@@ -42,9 +42,9 @@ annotations writes nothing. Before anything is written the import reports every 
 together and refuses: a malformed, repeated or unregistered category, a record the reader or the
 writer refuses (a record's `image_id` and its content are checked independently, so one record
 can report both), an image id that is not an integer or is listed twice, an image not in the
-capture, a stated frame the image does not have, or an existing per-image document. Every
-document and the import's audit event then commit together, or none does: a label placed
-meanwhile refuses the whole import. A crowd region keeps its `iscrowd` flag, and a run-length mask
+capture, a frame the image does not have (each image record states its `width` and `height`), or
+an existing per-image document. Every document and the import's audit event then commit
+together, or none does: a label placed meanwhile refuses the whole import. A crowd region keeps its `iscrowd` flag, and a run-length mask
 becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it, simplified at the
 stated `vertex_spacing`, pixels of perimeter per vertex: each ring keeps at most the vertex count
 its own perimeter implies at that spacing (the nearest integer, at least
@@ -82,7 +82,14 @@ fact as no document.
 A collaborator's delivery in a schema other than COCO is yours to convert: read a sample, write a
 one-off converter script that emits a COCO document, where
 `packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md` places your own work for a project,
-and import it. COCO is the one built-in import.
+and import it. COCO is the one built-in import of an external schema.
+
+A project's own labels leave it through `export_labels(dataset_root, destination)`, a zip holding
+every label document and flags record as stored, completion marks and provenance included, beside
+the dataset's identity and subject registry. They come back into another project holding the same
+images by capture and file name through `import_labels(container, dataset_root)`, which writes them as
+stored and refuses the whole import, naming each fault, over an image the capture lacks, a frame
+that differs, a subject its registry declares otherwise or not at all, or a label already present.
 
 ## Coordinate frame: the reading and its count, a photograph's EXIF applied once
 
@@ -114,6 +121,8 @@ bearing (denormalizing, cropping, drawing); read the frame and the pixels throug
 |------|---------|
 | `save_annotations` | Write an image's per-image label document |
 | `import_coco` | Convert an external dataset-level COCO into per-image label documents |
+| `export_labels` | Write a dataset's label documents and flags, as stored, into a new labels zip |
+| `import_labels` | Write a labels zip `export_labels` wrote into a dataset holding the same images |
 | `propose_annotations` | Run a named proposal engine over an image, whole-frame or over named grid cells |
 | `push_panel_event` | Push one of the four panel events (`banner`, a note shown above a tab; `labels_written`; `annotate_focus`; `canvas_state_request`) to a GUI panel over the tcip-web backend for this server's project; delivered only while the GUI has that project open |
 | `prioritize_review_queue` | Rank images by an active-learning scorer `scorer_catalog` lists for the next review batch, skipping those marked finished for a subject |

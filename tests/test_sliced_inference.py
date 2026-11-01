@@ -535,7 +535,6 @@ def test_training_and_inference_slice_one_frame_on_one_lattice(
         [Annotation(subject="bud", geometry=BBox(*SEAM_BLOB))],
         FRAME,
         FRAME,
-        keep_empty=True,
     )
     ds = dataset_over(
         "detection",
@@ -838,7 +837,7 @@ def _blob_capture(project: Path) -> Path:
     assert "error" not in dated, dated
     images = image_dir(root, date)
     for name, boxed in labels.items():
-        label_image(images / name, boxed, FRAME, FRAME, keep_empty=True)
+        label_image(images / name, boxed, FRAME, FRAME)
     return images
 
 

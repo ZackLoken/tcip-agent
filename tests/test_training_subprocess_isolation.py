@@ -85,7 +85,6 @@ def _document_dataset(
             ],
             32,
             32,
-            keep_empty=True,
         )
     return images_dir
 

@@ -26,7 +26,7 @@ from tcip_mcp.dataset_layout import Gestures, image_dir
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import (
     image_label_key,
-    save_labels,
+    label_image,
     staged_box,
     write_image,
 )
@@ -51,10 +51,10 @@ def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
     tmp_path: Path,
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [{"subject": "bud", "bbox": BOX}],
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": BOX}],
         gestures=Gestures(
             flag=(FlagRequest(text="  is this one open?  ", target=ON_BOX),)
         ),
@@ -75,10 +75,10 @@ def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [],
+        project=tmp_path,
+        labels=[],
         gestures=Gestures(
             flag=(
                 FlagRequest(text="glare across the frame", target=None),
@@ -134,19 +134,19 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
     with pytest.raises(
         ValueError, match="is not a person's recorded identity"
     ):
-        save_labels(
-            tmp_path,
+        label_image(
             image,
-            box,
+            project=tmp_path,
+            labels=box,
             author="save_annotations",
             gestures=Gestures(flag=(FlagRequest(text="open?", target=None),)),
         )
     assert _flags(image) == []
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        box,
+        project=tmp_path,
+        labels=box,
         gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
     held, logged = (
@@ -156,7 +156,9 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
     with pytest.raises(
         ValueError, match="is not a person's recorded identity"
     ):
-        save_labels(tmp_path, image, [], author="save_annotations")
+        label_image(
+            image, project=tmp_path, labels=[], author="save_annotations"
+        )
     assert _flags(image)[0].open
     assert read_label_document(image_label_key(image)) == held
     assert audit_rows(tmp_path) == logged
@@ -168,10 +170,10 @@ def test_a_flag_on_a_proposal_the_bucket_does_not_hold_refuses(
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
     with pytest.raises(ValueError, match="not one at index 3 to flag"):
-        save_labels(
-            tmp_path,
+        label_image(
             image,
-            [],
+            project=tmp_path,
+            labels=[],
             gestures=Gestures(
                 flag=(
                     FlagRequest(
@@ -188,18 +190,18 @@ def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     box = [{"subject": "bud", "bbox": BOX}]
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        box,
+        project=tmp_path,
+        labels=box,
         gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
     (raised,) = _flags(image)
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        box,
+        project=tmp_path,
+        labels=box,
         author="user:second",
         gestures=Gestures(resolve={raised.id: "yes, open"}),
     )
@@ -214,17 +216,17 @@ def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution
     assert (flag.request, flag.by) == (raised.request, raised.by)
 
     with pytest.raises(ValueError, match="are not open"):
-        save_labels(
-            tmp_path,
+        label_image(
             image,
-            box,
+            project=tmp_path,
+            labels=box,
             gestures=Gestures(resolve={raised.id: "again"}),
         )
     with pytest.raises(ValueError, match="are not open"):
-        save_labels(
-            tmp_path,
+        label_image(
             image,
-            box,
+            project=tmp_path,
+            labels=box,
             gestures=Gestures(resolve={"no-such-flag": ""}),
         )
 
@@ -235,10 +237,10 @@ def test_removing_the_flagged_annotation_resolves_its_flag_and_no_other(
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     other = [5.0, 5.0, 20.0, 20.0]
     both = [{"subject": "bud", "bbox": BOX}, {"subject": "bud", "bbox": other}]
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        both,
+        project=tmp_path,
+        labels=both,
         gestures=Gestures(
             flag=(
                 FlagRequest(text="on the first", target=ON_BOX),
@@ -251,7 +253,7 @@ def test_removing_the_flagged_annotation_resolves_its_flag_and_no_other(
         ),
     )
 
-    save_labels(tmp_path, image, both[1:], author="user:second")
+    label_image(image, project=tmp_path, labels=both[1:], author="user:second")
 
     first, second, whole = _flags(image)
     assert first.resolution is not None
@@ -271,20 +273,24 @@ def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(
     place resolves it as removed.
     """
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [{"subject": "bud", "bbox": BOX}],
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": BOX}],
         gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
 
-    save_labels(
-        tmp_path, image, [{"subject": "bud", "bbox": [41.0, 31.0, 61.0, 51.0]}]
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": [41.0, 31.0, 61.0, 51.0]}],
     )
     assert _flags(image)[0].open
 
-    save_labels(
-        tmp_path, image, [{"subject": "bud", "bbox": [0.0, 0.0, 10.0, 10.0]}]
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": [0.0, 0.0, 10.0, 10.0]}],
     )
     resolution = _flags(image)[0].resolution
     assert resolution is not None and resolution.removed
@@ -401,10 +407,10 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
     from tcip_mcp.tools.doctor_tools import _buckets, check_state
 
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [{"subject": "bud", "bbox": BOX}],
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": BOX}],
         gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
     findings: list = []
@@ -425,5 +431,7 @@ def test_a_save_that_touches_no_flag_writes_no_flags_record(
     import tcip_store as ts
 
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    label_image(
+        image, project=tmp_path, labels=[{"subject": "bud", "bbox": BOX}]
+    )
     assert not ts.exists(flag_key(image_label_key(image)))

@@ -166,7 +166,7 @@ def _build_experiment(
         Annotation(subject="bud", geometry=BBox(x, 80, x + 15, 110))
         for x in range(10, WIDTH - 20, BOX_STEP)
     ]
-    label_image(raster_path, boxes, WIDTH, HEIGHT, keep_empty=True)
+    label_image(raster_path, boxes, WIDTH, HEIGHT)
 
     data_cfg = {
         "images_dir": str(images_dir),
@@ -425,7 +425,7 @@ def test_the_document_retained_is_the_document_measured(
     def emptied_first(
         run_dir: Path, samples: list[Sample], *args: dict
     ) -> tuple[list[RetainedFile], list[Sample]]:
-        label_image(exp["raster_path"], [], WIDTH, HEIGHT, keep_empty=True)
+        label_image(exp["raster_path"], [], WIDTH, HEIGHT)
         return real_retained(run_dir, samples, *args)
 
     monkeypatch.setattr(assessment, "_retained", emptied_first)
@@ -544,10 +544,9 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(
         project.mkdir()
         fx.seed_confirmed_count(project, measured_subject="bud")
         exp = _build_experiment(project, experiment_id=f"exp_{project.name}")
-        label = exp["label"]
-        boxes = json_io.read_label_document(label).annotations
-        json_io.write_label_document(
-            label,
+        boxes = json_io.read_label_document(exp["label"]).annotations
+        label_image(
+            exp["raster_path"],
             [
                 Annotation(
                     subject=a.subject,
@@ -558,7 +557,6 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(
             ],
             WIDTH,
             HEIGHT,
-            keep_empty=True,
         )
         manifest = exp["spatial_manifest"]
         _attest_regions_complete(
@@ -645,9 +643,7 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
         for x in range(int(tx0) + 5, int(tx1) - 20, 2)
         for y in (40, 80, 120)
     ]
-    json_io.write_label_document(
-        exp["label"], existing + dense, WIDTH, HEIGHT, keep_empty=True
-    )
+    label_image(exp["raster_path"], existing + dense, WIDTH, HEIGHT)
     _attest_regions_complete(
         exp["root"],
         exp["stem"],
@@ -722,8 +718,8 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
 
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
-    json_io.write_label_document(
-        exp["label"],
+    label_image(
+        exp["raster_path"],
         [
             Annotation(
                 subject="bud",
@@ -734,7 +730,6 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
         ],
         WIDTH,
         HEIGHT,
-        keep_empty=True,
     )
     _attest_regions_complete(
         exp["root"],
@@ -944,9 +939,10 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(
                 "cap": 5,
             }
 
-    label = image_label_key(image_dir(tmp_path, UNDATED_BUCKET) / "mosaic.tif")
-    json_io.write_label_document(
-        label,
+    mosaic = image_dir(tmp_path, UNDATED_BUCKET) / "mosaic.tif"
+    label = image_label_key(mosaic)
+    label_image(
+        mosaic,
         [
             Annotation(subject="bur", geometry=BBox(20.3, 20.7, 40.1, 60.9)),
             Annotation(
@@ -1139,9 +1135,7 @@ def _build_attribute_scoped_experiment(
         )
         for x in range(10, WIDTH - 20, BOX_STEP)
     ]
-    label_image(
-        images_dir / f"{stem}.tif", boxes, WIDTH, HEIGHT, keep_empty=True
-    )
+    label_image(images_dir / f"{stem}.tif", boxes, WIDTH, HEIGHT)
 
     data_cfg = {
         "images_dir": str(images_dir),

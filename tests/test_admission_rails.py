@@ -14,12 +14,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from pathlib import Path
 
-    from tcip_annotation.json_io import CompletionMark
     from tcip_annotation.state import Ring
-    from tcip_store import Version
 
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
@@ -30,7 +27,6 @@ from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.dataset_layout import (  # noqa: E402
     UNDATED_BUCKET,
     image_dir,
-    label_key,
 )
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.subject_registry import Attribute  # noqa: E402
@@ -61,13 +57,9 @@ SIZE = (100, 100)
 """The frame size every image here is written and labeled at."""
 
 
-def _label(
-    image: Path,
-    annotations: list[Annotation],
-    **kwargs: bool | Version | Mapping[str, list[CompletionMark]] | None,
-) -> None:
-    """Write ``annotations`` as the label document of the :data:`SIZE` ``image``."""
-    label_image(image, annotations, *SIZE, **kwargs)
+def _label(image: Path, annotations: list[Annotation]) -> None:
+    """Save ``annotations`` as the label document of the :data:`SIZE` ``image``."""
+    label_image(image, annotations, *SIZE)
 
 
 def _poly(
@@ -141,12 +133,7 @@ def test_a_document_with_no_image_is_not_admitted(tmp_path: Path) -> None:
     images = image_dir(tmp_path, UNDATED_BUCKET)
     (kept,) = write_jpegs(images, ["kept"], SIZE)
     _label(kept, [box_annotation(10, 10, 50, 50)])
-    json_io.write_label_document(
-        label_key(tmp_path, UNDATED_BUCKET, "orphan"),
-        [box_annotation(10, 10, 50, 50)],
-        100,
-        100,
-    )
+    _label(images / "orphan.jpg", [box_annotation(10, 10, 50, 50)])
 
     admitted = admit_over(images, subject=BUD)
     assert [r.member for r in admitted.records] == ["kept"]
@@ -378,7 +365,7 @@ def test_count_label_lines_reads_a_documents_instances(tmp_path: Path) -> None:
     images = image_dir(tmp_path, UNDATED_BUCKET)
     a, neg = write_jpegs(images, ["a", "neg"], SIZE)
     _label(a, [box_annotation(0, 0, 10, 10), box_annotation(0, 0, 20, 20)])
-    _label(neg, [], keep_empty=True)
+    _label(neg, [])
     assert (
         count_label_lines(
             json_io.read_label_document(image_label_key(a)), ClassScope()
@@ -406,9 +393,9 @@ def _rail_fixture(tmp_path: Path) -> tuple[Path, Path]:
     ann, empty, _nolabel, neg = write_jpegs(
         images, ["ann", "empty", "nolabel", "neg"], SIZE
     )
-    _label(ann, [box_annotation(4, 4, 12, 12)], keep_empty=True)
-    _label(empty, [], keep_empty=True)
-    _label(neg, [], keep_empty=True)
+    _label(ann, [box_annotation(4, 4, 12, 12)])
+    _label(empty, [])
+    _label(neg, [])
     mark_complete(neg, BUD, project=tmp_path)
     return images, neg
 
@@ -461,7 +448,7 @@ def test_no_trainable_samples_raises_rather_than_training_on_nothing(
 ) -> None:
     images = image_dir(tmp_path, UNDATED_BUCKET)
     a, _b = write_jpegs(images, ["a", "b"], SIZE)
-    _label(a, [], keep_empty=True)  # unconfirmed empty
+    _label(a, [])  # unconfirmed empty
 
     with pytest.raises(ValueError, match="no trainable samples"):
         admit_over(images, subject=BUD)
@@ -470,7 +457,7 @@ def test_no_trainable_samples_raises_rather_than_training_on_nothing(
 def test_instance_seg_applies_the_same_rail(tmp_path: Path) -> None:
     images = image_dir(tmp_path, UNDATED_BUCKET)
     ann, _nolabel = write_jpegs(images, ["ann", "nolabel"], SIZE)
-    _label(ann, [_poly([(4, 4), (12, 4), (12, 12), (4, 12)])], keep_empty=True)
+    _label(ann, [_poly([(4, 4), (12, 4), (12, 12), (4, 12)])])
 
     ds = dataset_over("instance_seg", images, subject=BUD)
     assert [ds.sample_of(k).member for k in ds.stems] == ["ann"]
@@ -564,9 +551,8 @@ def test_a_confirmation_does_not_leak_across_subjects(tmp_path: Path) -> None:
             box_annotation(4, 4, 12, 12, subject="bud"),
             box_annotation(4, 4, 12, 12, subject="bush"),
         ],
-        keep_empty=True,
     )
-    _label(shared, [], keep_empty=True)
+    _label(shared, [])
     # Confirmed negative for bud only; the breeder never judged it for bush.
     mark_complete(shared, "bud", project=tmp_path)
 
@@ -588,10 +574,8 @@ def test_a_negative_mark_dies_with_an_edit_of_its_subject(
     """
     images, negative = _rail_fixture(tmp_path)
     neg = image_label_key(negative)
-    marks = json_io.read_label_document(neg).marks
-    json_io.write_label_document(
-        neg, [box_annotation(4, 4, 12, 12)], 100, 100, marks=marks
-    )
+    assert json_io.read_label_document(neg).marks
+    _label(negative, [box_annotation(4, 4, 12, 12)])
 
     assert json_io.read_label_document(neg).marks == {}
     tallies = admit_over(images, subject=BUD).tallies

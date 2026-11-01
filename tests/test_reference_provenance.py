@@ -32,17 +32,27 @@ def _documents(
 ) -> list[Annotation]:
     """Write one label document per stem and return the annotations they hold, read back.
 
-    Each document holds ``annotations(stem)``.
+    Each document holds ``annotations(stem)`` as stored, provenance and score included, written
+    by the one writer of stored label records over an ``IMG`` px image of that stem, the
+    dataset's registry declaring ``bud``.
     """
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+    from tests._producer_fixtures import (
+        image_label_key,
+        registry_of,
+        registry_over,
+        store_labels,
+        write_image,
+    )
 
+    registry_over(root, registry_of("bud"))
     held = []
     for s in stems:
-        key = label_key(root, UNDATED_BUCKET, s)
-        json_io.write_label_document(
-            key, annotations(s), IMG, IMG, keep_empty=True
+        image = write_image(
+            image_dir(root, UNDATED_BUCKET) / f"{s}.png", (IMG, IMG)
         )
-        held += json_io.read_label_document(key).annotations
+        store_labels(image, json_io.document_payload(annotations(s), IMG, IMG))
+        held += json_io.read_label_document(image_label_key(image)).annotations
     return held
 
 
@@ -170,6 +180,7 @@ def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(
 ) -> None:
     """The assessment refuses a reference holding a prediction-scored record."""
     pytest.importorskip("torch")
+    import tcip_store
     from tests._chain_fixtures import (
         assess,
         confirm_count_trait,
@@ -177,6 +188,7 @@ def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(
         synthetic_capture,
         train_on,
     )
+    from tests._record_damage_fixtures import damage_record
 
     root = tmp_path / "ds"
     synthetic_capture(root)
@@ -188,7 +200,13 @@ def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(
     )
     confirm_count_trait(tmp_path)
     held = selection.on("holdout")[0]
-    json_io.write_label_document(held.ground_truth, [_prediction()], 64, 64)
+    # Damage: the model's own record over the drawn reference, as an edit in place would leave it.
+    damage_record(
+        held.ground_truth,
+        tcip_store.encode_record(
+            json_io.document_payload([_prediction()], 64, 64)
+        ),
+    )
 
     record = assess(tmp_path, checkpoint, tmp_path / "selection")
 

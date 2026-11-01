@@ -158,7 +158,7 @@ def _import_coco(project: Path) -> Path:
         actor=None,
     )
     assert "error" not in result, result
-    return Path(result["document"])
+    return Path(result["source"])
 
 
 def _ingest_images(project: Path) -> Path:

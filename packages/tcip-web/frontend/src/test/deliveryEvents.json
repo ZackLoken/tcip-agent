@@ -1115,7 +1115,7 @@
                   },
                   "group": "2026-02-11/s16",
                   "side": "calibration",
-                  "ground_truth_digest": "1b4f6a6f0284885289e6b48773dde243a5c69fb1db938644e25cbbf6aeb137ce"
+                  "ground_truth_digest": "<digest n30>"
                 },
                 "source_digest": "4a88ef6a96da568be1fcd3c40ac8979af9f672665e155ace3b317cc30cdb4e10"
               },
@@ -1130,7 +1130,7 @@
                   },
                   "group": "2026-02-11/s18",
                   "side": "calibration",
-                  "ground_truth_digest": "3675e67adb133667951b0c44b71729acb5c0ebf612ccb2c45e5e460b12d3bf0b"
+                  "ground_truth_digest": "<digest n31>"
                 },
                 "source_digest": "0eb0414895217c5084e206c5dddafa3d7a9778b50458e977c355f1930173c3df"
               },
@@ -1145,7 +1145,7 @@
                   },
                   "group": "2026-02-11/s22",
                   "side": "calibration",
-                  "ground_truth_digest": "f7d1faa2777041ef4ec68cc1122728b6075b721d90bfd37e382c56a05b17ae89"
+                  "ground_truth_digest": "<digest n32>"
                 },
                 "source_digest": "239bb19a349b9029bb90bddf3382fa871e1f00546cd6b35c858c787412dc7581"
               },
@@ -1160,7 +1160,7 @@
                   },
                   "group": "2026-02-11/s24",
                   "side": "calibration",
-                  "ground_truth_digest": "9227b4deb8cbfc5a412232c56bac78be048df7ce6246a5e6dd2c922d74b10c5b"
+                  "ground_truth_digest": "<digest n33>"
                 },
                 "source_digest": "1431ecd2f3739a66d36fb3096d59da7be0024ad2be94246d2d98b4493b693a98"
               },
@@ -1175,7 +1175,7 @@
                   },
                   "group": "2026-02-11/s27",
                   "side": "calibration",
-                  "ground_truth_digest": "accea63b74dbcebdea66c747a3beb4f47d8402760deab359acb67ce1fbc1efe8"
+                  "ground_truth_digest": "<digest n34>"
                 },
                 "source_digest": "0aac2809980ecfcf293f2dd2cfd1d062dd691adf6afb0d048c15d327e36637d4"
               },
@@ -1190,7 +1190,7 @@
                   },
                   "group": "2026-02-11/s28",
                   "side": "calibration",
-                  "ground_truth_digest": "77caf924be0107bfa51b607152d8b445b43f76d38e39a977bf2e5996e58737ef"
+                  "ground_truth_digest": "<digest n35>"
                 },
                 "source_digest": "7c01fd57e3d6c53a931760c287b57a14d42c313259731d21d62db79c2172af21"
               },
@@ -1205,7 +1205,7 @@
                   },
                   "group": "2026-02-11/s31",
                   "side": "calibration",
-                  "ground_truth_digest": "1abe63c59aeda255f8a2118d77adf81bbe140599726d39d5fc2eb0331a9e6978"
+                  "ground_truth_digest": "<digest n36>"
                 },
                 "source_digest": "874f5efed8d4450861918e7e3840225b6ebc12cc7b204cba9cebdd501e3b8ae8"
               },
@@ -1220,7 +1220,7 @@
                   },
                   "group": "2026-02-11/s39",
                   "side": "calibration",
-                  "ground_truth_digest": "3b079de9c3a915fe6d6e3e406e4485d225500addc383f6860f79bad8f2985cc3"
+                  "ground_truth_digest": "<digest n37>"
                 },
                 "source_digest": "83c0cd56fc3687d698fa462690c90d2dde4701e1d496398760c8158159cad9c1"
               },
@@ -1235,7 +1235,7 @@
                   },
                   "group": "2026-02-11/s03",
                   "side": "holdout",
-                  "ground_truth_digest": "351d51275b7bca06087db10013239f4ca9d93a456ac2c71d8218cf13660701c7"
+                  "ground_truth_digest": "<digest n38>"
                 },
                 "source_digest": "52275db7ea452dd8d5824aa3a2f72fa4f2788a28db2c9067a34306efc05dfbe6"
               },
@@ -1250,7 +1250,7 @@
                   },
                   "group": "2026-02-11/s10",
                   "side": "holdout",
-                  "ground_truth_digest": "be48dc00e7675d33932ddc21866d3be44f02247d6cdf54e72bbf8ddb9e96fc14"
+                  "ground_truth_digest": "<digest n39>"
                 },
                 "source_digest": "656b9d6c0b36a4dc0805b15dffe7131c70e74b8054930d1780a08f51405d938b"
               },
@@ -1265,7 +1265,7 @@
                   },
                   "group": "2026-02-11/s12",
                   "side": "holdout",
-                  "ground_truth_digest": "c267c8544f13daa3f341009a92ffb4f9d57969dc4867bbfe72656256d2c09275"
+                  "ground_truth_digest": "<digest n40>"
                 },
                 "source_digest": "67ce87a3fd62e3f3120fe5f7ec7c1f50826c300bd838369ae0cf8ba37fa2ff04"
               },
@@ -1280,7 +1280,7 @@
                   },
                   "group": "2026-02-11/s14",
                   "side": "holdout",
-                  "ground_truth_digest": "fa0feecd8f8f18ed3e0f9ed66dd7dbc150a531862c32f6991e040ab3890dff54"
+                  "ground_truth_digest": "<digest n41>"
                 },
                 "source_digest": "4e71cc175a1cee4db5fba64ceea74c998818ddc5986d4ef10d6f72a276b4f1e8"
               },
@@ -1295,7 +1295,7 @@
                   },
                   "group": "2026-02-11/s15",
                   "side": "holdout",
-                  "ground_truth_digest": "a0ec435305c9d98bbbd39d301254e484d82c8fe9be868f75cb85464dba6ef1ec"
+                  "ground_truth_digest": "<digest n42>"
                 },
                 "source_digest": "f9e96335bd078b6b679668e1cb852b0f62208e1ee1abf9a7a65d1af3cbaaec08"
               },
@@ -1310,7 +1310,7 @@
                   },
                   "group": "2026-02-11/s30",
                   "side": "holdout",
-                  "ground_truth_digest": "71560852618913f9dfed119f0f6c1f69c590d0c64d6fdecd34622846e340c5ae"
+                  "ground_truth_digest": "<digest n43>"
                 },
                 "source_digest": "90ebeed530f2ad409809993700ce1819142c0c23263b71e06c72e63682b3d1ef"
               },
@@ -1325,7 +1325,7 @@
                   },
                   "group": "2026-02-11/s33",
                   "side": "holdout",
-                  "ground_truth_digest": "dbb585fa041b2fa409a3d3f8111ee54c578558e21915f4e526bc068ec11baa22"
+                  "ground_truth_digest": "<digest n44>"
                 },
                 "source_digest": "851120a4313efdffc93ef8295bf5f400d074d459df93ad4763d60a0b8afbfdfb"
               },
@@ -1340,7 +1340,7 @@
                   },
                   "group": "2026-02-11/s37",
                   "side": "holdout",
-                  "ground_truth_digest": "25d16784680ba324a629910483b3777071218e851a8723038c790f6fe2413f27"
+                  "ground_truth_digest": "<digest n45>"
                 },
                 "source_digest": "61098cde229e5968733862b01c0dc6e3fcf964690eb921f13e7eb6e9219cc6e7"
               }
@@ -1735,7 +1735,7 @@
                   },
                   "group": "2026-02-11/s16",
                   "side": "calibration",
-                  "ground_truth_digest": "1b4f6a6f0284885289e6b48773dde243a5c69fb1db938644e25cbbf6aeb137ce"
+                  "ground_truth_digest": "<digest n30>"
                 },
                 "source_digest": "4a88ef6a96da568be1fcd3c40ac8979af9f672665e155ace3b317cc30cdb4e10"
               },
@@ -1750,7 +1750,7 @@
                   },
                   "group": "2026-02-11/s18",
                   "side": "calibration",
-                  "ground_truth_digest": "3675e67adb133667951b0c44b71729acb5c0ebf612ccb2c45e5e460b12d3bf0b"
+                  "ground_truth_digest": "<digest n31>"
                 },
                 "source_digest": "0eb0414895217c5084e206c5dddafa3d7a9778b50458e977c355f1930173c3df"
               },
@@ -1765,7 +1765,7 @@
                   },
                   "group": "2026-02-11/s22",
                   "side": "calibration",
-                  "ground_truth_digest": "f7d1faa2777041ef4ec68cc1122728b6075b721d90bfd37e382c56a05b17ae89"
+                  "ground_truth_digest": "<digest n32>"
                 },
                 "source_digest": "239bb19a349b9029bb90bddf3382fa871e1f00546cd6b35c858c787412dc7581"
               },
@@ -1780,7 +1780,7 @@
                   },
                   "group": "2026-02-11/s24",
                   "side": "calibration",
-                  "ground_truth_digest": "9227b4deb8cbfc5a412232c56bac78be048df7ce6246a5e6dd2c922d74b10c5b"
+                  "ground_truth_digest": "<digest n33>"
                 },
                 "source_digest": "1431ecd2f3739a66d36fb3096d59da7be0024ad2be94246d2d98b4493b693a98"
               },
@@ -1795,7 +1795,7 @@
                   },
                   "group": "2026-02-11/s27",
                   "side": "calibration",
-                  "ground_truth_digest": "accea63b74dbcebdea66c747a3beb4f47d8402760deab359acb67ce1fbc1efe8"
+                  "ground_truth_digest": "<digest n34>"
                 },
                 "source_digest": "0aac2809980ecfcf293f2dd2cfd1d062dd691adf6afb0d048c15d327e36637d4"
               },
@@ -1810,7 +1810,7 @@
                   },
                   "group": "2026-02-11/s28",
                   "side": "calibration",
-                  "ground_truth_digest": "77caf924be0107bfa51b607152d8b445b43f76d38e39a977bf2e5996e58737ef"
+                  "ground_truth_digest": "<digest n35>"
                 },
                 "source_digest": "7c01fd57e3d6c53a931760c287b57a14d42c313259731d21d62db79c2172af21"
               },
@@ -1825,7 +1825,7 @@
                   },
                   "group": "2026-02-11/s31",
                   "side": "calibration",
-                  "ground_truth_digest": "1abe63c59aeda255f8a2118d77adf81bbe140599726d39d5fc2eb0331a9e6978"
+                  "ground_truth_digest": "<digest n36>"
                 },
                 "source_digest": "874f5efed8d4450861918e7e3840225b6ebc12cc7b204cba9cebdd501e3b8ae8"
               },
@@ -1840,7 +1840,7 @@
                   },
                   "group": "2026-02-11/s39",
                   "side": "calibration",
-                  "ground_truth_digest": "3b079de9c3a915fe6d6e3e406e4485d225500addc383f6860f79bad8f2985cc3"
+                  "ground_truth_digest": "<digest n37>"
                 },
                 "source_digest": "83c0cd56fc3687d698fa462690c90d2dde4701e1d496398760c8158159cad9c1"
               },
@@ -1855,7 +1855,7 @@
                   },
                   "group": "2026-02-11/s03",
                   "side": "holdout",
-                  "ground_truth_digest": "351d51275b7bca06087db10013239f4ca9d93a456ac2c71d8218cf13660701c7"
+                  "ground_truth_digest": "<digest n38>"
                 },
                 "source_digest": "52275db7ea452dd8d5824aa3a2f72fa4f2788a28db2c9067a34306efc05dfbe6"
               },
@@ -1870,7 +1870,7 @@
                   },
                   "group": "2026-02-11/s10",
                   "side": "holdout",
-                  "ground_truth_digest": "be48dc00e7675d33932ddc21866d3be44f02247d6cdf54e72bbf8ddb9e96fc14"
+                  "ground_truth_digest": "<digest n39>"
                 },
                 "source_digest": "656b9d6c0b36a4dc0805b15dffe7131c70e74b8054930d1780a08f51405d938b"
               },
@@ -1885,7 +1885,7 @@
                   },
                   "group": "2026-02-11/s12",
                   "side": "holdout",
-                  "ground_truth_digest": "c267c8544f13daa3f341009a92ffb4f9d57969dc4867bbfe72656256d2c09275"
+                  "ground_truth_digest": "<digest n40>"
                 },
                 "source_digest": "67ce87a3fd62e3f3120fe5f7ec7c1f50826c300bd838369ae0cf8ba37fa2ff04"
               },
@@ -1900,7 +1900,7 @@
                   },
                   "group": "2026-02-11/s14",
                   "side": "holdout",
-                  "ground_truth_digest": "fa0feecd8f8f18ed3e0f9ed66dd7dbc150a531862c32f6991e040ab3890dff54"
+                  "ground_truth_digest": "<digest n41>"
                 },
                 "source_digest": "4e71cc175a1cee4db5fba64ceea74c998818ddc5986d4ef10d6f72a276b4f1e8"
               },
@@ -1915,7 +1915,7 @@
                   },
                   "group": "2026-02-11/s15",
                   "side": "holdout",
-                  "ground_truth_digest": "a0ec435305c9d98bbbd39d301254e484d82c8fe9be868f75cb85464dba6ef1ec"
+                  "ground_truth_digest": "<digest n42>"
                 },
                 "source_digest": "f9e96335bd078b6b679668e1cb852b0f62208e1ee1abf9a7a65d1af3cbaaec08"
               },
@@ -1930,7 +1930,7 @@
                   },
                   "group": "2026-02-11/s30",
                   "side": "holdout",
-                  "ground_truth_digest": "71560852618913f9dfed119f0f6c1f69c590d0c64d6fdecd34622846e340c5ae"
+                  "ground_truth_digest": "<digest n43>"
                 },
                 "source_digest": "90ebeed530f2ad409809993700ce1819142c0c23263b71e06c72e63682b3d1ef"
               },
@@ -1945,7 +1945,7 @@
                   },
                   "group": "2026-02-11/s33",
                   "side": "holdout",
-                  "ground_truth_digest": "dbb585fa041b2fa409a3d3f8111ee54c578558e21915f4e526bc068ec11baa22"
+                  "ground_truth_digest": "<digest n44>"
                 },
                 "source_digest": "851120a4313efdffc93ef8295bf5f400d074d459df93ad4763d60a0b8afbfdfb"
               },
@@ -1960,7 +1960,7 @@
                   },
                   "group": "2026-02-11/s37",
                   "side": "holdout",
-                  "ground_truth_digest": "25d16784680ba324a629910483b3777071218e851a8723038c790f6fe2413f27"
+                  "ground_truth_digest": "<digest n45>"
                 },
                 "source_digest": "61098cde229e5968733862b01c0dc6e3fcf964690eb921f13e7eb6e9219cc6e7"
               }
@@ -2178,7 +2178,7 @@
                   "capture": "2026-02-11",
                   "stem": "s16"
                 },
-                "digest": "<digest n30>",
+                "digest": "<digest n47>",
                 "copy": "reference/0000_s16.json"
               },
               {
@@ -2187,7 +2187,7 @@
                   "capture": "2026-02-11",
                   "stem": "s18"
                 },
-                "digest": "<digest n31>",
+                "digest": "<digest n48>",
                 "copy": "reference/0001_s18.json"
               },
               {
@@ -2196,7 +2196,7 @@
                   "capture": "2026-02-11",
                   "stem": "s22"
                 },
-                "digest": "<digest n32>",
+                "digest": "<digest n49>",
                 "copy": "reference/0002_s22.json"
               },
               {
@@ -2205,7 +2205,7 @@
                   "capture": "2026-02-11",
                   "stem": "s24"
                 },
-                "digest": "<digest n33>",
+                "digest": "<digest n50>",
                 "copy": "reference/0003_s24.json"
               },
               {
@@ -2214,7 +2214,7 @@
                   "capture": "2026-02-11",
                   "stem": "s27"
                 },
-                "digest": "<digest n34>",
+                "digest": "<digest n51>",
                 "copy": "reference/0004_s27.json"
               },
               {
@@ -2223,7 +2223,7 @@
                   "capture": "2026-02-11",
                   "stem": "s28"
                 },
-                "digest": "<digest n35>",
+                "digest": "<digest n52>",
                 "copy": "reference/0005_s28.json"
               },
               {
@@ -2232,7 +2232,7 @@
                   "capture": "2026-02-11",
                   "stem": "s31"
                 },
-                "digest": "<digest n36>",
+                "digest": "<digest n53>",
                 "copy": "reference/0006_s31.json"
               },
               {
@@ -2241,7 +2241,7 @@
                   "capture": "2026-02-11",
                   "stem": "s39"
                 },
-                "digest": "<digest n37>",
+                "digest": "<digest n54>",
                 "copy": "reference/0007_s39.json"
               },
               {
@@ -2250,7 +2250,7 @@
                   "capture": "2026-02-11",
                   "stem": "s03"
                 },
-                "digest": "<digest n38>",
+                "digest": "<digest n55>",
                 "copy": "reference/0008_s03.json"
               },
               {
@@ -2259,7 +2259,7 @@
                   "capture": "2026-02-11",
                   "stem": "s10"
                 },
-                "digest": "<digest n39>",
+                "digest": "<digest n56>",
                 "copy": "reference/0009_s10.json"
               },
               {
@@ -2268,7 +2268,7 @@
                   "capture": "2026-02-11",
                   "stem": "s12"
                 },
-                "digest": "<digest n40>",
+                "digest": "<digest n57>",
                 "copy": "reference/0010_s12.json"
               },
               {
@@ -2277,7 +2277,7 @@
                   "capture": "2026-02-11",
                   "stem": "s14"
                 },
-                "digest": "<digest n41>",
+                "digest": "<digest n58>",
                 "copy": "reference/0011_s14.json"
               },
               {
@@ -2286,7 +2286,7 @@
                   "capture": "2026-02-11",
                   "stem": "s15"
                 },
-                "digest": "<digest n42>",
+                "digest": "<digest n59>",
                 "copy": "reference/0012_s15.json"
               },
               {
@@ -2295,7 +2295,7 @@
                   "capture": "2026-02-11",
                   "stem": "s30"
                 },
-                "digest": "<digest n43>",
+                "digest": "<digest n60>",
                 "copy": "reference/0013_s30.json"
               },
               {
@@ -2304,7 +2304,7 @@
                   "capture": "2026-02-11",
                   "stem": "s33"
                 },
-                "digest": "<digest n44>",
+                "digest": "<digest n61>",
                 "copy": "reference/0014_s33.json"
               },
               {
@@ -2313,7 +2313,7 @@
                   "capture": "2026-02-11",
                   "stem": "s37"
                 },
-                "digest": "<digest n45>",
+                "digest": "<digest n62>",
                 "copy": "reference/0015_s37.json"
               }
             ],
@@ -2329,7 +2329,7 @@
                   },
                   "group": "2026-02-11/s16",
                   "side": "calibration",
-                  "ground_truth_digest": "1b4f6a6f0284885289e6b48773dde243a5c69fb1db938644e25cbbf6aeb137ce"
+                  "ground_truth_digest": "<digest n47>"
                 },
                 "source_digest": "4a88ef6a96da568be1fcd3c40ac8979af9f672665e155ace3b317cc30cdb4e10"
               },
@@ -2344,7 +2344,7 @@
                   },
                   "group": "2026-02-11/s18",
                   "side": "calibration",
-                  "ground_truth_digest": "3675e67adb133667951b0c44b71729acb5c0ebf612ccb2c45e5e460b12d3bf0b"
+                  "ground_truth_digest": "<digest n48>"
                 },
                 "source_digest": "0eb0414895217c5084e206c5dddafa3d7a9778b50458e977c355f1930173c3df"
               },
@@ -2359,7 +2359,7 @@
                   },
                   "group": "2026-02-11/s22",
                   "side": "calibration",
-                  "ground_truth_digest": "f7d1faa2777041ef4ec68cc1122728b6075b721d90bfd37e382c56a05b17ae89"
+                  "ground_truth_digest": "<digest n49>"
                 },
                 "source_digest": "239bb19a349b9029bb90bddf3382fa871e1f00546cd6b35c858c787412dc7581"
               },
@@ -2374,7 +2374,7 @@
                   },
                   "group": "2026-02-11/s24",
                   "side": "calibration",
-                  "ground_truth_digest": "9227b4deb8cbfc5a412232c56bac78be048df7ce6246a5e6dd2c922d74b10c5b"
+                  "ground_truth_digest": "<digest n50>"
                 },
                 "source_digest": "1431ecd2f3739a66d36fb3096d59da7be0024ad2be94246d2d98b4493b693a98"
               },
@@ -2389,7 +2389,7 @@
                   },
                   "group": "2026-02-11/s27",
                   "side": "calibration",
-                  "ground_truth_digest": "accea63b74dbcebdea66c747a3beb4f47d8402760deab359acb67ce1fbc1efe8"
+                  "ground_truth_digest": "<digest n51>"
                 },
                 "source_digest": "0aac2809980ecfcf293f2dd2cfd1d062dd691adf6afb0d048c15d327e36637d4"
               },
@@ -2404,7 +2404,7 @@
                   },
                   "group": "2026-02-11/s28",
                   "side": "calibration",
-                  "ground_truth_digest": "77caf924be0107bfa51b607152d8b445b43f76d38e39a977bf2e5996e58737ef"
+                  "ground_truth_digest": "<digest n52>"
                 },
                 "source_digest": "7c01fd57e3d6c53a931760c287b57a14d42c313259731d21d62db79c2172af21"
               },
@@ -2419,7 +2419,7 @@
                   },
                   "group": "2026-02-11/s31",
                   "side": "calibration",
-                  "ground_truth_digest": "1abe63c59aeda255f8a2118d77adf81bbe140599726d39d5fc2eb0331a9e6978"
+                  "ground_truth_digest": "<digest n53>"
                 },
                 "source_digest": "874f5efed8d4450861918e7e3840225b6ebc12cc7b204cba9cebdd501e3b8ae8"
               },
@@ -2434,7 +2434,7 @@
                   },
                   "group": "2026-02-11/s39",
                   "side": "calibration",
-                  "ground_truth_digest": "3b079de9c3a915fe6d6e3e406e4485d225500addc383f6860f79bad8f2985cc3"
+                  "ground_truth_digest": "<digest n54>"
                 },
                 "source_digest": "83c0cd56fc3687d698fa462690c90d2dde4701e1d496398760c8158159cad9c1"
               },
@@ -2449,7 +2449,7 @@
                   },
                   "group": "2026-02-11/s03",
                   "side": "holdout",
-                  "ground_truth_digest": "351d51275b7bca06087db10013239f4ca9d93a456ac2c71d8218cf13660701c7"
+                  "ground_truth_digest": "<digest n55>"
                 },
                 "source_digest": "52275db7ea452dd8d5824aa3a2f72fa4f2788a28db2c9067a34306efc05dfbe6"
               },
@@ -2464,7 +2464,7 @@
                   },
                   "group": "2026-02-11/s10",
                   "side": "holdout",
-                  "ground_truth_digest": "be48dc00e7675d33932ddc21866d3be44f02247d6cdf54e72bbf8ddb9e96fc14"
+                  "ground_truth_digest": "<digest n56>"
                 },
                 "source_digest": "656b9d6c0b36a4dc0805b15dffe7131c70e74b8054930d1780a08f51405d938b"
               },
@@ -2479,7 +2479,7 @@
                   },
                   "group": "2026-02-11/s12",
                   "side": "holdout",
-                  "ground_truth_digest": "c267c8544f13daa3f341009a92ffb4f9d57969dc4867bbfe72656256d2c09275"
+                  "ground_truth_digest": "<digest n57>"
                 },
                 "source_digest": "67ce87a3fd62e3f3120fe5f7ec7c1f50826c300bd838369ae0cf8ba37fa2ff04"
               },
@@ -2494,7 +2494,7 @@
                   },
                   "group": "2026-02-11/s14",
                   "side": "holdout",
-                  "ground_truth_digest": "fa0feecd8f8f18ed3e0f9ed66dd7dbc150a531862c32f6991e040ab3890dff54"
+                  "ground_truth_digest": "<digest n58>"
                 },
                 "source_digest": "4e71cc175a1cee4db5fba64ceea74c998818ddc5986d4ef10d6f72a276b4f1e8"
               },
@@ -2509,7 +2509,7 @@
                   },
                   "group": "2026-02-11/s15",
                   "side": "holdout",
-                  "ground_truth_digest": "a0ec435305c9d98bbbd39d301254e484d82c8fe9be868f75cb85464dba6ef1ec"
+                  "ground_truth_digest": "<digest n59>"
                 },
                 "source_digest": "f9e96335bd078b6b679668e1cb852b0f62208e1ee1abf9a7a65d1af3cbaaec08"
               },
@@ -2524,7 +2524,7 @@
                   },
                   "group": "2026-02-11/s30",
                   "side": "holdout",
-                  "ground_truth_digest": "71560852618913f9dfed119f0f6c1f69c590d0c64d6fdecd34622846e340c5ae"
+                  "ground_truth_digest": "<digest n60>"
                 },
                 "source_digest": "90ebeed530f2ad409809993700ce1819142c0c23263b71e06c72e63682b3d1ef"
               },
@@ -2539,7 +2539,7 @@
                   },
                   "group": "2026-02-11/s33",
                   "side": "holdout",
-                  "ground_truth_digest": "dbb585fa041b2fa409a3d3f8111ee54c578558e21915f4e526bc068ec11baa22"
+                  "ground_truth_digest": "<digest n61>"
                 },
                 "source_digest": "851120a4313efdffc93ef8295bf5f400d074d459df93ad4763d60a0b8afbfdfb"
               },
@@ -2554,7 +2554,7 @@
                   },
                   "group": "2026-02-11/s37",
                   "side": "holdout",
-                  "ground_truth_digest": "25d16784680ba324a629910483b3777071218e851a8723038c790f6fe2413f27"
+                  "ground_truth_digest": "<digest n62>"
                 },
                 "source_digest": "61098cde229e5968733862b01c0dc6e3fcf964690eb921f13e7eb6e9219cc6e7"
               }
@@ -2771,7 +2771,7 @@
         "entry": {
           "name": "<second run>",
           "checkpoint_path": "/scratch/workspace/counts/.tcip/experiments/<second run>/model_final.pt",
-          "sha256": "<sha256 n47>",
+          "sha256": "<sha256 n63>",
           "registered_at": "2000-01-01T00:00:04+00:00",
           "metrics": {},
           "tags": [],
@@ -2783,7 +2783,7 @@
         "entry": {
           "name": "other",
           "checkpoint_path": "/scratch/workspace/counts/.tcip/experiments/<second run>/second.pt",
-          "sha256": "<sha256 n48>",
+          "sha256": "<sha256 n64>",
           "registered_at": "2000-01-01T00:00:05+00:00",
           "metrics": {},
           "tags": [],
@@ -2985,7 +2985,7 @@
       ],
       "unvalidated": {
         "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-        "digests": { "curves": "<result_sha256 n27>", "milestones": "<milestones n49>" }
+        "digests": { "curves": "<result_sha256 n27>", "milestones": "<milestones n65>" }
       },
       "positive_class_assessed": true,
       "plant_mapping": {
@@ -3163,15 +3163,15 @@
         ],
         "unvalidated": {
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n50>", "milestones": "<milestones n51>" }
+          "digests": { "curves": "<curves n66>", "milestones": "<milestones n67>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "name": "valley",
-          "dataset_id": "<dataset_id n52>",
+          "dataset_id": "<dataset_id n68>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n53>",
+          "record_sha256": "<record_sha256 n69>",
           "match_radius": {
             "2026-02-11": { "value": 1.0, "source": "h_pos_err", "rationale": null },
             "2026-02-25": { "value": 1.0, "source": "h_pos_err", "rationale": null }
@@ -3241,15 +3241,15 @@
         ],
         "unvalidated": {
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n54>", "milestones": "<milestones n55>" }
+          "digests": { "curves": "<curves n70>", "milestones": "<milestones n71>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "name": "valley",
-          "dataset_id": "<dataset_id n52>",
+          "dataset_id": "<dataset_id n68>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n53>",
+          "record_sha256": "<record_sha256 n69>",
           "match_radius": {
             "2026-02-11": { "value": 1.0, "source": "h_pos_err", "rationale": null },
             "2026-02-25": { "value": 1.0, "source": "h_pos_err", "rationale": null }
@@ -3323,15 +3323,15 @@
         ],
         "unvalidated": {
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n56>", "milestones": "<milestones n57>" }
+          "digests": { "curves": "<curves n72>", "milestones": "<milestones n73>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "name": "valley",
-          "dataset_id": "<dataset_id n52>",
+          "dataset_id": "<dataset_id n68>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n53>",
+          "record_sha256": "<record_sha256 n69>",
           "match_radius": {
             "2026-02-11": { "value": 1.0, "source": "h_pos_err", "rationale": null },
             "2026-02-25": { "value": 1.0, "source": "h_pos_err", "rationale": null }
@@ -3432,10 +3432,10 @@
       "positive_class_assessed": true,
       "plant_mapping": {
         "name": "valley",
-        "dataset_id": "<dataset_id n58>",
+        "dataset_id": "<dataset_id n74>",
         "dataset_root": "ds",
         "built_at": "2000-01-01T00:00:16+00:00",
-        "record_sha256": "<record_sha256 n59>",
+        "record_sha256": "<record_sha256 n75>",
         "match_radius": {
           "2026-02-11": { "value": 3.0, "source": "h_pos_err", "rationale": null },
           "2026-02-25": { "value": 3.0, "source": "h_pos_err", "rationale": null },

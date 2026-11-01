@@ -14,7 +14,12 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from tcip_annotation.json_io import LabelDocument, read_label_document
+from tcip_annotation.json_io import (
+    LabelDocument,
+    document_payload,
+    label_document,
+    read_label_document,
+)
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.pipelines.data.split_construction import raster_identity
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -33,7 +38,7 @@ from tests._geotiff_fixtures import (
     write_canonical_dataset_raster,
 )
 from tests._mapping_fixtures import POSITION_ERROR_M
-from tests._producer_fixtures import image_label_key, label_image
+from tests._producer_fixtures import image_label_key
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -82,15 +87,15 @@ def _stored(raster_path: Path) -> LabelDocument:
     return read_label_document(image_label_key(raster_path))
 
 
-def _write_document(
-    raster_path: Path, annotations: list[Annotation], width: int = WIDTH
+def _document(
+    annotations: list[Annotation], width: int = WIDTH
 ) -> LabelDocument:
-    """Save ``annotations`` as the raster's label document and return it as read back.
+    """Return ``annotations`` at ``width`` by ``HEIGHT`` as the label document reader reads them.
 
-    The document is saved at ``width`` by ``HEIGHT``.
+    The record is the encoder's (``json_io.document_payload``), provenance and score as given,
+    read by the decoder (``json_io.label_document``).
     """
-    label_image(raster_path, annotations, width, HEIGHT, keep_empty=True)
-    return _stored(raster_path)
+    return label_document(document_payload(annotations, width, HEIGHT))
 
 
 def _square(x0: float, y0: float, x1: float, y1: float) -> Polygon:
@@ -133,7 +138,7 @@ def test_load_canopy_segments_admits_a_hand_traced_polygon_and_a_box(
             created_at="t",
         ),
     ]
-    data = _write_document(raster_path, anns)
+    data = _document(anns)
 
     segments = load_canopy_segments(
         data,
@@ -169,7 +174,7 @@ def test_load_canopy_segments_excludes_annotations_of_another_subject(
             created_by="user:breeder",
         ),
     ]
-    data = _write_document(raster_path, anns)
+    data = _document(anns)
 
     segments = load_canopy_segments(
         data,
@@ -185,8 +190,7 @@ def test_load_canopy_segments_refuses_a_document_whose_size_differs(
     tmp_path: Path,
 ) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -210,8 +214,7 @@ def test_load_canopy_segments_refuses_when_no_annotation_of_subject_exists(
     tmp_path: Path,
 ) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             Annotation(
                 subject="other",
@@ -234,8 +237,7 @@ def test_load_canopy_segments_refuses_a_point_naming_the_record(
     tmp_path: Path,
 ) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -263,8 +265,7 @@ def test_load_canopy_segments_refuses_a_geometry_less_annotation(
     image-level label naming no region.
     """
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             Annotation(
                 subject="canopy", geometry=None, created_by="user:breeder"
@@ -285,8 +286,7 @@ def test_load_canopy_segments_refuses_a_geometry_less_annotation(
 
 def test_load_canopy_segments_refuses_a_scored_polygon(tmp_path: Path) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -310,8 +310,7 @@ def test_load_canopy_segments_refuses_a_polygon_with_no_created_by(
     tmp_path: Path,
 ) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             Annotation(subject="canopy", geometry=_square(5, 5, 20, 20)),
         ],
@@ -333,8 +332,7 @@ def test_load_canopy_segments_admits_a_polygon_with_no_created_by_a_person_signe
 
     _, raster_path, _georef, identity = _setup(tmp_path)
     unattributed = Annotation(subject="canopy", geometry=_square(5, 5, 20, 20))
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             signed_off(
                 unattributed, "user:breeder", "2026-01-01T00:00:00+00:00"
@@ -356,8 +354,7 @@ def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons
     tmp_path: Path,
 ) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(
-        raster_path,
+    data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -404,7 +401,10 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
             "image_path": str(raster_path),
             "annotations": [],
             "gestures": {
-                "decide": {"bucket": staged.bucket, "verdicts": {"0": "accepted"}}
+                "decide": {
+                    "bucket": staged.bucket,
+                    "verdicts": {"0": "accepted"},
+                }
             },
             "user": "breeder",
         },
@@ -434,8 +434,7 @@ def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -482,8 +481,7 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
     position error is not tied, and a detection in its segment is attributed to no plant.
     """
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -640,8 +638,7 @@ def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -681,8 +678,7 @@ def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -714,8 +710,7 @@ def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -752,8 +747,7 @@ def test_tie_segments_to_plants_refuses_a_blank_named_plant(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -785,8 +779,7 @@ def test_tie_segments_to_plants_refuses_a_duplicate_plant_id(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -823,8 +816,7 @@ def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -856,8 +848,7 @@ def test_tie_segments_to_plants_names_a_plant_outside_the_raster(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -894,8 +885,7 @@ def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -932,8 +922,7 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -997,8 +986,7 @@ def test_assign_detections_to_segments_attributes_an_overlap_to_neither(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",
@@ -1043,8 +1031,7 @@ def test_assign_detections_to_segments_no_boxes_returns_empty(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _write_document(
-        raster_path,
+    segments_data = _document(
         [
             Annotation(
                 subject="canopy",

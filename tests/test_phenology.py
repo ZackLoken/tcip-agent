@@ -41,11 +41,23 @@ RULE = BUD_OPENING.crossing_rule
 
 
 def _document(project: Path, annotations: list[Annotation]) -> Key:
-    """Write ``annotations`` as an image's prediction document under ``project``; return its key."""
-    from tcip_mcp.dataset_layout import prediction_key
+    """Publish ``annotations`` at 8 px as the bucket ``m/2024-05-01``'s document of ``img``.
 
-    key = prediction_key(project, "m/2024-05-01", "img")
-    json_io.write_label_document(key, annotations, 8, 8)
+    The publication is :func:`~tests._producer_fixtures.published_document`'s; returns the
+    document's key.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._producer_fixtures import published_document
+
+    key = published_document(
+        project,
+        "m/2024-05-01",
+        image_dir(project, "2024-05-01") / "img.png",
+        annotations,
+        8,
+        8,
+    ).document_key("img")
+    assert key is not None
     return key
 
 

@@ -6,11 +6,13 @@ import type {
   LabelDocumentAnswer,
   RegistrySubjects,
   SavedLabels,
+  SelectAnswer,
   ServedAnnotation,
   ServedProposals,
   Staged,
   SubjectsLoad,
 } from "@/api/types.generated";
+import type { DatasetSelection } from "@/store/types";
 import produced from "@/test/annotateAnswers.json";
 import type { Refusal } from "@/test/refusals";
 
@@ -31,10 +33,13 @@ import type { Refusal } from "@/test/refusals";
  *    second bucket's box and polygon proposals served (`shaped_proposals`) and its polygon
  *    accepted (`accept_polygon`); the unpaired proposal accepted again by a save drawing a box
  *    over it first (`accept_drawn`);
- *  - a document whose third box a tool wrote (`tool_two`), its save confirming that box
- *    (`confirmed`), and a save of the three boxes as a person's (`person_boxes`);
- *  - the second photograph's document holding a tool's, a person's, an accepted tool's and an
- *    unattributed box (`authored`), then one holding a tool's polygon (`tool_polygon`);
+ *  - over three photographs of a capture of their own, a COCO document imported carrying the
+ *    tool's and unattributed records: a document whose third box the import gave a tool and whose
+ *    other two a person saved (`tool_two`), its save confirming that box (`confirmed`), and a
+ *    save of the three boxes as a person's (`person_boxes`); a document holding the tool's
+ *    polygon (`tool_polygon`); and a document, saved by a person, holding a tool's, a person's,
+ *    an accepted tool's and an unattributed box (`authored`); and their capture's selection
+ *    (`imported`);
  *  - the save flagging one box (`flag_raised`) and its document (`flagged`), the save removing the
  *    box (`flag_removed`), and a new box flagged twice with the second flag resolved
  *    (`flags_mixed`);
@@ -76,9 +81,21 @@ export const ANNOTATE_ANSWERS = produced as unknown as {
   nothing_proposed: null;
   engine_refusal: Refusal<string>;
   registry: SubjectsLoad;
+  imported: SelectAnswer;
   unreadable: Refusal<string>;
   buckets: { single: string; review: string; shaped: string };
 };
+
+/** The selection of the imported photographs' capture, the tool's box document's photograph in
+ *  view. */
+export const TOOL_SELECTION: DatasetSelection = (() => {
+  const { selection } = ANNOTATE_ANSWERS.imported;
+  const index = selection.images.findIndex(
+    (image) => image.path === ANNOTATE_ANSWERS.tool_two.image_path,
+  );
+  if (index === -1) throw new Error("the imported capture holds no tool's box document");
+  return { ...selection, current_image_index: index };
+})();
 
 /** The subjects the produced registry declares, by name. */
 const DECLARED = ANNOTATE_ANSWERS.registry.subjects ?? {};

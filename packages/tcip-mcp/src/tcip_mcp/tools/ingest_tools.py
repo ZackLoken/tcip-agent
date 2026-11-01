@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import datetime
 import errno
+import io
 import logging
+import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
 
 import tcip_store
 from tcip_mcp import dataset_layout
@@ -30,6 +34,7 @@ from tcip_mcp.pipelines.image_utils import (
 )
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
+from tcip_mcp.subject_registry import SubjectRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -574,12 +579,12 @@ def import_coco(
     Every declared category must be a subject the dataset's registry declares, and each image is
     the capture's image of that exact file name (a ``.bandgroup`` capture by stem). Every fault
     found before writing is named together and refuses the import with nothing written: a
-    malformed or unregistered category, a malformed record, a duplicate id or image, an image not
-    in the capture, or a frame that disagrees with the image. The documents and the import's audit
-    line then commit as one store transaction, each document checked absent inside it, so a label
-    already there refuses the whole import with nothing written; an import that writes no document
-    leaves no event. A crowd region keeps its flag and a run-length mask becomes rings. An image
-    with no annotations writes nothing.
+    malformed or unregistered category, a malformed record, a duplicate id or file name, two file
+    names naming one image, an image not in the capture, or a frame that disagrees with the
+    image. The documents and the import's audit line then commit as one store transaction, each
+    document checked absent inside it, so a label already there refuses the whole import with
+    nothing written; an import that writes no document leaves no event. A crowd region keeps its
+    flag and a run-length mask becomes rings. An image with no annotations writes nothing.
 
     Args:
         document: Path to the COCO ``.json`` (an ``images``/``categories`` key).
@@ -592,8 +597,8 @@ def import_coco(
             vertex), recorded on the import's audit line.
         rationale: Why the import simplifies at ``vertex_spacing``, recorded beside it.
 
-    Returns ``{document, capture, vertex_spacing, rationale, written}``, ``written`` the stem of
-    every label document written.
+    Returns ``{source, vertex_spacing, rationale, written}``, ``source`` the document's path and
+    ``written`` the capture's stems of every label document written, by capture.
 
     """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
@@ -609,4 +614,143 @@ def import_coco(
             actor=actor,
         )
     except (ValueError, FileNotFoundError) as exc:
+        return {"error": str(exc)}
+
+
+class LabelExport(BaseModel):
+    """A dataset's labels as they leave it.
+
+    ``dataset`` is the dataset's identity record, ``subjects`` the registry its labels were made
+    under, and ``images`` every image's label records as its dataset stored them, by capture and
+    then by the image's file name.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    dataset: dataset_layout.DatasetRecord
+    subjects: SubjectRegistry
+    images: dataset_layout.CaptureLabels
+
+
+LABELS_MEMBER = "labels.json"
+"""The member of a labels container holding its :class:`LabelExport`."""
+
+
+@tool()
+@audited
+def export_labels(
+    project: Path, dataset_root: str, destination: str, *, actor: str | None
+) -> dict:
+    """Write every label document and flags record the dataset holds into a new labels container.
+
+    The export is ``actor``'s.
+
+    The container is a zip file holding one member, ``labels.json``: the dataset's identity
+    (``dataset.json``), its subject registry, and for every label document the store holds, by
+    capture and by its image's file name (a band group's manifest's), that document and the
+    image's flags record, each as stored. Prediction documents and staged proposals do not
+    travel. Two exports of one unchanged dataset are equal byte for byte. A label document whose
+    capture holds no image of its stem refuses the export, naming it.
+
+    Args:
+        dataset_root: The dataset whose labels leave (holds ``images/`` and ``subjects.json``).
+        destination: The zip file to write; one that already exists is refused, never written
+            over.
+
+    Returns ``{destination, images}``, ``images`` the count of label documents written.
+
+    """
+    from tcip_annotation.flags import flag_key
+    from tcip_mcp.subject_registry import read_registry
+    from tcip_mcp.tools.data_tools import _scan_dataset
+
+    root, dest = located(dataset_root, project), located(destination, project)
+    images: dataset_layout.CaptureLabels = {}
+    try:
+        census = _scan_dataset(str(root))
+        named = {
+            key: Path(image).name for image, key in census["images"].items()
+        }
+        for key in census["labels"]:
+            capture, stem = key.parts
+            if key not in named:
+                raise ValueError(
+                    f"{capture}/{stem} is a label document of no image of {root}, so no "
+                    "file name names it; restore its image (diagnose_project lists every "
+                    "such document)"
+                )
+            images.setdefault(capture, {})[named[key]] = (
+                dataset_layout.ImageLabels.model_validate(
+                    {
+                        "document": tcip_store.read(key),
+                        "flags": tcip_store.read(flag_key(key), default=None),
+                    }
+                )
+            )
+        exported = LabelExport(
+            dataset=dataset_layout.require_dataset_identity(root),
+            subjects=read_registry(root),
+            images=images,
+        )
+        with zipfile.ZipFile(dest, "x") as container:
+            container.writestr(
+                zipfile.ZipInfo(LABELS_MEMBER),
+                exported.model_dump_json(indent=2),
+                compress_type=zipfile.ZIP_DEFLATED,
+            )
+    except (ValueError, FileExistsError, FileNotFoundError) as exc:
+        return {"error": str(exc)}
+    return {
+        "destination": str(dest),
+        "images": sum(len(stems) for stems in images.values()),
+    }
+
+
+@tool()
+def import_labels(
+    project: Path, container: str, dataset_root: str, *, actor: str | None
+) -> dict:
+    """Write the labels a container ``export_labels`` wrote into the dataset's captures, as stored.
+
+    The import is ``actor``'s.
+
+    Every image of the container is written for the image of its file name in its capture: its
+    label document and its flags record, each as the exporting dataset stored them, so provenance
+    and completion marks arrive unchanged. Any fault refuses the whole import with nothing
+    written, all of them named: a file name the capture holds no image of, a document whose frame
+    is not its image's, a
+    subject the dataset's registry does not declare as the container's registry does, and a
+    label record already present. The records and one ``labels_imported`` line, naming the
+    container, the digest of its bytes and the exporting dataset's identity, commit together.
+
+    Args:
+        container: The zip file ``export_labels`` wrote.
+        dataset_root: The dataset whose captures hold the same images by capture and file name.
+
+    Returns ``{source, dataset, written}``, ``written`` each capture's stems.
+
+    """
+    root, path = located(dataset_root, project), located(container, project)
+    try:
+        stored = tcip_store.read_blob_versioned(path)
+        with zipfile.ZipFile(io.BytesIO(stored.value)) as held:
+            exported = LabelExport.model_validate_json(
+                held.read(LABELS_MEMBER)
+            )
+        return dataset_layout.write_label_records(
+            root,
+            exported.images,
+            registry=exported.subjects,
+            faults=(),
+            source=str(path),
+            digest=stored.version.token,
+            facts={"dataset": exported.dataset.model_dump(mode="json")},
+            actor=actor,
+        )
+    except (
+        ValueError,
+        KeyError,
+        zipfile.BadZipFile,
+        tcip_store.NotFoundError,
+    ) as exc:
         return {"error": str(exc)}

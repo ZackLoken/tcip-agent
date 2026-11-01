@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.dataset_layout import image_dir
@@ -191,11 +190,13 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
     An attribute whose positive value sits at id 2 with no record at id 1 counts two positive
     detections of three, none unclassified.
     """
-    from tcip_mcp.dataset_layout import prediction_key
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._producer_fixtures import published_document
 
-    p = prediction_key(tmp_path, "run/2026-03-05", "img")
-    json_io.write_label_document(
-        p,
+    bucket = published_document(
+        tmp_path,
+        "run/2026-03-05",
+        image_dir(tmp_path, "2026-03-05") / "img.png",
         [
             Annotation(
                 subject="bud",
@@ -219,6 +220,8 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
         40,
         24,
     )
+    p = bucket.document_key("img")
+    assert p is not None
 
     scope = scope_over(tmp_path, REGISTRY, "bud")
     total, positive, unclassified = phenology.count_by_class(

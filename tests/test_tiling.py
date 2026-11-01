@@ -286,7 +286,6 @@ def test_tiled_dataset_keeps_empty_tiles(tmp_path: Path) -> None:
         [Annotation(subject="bud", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
         256,
         256,
-        keep_empty=True,
     )
     ds = dataset_over(
         "detection",

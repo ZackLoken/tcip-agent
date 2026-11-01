@@ -417,7 +417,7 @@
         "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
         "subject": "bud",
         "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n2>"
+        "dataset_fingerprint": "<dataset_fingerprint n4>"
       }
     ],
     "dataset_fingerprints": "different",
@@ -458,7 +458,7 @@
             "entry": {
               "name": "train-unstamped",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-unstamped/model_final.pt",
-              "sha256": "<sha256 n4>",
+              "sha256": "<sha256 n5>",
               "registered_at": "2000-01-01T00:00:24+00:00",
               "metrics": {},
               "tags": [],
@@ -470,7 +470,7 @@
         "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
         "subject": "bud",
         "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n2>"
+        "dataset_fingerprint": "<dataset_fingerprint n6>"
       },
       {
         "run": {
@@ -538,7 +538,7 @@
             "entry": {
               "name": "train-undeclared",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-undeclared/model_final.pt",
-              "sha256": "<sha256 n5>",
+              "sha256": "<sha256 n7>",
               "registered_at": "2000-01-01T00:00:20+00:00",
               "metrics": {},
               "tags": [],
@@ -550,7 +550,7 @@
         "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
         "subject": "bud",
         "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n2>"
+        "dataset_fingerprint": "<dataset_fingerprint n8>"
       },
       {
         "run": {
@@ -600,7 +600,7 @@
         "dataset_fingerprint": "<dataset_fingerprint n2>"
       }
     ],
-    "dataset_fingerprints": "same",
+    "dataset_fingerprints": "different",
     "higher_is_better": { "val_map50": true, "val_map99": null }
   },
   "compare_best": {
@@ -906,7 +906,7 @@
         "launch": {
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
-          "agent_session": "<agent_session n6>",
+          "agent_session": "<agent_session n9>",
           "terminal_session": null
         }
       }
@@ -1377,7 +1377,7 @@
         "launch": {
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
-          "agent_session": "<agent_session n6>",
+          "agent_session": "<agent_session n9>",
           "terminal_session": null
         }
       }
@@ -1888,7 +1888,7 @@
         "launch": {
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
-          "agent_session": "<agent_session n6>",
+          "agent_session": "<agent_session n9>",
           "terminal_session": null
         }
       },
@@ -2420,7 +2420,7 @@
             "entry": {
               "name": "train-verified",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-verified/model_best.pt",
-              "sha256": "<sha256 n7>",
+              "sha256": "<sha256 n10>",
               "registered_at": "2000-01-01T00:00:44+00:00",
               "metrics": {},
               "tags": [],
@@ -2484,7 +2484,7 @@
             "entry": {
               "name": "train-unstamped",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-unstamped/model_final.pt",
-              "sha256": "<sha256 n4>",
+              "sha256": "<sha256 n5>",
               "registered_at": "2000-01-01T00:00:24+00:00",
               "metrics": {},
               "tags": [],
@@ -2496,7 +2496,7 @@
         "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
         "subject": "bud",
         "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n2>"
+        "dataset_fingerprint": "<dataset_fingerprint n6>"
       }
     ],
     "dataset_fingerprints": "unset",
@@ -2517,7 +2517,7 @@
     "entry": {
       "name": "train-verified",
       "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-verified/model_best.pt",
-      "sha256": "<sha256 n7>",
+      "sha256": "<sha256 n10>",
       "registered_at": "2000-01-01T00:00:44+00:00",
       "metrics": {},
       "tags": [],

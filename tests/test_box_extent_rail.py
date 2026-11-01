@@ -1,6 +1,6 @@
 """An inverted or zero-extent box is refused wherever a writer builds one.
 
-The writers are the save doors, the per-image writer and the prediction encoder.
+The writers are the save doors, the one label save beneath them and the prediction encoder.
 """
 
 from __future__ import annotations
@@ -16,12 +16,11 @@ from tcip_annotation.json_io import (
     annotation_object,
     label_document,
     read_label_document,
-    write_label_document,
 )
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
-from tests._producer_fixtures import image_label_key, write_image
+from tests._producer_fixtures import image_label_key, label_image, write_image
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -117,14 +116,19 @@ def test_a_corner_box_is_refused_and_admitted_through_the_save_conversion() -> (
     assert (box.x1, box.y1, box.x2, box.y2) == (5, 5, 10, 20)
 
 
-# ── the persistence boundary: the one writer covers every writer at once ──
+# ── the persistence boundary: the one label save covers every writer at once ──
 
 
-def test_the_writer_refuses_an_inverted_box(tmp_path: Path) -> None:
+def _image(tmp_path: Path) -> Path:
+    """Return the path of the undated image ``img`` under ``tmp_path``."""
+    return image_dir(tmp_path, UNDATED_BUCKET) / "img.png"
+
+
+def test_the_save_refuses_an_inverted_box(tmp_path: Path) -> None:
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
     with pytest.raises(ValueError):
-        write_label_document(
-            key,
+        label_image(
+            _image(tmp_path),
             [Annotation(subject="leaf", geometry=BBox(10, 10, 5, 5))],
             200,
             150,
@@ -132,11 +136,11 @@ def test_the_writer_refuses_an_inverted_box(tmp_path: Path) -> None:
     assert ts.read(key, default=None) is None
 
 
-def test_the_writer_admits_an_ordered_box(tmp_path: Path) -> None:
+def test_the_save_admits_an_ordered_box(tmp_path: Path) -> None:
     # admits valid work: every existing writer builds an ordered box.
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
-    write_label_document(
-        key,
+    label_image(
+        _image(tmp_path),
         [Annotation(subject="leaf", geometry=BBox(5, 5, 10, 20))],
         200,
         150,
@@ -146,16 +150,16 @@ def test_the_writer_admits_an_ordered_box(tmp_path: Path) -> None:
     )
 
 
-def test_the_writer_refuses_a_collinear_polygon(tmp_path: Path) -> None:
-    """The per-image writer refuses a collinear polygon and writes nothing.
+def test_the_save_refuses_a_collinear_polygon(tmp_path: Path) -> None:
+    """The label save refuses a collinear polygon and writes nothing.
 
     A polygon whose three points sit on one horizontal line raises ``ValueError``, and no label
     document is stored.
     """
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
     with pytest.raises(ValueError):
-        write_label_document(
-            key,
+        label_image(
+            _image(tmp_path),
             [
                 Annotation(
                     subject="leaf",
@@ -168,11 +172,11 @@ def test_the_writer_refuses_a_collinear_polygon(tmp_path: Path) -> None:
     assert ts.read(key, default=None) is None
 
 
-def test_the_writer_admits_a_real_polygon(tmp_path: Path) -> None:
+def test_the_save_admits_a_real_polygon(tmp_path: Path) -> None:
     # admits valid work: a polygon with real area is unaffected by the collinear-polygon refusal.
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
-    write_label_document(
-        key,
+    label_image(
+        _image(tmp_path),
         [
             Annotation(
                 subject="leaf",
@@ -287,11 +291,7 @@ def _seed_review_dataset(
 
     Returns the image written.
     """
-    from tests._producer_fixtures import (
-        label_image,
-        registry_of,
-        registry_over,
-    )
+    from tests._producer_fixtures import registry_of, registry_over
     from tests._web_fixtures import open_new_project
 
     dataset_root = open_new_project(tmp_path).root
@@ -304,7 +304,7 @@ def _seed_review_dataset(
         if gt_box is not None
         else []
     )
-    label_image(img, gt_annotations, 200, 150, keep_empty=True)
+    label_image(img, gt_annotations, 200, 150)
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -437,7 +437,9 @@ def test_the_save_door_refuses_accepting_a_degenerate_proposal(
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(img, [], decide={"bucket": "m", "verdicts": {"0": "accepted"}}),
+        json=_save(
+            img, [], decide={"bucket": "m", "verdicts": {"0": "accepted"}}
+        ),
     )
 
     assert resp.status_code == 400, resp.text
@@ -451,7 +453,9 @@ def test_the_save_door_admits_accepting_an_ordered_proposal(
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(img, [], decide={"bucket": "m", "verdicts": {"0": "accepted"}}),
+        json=_save(
+            img, [], decide={"bucket": "m", "verdicts": {"0": "accepted"}}
+        ),
     )
 
     assert resp.status_code == 200, resp.text
@@ -479,7 +483,10 @@ def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count() -> (
         image="preds.jpg",
         width=200,
         height=150,
-        boxes=[(10, 10, 20, 20), (30, 30, 30, 40)],  # the second has zero width
+        boxes=[
+            (10, 10, 20, 20),
+            (30, 30, 30, 40),
+        ],  # the second has zero width
         scores=[0.9, 0.8],
         cap=3,
     )
@@ -573,8 +580,22 @@ def test_stage_proposals_whose_every_box_drops_refuses_naming_the_count(
         model_name="sam",
         actor=None,
         boxes=[
-            {"subject": "leaf", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.0, "h": 0.2},
-            {"subject": "leaf", "conf": 0.7, "cx": 0.3, "cy": 0.3, "w": 0.1, "h": 0.0},
+            {
+                "subject": "leaf",
+                "conf": 0.8,
+                "cx": 0.5,
+                "cy": 0.5,
+                "w": 0.0,
+                "h": 0.2,
+            },
+            {
+                "subject": "leaf",
+                "conf": 0.7,
+                "cx": 0.3,
+                "cy": 0.3,
+                "w": 0.1,
+                "h": 0.0,
+            },
         ],
     )
 

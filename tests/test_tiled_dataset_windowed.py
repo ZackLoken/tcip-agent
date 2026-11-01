@@ -68,9 +68,7 @@ def _write_labels(image: Path, size_wh: tuple[int, int]) -> None:
 
     w, h = size_wh
     box = BBox(0.3 * w, 0.3 * h, 0.5 * w, 0.5 * h)
-    label_image(
-        image, [Annotation(subject="bud", geometry=box)], w, h, keep_empty=True
-    )
+    label_image(image, [Annotation(subject="bud", geometry=box)], w, h)
 
 
 def _jpeg_project(tmp_path: Path, size: int = 200) -> Path:

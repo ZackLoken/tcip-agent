@@ -1376,15 +1376,18 @@ def _four_bud_images(tmp_path: Path) -> Path:
 def _stored(
     tmp_path: Path, annotations: list[Annotation], size: int = 100
 ) -> LabelDocument:
-    """Write ``annotations`` as one image's label document and return it read back.
+    """Save ``annotations`` as one image's label document and return it read back.
 
     The document is that of a ``size``-pixel image ``a`` under ``tmp_path``.
     """
     from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import label_key
+    from tcip_mcp.dataset_layout import image_dir, label_key
+    from tests._producer_fixtures import label_image
 
     key = label_key(tmp_path, UNDATED_BUCKET, "a")
-    json_io.write_label_document(key, annotations, size, size, keep_empty=True)
+    label_image(
+        image_dir(tmp_path, UNDATED_BUCKET) / "a.png", annotations, size, size
+    )
     return json_io.read_label_document(key)
 
 

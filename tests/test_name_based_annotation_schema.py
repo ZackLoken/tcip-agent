@@ -119,7 +119,7 @@ def test_a_confirmed_negative_is_its_own_subjects_alone(
     from tests._producer_fixtures import mark_complete
 
     (image,) = write_jpegs(image_dir(tmp_path, "2-11-26"), ["img_009"], SIZE)
-    label_image(image, [], *SIZE, keep_empty=True)
+    label_image(image, [], *SIZE)
     # A human confirmed img_009 an empty negative for bud on this date.
     mark_complete(image, "bud", project=tmp_path)
 

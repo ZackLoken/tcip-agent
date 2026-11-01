@@ -99,7 +99,6 @@ def _grouped_dataset(root: Path) -> Path:
             [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
             TILE,
             TILE,
-            keep_empty=True,
         )
     return images_dir
 

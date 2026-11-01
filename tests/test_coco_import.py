@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     import numpy as np
     from torch.utils.data import Dataset
 
-    from tcip_annotation.state import Annotation
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_store import Key, Txn
     from tcip_web.state import OpenProject
@@ -191,22 +190,6 @@ def _targets(task: str, root: Path) -> dict:
     }
 
 
-def _person_label() -> list:
-    """Return one leaf box stamped by ``json_io.stamped`` as drawn by ``user:breeder``."""
-    return [
-        json_io.stamped(
-            [
-                json_io.annotation_from_payload(
-                    {"subject": "leaf", "bbox": [1, 1, 5, 5]}
-                )
-            ],
-            [],
-            author="user:breeder",
-            now="2025-09-16",
-        )[0]
-    ]
-
-
 def test_an_imported_documents_images_train_with_the_boxes_it_stated(
     tmp_path: Path,
 ) -> None:
@@ -220,7 +203,7 @@ def test_an_imported_documents_images_train_with_the_boxes_it_stated(
     root = _dataset(tmp_path).root
     result = _import(_document(tmp_path / "external.json"), root)
     assert "error" not in result, result
-    assert result["written"] == ["tree_01", "tree_02"]
+    assert result["written"] == {DATE: ["tree_01", "tree_02"]}
     assert _written(root) == ["tree_01", "tree_02"]
 
     targets = _targets("detection", root)
@@ -345,17 +328,17 @@ def test_the_import_leaves_one_row_with_the_documents_path_and_digest(
 
     rows = audit_rows(root)[before:]
     assert [(row["tool"], row["status"]) for row in rows] == [
-        ("coco_document_imported", "ok")
+        ("labels_imported", "ok")
     ]
     (event,) = rows
-    assert event["arguments"]["document"] == str(document.resolve())
-    assert event["arguments"]["written"] == ["tree_01", "tree_02"]
+    assert event["arguments"]["source"] == str(document.resolve())
+    assert event["arguments"]["written"] == {DATE: ["tree_01", "tree_02"]}
     assert (
         event["arguments"]["vertex_spacing"],
         event["arguments"]["rationale"],
     ) == (VERTEX_SPACING, RATIONALE)
     assert (
-        event["document_digest"]
+        event["source_digest"]
         == hashlib.sha256(document.read_bytes()).hexdigest()
     )
     for stem in _written(root):
@@ -388,8 +371,8 @@ def test_the_digest_names_the_bytes_the_labels_came_from(
     monkeypatch.setattr(ts, "transaction", replacing)
     assert "error" not in _import(document, root)
 
-    (event,) = audit_rows(root, "coco_document_imported")
-    assert event["document_digest"] == hashlib.sha256(read_bytes).hexdigest()
+    (event,) = audit_rows(root, "labels_imported")
+    assert event["source_digest"] == hashlib.sha256(read_bytes).hexdigest()
     assert document.read_bytes() != read_bytes
 
 
@@ -450,7 +433,34 @@ def test_an_image_not_under_the_dataset_refuses_the_whole_import(
         _document(tmp_path / "external.json", images=images), root
     )
 
-    assert "error" in result and "'tree_99.png'" in result["error"]
+    assert (
+        "error" in result
+        and f"{DATE}/tree_99.png names no image" in result["error"]
+    )
+    assert _written(root) == []
+
+
+def test_a_file_name_equal_to_another_images_stem_names_no_image(
+    tmp_path: Path,
+) -> None:
+    """A file name that is another image's logical stem is not that image.
+
+    Over a capture holding ``missing.png.png``, whose stem is ``missing.png``, a document naming
+    ``missing.png`` refuses naming that file name, and no label document is written.
+    """
+    root = _dataset(tmp_path, ("tree_01", "missing.png")).root
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
+        {"id": 2, "file_name": "missing.png", "width": IMG, "height": IMG},
+    ]
+
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
+
+    assert f"{DATE}/missing.png names no image" in result.get("error", ""), (
+        result
+    )
     assert _written(root) == []
 
 
@@ -476,7 +486,10 @@ def test_an_ordinary_image_is_named_by_its_own_file_name(
         _document(tmp_path / "external.json", images=images), root
     )
 
-    assert "error" in result and f"{file_name!r} is not in" in result["error"]
+    assert (
+        "error" in result
+        and f"{DATE}/{file_name} names no image" in result["error"]
+    )
     assert _written(root) == []
 
 
@@ -504,7 +517,8 @@ def test_an_existing_per_image_document_refuses_the_whole_import(
 
     assert (
         "error" in result
-        and "already holds a label document for ['tree_02']" in result["error"]
+        and f"already holds label records for ['{DATE}/tree_02']"
+        in result["error"]
     )
     assert ts.read_versioned(_label(root, "tree_02")).version == before
     assert _written(root) == ["tree_02"]
@@ -545,8 +559,32 @@ def test_an_unannotated_images_faults_still_refuse_the_import(
     )
 
     assert "error" in result
-    assert "'tree_03.png' is stated as" in result["error"]
+    assert f"{DATE}/tree_03.png is labeled at" in result["error"]
     assert _written(root) == ["tree_03"]
+
+
+def test_an_unannotated_image_the_capture_lacks_refuses_the_import(
+    tmp_path: Path,
+) -> None:
+    """A listed image the document gives no annotation is still claimed, so its absence refuses."""
+    root = _dataset(tmp_path).root
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
+        {"id": 2, "file_name": "tree_99.png", "width": IMG, "height": IMG},
+    ]
+    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]
+
+    result = _import(
+        _document(
+            tmp_path / "external.json", images=images, annotations=annotations
+        ),
+        root,
+    )
+
+    assert f"{DATE}/tree_99.png names no image" in result.get("error", ""), (
+        result
+    )
+    assert _written(root) == []
 
 
 def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
@@ -572,7 +610,7 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
 
     result = _import(_document(tmp_path / "external.json"), root)
 
-    assert result.get("written") == ["tree_01", "tree_02"], result
+    assert result.get("written") == {DATE: ["tree_01", "tree_02"]}, result
     assert ts.read_versioned(_label(root, "tree_03")).version == before
 
 
@@ -598,7 +636,10 @@ def test_a_frame_the_image_does_not_have_refuses_the_whole_import(
         _document(tmp_path / "external.json", images=images), root
     )
 
-    assert "error" in result and "'tree_01.png'" in result["error"]
+    assert (
+        "error" in result
+        and f"{DATE}/tree_01.png is labeled at" in result["error"]
+    )
     assert _written(root) == []
 
 
@@ -621,10 +662,8 @@ def test_a_repeated_image_reports_every_fault_it_carries(
     )
 
     assert "error" in result
-    assert (
-        "the capture 'tree_01' another record already names" in result["error"]
-    )
-    assert "is stated as" in result["error"]
+    assert "image 'tree_01.png' is listed twice" in result["error"]
+    assert "is labeled at" in result["error"]
     assert _written(root) == []
 
 
@@ -688,21 +727,26 @@ def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path) -> None:
 
 
 def _label_placed_before_the_writes(
-    monkeypatch: pytest.MonkeyPatch, key: Key, annotations: list[Annotation]
+    monkeypatch: pytest.MonkeyPatch, root: Path, stem: str
 ) -> None:
-    """Arrange a person's label to land on the document ``key`` names as a transaction opens.
+    """Arrange a person's leaf box to land on the capture's image ``stem`` as a transaction opens.
 
-    The patched ``ts.transaction`` writes the label on its first call, then restores itself.
+    The patched ``ts.transaction`` restores itself on its first call, then saves the box as
+    ``user:breeder`` through the one label save (``_producer_fixtures.label_image``).
     """
+    from tests._producer_fixtures import label_image
+
     real_transaction = ts.transaction
 
     def interleaved(
         *keys: Key, **kwargs: float | None
     ) -> AbstractContextManager[Txn]:
-        json_io.write_label_document(
-            key, annotations, IMG, IMG, keep_empty=True
-        )
         monkeypatch.setattr(ts, "transaction", real_transaction)
+        label_image(
+            image_dir(root, DATE) / f"{stem}.png",
+            [{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+            project=root,
+        )
         return real_transaction(*keys, **kwargs)
 
     monkeypatch.setattr(ts, "transaction", interleaved)
@@ -722,12 +766,11 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
 
     root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json")
-    _label_placed_before_the_writes(
-        monkeypatch, _label(root, "tree_02"), _person_label()
-    )
+    _label_placed_before_the_writes(monkeypatch, root, "tree_02")
 
     with pytest.raises(
-        ValueError, match=r"already holds a label document for \['tree_02'\]"
+        ValueError,
+        match=rf"already holds label records for \['{DATE}/tree_02'\]",
     ):
         import_coco_document(
             document,
@@ -742,7 +785,7 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
     (kept,) = json_io.read_label_document(_label(root, "tree_02")).annotations
     assert (kept.subject, kept.created_by) == ("leaf", "user:breeder")
     assert _written(root) == ["tree_02"]
-    assert audit_rows(root, "coco_document_imported") == []
+    assert audit_rows(root, "labels_imported") == []
 
 
 def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
@@ -814,14 +857,12 @@ def test_an_import_that_committed_no_document_leaves_no_event(
         _import(_document(tmp_path / "empty.json", annotations=[]), root)[
             "written"
         ]
-        == []
+        == {}
     )
-    assert audit_rows(root, "coco_document_imported") == []
+    assert audit_rows(root, "labels_imported") == []
 
-    _label_placed_before_the_writes(
-        monkeypatch, _label(root, "tree_01"), _person_label()
-    )
-    with pytest.raises(ValueError, match="already holds a label document"):
+    _label_placed_before_the_writes(monkeypatch, root, "tree_01")
+    with pytest.raises(ValueError, match="already holds label records"):
         import_coco_document(
             _document(tmp_path / "external.json"),
             root,
@@ -832,7 +873,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(
             actor=None,
         )
     assert _written(root) == ["tree_01"]
-    assert audit_rows(root, "coco_document_imported") == []
+    assert audit_rows(root, "labels_imported") == []
 
 
 def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(
@@ -911,14 +952,8 @@ def test_a_malformed_annotations_container_refuses_by_name_through_the_tool(
     assert "error" in result and "external.json" in result["error"]
 
 
-def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
-    tmp_path: Path,
-) -> None:
-    """A band-grouped capture is resolved by the stem of the file name the document names.
-
-    An external document names a grouped capture by one of its own file names; the import ties
-    it by stem to the ``.bandgroup`` manifest, and the written document is the capture's own.
-    """
+def _grouped(tmp_path: Path) -> Path:
+    """Return :func:`_dataset`'s root with a two-band group ``plot7`` written into its capture."""
     import numpy as np
     import tifffile
 
@@ -935,6 +970,18 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
         {"Green": band_g, "Red": band_r},
         central_wavelength_nm=None,
     )
+    return root
+
+
+def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
+    tmp_path: Path,
+) -> None:
+    """A band-grouped capture is resolved by the stem of the file name the document names.
+
+    An external document names a grouped capture by one of its own file names; the import ties
+    it by stem to the ``.bandgroup`` manifest, and the written document is the capture's own.
+    """
+    root = _grouped(tmp_path)
     images = [{"id": 1, "file_name": "plot7.tif", "width": IMG, "height": IMG}]
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]
 
@@ -946,9 +993,37 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
     )
 
     assert "error" not in result, result
-    assert result["written"] == ["plot7"]
+    assert result["written"] == {DATE: ["plot7"]}
     (ann,) = json_io.read_label_document(_label(root, "plot7")).annotations
     assert ann.subject == SUBJECT
+
+
+def test_two_file_names_of_one_band_group_refuse_whether_annotated_or_not(
+    tmp_path: Path,
+) -> None:
+    """Two file names naming one band group refuse, one annotated and one not.
+
+    The import refuses naming both file names, and no label document is written.
+    """
+    root = _grouped(tmp_path)
+    images = [
+        {"id": 1, "file_name": "plot7.tif", "width": IMG, "height": IMG},
+        {"id": 2, "file_name": "plot7.png", "width": IMG, "height": IMG},
+    ]
+    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]
+
+    result = _import(
+        _document(
+            tmp_path / "external.json", images=images, annotations=annotations
+        ),
+        root,
+    )
+
+    assert (
+        f"{DATE}/plot7.tif and {DATE}/plot7.png name one image, 'plot7'"
+        in result.get("error", "")
+    ), result
+    assert _written(root) == []
 
 
 CROWD = [36.0, 34.0, 20.0, 18.0]
@@ -1163,8 +1238,8 @@ def test_every_fault_the_document_carries_is_reported_together(
     for fault in (
         "category id 7 is declared twice",
         "record 1 names category_id 8",
-        "'tree_01.png' is stated as",
-        "'tree_99.png' is not in",
+        f"{DATE}/tree_01.png is labeled at",
+        f"{DATE}/tree_99.png names no image",
     ):
         assert fault in result["error"], (fault, result["error"])
 
@@ -1192,7 +1267,7 @@ def test_a_missing_image_is_reported_whatever_document_its_stem_holds(
     )
 
     assert "error" in result
-    assert "'tree_02.jpg' is not in" in result["error"]
+    assert f"{DATE}/tree_02.jpg names no image" in result["error"]
     assert _written(root) == ["tree_02"]
 
 

@@ -21,14 +21,18 @@ first accepted and :data:`REVIEWED` with :data:`REVIEWED_RING` saved (``review_s
 the paired proposal and the unpaired one are accepted (``accept_paired``, ``accept_unpaired``),
 and a second bucket of a box and :data:`PROPOSED_RING` is served (``shaped_proposals``) and its
 polygon accepted (``accept_polygon``); the unpaired proposal is accepted again by a save that
-draws a box over it first (``accept_drawn``). A document whose box at :data:`TOOL_INDEX` a tool
-wrote is loaded (``tool_two``), that box confirmed (``confirmed``) and the boxes saved as a
-person's (``person_boxes``); the second photograph's document holding :data:`AUTHORED` (a tool's,
-a person's, a tool's a person accepted, an unattributed box) is loaded (``authored``), then one
-holding a tool's polygon (``tool_polygon``); the flag scenes follow (``_flag_scenes``), and the
-prompt scenes over the fourth photograph (``_prompt_scenes``), and the photographs' registry
-declaring the scenes' subjects (``registry``); last, the fifth photograph's document is damaged
-in the store and its load refused (``unreadable``). Each staging's minted
+draws a box over it first (``accept_drawn``). The first photograph is cleared; the flag scenes
+follow (``_flag_scenes``), and the prompt scenes over the fourth photograph
+(``_prompt_scenes``), and the photographs' registry declaring the scenes' subjects
+(``registry``). A COCO document is imported onto three photographs of a capture of their own
+(``_imported``), carrying the tool's and unattributed records. On the tool's box document a
+person saves :data:`REVIEWED`, the imported box at :data:`TOOL_INDEX` kept as the tool's
+(``tool_two``); that box is confirmed (``confirmed``) and the boxes saved as a person's
+(``person_boxes``). The tool's polygon document is loaded (``tool_polygon``), and the
+authorship document, saved with :data:`AUTHORED` (a tool's, a person's, a tool's a person
+accepts, an unattributed box), is loaded (``authored``); their capture is selected
+(``imported``); last, the fifth photograph's document is damaged in the store and its load
+refused (``unreadable``). Each staging's minted
 bucket name is published under ``buckets``, and each save's answer under ``saves``. The answers
 are written, each instant an annotation,
 a mark or a flag stamps read as an instant (``fixture_session.LABEL_DOCUMENT_STAMPS`` beside the
@@ -40,7 +44,6 @@ id numbered (``fixture_session.normalized``), to :data:`GENERATED_PATH`.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -58,7 +61,8 @@ from tools.fixture_session import (
 from tools.generate_open_fixture import FRAMES, SUBJECT, captures
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
 
     from fastapi.testclient import TestClient
     from pydantic import JsonValue
@@ -112,7 +116,7 @@ PROPOSED_RING = [[100.0, 500.0], [200.0, 500.0], [200.0, 600.0]]
 """A polygon a second bucket proposes, clear of the review document's shapes."""
 
 TOOL_INDEX = 2
-"""The index of the box a tool authored in the authorship scene's document."""
+"""The index in :data:`REVIEWED` of the box a tool authored in the tool's document."""
 
 AUTHORED = (
     (10.0, 10.0, 50.0, 50.0),
@@ -122,6 +126,21 @@ AUTHORED = (
 )
 """The corners of the boxes of the document each authorship stands in: a tool's, a person's, a
 tool's a person accepted, and one no one authored. Sample values."""
+
+AUTHORED_ACCEPTED = 2
+"""The index in :data:`AUTHORED` of the tool's box a person accepts."""
+
+IMPORTED_CAPTURE = "2026-01-15"
+"""The capture of the photographs an external COCO document is imported onto, a sample date
+apart from the open fixture's."""
+
+AUTHORED_IMAGE, TOOL_IMAGE, POLYGON_IMAGE = (
+    "authored.jpg",
+    "tool.jpg",
+    "polygon.jpg",
+)
+"""The file names of those photographs, sample names: the authorship document's, the tool's
+box document's and the tool's polygon document's."""
 
 FLAGGER = "first"
 """The person who flags the review document's first box and the flag scenes' boxes."""
@@ -162,9 +181,7 @@ def produce() -> dict[str, JsonValue]:
     A route refusing what it should admit raises.
     """
     from tcip_annotation.flags import FlagRequest, PointTarget
-    from tcip_annotation.state import Annotation, Polygon
     from tcip_mcp.dataset_layout import Decisions, Gestures, label_key_of
-    from tcip_mcp.identity import actor
     from tcip_mcp.tools.proposal_tools import StagedShapes, stage_proposals
     from tcip_mcp.web_client import CaptureChoice
     from tcip_web.routes.annotate import (
@@ -173,7 +190,6 @@ def produce() -> dict[str, JsonValue]:
         SavedLabels,
         SavePayload,
     )
-    from tests._producer_fixtures import box_annotation, label_image
     from tests._record_damage_fixtures import damage_record
     from tests._web_fixtures import named_project
 
@@ -367,69 +383,43 @@ def produce() -> dict[str, JsonValue]:
             "review": bucket,
             "shaped": shaped,
         }
-        three = [AnnotationPayload(subject=SUBJECT, bbox=b) for b in REVIEWED]
-        label_image(
-            first,
-            [
-                replace(
-                    box_annotation(*b, subject=SUBJECT),
-                    created_by=MODEL_AUTHOR
-                    if i == TOOL_INDEX
-                    else actor(ACTOR),
-                )
-                for i, b in enumerate(REVIEWED)
-            ],
-            width,
-            height,
-        )
-        served["tool_two"] = load(first)
-        person = actor(ACTOR)
-        label_image(
-            second,
-            [
-                replace(
-                    box_annotation(*b, subject=SUBJECT),
-                    created_by=by,
-                    accepted_by=accepted,
-                )
-                for b, (by, accepted) in zip(
-                    AUTHORED,
-                    (
-                        (MODEL_AUTHOR, None),
-                        (person, None),
-                        (MODEL_AUTHOR, person),
-                        (None, None),
-                    ),
-                    strict=True,
-                )
-            ],
-            *FRAMES[1],
-        )
-        served["authored"] = load(second)
-        label_image(
-            second,
-            [
-                Annotation(
-                    subject=SUBJECT,
-                    geometry=Polygon([[(x, y) for x, y in REVIEWED_RING]]),
-                    created_by=MODEL_AUTHOR,
-                )
-            ],
-            *FRAMES[1],
-        )
-        served["tool_polygon"] = load(second)
-        saves["confirmed"] = save(
-            first, three, confirm=frozenset({TOOL_INDEX})
-        )
         save(first, [])
-        saves["person_boxes"] = save(first, three)
-        flag_saves, flag_loads, held_flag = _flag_scenes(save, load, first, box)
+        flag_saves, flag_loads, held_flag = _flag_scenes(
+            save, load, first, box
+        )
         saves.update(flag_saves)
         served.update(flag_loads)
         served["saves"] = saves
         prompted, minted = _prompt_scenes(client, paths[3])
         served.update(prompted)
         served["registry"] = _registry(client, str(root), date)
+        authored, tooled, polygon = _imported(workspace, valley.root, root)
+        three = [AnnotationPayload(subject=SUBJECT, bbox=b) for b in REVIEWED]
+        load(tooled)
+        save(tooled, three)
+        served["tool_two"] = load(tooled)
+        saves["confirmed"] = save(
+            tooled, three, confirm=frozenset({TOOL_INDEX})
+        )
+        save(tooled, [])
+        saves["person_boxes"] = save(tooled, three)
+        served["tool_polygon"] = load(polygon)
+        load(authored)
+        save(
+            authored,
+            [
+                AnnotationPayload(subject=SUBJECT, bbox=list(b))
+                for b in AUTHORED
+            ],
+            confirm=frozenset({AUTHORED_ACCEPTED}),
+        )
+        served["authored"] = load(authored)
+        served["imported"] = answered(
+            client,
+            "select_dataset",
+            200,
+            CaptureChoice(dataset_root=str(root), date=IMPORTED_CAPTURE),
+        )
         damage_record(label_key_of(paths[4]), b"[]")
         served["unreadable"] = answered(
             client, "load_labels", 400, params={"image_path": paths[4]}
@@ -482,6 +472,86 @@ def _registry(client: TestClient, dataset_root: str, date: str) -> JsonValue:
         ),
     )
     return load()
+
+
+def _imported(
+    workspace: Path, project: Path, dataset_root: Path
+) -> tuple[str, str, str]:
+    """Import a COCO document's tool and unattributed records; return its photographs' paths.
+
+    Photographs :data:`AUTHORED_IMAGE` and :data:`POLYGON_IMAGE` of the second frame of
+    :data:`FRAMES` and :data:`TOOL_IMAGE` of the first are written in the capture
+    :data:`IMPORTED_CAPTURE` of ``dataset_root``, and a COCO document under ``workspace`` listing
+    them is imported through ``coco_import.import_coco_document`` for ``project``. Its records
+    carry the provenance it states: on the first, every box of :data:`AUTHORED` but the person's,
+    the first and the accepted one created by :data:`MODEL_AUTHOR` with no instant and the last
+    with no producer; on the second, the box of :data:`REVIEWED` at :data:`TOOL_INDEX`, and on
+    the third :data:`REVIEWED_RING`, each created by :data:`MODEL_AUTHOR`.
+    """
+    import json
+
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.identity import actor
+    from tcip_mcp.pipelines.data.coco_import import import_coco_document
+    from tests._producer_fixtures import write_image
+
+    named = ((AUTHORED_IMAGE, 1), (TOOL_IMAGE, 0), (POLYGON_IMAGE, 1))
+    images = [
+        write_image(
+            image_dir(dataset_root, IMPORTED_CAPTURE) / name, FRAMES[i]
+        )
+        for name, i in named
+    ]
+
+    def boxed(image_id: int, corners: Sequence[float], by: str | None) -> dict:
+        x1, y1, x2, y2 = corners
+        return {
+            "image_id": image_id,
+            "bbox": [x1, y1, x2 - x1, y2 - y1],
+            "created_by": by,
+        }
+
+    creators = {0: MODEL_AUTHOR, AUTHORED_ACCEPTED: MODEL_AUTHOR, 3: None}
+    records = [
+        *(boxed(1, AUTHORED[i], by) for i, by in creators.items()),
+        boxed(2, REVIEWED[TOOL_INDEX], MODEL_AUTHOR),
+        {
+            "image_id": 3,
+            "segmentation": [[c for xy in REVIEWED_RING for c in xy]],
+            "created_by": MODEL_AUTHOR,
+        },
+    ]
+    document = workspace / "imported.json"
+    document.write_text(
+        json.dumps(
+            {
+                "images": [
+                    {
+                        "id": n,
+                        "file_name": name,
+                        "width": FRAMES[i][0],
+                        "height": FRAMES[i][1],
+                    }
+                    for n, (name, i) in enumerate(named, start=1)
+                ],
+                "categories": [{"id": 1, "name": SUBJECT}],
+                "annotations": [{**r, "category_id": 1} for r in records],
+            }
+        ),
+        encoding="utf-8",
+    )
+    import_coco_document(
+        document,
+        dataset_root,
+        date=IMPORTED_CAPTURE,
+        # The document holds no run-length mask, so no ring is simplified at this spacing.
+        vertex_spacing=1.0,
+        rationale="the tool's and unattributed records the annotate scenes read",
+        project=project,
+        actor=actor(ACTOR),
+    )
+    authored, tooled, polygon = map(str, images)
+    return authored, tooled, polygon
 
 
 def _flag_scenes(

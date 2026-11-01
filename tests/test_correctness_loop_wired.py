@@ -150,7 +150,6 @@ def _admitted_tree(tmp_path: Path) -> Path:
             64,
             64,
             (0, 0, 0),
-            keep_empty=True,
         )
     return imgs
 

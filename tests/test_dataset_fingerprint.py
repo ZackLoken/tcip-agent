@@ -17,7 +17,7 @@ from PIL import Image
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.data import (
     dataset_fingerprint as fingerprint_mod,
     selection,
@@ -28,6 +28,7 @@ from tests._producer_fixtures import (
     label_image,
     registry_of,
     registry_over,
+    store_labels,
     write_band_group,
     write_image,
 )
@@ -213,16 +214,19 @@ def test_the_labels_term_keys_each_document_by_its_capture(
 ) -> None:
     """The labels term keys each document by its capture beside its stem.
 
-    One stem's document under two different captures is two different label sets.
+    One stem's document, stored the same, under two different captures is two different label
+    sets.
     """
     undated, dated = tmp_path / "undated", tmp_path / "dated"
-    box = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
-    json_io.write_label_document(
-        label_key(undated, UNDATED_BUCKET, "A"), box, 32, 32
+    document = json_io.document_payload(
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32
     )
-    json_io.write_label_document(
-        label_key(dated, "2026-02-11", "A"), box, 32, 32
-    )
+    for root, capture in ((undated, UNDATED_BUCKET), (dated, "2026-02-11")):
+        registry_over(root, registry_of("bud"))
+        store_labels(
+            write_image(image_dir(root, capture) / "A.png", (32, 32)),
+            document,
+        )
 
     assert fingerprint_mod._labels_term(
         undated, {}
@@ -235,20 +239,23 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
 ) -> None:
     """An RGB nested dataset fingerprints to the value one run of ``dataset_fingerprint`` recorded.
 
-    The dataset holds fixed image bytes, one label document and a registry.
+    The dataset holds one fixed 64 px image, one label document written as stored and a
+    registry.
     """
-    image = image_dir(tmp_path, "2026-02-11") / "IMG_1.jpg"
-    image.parent.mkdir(parents=True)
-    image.write_bytes(b"fixed-jpeg-bytes-for-fingerprint-test")
-    label_image(
-        image,
-        [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
-        64,
-        64,
-    )
     registry_over(tmp_path, registry_of("bud"))
+    image = write_image(
+        image_dir(tmp_path, "2026-02-11") / "IMG_1.png",
+        (64, 64),
+        (90, 110, 70),
+    )
+    store_labels(
+        image,
+        json_io.document_payload(
+            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 64, 64
+        ),
+    )
 
-    assert dataset_fingerprint(tmp_path) == "d18c7b3b874d2025"
+    assert dataset_fingerprint(tmp_path) == "d1950101fcfe4d5c"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(

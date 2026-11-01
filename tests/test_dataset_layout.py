@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import (
     UNDATED_BUCKET,
@@ -17,6 +16,7 @@ from tcip_mcp.dataset_layout import (
     label_key,
     parse_image_path,
 )
+from tests._producer_fixtures import label_image
 
 
 def test_parse_image_path_date_nested() -> None:
@@ -73,21 +73,21 @@ def test_capture_subjects_is_per_capture(tmp_path: Path) -> None:
     root = tmp_path
     # Subjects are read from the per-image label records (the key never encodes them).
     # bud labeled on 2026-02-11 only; bush labeled on 2026-03-02 only.
-    json_io.write_label_document(
-        label_key(root, "2026-02-11", "IMG_1"),
+    label_image(
+        image_dir(root, "2026-02-11") / "IMG_1.png",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         100,
         100,
     )
-    json_io.write_label_document(
-        label_key(root, "2026-03-02", "IMG_9"),
+    label_image(
+        image_dir(root, "2026-03-02") / "IMG_9.png",
         [Annotation(subject="bush", geometry=BBox(1, 1, 9, 9))],
         100,
         100,
     )
     # A second image on 2026-03-02 carries bud, so that date offers both subjects.
-    json_io.write_label_document(
-        label_key(root, "2026-03-02", "IMG_5"),
+    label_image(
+        image_dir(root, "2026-03-02") / "IMG_5.png",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         100,
         100,
@@ -106,8 +106,8 @@ def test_capture_subjects_names_an_unreadable_label_and_lists_the_rest(
     ts.replace(
         label_key(tmp_path, "2026-02-11", "IMG_1"), ["not", "a", "document"]
     )
-    json_io.write_label_document(
-        label_key(tmp_path, "2026-02-11", "IMG_2"),
+    label_image(
+        image_dir(tmp_path, "2026-02-11") / "IMG_2.png",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         100,
         100,
@@ -204,24 +204,19 @@ def test_buckets_under_lists_every_published_bucket_and_nothing_else(
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import buckets_under
-    from tcip_mcp.dataset_layout import prediction_key
+    from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path
-    for name in ("modelA/2026-03-02", "modelB"):
+    for name in ("modelA/2026-03-02", "modelB", "modelC/2026-03-02"):
         published(
             root,
             name,
             [predicted(image_root(root) / "IMG_1.png", ["bud"])],
             scope={"subject": "bud"},
         )
-    json_io.write_label_document(
-        prediction_key(root, "modelC/2026-03-02", "IMG_1"),
-        [],
-        8,
-        8,
-        keep_empty=True,
-    )
+    # Damage: modelC's bucket record removed, its document left behind.
+    ts.delete(bucket_key(root, "modelC/2026-03-02"))
 
     assert [b.name for b in buckets_under(root)] == [
         "modelA/2026-03-02",

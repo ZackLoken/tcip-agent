@@ -69,7 +69,6 @@ class TestDatasets:
             ],
             64,
             64,
-            keep_empty=True,
         )
 
         ds = dataset_over("detection", str(imgs), subject="bud")

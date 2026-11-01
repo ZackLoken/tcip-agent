@@ -24,7 +24,7 @@ def _real_dataset(root: Path) -> None:
     image = write_image(
         image_dir(root, "2024-01-01") / "a.png", (10, 10), (1, 2, 3)
     )
-    label_image(image, [], 10, 10, keep_empty=True)
+    label_image(image, [], 10, 10)
 
 
 def _registered(
@@ -81,7 +81,7 @@ def test_a_real_content_change_still_reports_changed(tmp_path: Path) -> None:
     image = write_image(
         image_dir(root, "2024-01-01") / "b.png", (10, 10), (4, 5, 6)
     )
-    label_image(image, [], 10, 10, keep_empty=True)
+    label_image(image, [], 10, 10)
 
     verdict = _check(root, project)
 

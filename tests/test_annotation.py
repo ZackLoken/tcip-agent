@@ -6,11 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tcip_annotation import Annotation, BBox
-from tcip_annotation.json_io import (
-    label_document,
-    read_label_document,
-    write_label_document,
-)
+from tcip_annotation.json_io import label_document, read_label_document
 from tcip_annotation.matching import iou_matrix, pair_proposals
 
 if TYPE_CHECKING:
@@ -40,8 +36,9 @@ def test_label_document_reads_the_name_based_record() -> None:
     assert {a.subject for a in anns} == {"bud"}
 
 
-def test_write_and_read_roundtrip(tmp_path: Path) -> None:
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+def test_save_and_read_roundtrip(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key
+    from tests._producer_fixtures import label_image
 
     anns = [
         Annotation(
@@ -51,9 +48,12 @@ def test_write_and_read_roundtrip(tmp_path: Path) -> None:
             subject="leaf", geometry=BBox(x1=300, y1=300, x2=350, y2=350)
         ),
     ]
-    key = label_key(tmp_path, UNDATED_BUCKET, "test")
-    write_label_document(key, anns, 640, 480)
-    read_back = read_label_document(key).annotations
+    label_image(
+        image_dir(tmp_path, UNDATED_BUCKET) / "test.png", anns, 640, 480
+    )
+    read_back = read_label_document(
+        label_key(tmp_path, UNDATED_BUCKET, "test")
+    ).annotations
     assert len(read_back) == 2
     assert {a.subject for a in read_back} == {"bud", "leaf"}
     # Check approximate roundtrip (floating point tolerance)

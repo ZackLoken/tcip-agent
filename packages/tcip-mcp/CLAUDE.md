@@ -35,7 +35,8 @@ src/tcip_mcp/
                                  # scalar, and the spatial held-out check
     schemas.py, image_utils.py
   dataset_layout.py      # the one resolver: an image's place, its label document's key, a bucket's
-                          # keys, and the one label save; the frontend names images only
+                          # keys, the one label save and the one writer of stored label records;
+                          # the frontend names images only
   subject_registry.py    # subjects.json: subjects and the attributes each declares, in declared order
   traits.py               # one record per trait: its entry (spec fields and what each delivered
                             # number means) as appended revisions the breeder confirms

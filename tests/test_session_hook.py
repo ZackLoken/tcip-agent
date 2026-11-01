@@ -117,7 +117,7 @@ def remembered(opened: OpenProject) -> OpenProject:
     )
     registry_over(root, registry_of("bud"))
     image = write_image(image_dir(root, "2026-03-04") / "IMG_E.JPG", (32, 32))
-    label_image(image, [], 32, 32, keep_empty=True)
+    label_image(image, [], 32, 32)
     return opened
 
 
@@ -325,7 +325,7 @@ def test_more_findings_than_fit_name_the_tool_answering_all_of_them(
     images = image_dir(root, "2026-03-04")
     for n in range(160):
         image = write_image(images / f"IMG_{n:03d}.JPG", (8, 8))
-        label_image(image, [], 8, 8, keep_empty=True)
+        label_image(image, [], 8, 8)
 
     counted, shown = _findings_part(pty_host.orientation(opened, "startup"))
 

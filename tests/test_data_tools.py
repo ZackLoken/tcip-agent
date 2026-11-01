@@ -108,22 +108,19 @@ def test_scan_dataset_counts_only_the_documents_a_published_bucket_names(
     at one.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.dataset_layout import prediction_key
+    from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
-    published(
-        tmp_path,
-        "modelA/2-11-26",
-        [predicted(image_dir(root, "2-11-26") / "imgA.png", ["bud"])],
-        scope={"subject": "bud"},
-    )
-    json_io.write_label_document(
-        prediction_key(root, "modelB/2-11-26", "imgB"),
-        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5), score=0.9)],
-        32,
-        32,
-    )
+    for name, stem in (("modelA/2-11-26", "imgA"), ("modelB/2-11-26", "imgB")):
+        published(
+            tmp_path,
+            name,
+            [predicted(image_dir(root, "2-11-26") / f"{stem}.png", ["bud"])],
+            scope={"subject": "bud"},
+        )
+    # Damage: modelB's bucket record removed, its document left behind.
+    ts.delete(bucket_key(root, "modelB/2-11-26"))
 
     scan_result = scan_dataset(tmp_path, str(root))
 
@@ -334,10 +331,7 @@ def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(
 
 
 def _spoil(image: Path) -> None:
-    """Replace the label document of ``image`` with a non-document record.
-
-    The replacement goes past the label writer.
-    """
+    """Damage the label document of ``image``: store a list, which no label document reads as."""
     ts.replace(image_label_key(image), ["not", "a", "document"])
 
 
@@ -887,7 +881,6 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
         [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
         100,
         80,
-        keep_empty=True,
     )
     mark_complete(p4, "leaf", project=root)
 
@@ -932,7 +925,7 @@ def _leaf_dataset_with_negatives(
         negative = write_image(
             images_dir / f"{date}_bg{i}.jpg", (100, 80), (128, 128, 128)
         )
-        label_image(negative, [], 100, 80, keep_empty=True)
+        label_image(negative, [], 100, 80)
         mark_complete(negative, "leaf", project=root)
 
 
@@ -1360,8 +1353,8 @@ def test_draw_splits_nothing_admitted_names_the_searched_images(
     """
     root = tmp_path / "ds"
     image_dir(root, "2-11-26").mkdir(parents=True)
-    json_io.write_label_document(
-        label_key(root, "2-11-26", "a"),
+    label_image(
+        image_dir(root, "2-11-26") / "a.jpg",
         [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
         100,
         80,
@@ -1454,8 +1447,8 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(
             100,
             80,
         )
-    json_io.write_label_document(
-        label_key(root, "2-12-26", "orphan"),
+    label_image(
+        image_dir(root, "2-12-26") / "orphan.jpg",
         [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
         100,
         80,

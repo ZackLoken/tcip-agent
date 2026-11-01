@@ -224,7 +224,6 @@ def _admitted_samples(root: Path) -> list[Sample]:
             16,
             16,
             (40, 60, 80),
-            keep_empty=True,
         )
     return samples_over(images_dir, subject="leaf")
 

@@ -14,7 +14,13 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
-from tests._producer_fixtures import image_label_key, label_image
+from tests._producer_fixtures import (
+    image_label_key,
+    registry_of,
+    registry_over,
+    store_labels,
+    write_image,
+)
 
 if TYPE_CHECKING:
     from tcip_store import Key
@@ -25,8 +31,18 @@ BOX = BBox(10.0, 10.0, 30.0, 30.0)
 
 
 def _stored(image: Path, anns: list[Annotation]) -> Key:
-    """Write ``anns`` as the document of ``image`` and return its key."""
-    label_image(image, anns, IMG, IMG)
+    """Write an ``IMG`` px ``image`` and ``anns`` as stored as its document; return its key.
+
+    The dataset's registry declares :data:`SUBJECT`, and the document, scores included, goes
+    through the one writer of stored label records.
+    """
+    from tcip_mcp.dataset_layout import parse_image_path
+
+    registry_over(parse_image_path(image)[0], registry_of(SUBJECT))
+    store_labels(
+        write_image(image, (IMG, IMG)),
+        json_io.document_payload(anns, IMG, IMG),
+    )
     return image_label_key(image)
 
 
@@ -93,11 +109,11 @@ def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
     Over the geometry the loader declares it reads, a box beside the polygon is no instance and
     no mask.
     """
-    from tests._producer_fixtures import dataset_over, write_image
+    from tests._producer_fixtures import dataset_over
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
     _stored(
-        write_image(images / "p0.png", (IMG, IMG), (40, 40, 40)),
+        images / "p0.png",
         [
             Annotation(subject=SUBJECT, geometry=BOX),
             Annotation(

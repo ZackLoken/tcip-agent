@@ -10,17 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store as ts
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import image_dir, label_key
 from tcip_mcp.tools import doctor_tools as doctor
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import label_image, write_image
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-
-    from tcip_annotation.json_io import CompletionMark
-    from tcip_store import Version
+    from collections.abc import Iterable
 
 DATE = "2-11-26"
 
@@ -37,17 +33,9 @@ def _errors(findings: list[tuple[str, str]]) -> list[str]:
     return [msg for level, msg in findings if level == "error"]
 
 
-def _label(
-    root: Path,
-    stem: str,
-    annotations: Iterable[Annotation],
-    width: int = 96,
-    height: int = 64,
-    **kwargs: bool | Version | Mapping[str, list[CompletionMark]] | None,
-) -> None:
-    json_io.write_label_document(
-        label_key(root, DATE, stem), annotations, width, height, **kwargs
-    )
+def _label(root: Path, stem: str, annotations: Iterable[Annotation]) -> None:
+    """Save ``annotations`` as the 96 by 64 label document of ``stem`` in the capture."""
+    label_image(image_dir(root, DATE) / f"{stem}.jpg", annotations, 96, 64)
 
 
 def test_an_unreadable_label_record_is_an_error_per_document(
@@ -128,7 +116,7 @@ def test_an_empty_label_not_marked_complete_is_an_error(
     """An empty label no person marked complete is the one error, naming it not marked complete."""
     root = tmp_path / "ds"
     write_image(image_dir(root, DATE) / "plotA_0_0.jpg", (96, 64))
-    _label(root, "plotA_0_0", [], keep_empty=True)
+    _label(root, "plotA_0_0", [])
 
     errors = _errors(_check(root))
 
@@ -146,7 +134,7 @@ def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path) -> None:
     root = tmp_path / "ds"
     image = image_dir(root, DATE) / "plotA_0_0.jpg"
     write_image(image, (96, 64))
-    _label(root, "plotA_0_0", [], keep_empty=True)
+    _label(root, "plotA_0_0", [])
     mark_complete(image, "bud", project=root)
 
     assert _check(root) == []

@@ -17,18 +17,41 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_annotation import Annotation, BBox, Polygon
-from tcip_annotation.json_io import read_label_document, write_label_document
+from tcip_annotation.json_io import read_label_document
 from tcip_annotation.matching import pair_proposals
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, prediction_key
-from tests._producer_fixtures import WrittenDataset, image_label_key
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._producer_fixtures import (
+    WrittenDataset,
+    image_label_key,
+    label_image,
+    published_document,
+)
 
 if TYPE_CHECKING:
     from tcip_store import Key
 
 
-def _write(key: Key, annotations: list[Annotation]) -> list[Annotation]:
-    """Write ``annotations`` as the 640x480 document ``key`` names and return them read back."""
-    write_label_document(key, annotations, 640, 480)
+def _saved(
+    dataset: WrittenDataset, annotations: list[Annotation]
+) -> list[Annotation]:
+    """Save ``annotations`` on ``dataset``'s one 640x480 image and return them read back."""
+    label_image(dataset.images[0], annotations, 640, 480)
+    return read_label_document(image_label_key(dataset.images[0])).annotations
+
+
+def _predicted(
+    dataset: WrittenDataset, annotations: list[Annotation]
+) -> list[Annotation]:
+    """Publish ``annotations`` at 640x480 as ``dataset``'s one image's document in the bucket ``m``.
+
+    The publication is :func:`~tests._producer_fixtures.published_document`'s; returns the
+    annotations read back.
+    """
+    image = dataset.images[0]
+    key: Key | None = published_document(
+        dataset.root, "m", image, annotations, 640, 480
+    ).document_key(image.stem)
+    assert key is not None
     return read_label_document(key).annotations
 
 
@@ -45,16 +68,6 @@ def canvas_dataset(tmp_path: Path) -> WrittenDataset:
         images_dir / "test_001.jpg", (640, 480), (100, 150, 200)
     )
     return WrittenDataset(tmp_path, images_dir, [image])
-
-
-def _label(dataset: WrittenDataset) -> Key:
-    """Return the label document key of ``dataset``'s one image."""
-    return image_label_key(dataset.images[0])
-
-
-def _prediction(dataset: WrittenDataset) -> Key:
-    """Return the key of ``dataset``'s one image's document in the bucket ``m``."""
-    return prediction_key(dataset.root, "m", dataset.images[0].stem)
 
 
 # ── Box roundtrip ──
@@ -75,7 +88,7 @@ class TestBoxRoundtrip:
             ),
         ]
 
-        read_back = _write(_label(canvas_dataset), annotations)
+        read_back = _saved(canvas_dataset, annotations)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "nut"}
 
@@ -104,7 +117,7 @@ class TestBoxRoundtrip:
             for i, subj in enumerate(subjects)
         ]
 
-        read_back = _write(_label(canvas_dataset), annotations)
+        read_back = _saved(canvas_dataset, annotations)
         assert len(read_back) == 5
         assert {a.subject for a in read_back} == set(subjects)
 
@@ -122,8 +135,8 @@ class TestPolygonRoundtrip:
         # Draw a triangle polygon (simulating canvas vertex clicks)
         poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
 
-        read_back = _write(
-            _label(canvas_dataset), [Annotation(subject="bud", geometry=poly)]
+        read_back = _saved(
+            canvas_dataset, [Annotation(subject="bud", geometry=poly)]
         )
         assert len(read_back) == 1
         assert read_back[0].subject == "bud"
@@ -154,7 +167,7 @@ class TestPolygonRoundtrip:
             ),
         ]
 
-        read_back = _write(_label(canvas_dataset), annotations)
+        read_back = _saved(canvas_dataset, annotations)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "leaf"}
 
@@ -170,8 +183,8 @@ class TestPolygonRoundtrip:
             [(100.0, 50.0), (150.0, 50.0), (150.0, 200.0), (100.0, 200.0)],
             [(300.0, 60.0), (350.0, 60.0), (350.0, 190.0), (300.0, 190.0)],
         ]
-        read_back = _write(
-            _prediction(canvas_dataset),
+        read_back = _predicted(
+            canvas_dataset,
             [
                 Annotation(
                     subject="bud", geometry=Polygon(rings=rings), score=0.88
@@ -207,7 +220,7 @@ class TestSingleDocumentSave:
             ),
         ]
 
-        read_back = _write(_label(canvas_dataset), annotations)
+        read_back = _saved(canvas_dataset, annotations)
         assert len(read_back) == 2
         box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
         poly_ann = next(
@@ -227,8 +240,8 @@ class TestPredictionOverlay:
         self, canvas_dataset: WrittenDataset
     ) -> None:
         """A loaded proposal pairs with the annotation it overlaps."""
-        loaded_gt = _write(
-            _label(canvas_dataset),
+        loaded_gt = _saved(
+            canvas_dataset,
             [
                 Annotation(
                     subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)
@@ -240,8 +253,8 @@ class TestPredictionOverlay:
             ],
         )
         # Predictions: one matching, one FP.
-        loaded_preds = _write(
-            _prediction(canvas_dataset),
+        loaded_preds = _predicted(
+            canvas_dataset,
             [
                 Annotation(
                     subject="bud",

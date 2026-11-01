@@ -10,20 +10,17 @@ from pathlib import Path
 
 import pytest
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import (
     capture_subjects,
     image_dir,
     image_root,
-    label_key,
     list_dates,
     list_subjects,
-    prediction_key,
     subjects_path,
 )
 from tcip_mcp.subject_registry import RegistryError, Subject, SubjectRegistry
-from tests._producer_fixtures import registry_over
+from tests._producer_fixtures import label_image, registry_over
 
 
 def test_only_published_buckets_are_listed_under_the_date_their_record_states(
@@ -34,19 +31,15 @@ def test_only_published_buckets_are_listed_under_the_date_their_record_states(
     A prediction document no bucket record names is not listed.
     """
     pytest.importorskip("torch")
+    import tcip_store
     from tcip_mcp.buckets import buckets_by_date
+    from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path
     scope = {"subject": "bud"}
-    json_io.write_label_document(
-        prediction_key(root, "baseline/2026-02-11", "IMG_1"),
-        [],
-        120,
-        90,
-        keep_empty=True,
-    )
     for model, date, stem in (
+        ("baseline", "2026-02-11", "IMG_1"),
         ("candidate", "2026-02-11", "IMG_1"),
         ("baseline", "2026-03-02", "IMG_2"),
     ):
@@ -56,6 +49,8 @@ def test_only_published_buckets_are_listed_under_the_date_their_record_states(
             [predicted(image_dir(root, date) / f"{stem}.png", ["bud"])],
             scope=scope,
         )
+    # Damage: the 2026-02-11 baseline's bucket record removed, its document left behind.
+    tcip_store.delete(bucket_key(root, "baseline/2026-02-11"))
 
     listed = buckets_by_date(root, ["2026-02-11", "2026-03-02"])
 
@@ -129,14 +124,14 @@ def test_declared_subjects_and_subjects_labeled_on_a_date_are_not_interchangeabl
     """
     root = tmp_path
     _registry(root)
-    json_io.write_label_document(
-        label_key(root, "2026-02-11", "IMG_1"),
+    label_image(
+        image_dir(root, "2026-02-11") / "IMG_1.png",
         [Annotation(subject="bud", geometry=BBox(1, 2, 7, 19))],
         120,
         90,
     )
-    json_io.write_label_document(
-        label_key(root, "2026-03-02", "IMG_2"),
+    label_image(
+        image_dir(root, "2026-03-02") / "IMG_2.png",
         [Annotation(subject="bush", geometry=BBox(3, 4, 40, 11))],
         120,
         90,

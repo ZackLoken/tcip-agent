@@ -32,6 +32,7 @@ import {
   POINT_SUBJECT,
   registryOf,
   SECOND_SUBJECT,
+  TOOL_SELECTION,
 } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
 import { LABEL_ANSWERS, servedAnnotation } from "@/test/labels";
@@ -2497,10 +2498,18 @@ describe("AnnotateTab review symbology", () => {
     });
     await flush();
   };
+  /** Mount over the tool's document with its own photograph in view, so its saves are adopted. */
+  const mountToolDocument = async () => {
+    openTestProject(selected({ subject: SUBJECT }, TOOL_SELECTION), {
+      mode: "box",
+      active_subject: SUBJECT,
+    });
+    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
+    await mountTab();
+  };
 
   it("a confirms a focused annotation no proposal pairs with when a tool left it unconfirmed", async () => {
-    // The tool's document holds the review document's boxes, so the review's pairings stand, and
-    // keeps the flag the review raised on its first box.
+    // The tool's document holds the review document's boxes, so the review's pairings stand.
     loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
     changeSelection({ bucket: BUCKET });
     vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
@@ -2575,10 +2584,8 @@ describe("AnnotateTab review symbology", () => {
   });
 
   it("a gesture's answer is adopted whole: its document and the token that names it together", async () => {
-    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
     saveSpy.mockResolvedValueOnce(LANDED.confirmed);
-    await mountTab();
-    await flush();
+    await mountToolDocument();
     await pressToolBox();
     fireEvent.keyDown(window, { key: "a" });
     await flush();
@@ -2721,9 +2728,7 @@ describe("AnnotateTab review symbology", () => {
 
   describe("an adopted save, ordinary or gesture", () => {
     const editedToolBox = async () => {
-      loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
-      await mountTab();
-      await flush();
+      await mountToolDocument();
       act(() => useStore.getState().update("boxes", TOOL_REF, { ...TOOL_BOX, x2: 541 }));
       expect(useStore.getState().canvas.undoStack).toHaveLength(1);
     };
