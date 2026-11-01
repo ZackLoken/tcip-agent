@@ -331,8 +331,12 @@ def read_audit_log(
         records, _cursor = audit_entries(root)
     except ValueError as exc:
         return {"error": str(exc), "scope_resolved": str(root)}
-    since_dt = None if since is None else _bound_instant(since, end_of_day=False)
-    until_dt = None if until is None else _bound_instant(until, end_of_day=True)
+    since_dt = (
+        None if since is None else _bound_instant(since, end_of_day=False)
+    )
+    until_dt = (
+        None if until is None else _bound_instant(until, end_of_day=True)
+    )
 
     def _matches(entry: AuditLine) -> bool:
         return (

@@ -341,7 +341,10 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
         dataset=None
         if selection is None
         else DatasetChoice(
-            **{name: getattr(selection, name) for name in DatasetChoice.model_fields}
+            **{
+                name: getattr(selection, name)
+                for name in DatasetChoice.model_fields
+            }
             | {"dataset_root": stored_path(selection.dataset_root, project)}
         ),
     )

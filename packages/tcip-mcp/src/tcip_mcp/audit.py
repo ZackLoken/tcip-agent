@@ -175,8 +175,14 @@ def audit_line(
     """
     return AuditLine.model_validate(
         {
-            **{k: v for k, v in (extra or {}).items() if k not in AuditLine.model_fields},
-            **dict(agent_identity.current() or agent_identity.RecordedIdentity()),
+            **{
+                k: v
+                for k, v in (extra or {}).items()
+                if k not in AuditLine.model_fields
+            },
+            **dict(
+                agent_identity.current() or agent_identity.RecordedIdentity()
+            ),
             "timestamp": now(),
             "tool": tool,
             "arguments": _redact(arguments) if arguments else {},
@@ -199,7 +205,9 @@ def record_event_or_raise(
 
     The line is appended by :func:`append_or_raise`.
     """
-    append_or_raise(audit_line(tool, arguments, actor, status, extra), scope=scope)
+    append_or_raise(
+        audit_line(tool, arguments, actor, status, extra), scope=scope
+    )
 
 
 def append_or_raise(line: AuditLine, *, scope: str | Path) -> None:
@@ -298,7 +306,9 @@ def audited(
                     update={
                         "status": status,
                         "error": error,
-                        "duration_ms": round((time.monotonic() - t0) * 1000, 1),
+                        "duration_ms": round(
+                            (time.monotonic() - t0) * 1000, 1
+                        ),
                     }
                 )
                 append(

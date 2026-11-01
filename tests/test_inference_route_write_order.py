@@ -44,7 +44,12 @@ STATED = Stated(tile=False, conf=0.25, postprocess="nms", rationale=RATIONALE)
 
 
 def _launch_through_the_route(
-    client: TestClient, dataset: Path, bucket_name: str, ckpt: str, *, tile: bool
+    client: TestClient,
+    dataset: Path,
+    bucket_name: str,
+    ckpt: str,
+    *,
+    tile: bool,
 ) -> InferenceJob | None:
     """Launch a GUI run publishing beneath ``bucket_name`` through the route and join its worker.
 

@@ -305,7 +305,9 @@ def phenology_measurement(payload: PhenologyPayload) -> PhenologyAnswer:
         milestones=measurement.phenology.milestones,
         unvalidated=None
         if reason is None
-        else PhenologyRefusal(message=reason, digests=ProjectionDigests(**digests)),
+        else PhenologyRefusal(
+            message=reason, digests=ProjectionDigests(**digests)
+        ),
         positive_class_assessed=measurement.positive_class_assessed,
         plant_mapping=measurement.plant_mapping,
     )
@@ -453,7 +455,9 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
         root, payload, person, request
     )
     saved_path = (
-        root / "results_export" / phenology.export_filename(payload.trait, payload.payload)
+        root
+        / "results_export"
+        / phenology.export_filename(payload.trait, payload.payload)
     )
     try:
         phenology.deliver_phenology(

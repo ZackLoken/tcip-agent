@@ -1275,7 +1275,9 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     )
 
     assert resp.status_code == 200, resp.text
-    minted = named_directory(resp.json()["sweep_id"], sweep_dirs(opened_project))
+    minted = named_directory(
+        resp.json()["sweep_id"], sweep_dirs(opened_project)
+    )
     assert minted is not None
     assert observe_sweep(minted).record.input.relaunched_from == source
     (line,) = audit_rows(opened_project)[before:]

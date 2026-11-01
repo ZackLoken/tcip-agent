@@ -104,7 +104,9 @@ def encode_predictions(
 
     read = scope.document_attributes("this bucket's scope")
     attributes = read.attributes
-    rows = (result.attributes or []) if attributes else [[]] * len(result.boxes)
+    rows = (
+        (result.attributes or []) if attributes else [[]] * len(result.boxes)
+    )
     created_at = now().isoformat()
     stored = stored_geometries(result)
     preds: list[Annotation] = []

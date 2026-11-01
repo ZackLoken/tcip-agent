@@ -134,7 +134,9 @@ def test_assignments_keeping_no_candidate_are_refused_by_their_type() -> None:
     from tcip_mcp.tools.proposal_tools import StagedAssignments
 
     with pytest.raises(ValidationError, match="candidates"):
-        StagedAssignments.model_validate({"staging_id": "run", "candidates": []})
+        StagedAssignments.model_validate(
+            {"staging_id": "run", "candidates": []}
+        )
 
 
 def test_a_kept_id_the_run_did_not_propose_refuses_naming_the_runs_ids(
@@ -326,7 +328,9 @@ def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
     refused = propose_annotations(
         tmp_path, image_path=str(loose), engine="stub", actor=None
     )
-    assert isinstance(refused, dict) and "images/ tree" in refused["error"], refused
+    assert isinstance(refused, dict) and "images/ tree" in refused["error"], (
+        refused
+    )
     assert not (tmp_path / ".tcip" / "state" / "proposals").exists()
 
     placed = image_dir(tmp_path, "2026-01-01") / "placed.jpg"
@@ -334,7 +338,10 @@ def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
     proposed = propose_annotations(
         tmp_path, image_path=str(placed), engine="stub", actor=None
     )
-    assert isinstance(proposed, ProposedCandidates) and len(proposed.candidates) == 1
+    assert (
+        isinstance(proposed, ProposedCandidates)
+        and len(proposed.candidates) == 1
+    )
 
 
 @pytest.mark.parametrize("capture", [UNDATED_BUCKET, "2026-06-01"])
@@ -579,9 +586,7 @@ def test_a_run_finding_nothing_stages_nothing_and_leaves_an_earlier_run_staged(
     )
     assert second is None, second
     acts, _cursor = acts_of(tmp_path, ("propose_annotations",))
-    assert [act.arguments["staging_id"] for act in acts] == [
-        first.staging_id
-    ]
+    assert [act.arguments["staging_id"] for act in acts] == [first.staging_id]
 
     accepted = stage_proposals(
         tmp_path,

@@ -128,9 +128,10 @@ def test_the_fields_a_request_declared_are_read_through_the_same_header_map() ->
     assert agent_identity.identity_from_headers(sent).model_dump() == {
         field: f"declared {field}" for field in agent_identity.RECORD_FIELDS
     }
-    assert agent_identity.identity_from_headers(
-        {}
-    ) == agent_identity.RecordedIdentity()
+    assert (
+        agent_identity.identity_from_headers({})
+        == agent_identity.RecordedIdentity()
+    )
     assert (
         agent_identity.identity_from_headers(
             {"X-TCIP-Agent-Session": ""}

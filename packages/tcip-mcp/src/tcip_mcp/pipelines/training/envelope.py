@@ -464,7 +464,8 @@ class TrainContext:
         from tcip_mcp.experiments import METRICS_FILE, append_row
 
         append_row(
-            self.run_dir / METRICS_FILE, self._metrics_row(metrics, epoch, step)
+            self.run_dir / METRICS_FILE,
+            self._metrics_row(metrics, epoch, step),
         )
         self._write_scalars(metrics, step)
 
@@ -652,7 +653,11 @@ def close_run(
         state, checkpoint = "failed", None
         status_error = f"{status_error}; {exc}" if status_error else str(exc)
     write_final_status(
-        run_dir, state, status_error, ended=line.timestamp, checkpoint=checkpoint
+        run_dir,
+        state,
+        status_error,
+        ended=line.timestamp,
+        checkpoint=checkpoint,
     )
     return state, status_error
 

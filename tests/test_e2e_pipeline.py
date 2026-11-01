@@ -160,7 +160,9 @@ class TestE2EPipeline:
         ]
         save_result = save_annotations(
             BoundProject(
-                project_dir, created["record"]["id"], workspace_from_environment()
+                project_dir,
+                created["record"]["id"],
+                workspace_from_environment(),
             ),
             img_path,
             annotations=new_anns,

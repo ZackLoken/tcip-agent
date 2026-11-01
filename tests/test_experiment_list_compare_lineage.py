@@ -180,7 +180,9 @@ def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
     run_dir = finished_run(tmp_path, experiment_id="exp-ended")
     append_row(
         run_dir / METRICS_FILE,
-        MetricsRow.model_validate({"epoch": 0, "timestamp": now(), "loss": 0.5}),
+        MetricsRow.model_validate(
+            {"epoch": 0, "timestamp": now(), "loss": 0.5}
+        ),
     )
     append_row(
         run_dir / METRICS_FILE,

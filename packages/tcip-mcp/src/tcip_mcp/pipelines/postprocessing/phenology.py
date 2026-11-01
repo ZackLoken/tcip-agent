@@ -122,7 +122,11 @@ class CurveRow(BaseModel):
     @property
     def classified(self) -> bool:
         """Whether the date was imaged and every detection on it carries the state's attribute."""
-        return self.n_unclassified == 0 and self.n_missing == 0 and self.n_images > 0
+        return (
+            self.n_unclassified == 0
+            and self.n_missing == 0
+            and self.n_images > 0
+        )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -131,7 +135,11 @@ class CurveRow(BaseModel):
 
         ``None`` otherwise: a date detecting no objects observes no fraction, a real 0% aside.
         """
-        return self.n_positive / self.n_total if self.classified and self.n_total else None
+        return (
+            self.n_positive / self.n_total
+            if self.classified and self.n_total
+            else None
+        )
 
 
 class MilestoneRow(BaseModel):
@@ -208,7 +216,11 @@ def curve_csv_columns() -> list[str]:
     """
     from tcip_mcp.delivery import DELIVERY_COLUMNS
 
-    return [*CurveRow.model_fields, *CurveRow.model_computed_fields, *DELIVERY_COLUMNS]
+    return [
+        *CurveRow.model_fields,
+        *CurveRow.model_computed_fields,
+        *DELIVERY_COLUMNS,
+    ]
 
 
 def _real_points(series: list[tuple[str, float]]) -> list[tuple[date, float]]:
@@ -220,7 +232,9 @@ def _real_points(series: list[tuple[str, float]]) -> list[tuple[date, float]]:
     """
     from tcip_mcp.dataset_layout import capture_date
 
-    return [(day, r) for d, r in series if (day := capture_date(d)) is not None]
+    return [
+        (day, r) for d, r in series if (day := capture_date(d)) is not None
+    ]
 
 
 # ── milestones ───────────────────────────────────────────────────────────
@@ -492,11 +506,18 @@ def per_plant_phenology(
                 n_unclassified=unclassified,
                 n_missing=missing,
             )
-            for (capture, total, positive, unclassified, missing, n_images) in info[
-                "series"
-            ]
+            for (
+                capture,
+                total,
+                positive,
+                unclassified,
+                missing,
+                n_images,
+            ) in info["series"]
         ]
-        frac_series = [(r.capture, r.ratio) for r in rows if r.ratio is not None]
+        frac_series = [
+            (r.capture, r.ratio) for r in rows if r.ratio is not None
+        ]
         # An excluded plant goes through the producer with no rows, so every row has one key set.
         row = MilestoneRow(
             plant_id=plant_id,
@@ -509,7 +530,9 @@ def per_plant_phenology(
             ),
             milestones={},
         )
-        row.milestones = plant_milestones(frac_series if row.complete else [], spec)
+        row.milestones = plant_milestones(
+            frac_series if row.complete else [], spec
+        )
         milestones.append(row)
         curves.extend(rows)
     return PlantPhenology(

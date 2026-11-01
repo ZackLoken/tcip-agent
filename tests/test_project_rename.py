@@ -307,7 +307,9 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     )
 
     moved_other = str(moved.resolve() / "data" / "other")
-    swept = observe_sweep(named_directory("study", sweep_dirs(moved))).record.input
+    swept = observe_sweep(
+        named_directory("study", sweep_dirs(moved))
+    ).record.input
     swept_data = swept.base_config["data"]
     assert isinstance(swept_data, dict)
     assert swept_data["images_dir"] == str(

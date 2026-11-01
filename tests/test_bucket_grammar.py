@@ -111,7 +111,10 @@ def test_a_publication_states_the_one_capture_its_documents_are_of(
     results = [
         DetectionResult(
             image=str(
-                write_image(image_dir(tmp_path / "ds", capture) / f"{capture}.jpg", (8, 8))
+                write_image(
+                    image_dir(tmp_path / "ds", capture) / f"{capture}.jpg",
+                    (8, 8),
+                )
             ),
             width=8,
             height=8,
@@ -124,7 +127,9 @@ def test_a_publication_states_the_one_capture_its_documents_are_of(
 
     with pytest.raises(ValueError, match="captures"):
         published(tmp_path, "baseline/both", results, scope={"subject": "bud"})
-    bucket = published(tmp_path, "baseline/first", results[:1], scope={"subject": "bud"})
+    bucket = published(
+        tmp_path, "baseline/first", results[:1], scope={"subject": "bud"}
+    )
     assert bucket.date == first
 
 

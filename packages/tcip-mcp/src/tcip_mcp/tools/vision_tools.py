@@ -144,7 +144,10 @@ def _display_of(
 
     with header.open_at_route_count() as raster:
         return _read_for_display(
-            raster, plain=displays_plain(header), max_edge=max_edge, region=region
+            raster,
+            plain=displays_plain(header),
+            max_edge=max_edge,
+            region=region,
         )
 
 

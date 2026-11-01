@@ -721,11 +721,17 @@ def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allo
     write_subject_registry(
         tmp_path,
         str(tmp_path),
-        {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
+        {
+            "leaf": {"description": "one leaf"},
+            "bush": {"description": "one bush"},
+        },
         actor=None,
     )
     result = write_subject_registry(
-        tmp_path, str(tmp_path), {"bush": {"description": "one bush"}}, actor=None
+        tmp_path,
+        str(tmp_path),
+        {"bush": {"description": "one bush"}},
+        actor=None,
     )  # drops leaf
 
     assert "error" in result and "leaf" in result["error"]
@@ -740,7 +746,10 @@ def test_write_subject_registry_admits_a_removal_stated_as_deliberate(
     write_subject_registry(
         tmp_path,
         str(tmp_path),
-        {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
+        {
+            "leaf": {"description": "one leaf"},
+            "bush": {"description": "one bush"},
+        },
         actor=None,
     )
     result = write_subject_registry(
@@ -766,7 +775,10 @@ def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow
     )  # truncated mid-object
 
     result = write_subject_registry(
-        tmp_path, str(tmp_path), {"bush": {"description": "one bush"}}, actor=None
+        tmp_path,
+        str(tmp_path),
+        {"bush": {"description": "one bush"}},
+        actor=None,
     )
 
     assert "error" in result

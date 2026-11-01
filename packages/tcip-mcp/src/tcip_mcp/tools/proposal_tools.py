@@ -569,7 +569,9 @@ def _stage_assignments_regime(
     engine = staging.engine
     cand_map = {c.candidate_id: c for c in staging.candidates}
     unknown = [
-        a.candidate_id for a in assignments.candidates if a.candidate_id not in cand_map
+        a.candidate_id
+        for a in assignments.candidates
+        if a.candidate_id not in cand_map
     ]
     if unknown:
         return {

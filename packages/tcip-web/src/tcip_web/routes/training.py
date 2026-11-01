@@ -157,7 +157,9 @@ def _named(experiment_id: str) -> Path:
     """
     from tcip_mcp.experiments import experiment_dirs, named_directory
 
-    directory = named_directory(experiment_id, experiment_dirs(store.held().root))
+    directory = named_directory(
+        experiment_id, experiment_dirs(store.held().root)
+    )
     if directory is None:
         raise HTTPException(404, f"Run not found: {experiment_id}")
     return directory

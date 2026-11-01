@@ -91,7 +91,9 @@ def _past_the_sample_budget(path: Path) -> Path:
     row = np.linspace(0, 255, edge).astype(np.uint8)
     np.save(
         str(path),
-        np.ascontiguousarray(np.broadcast_to(row[None, :, None], (edge, edge, 4))),
+        np.ascontiguousarray(
+            np.broadcast_to(row[None, :, None], (edge, edge, 4))
+        ),
     )
     return path
 

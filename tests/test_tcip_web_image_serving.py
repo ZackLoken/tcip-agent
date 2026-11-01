@@ -125,7 +125,11 @@ def _wide_multiband(
     rng = np.random.default_rng(11)
     arr = rng.integers(0, 256, size=(height, width, channels)).astype(np.uint8)
     tifffile.imwrite(
-        str(path), arr, rowsperstrip=8, photometric="minisblack", planarconfig="contig"
+        str(path),
+        arr,
+        rowsperstrip=8,
+        photometric="minisblack",
+        planarconfig="contig",
     )
     return arr
 
@@ -246,7 +250,11 @@ def test_an_empty_region_is_refused_rather_than_raising(
     _quadrant_rgb(path)
     resp = client.get(
         "/api/images",
-        params={"path": str(path), "display_pixels": DISPLAY, "region": region},
+        params={
+            "path": str(path),
+            "display_pixels": DISPLAY,
+            "region": region,
+        },
     )
     assert resp.status_code == 400
     assert "out of bounds for a 300x400 raster" in resp.json()["detail"]
@@ -276,7 +284,11 @@ def test_a_selection_of_two_bands_is_refused_by_its_type(
     _quadrant_rgb(path)
     resp = client.get(
         "/api/images",
-        params={"path": str(path), "display_pixels": DISPLAY, "bands": ["0", "1"]},
+        params={
+            "path": str(path),
+            "display_pixels": DISPLAY,
+            "bands": ["0", "1"],
+        },
     )
     assert resp.status_code == 422
     assert "bands" in resp.text
@@ -1122,7 +1134,11 @@ def test_a_uint16_raster_serves_on_its_dtypes_full_scale(
     tifffile.imwrite(str(path), np.full((32, 40), 32768, dtype=np.uint16))
     resp = client.get(
         "/api/images",
-        params={"path": str(path), "display_pixels": DISPLAY, "stretch": "none"},
+        params={
+            "path": str(path),
+            "display_pixels": DISPLAY,
+            "stretch": "none",
+        },
     )
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
@@ -1136,7 +1152,11 @@ def test_a_multi_band_uint16_raster_serves_on_that_same_scale(
     served = _served(
         client.get(
             "/api/images",
-            params={"path": str(path), "display_pixels": DISPLAY, "stretch": "none"},
+            params={
+                "path": str(path),
+                "display_pixels": DISPLAY,
+                "stretch": "none",
+            },
         )
     )
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
@@ -1187,7 +1207,11 @@ def test_a_non_positive_float_band_renders_black(
     tifffile.imwrite(str(path), arr)
     resp = client.get(
         "/api/images",
-        params={"path": str(path), "display_pixels": DISPLAY, "stretch": "none"},
+        params={
+            "path": str(path),
+            "display_pixels": DISPLAY,
+            "stretch": "none",
+        },
     )
     served = _served(resp)
     assert np.allclose(served, 0, atol=2)
@@ -2313,7 +2337,9 @@ def test_the_image_route_and_the_vision_tools_display_a_raster_alike(
         pixels,
         photometric=photometric,
         planarconfig="contig",
-        extrasamples=["unassalpha"] if photometric == "rgb" and channels == 4 else None,
+        extrasamples=["unassalpha"]
+        if photometric == "rgb" and channels == 4
+        else None,
     )
 
     served = _served(
@@ -2329,5 +2355,7 @@ def test_the_image_route_and_the_vision_tools_display_a_raster_alike(
 
     assert np.array_equal(served, _display_of(SourceHeader(path)).pixels)
     assert np.array_equal(served, pixels[:, :, :3]) is plain
-    described = client.get("/api/images/bands", params={"path": str(path)}).json()
+    described = client.get(
+        "/api/images/bands", params={"path": str(path)}
+    ).json()
     assert described["plain"] is plain

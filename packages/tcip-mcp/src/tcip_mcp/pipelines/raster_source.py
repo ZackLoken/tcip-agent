@@ -1209,7 +1209,9 @@ class SourceHeader:
     @property
     def declared_band_names(self) -> list[str] | None:
         """A band group's band names in its manifest's order, ``None`` for a source naming none."""
-        return list(self.group.manifest.bands) if self.kind == "group" else None
+        return (
+            list(self.group.manifest.bands) if self.kind == "group" else None
+        )
 
     @property
     def route_channels(self) -> int:

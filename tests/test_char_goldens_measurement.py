@@ -203,15 +203,15 @@ _RULE = BUD_OPENING.crossing_rule
 def test_golden_crossing_dates_interpolated() -> None:
     # The return is a Crossing record (date + evidentiary bound), not a bare string.
     # 0.05 lies midway 0.0 to 0.10, 10 days
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.05, _RULE).date == date(
-        2026, 2, 15
-    )
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.50, _RULE).date == date(
-        2026, 3, 1
-    )
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).date == date(
-        2026, 3, 12
-    )
+    assert phenology_mod.crossing_date(
+        _PHENO_SERIES, 0.05, _RULE
+    ).date == date(2026, 2, 15)
+    assert phenology_mod.crossing_date(
+        _PHENO_SERIES, 0.50, _RULE
+    ).date == date(2026, 3, 1)
+    assert phenology_mod.crossing_date(
+        _PHENO_SERIES, 0.95, _RULE
+    ).date == date(2026, 3, 12)
     # 0.97 observed, not 0.95 exactly
     assert (
         phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).bound

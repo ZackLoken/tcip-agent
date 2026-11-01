@@ -279,7 +279,9 @@ def close_session(payload: SessionRef) -> SessionWrite:
     return written
 
 
-def end_sessions(root: Path, started: datetime | None) -> list[audit.AuditLine]:
+def end_sessions(
+    root: Path, started: datetime | None
+) -> list[audit.AuditLine]:
     """Mark sessions ended in one transaction on ``root``'s stats record.
 
     The session ended is the one ``started`` names, or every unended session (each person's)
@@ -299,7 +301,10 @@ def end_sessions(root: Path, started: datetime | None) -> list[audit.AuditLine]:
         lines = []
         for session in (s for s in named if s.ended is None):
             line = audit.audit_line(
-                "session_ended", {"started": session.started}, session.user, "ok"
+                "session_ended",
+                {"started": session.started},
+                session.user,
+                "ok",
             )
             session.ended = line.timestamp
             lines.append(line)

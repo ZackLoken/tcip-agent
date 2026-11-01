@@ -85,7 +85,9 @@ def test_list_projects_lists_workspace_projects(
     assert names == {"currant_bud_valley-farm", "chestnut_burr_site-b"}
 
     hz = _listed(client)["currant_bud_valley-farm"]
-    assert hz["tree"]["captures"] == [{"name": "2026-02-11", "date": "2026-02-11"}]
+    assert hz["tree"]["captures"] == [
+        {"name": "2026-02-11", "date": "2026-02-11"}
+    ]
     assert hz["tree"]["subjects"] == ["bud", "bush"]  # sorted
     assert hz["tree"]["buckets_by_date"] == {
         "2026-02-11": []

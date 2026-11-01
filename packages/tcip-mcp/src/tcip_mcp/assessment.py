@@ -1351,7 +1351,9 @@ class _ReferenceRow(BaseModel):
     unit: str
 
 
-def _read_reference_csv(data: bytes, csv_path: str) -> dict[str, _ReferenceRow]:
+def _read_reference_csv(
+    data: bytes, csv_path: str
+) -> dict[str, _ReferenceRow]:
     """Return each row of a reference CSV's bytes by its stem.
 
     ``data`` are the bytes of the breeder's reference CSV at ``csv_path``, each row read by its
@@ -1368,7 +1370,9 @@ def _read_reference_csv(data: bytes, csv_path: str) -> dict[str, _ReferenceRow]:
             try:
                 row = _ReferenceRow.model_validate(raw)
             except ValidationError as exc:
-                raise AssessmentRefusedError(f"{csv_path}:{line_no}: {exc}") from exc
+                raise AssessmentRefusedError(
+                    f"{csv_path}:{line_no}: {exc}"
+                ) from exc
             if row.image_stem in out:
                 raise AssessmentRefusedError(
                     f"{csv_path}:{line_no} repeats stem {row.image_stem!r}."

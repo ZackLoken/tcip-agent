@@ -238,9 +238,7 @@ def test_an_end_naming_another_projects_session_is_refused_and_ends_nothing(
     assert audit_rows(hill.root, "session_ended") == []
 
 
-def _two_open_sessions(
-    client: TestClient, project_id: str
-) -> list[datetime]:
+def _two_open_sessions(client: TestClient, project_id: str) -> list[datetime]:
     """Post Alice's then Bob's contribution to ``project_id``; return their start stamps."""
     alice = _open_session(client, project_id)
     bob = _event(

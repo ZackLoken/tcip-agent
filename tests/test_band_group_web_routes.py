@@ -249,16 +249,22 @@ def test_serve_image_rejects_an_undeclared_band_name(
 
 @pytest.mark.parametrize("region", [None, [0, 0, 8, 8]])
 def test_serve_image_rejects_a_band_index_the_raster_does_not_have(
-    client: TestClient, grouped_dataset: GroupedDataset, region: list[int] | None
+    client: TestClient,
+    grouped_dataset: GroupedDataset,
+    region: list[int] | None,
 ) -> None:
     """An index past the group's bands is refused by the composite, whole view or region."""
     manifest = grouped_dataset.manifest
     view = _view(manifest, bands=["0", "1", "3"])
     resp = client.get(
-        "/api/images", params=view if region is None else {**view, "region": region}
+        "/api/images",
+        params=view if region is None else {**view, "region": region},
     )
     assert resp.status_code == 400
-    assert "band index 3 is out of range for a 3-band array" in resp.json()["detail"]
+    assert (
+        "band index 3 is out of range for a 3-band array"
+        in resp.json()["detail"]
+    )
 
 
 def test_get_bands_endpoint_reports_the_group(

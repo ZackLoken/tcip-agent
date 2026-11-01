@@ -200,7 +200,10 @@ def test_load_returns_the_version_and_save_round_trips_it(
         "/api/subjects/save",
         json={
             "dataset_root": str(tmp_path),
-            "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
+            "subjects": {
+                "leaf": {"description": "one leaf"},
+                "bush": {"description": "one bush"},
+            },
             "version": load["version"],
             "user": "tester",
         },
@@ -230,7 +233,10 @@ def test_save_refuses_a_stale_version(
         "/api/subjects/save",
         json={
             "dataset_root": str(tmp_path),
-            "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
+            "subjects": {
+                "leaf": {"description": "one leaf"},
+                "bush": {"description": "one bush"},
+            },
             "version": stale_load["version"],
             "user": "tester",
         },
@@ -708,7 +714,10 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(
-        tmp_path, str(tmp_path), {"bud": {"description": "one bud"}}, actor=None
+        tmp_path,
+        str(tmp_path),
+        {"bud": {"description": "one bud"}},
+        actor=None,
     )
     real = tcip_store.read_blob_versioned
     interleaved: list[dict] = []

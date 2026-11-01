@@ -180,7 +180,10 @@ def _states_an_instant(schema: JsonValue) -> bool:
     """Return whether a property's JSON schema ``schema`` types its value as an instant."""
     return isinstance(schema, dict) and (
         schema.get("format") == "date-time"
-        or any(_states_an_instant(m) for m in cast("list", schema.get("anyOf", [])))
+        or any(
+            _states_an_instant(m)
+            for m in cast("list", schema.get("anyOf", []))
+        )
     )
 
 

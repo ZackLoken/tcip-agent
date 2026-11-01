@@ -94,7 +94,9 @@ def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(
     assert written.attributes == {}
 
 
-@pytest.mark.parametrize("dropped", ["width", "height", "boxes", "scores", "cap"])
+@pytest.mark.parametrize(
+    "dropped", ["width", "height", "boxes", "scores", "cap"]
+)
 def test_a_pass_result_missing_a_field_a_document_holds_refuses_naming_it(
     tmp_path: Path, dropped: str
 ) -> None:
@@ -117,7 +119,10 @@ def test_a_pass_result_missing_a_field_a_document_holds_refuses_naming_it(
         published(tmp_path, "damaged", [damaged], scope={"subject": SUBJECT})
 
     whole = published(
-        tmp_path, "whole", [predicted(image, [SUBJECT])], scope={"subject": SUBJECT}
+        tmp_path,
+        "whole",
+        [predicted(image, [SUBJECT])],
+        scope={"subject": SUBJECT},
     )
     assert len(whole.documents) == 1
 

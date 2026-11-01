@@ -83,7 +83,12 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path: Path) -> None:
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     empty, _dropped = encode_predictions(
         DetectionResult(
-            image="empty.jpg", width=100, height=100, boxes=[], scores=[], cap=1
+            image="empty.jpg",
+            width=100,
+            height=100,
+            boxes=[],
+            scores=[],
+            cap=1,
         ),
         "model:fixture",
         scope=scope,

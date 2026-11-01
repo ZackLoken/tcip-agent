@@ -147,7 +147,9 @@ def register_dataset(
             existing = (
                 None
                 if stored.value is None
-                else decode_dataset_identity_document(stored.value, dataset_root=root)
+                else decode_dataset_identity_document(
+                    stored.value, dataset_root=root
+                )
             )
         except ValueError as exc:
             return {
@@ -158,7 +160,9 @@ def register_dataset(
             id=mint_id() if existing is None else existing.id,
             path=stored_path(root, project),
         )
-        identity = DatasetRecord(crop=crop, id=entry.id, fingerprint=fingerprint)
+        identity = DatasetRecord(
+            crop=crop, id=entry.id, fingerprint=fingerprint
+        )
         try:
             tcip_store.put_blob(
                 ident_path,

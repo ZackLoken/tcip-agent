@@ -79,7 +79,9 @@ def produce() -> dict[str, JsonValue]:
             (
                 "labels_written",
                 "annotate",
-                LabelsWritten(image_path=str(image_dir(root, date) / RAW_IMAGES[0])),
+                LabelsWritten(
+                    image_path=str(image_dir(root, date) / RAW_IMAGES[0])
+                ),
             ),
             ("annotate_focus", "app", focus("raw")),
             ("annotate_focus_troubled", "app", focus("troubled")),
