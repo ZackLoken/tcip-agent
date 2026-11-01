@@ -100,14 +100,14 @@ def reported(client: TestClient, token: str, *facts: str) -> bool:
 
 def keep_held(ws: WebSocketTestSession, held: list[int]) -> None:
     """Append to ``held`` the count of every held frame ``ws`` serves, until the socket ends."""
-    from anyio import EndOfStream
+    from anyio import ClosedResourceError, EndOfStream
     from fastapi import WebSocketDisconnect
     from pydantic import TypeAdapter
 
     from tcip_web.routes.terminal import TerminalHeldFrame, TerminalServedFrame
 
     frames: TypeAdapter[TerminalServedFrame] = TypeAdapter(TerminalServedFrame)
-    with suppress(WebSocketDisconnect, EndOfStream):
+    with suppress(WebSocketDisconnect, EndOfStream, ClosedResourceError):
         while True:
             frame = frames.validate_json(ws.receive_text())
             if isinstance(frame, TerminalHeldFrame):
