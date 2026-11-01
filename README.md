@@ -100,8 +100,9 @@ A fresh machine needs these before the first command:
   README (`Miniforge3-Windows-x86_64.exe`, `Miniforge3-$(uname)-$(uname -m).sh`). A Miniconda
   install adds the Anaconda channels, whose terms only you can accept, and `conda env create`
   stops until you do.
-- On Linux, the libGL and GLib libraries the opencv-python wheel links (`libgl1` and
-  `libglib2.0-0` on Debian and Ubuntu).
+- On Linux, the libGL and GLib libraries the opencv-python wheel links: on Debian and Ubuntu,
+  `sudo apt-get update` then `sudo apt-get install -y libgl1 libglib2.0-0`, since a fresh
+  machine holds no package index until the first update.
 - For the agent terminal, the command line of each harness you will run, on `PATH` and signed in:
   `claude` (Claude Code), `codex` (Codex) or `agy` (Antigravity).
 - Docker, for the container image alone.
