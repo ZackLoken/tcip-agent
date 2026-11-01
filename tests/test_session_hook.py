@@ -11,12 +11,12 @@ import io
 import json
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import tomllib
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.dataset_layout import image_dir
@@ -133,6 +133,15 @@ def started(client: TestClient) -> Iterator[terminal_routes.TerminalSession]:
         yield terminal_routes._SESSIONS[sid]
 
 
+def _reported(
+    project: OpenProject, session: terminal_routes.TerminalSession
+) -> str | None:
+    """Return the conversation ``session``'s hook last reported, as ``project``'s log records it."""
+    recorded = terminal_routes.recorded_session(LAUNCH["provider"], project)
+    assert recorded is not None and recorded.session_id == session.id
+    return recorded.conversation
+
+
 def _hooked(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -178,7 +187,7 @@ def test_each_harnesss_new_session_reports_and_is_told_the_whole_orientation(
 
     text = told(_hooked(monkeypatch, capsys, event("conv-new"), *argv))
 
-    assert started.conversation == "conv-new"
+    assert _reported(remembered, started) == "conv-new"
     for fact in (
         '"display_name": "Test project"',
         "2026-03-04/IMG_E: empty label document",
@@ -204,7 +213,7 @@ def test_a_compaction_is_told_the_memory_and_the_knowledge_alone(
         _hooked(monkeypatch, capsys, event("conv-c", "compact"))
     )
 
-    assert started.conversation == "conv-c"
+    assert _reported(remembered, started) == "conv-c"
     assert "the newest report detail" in text
     assert "orientation-task" in text
     assert serve_domain_knowledge.__name__ in text
@@ -225,7 +234,32 @@ def test_a_resumed_session_reports_its_conversation_and_is_told_nothing(
     printed = _hooked(monkeypatch, capsys, event("conv-r", "resume"))
 
     assert printed == ""
-    assert started.conversation == "conv-r"
+    assert _reported(remembered, started) == "conv-r"
+
+
+def test_a_report_whose_line_fails_fails_the_hook_and_prints_nothing(
+    remembered: OpenProject,
+    started: terminal_routes.TerminalSession,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A report the backend cannot record answers 409, and the hook raises it, printing nothing.
+
+    The harness runs its agent without the orientation; the recorded conversation stays unset.
+    """
+    import httpx
+
+    from tests._audit_fixtures import audit_rows, refuse_audit_appends
+
+    monkeypatch.setenv(TERMINAL_SESSION_ENV, started.id)
+    with monkeypatch.context() as refusing:
+        refuse_audit_appends(refusing)
+        with pytest.raises(httpx.HTTPStatusError) as refused:
+            _hooked(monkeypatch, capsys, _claude_start("conv-x", "startup"))
+
+    assert refused.value.response.status_code == 409
+    assert capsys.readouterr().out == ""
+    assert audit_rows(remembered.root, "agent_terminal_reported") == []
 
 
 def test_the_orientation_holds_the_newest_entries_that_fit_and_how_many_there_are(
@@ -239,11 +273,11 @@ def test_the_orientation_holds_the_newest_entries_that_fit_and_how_many_there_ar
     The reports are written out of time order, each stating a distinct known time, and the page
     holds the latest-stated ones in descending time and states every report it was cut from.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import UTC, datetime, timedelta
 
     from tcip_mcp.tools import meta_tools
 
-    base = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 3, 1, tzinfo=UTC)
     minutes = {n: (n * 17) % 40 for n in range(40)}
     for n, minute in minutes.items():
         stated = base + timedelta(minutes=minute)
@@ -435,7 +469,10 @@ def test_each_rows_own_hook_spelling_runs_reports_and_prints_its_orientation(
     )
     env = {**pty_host.os.environ, TERMINAL_SESSION_ENV: started.id}
     (settings,) = pty_host.render_argv(
-        [pty_host.CLAUDE_SETTINGS_ARG], remembered, env, None
+        [pty_host.CLAUDE_SETTINGS_ARG],
+        remembered,
+        env,
+        pty_host.NotResumed(why="the settings argument resumes nothing"),
     )
     ((claude,),) = [
         group["hooks"]
@@ -478,6 +515,6 @@ def test_each_rows_own_hook_spelling_runs_reports_and_prints_its_orientation(
         ran = _run(command, event, run_env)
         assert ran.returncode == 0, ran.stderr
         assert "the newest report detail" in told(ran.stdout)
-        assert started.conversation == event.get(
+        assert _reported(remembered, started) == event.get(
             "session_id", event.get("conversationId")
         )

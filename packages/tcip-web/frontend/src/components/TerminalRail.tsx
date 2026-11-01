@@ -5,7 +5,8 @@
  * translation layer. The terminal is recolored to the field-station palette via the ANSI
  * theme; the harness's own layout is untouched. Staged requests are submitted to the session for
  * its agent, and choosing another harness while an agent runs waits for that agent's hand-off
- * before the chosen one starts.
+ * before the chosen one starts. Under the header the rail states what the launch answered about
+ * its conversation and, while any are held, how many requests the backend holds for the agent.
  */
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -19,12 +20,18 @@ import { committedOf, messageOf, StructuredRefusalError } from "@/api/http";
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import {
   TERMINAL_ENDED_CLOSE_CODE,
+  type LaunchedProgram,
   type ProviderStatus,
   type TerminalEnd,
   type TerminalFrame,
+  type TerminalServedFrame,
   type TerminalStatus,
 } from "@/api/types.generated";
-import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
+import {
+  createReconnectingSocket,
+  jsonFrameHandlers,
+  type ReconnectingSocket,
+} from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 import type { TerminalPhase } from "@/store/slices/terminalOpen";
 
@@ -51,6 +58,19 @@ const PICKER_TITLE: Record<TerminalPhase, string> = {
 /** Whether the rail's agent is running in `phase`: live, or handing off before a switch. */
 function running(phase: TerminalPhase): boolean {
   return phase === "live" || phase === "handing-off";
+}
+
+/** What a launch answered about the conversation it continues, in words for the person. */
+function launchSaid(resumed: LaunchedProgram["resumed"]): string {
+  return resumed.kind === "resumed"
+    ? `Resumed conversation ${resumed.conversation} of session ${resumed.session}.`
+    : resumed.why;
+}
+
+/** The backend's count of the requests it holds, in words for the person. */
+function heldSaid(count: number): string {
+  const requests = count === 1 ? "1 request" : `${count} requests`;
+  return `The backend holds ${requests} until the agent accepts input.`;
 }
 
 function clampWidth(px: number): number {
@@ -127,6 +147,10 @@ export function TerminalRail() {
   const phase = useStore((s) => s.terminalPhase);
   const setPhase = useStore((s) => s.setTerminalPhase);
   const [confirmingExit, setConfirmingExit] = useState(false);
+  // What the session's launch answered about its conversation, and how many requests the backend
+  // holds for its agent, as the session's socket last said.
+  const [resumed, setResumed] = useState<LaunchedProgram["resumed"] | null>(null);
+  const [held, setHeld] = useState(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
   const socketRef = useRef<ReconnectingSocket | null>(null);
@@ -135,8 +159,8 @@ export function TerminalRail() {
   const submissionRef = useRef<Promise<void> | null>(null);
   const pendingMessages = useStore((s) => s.pendingTerminalMessages);
 
-  // Submit staged requests, oldest first, to the live session, each leaving the queue once the
-  // backend took it; the backend delivers them once the agent can take input.
+  // Submit staged requests, oldest first, to the live session, each leaving the staging once the
+  // backend admitted it; the backend holds them until the agent can take input.
   const submitStaged = useCallback(() => {
     const id = sessionRef.current;
     if (!id || submissionRef.current) return;
@@ -147,7 +171,7 @@ export function TerminalRail() {
           const { terminalPhase } = useStore.getState();
           if (next === undefined || sessionRef.current !== id || terminalPhase !== "live") break;
           await terminalApi.submit(id, { text: next });
-          useStore.getState().dropDeliveredTerminalMessages(1);
+          useStore.getState().dropAdmittedTerminalMessages(1);
         }
       } catch (e) {
         setError(messageOf(e));
@@ -161,6 +185,7 @@ export function TerminalRail() {
   const detach = useCallback(() => {
     socketRef.current?.stop();
     sessionRef.current = null;
+    setHeld(0);
   }, []);
 
   /** Show that the agent ended: detached, and only Start launches another. */
@@ -359,6 +384,7 @@ export function TerminalRail() {
             });
             if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
             sessionRef.current = created.session_id;
+            setResumed(created.launched.resumed);
             submitStaged();
           }
         } catch (e) {
@@ -374,7 +400,10 @@ export function TerminalRail() {
         term.reset(); // the replay repaints the screen from scratch
         sendSize();
       },
-      onMessage: (data) => term.write(data),
+      ...jsonFrameHandlers<TerminalServedFrame>((frame) => {
+        if (frame.type === "output") term.write(frame.data);
+        else setHeld(frame.count);
+      }),
       // The ended code closes a session whose agent ended, starting a switch's chosen row; any
       // other close retries.
       onClose: (ev) => {
@@ -587,7 +616,7 @@ export function TerminalRail() {
                 title={
                   phase === "handing-off"
                     ? "End the agent now, without waiting for its hand-off; the chosen harness then starts"
-                    : "End the agent and its conversation; Start then launches a fresh one"
+                    : "End the agent"
                 }
                 className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
               >
@@ -604,6 +633,16 @@ export function TerminalRail() {
           )}
         </div>
       </div>
+      {running(phase) && resumed !== null && (
+        <p className="shrink-0 border-b border-tcip-border px-3 py-1 text-[12px] text-tcip-muted">
+          {launchSaid(resumed)}
+        </p>
+      )}
+      {running(phase) && held > 0 && (
+        <p className="shrink-0 border-b border-tcip-border px-3 py-1 text-[12px] text-tcip-warn">
+          {heldSaid(held)}
+        </p>
+      )}
 
       {reason !== null ? (
         <div className="p-4 flex flex-col gap-3">

@@ -54,9 +54,9 @@ hook inheriting its environment; Codex documents inline `[hooks]` tables, `sessi
 `source` in a hook's input and trust through `/hooks`, but not that a `-c` override registers a hook
 nor that a hook inherits its environment (`TCIP_TERMINAL_SESSION`, `TCIP_WORKSPACE`), which only
 Codex's source supports, so the live smoke decides both. The hook posts its harness's conversation
-and how its session started to the session start route, which answers what the session's agent is
-told (`orientation`) for the project the session was launched for, never the GUI's; a session
-launched for none stays one, whatever project its agent's MCP server creates and acts on. For a
+and how its session started to the session start route, `session_start`, whose answer is
+`orientation`'s; a session launched for none stays one, whatever project its agent's MCP server
+creates and acts on. For a
 new conversation it is the project as `inspect_project` answers for it, the findings
 `diagnose_project` answers (beside how many there are) and each memory corpus's newest entries as
 `load_project_memory` pages them; after a compaction the memory alone; on a resume nothing; with
@@ -69,14 +69,11 @@ needing less than an equal share keeps all of it, each cut part stating how many
 and a part that does not fit standing as a short fixed statement of it; Codex's hook passes its
 whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness reads
 from a hook's stdout, so it reaches the agent as context, never as a pasted message, and
-`diagnose_project` runs in the backend, outside every harness's sandbox. The session's own text (a
-switch's hand-off request) is pasted together with every request staged by the time the harness
-takes input, as one message, so a harness that starts a turn on it still reads them; the paste
-waits until the harness has bracketed paste on and has written its row's `composer_ready`, since a
-harness can turn bracketed paste on while a loading screen still discards input. Each launch
-probes the version its harness declares and records it, so a harness updated in place is seen at
-its next launch. No timer-free signal tells a launch whose sequence
-never arrives from one still starting, and a sequence that moved earlier still pastes early. The
+`diagnose_project` runs in the backend, outside every harness's sandbox. `TerminalSession.deliver`
+decides when a paste goes and what it carries. Each launch probes the version its harness
+declares and records it, so a harness updated in place is seen at its next launch. No timer-free
+signal tells a launch whose sequence never arrives from one still starting, and a sequence that
+moved earlier still pastes early. The
 child's environment is this process's own less every variable `WITHHELD_ENV_PREFIXES` names:
 every `CLAUDE`-prefixed one, so a backend started from a Claude Code session does not launch its
 agent as a nested session, and every prompt-cache control Claude Code ranks above the row's
@@ -112,27 +109,20 @@ developer's auto-memory reach the breeder's agent, and adds the repository as a 
 which it reads the generated knowledge skills; the other rows reach the knowledge through
 `serve_domain_knowledge`.
 
-Each launch records what it ran: create answers a `TerminalLaunch` (the provider id, the
-rendered argv and the version its executable declares, never probed on a `TCIP_TERMINAL_CMD`
-override, the preparation run before the launch and the conversation it resumed or none), with
-one `agent_terminal_started` line in the open project's audit log per launch (none when no project
-is open). A session holds one launch for its life, and its one end is `TerminalSession.end` in
-`routes/terminal.py`, whose `agent_terminal_ended` line (`TerminalEnded`; none for a session
-launched with no project open) records whether the
-conversation may be resumed (not after the person's Exit, unless that Exit ends a switch of
-harness without waiting for its hand-off), the requests its agent was never given, which the end
-route answers from that one record, the conversation the session hook last
-reported, the time of the agent's last output and, for a switch of harness, whether the agent's
-hand-off landed. A launch resumes its row's conversation when the newest end of that row in the
-open project's log left it resumable, with an id, its last output within the row's
-`Resume.cache_lifetime` (`_conversation_to_resume`); anything else, an override and Antigravity's
-row, which documents no cache lifetime, are fresh. A switch of harness while an agent runs is
-`hand_off_session`: the hand-off request goes through the session's delivery, the session ends once
-the agent's `write_retrospective` line stamped with this session lands in the log, read when the
-agent's output arrives, and the person's End meanwhile ends it at once, no hand-off landed; a
-session for no project ends at once. The session delivers the requests the rail submits to the
-agent under the condition `Provider` states. Which agent
-harness the program is comes from the harness's own MCP handshake, not from here. The child is
+Each launch records what it ran: create answers a `TerminalLaunch` (`LaunchedProgram`), and that
+answer is the launch's one `agent_terminal_started` line in the open project's audit log (none
+when no project is open). `session_start` is what records a report the session hook posts, and
+what refuses one. A session holds one launch for its life, and its one end is
+`TerminalSession.end` in `routes/terminal.py`, whose `agent_terminal_ended` line (`TerminalEnded`)
+the end route answers from. Whether a launch resumes, and why not, is decided once, by
+`launch_resumes` over `recorded_session`; a session whose backend stopped without ending it is
+resumed so, and no end line is written for it, as is one whose person's End answered that its end
+line could not be written. A switch of harness while an agent runs is `hand_off_session`, and
+`TerminalSession.hand_off_landed` is what answers for its hand-off. The session delivers the
+requests the rail submits under the condition `Provider` states, and its socket serves
+`TerminalServedFrame` (`TerminalOutputFrame` and `TerminalHeldFrame`, each frame's docstring its
+contract). Which agent harness the program is comes from the harness's own MCP
+handshake, not from here. The child is
 spawned with `TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads
 it and stamps it on its own records as a declared correlation (`tcip_mcp.agent_identity`), beside
 the harness name and version the handshake declared. Declarations, all of them; nothing refuses on

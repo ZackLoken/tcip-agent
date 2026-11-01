@@ -19,9 +19,13 @@ export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
 
 export const NO_LOGS = "no_logs";
 
+export const NOT_RESUMED = "not_resumed";
+
 export const OPERATIONALIZATION = "operationalization";
 
 export const PROJECT_NOT_OPEN = "project_not_open";
+
+export const RESUMED = "resumed";
 
 export const REVISION_MOVED = "revision_moved";
 
@@ -82,6 +86,8 @@ export type SubjectState = "complete" | "negative" | "partial" | "unannotated";
 export type VerdictAction = "accepted" | "rejected";
 
 export type TerminalFrame = TerminalInputFrame | TerminalResizeFrame;
+
+export type TerminalServedFrame = TerminalOutputFrame | TerminalHeldFrame;
 
 export type PanelEvent = LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
 
@@ -686,6 +692,16 @@ export interface TerminalResizeFrame {
   cols: number;
 }
 
+export interface TerminalOutputFrame {
+  type: "output";
+  data: string;
+}
+
+export interface TerminalHeldFrame {
+  type: "held";
+  count: number;
+}
+
 export interface InferenceJobFrame {
   type: "progress" | "final";
   job: InferenceJob;
@@ -1067,7 +1083,7 @@ export interface LaunchedProgram {
   version: string | null;
   confinement: string | null;
   prepared: string[];
-  resumed: string | null;
+  resumed: Resumed | NotResumed;
 }
 
 export interface Listed {
@@ -1119,6 +1135,11 @@ export interface MilestoneRow {
   n_dates_missing_images: number;
   milestones: Record<string, Crossing | null>;
   complete: boolean;
+}
+
+export interface NotResumed {
+  kind: "not_resumed";
+  why: string;
 }
 
 export interface OperatingPoint {
@@ -1291,6 +1312,12 @@ export interface Resolution {
   at: string;
   reply: string;
   removed: boolean;
+}
+
+export interface Resumed {
+  kind: "resumed";
+  conversation: string;
+  session: string;
 }
 
 export interface RetainedFile {

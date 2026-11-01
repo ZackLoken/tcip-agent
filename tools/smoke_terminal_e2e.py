@@ -18,7 +18,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
@@ -26,6 +26,7 @@ from urllib.parse import urlsplit, urlunsplit
 if TYPE_CHECKING:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from starlette.testclient import WebSocketTestSession
 
 sys.path.insert(
     0, str(Path(__file__).parent.parent / "packages" / "tcip-web" / "src")
@@ -95,6 +96,22 @@ def reported(client: TestClient, token: str, *facts: str) -> bool:
         and matching[0]["category"] == REQUESTED_CATEGORY
         and all(fact in matching[0]["detail"] for fact in facts)
     )
+
+
+def keep_held(ws: WebSocketTestSession, held: list[int]) -> None:
+    """Append to ``held`` the count of every held frame ``ws`` serves, until the socket ends."""
+    from anyio import EndOfStream
+    from fastapi import WebSocketDisconnect
+    from pydantic import TypeAdapter
+
+    from tcip_web.routes.terminal import TerminalHeldFrame, TerminalServedFrame
+
+    frames: TypeAdapter[TerminalServedFrame] = TypeAdapter(TerminalServedFrame)
+    with suppress(WebSocketDisconnect, EndOfStream):
+        while True:
+            frame = frames.validate_json(ws.receive_text())
+            if isinstance(frame, TerminalHeldFrame):
+                held.append(frame.count)
 
 
 SERVE_TIMEOUT_S = 10
@@ -172,13 +189,13 @@ def main(
 
 def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
     """Run the smoke for the ``provider`` row through ``client``; return 0 on a pass."""
-    from tcip_mcp.audit import acts_of
     from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.app import app
     from tcip_web.routes import terminal as terminal_routes
-    from tcip_web.routes.terminal import TerminalSession
+    from tcip_web.routes.terminal import RecordedSession, TerminalSession
     from tcip_web.state import store
+    from tcip_web.terminal import Resumed
 
     status = client.get("/api/terminal/status").json()
     print(f"[1] status: {status}")
@@ -253,9 +270,13 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
         """
         started = time.time()
         socket_path = app.url_path_for("terminal_ws", session_id=session.id)
+        held: list[int] = []
         with client.websocket_connect(
             terminal_ws_url(client, socket_path)
         ) as ws:
+            threading.Thread(
+                target=keep_held, args=(ws, held), daemon=True
+            ).start()
             ws.send_json(
                 {"type": "input", "data": "\x1b[?1;2c"}
             )  # a terminal's DA reply
@@ -270,18 +291,21 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
                 time.sleep(1.0)
                 if reported(client, signal, *facts):
                     return True
-            print(
-                f"    bracketed paste on: {session._ready}; requests still "
-                f"queued: {len(session._queued)}"
-            )
+            print(f"    requests the socket last counted held: {held[-1:]}")
             print(
                 f"    stream tail: {ascii(session.scrollback_snapshot()[-1500:])}"
             )
-            return False
+        ended = client.post(
+            f"/api/terminal/sessions/{session.id}/end", json={"user": user}
+        )
+        print(f"    ended, the agent never given: {ended.json()}")
+        return False
 
-    def end_lines() -> list:
-        """Return the scratch project's ``agent_terminal_ended`` lines, oldest first."""
-        return acts_of(project, ("agent_terminal_ended",))[0]
+    def recorded(session: TerminalSession) -> RecordedSession | None:
+        """Return ``session`` as the scratch project's log records it, ``None`` before it does."""
+        assert store.opened is not None
+        found = terminal_routes.recorded_session(provider, store.opened)
+        return found if found and found.session_id == session.id else None
 
     print("[3] the first launch")
     first = launched()
@@ -291,24 +315,25 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
         passed = answered(first, request_for(token), token, name)
         print(f"    reported naming {name!r} from its orientation: {passed}")
         if passed and terminal_routes._provider(provider).resume is not None:
-            started = time.time()
+            started, conversation = time.time(), None
             while (
-                first.conversation is None
+                conversation is None
                 and time.time() - started < answer_timeout_s
             ):
                 time.sleep(1.0)
-            print(
-                f"[4] the harness reported conversation {first.conversation}"
-            )
+                record = recorded(first)
+                conversation = None if record is None else record.conversation
+            print(f"[4] the harness reported conversation {conversation}")
             terminal_routes.shutdown_all()
-            (ended,) = end_lines()
-            print(f"    the shutdown's end line: {ended.arguments}")
+            record = recorded(first)
+            print(f"    the shutdown's end: {record and record.end}")
             print("[5] the launch after the shutdown")
             second = launched()
             passed = (
                 second is not None
-                and first.conversation is not None
-                and second.launched.resumed == first.conversation
+                and conversation is not None
+                and second.launched.resumed
+                == Resumed(conversation=conversation, session=first.id)
                 and answered(
                     second, continuation_request(), token + CONTINUED_SUFFIX
                 )
@@ -316,8 +341,7 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
     finally:
         terminal_routes.shutdown_all()
     print(
-        f"[6] after shutdown_all: sessions still held {len(terminal_routes._SESSIONS)}, "
-        f"end lines recorded {len(end_lines())}"
+        f"[6] after shutdown_all: sessions still held {len(terminal_routes._SESSIONS)}"
     )
 
     print("SMOKE PASS" if passed else "SMOKE FAIL")

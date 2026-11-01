@@ -22,7 +22,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -213,7 +213,6 @@ class _RasterStats:
     interpretations: tuple | None = None
 
 
-_V = TypeVar("_V")
 _stats_cache: OrderedDict[tuple, _RasterStats] = OrderedDict()
 """Each raster's display statistics, under its :func:`_source_identity` and the band count it
 is read at."""
@@ -482,9 +481,9 @@ def _source_identity(header: SourceHeader) -> tuple:
     return raster_source.source_version(header), sidecar
 
 
-def _memo(
-    cache: OrderedDict[tuple, _V], key: tuple, compute: Callable[[], _V]
-) -> _V:
+def _memo[V](
+    cache: OrderedDict[tuple, V], key: tuple, compute: Callable[[], V]
+) -> V:
     """Return what ``cache`` holds under ``key``; on a miss, ``compute()``'s answer.
 
     A computed answer is stored there with the :data:`_STATS_CACHE_MAX` most recently used kept.
