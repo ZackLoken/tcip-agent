@@ -86,6 +86,7 @@ NUMBERED = frozenset(
         "result_sha256",
         "record_sha256",
         "checkpoint_sha256",
+        "ground_truth_digest",
         "sha256",
         "digest",
         "curves",
@@ -95,7 +96,8 @@ NUMBERED = frozenset(
 """The served strings two productions of the same scenes fill differently: ids minted inside a
 helper's own steps, and digests over what carries those or a time, or over a file the scene
 writes in the platform's own line endings (a run's weights, a written output, a record holding a
-time, a plant registry, a measurement's projection keyed by its name under ``digests``).
+time, a plant registry, a measurement's projection keyed by its name under ``digests``, a
+reference label document whose annotations its save stamped).
 An id a scene step holds is read under the name the scene gives it instead (:data:`HELD_RUNS`
 and the ``minted`` names :func:`deliveries` reads)."""
 

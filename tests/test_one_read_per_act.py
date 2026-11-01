@@ -208,6 +208,7 @@ def test_an_assessment_reads_each_reference_document_once(
     from tcip_annotation import json_io
     from tcip_mcp.assessment import read_assessment
     from tests._chain_fixtures import IMG, assess, confirm_count_trait
+    from tests._producer_fixtures import label_image
     from tests.test_assessment_guards import _trained
 
     _images_dir, drawn, selection_dir, checkpoint = _trained(
@@ -230,8 +231,15 @@ def test_an_assessment_reads_each_reference_document_once(
     ) -> list[Sample]:
         out = real_readmit(samples, scope)
         readmitted.update((s.ground_truth, s.ground_truth_digest) for s in out)
-        json_io.write_label_document(
-            reference[0], [], IMG, IMG, keep_empty=True
+        label_image(
+            next(
+                s.source
+                for s in drawn.samples
+                if s.ground_truth == reference[0]
+            ),
+            [],
+            IMG,
+            IMG,
         )
         return out
 
@@ -257,18 +265,16 @@ def test_an_assessment_reads_each_reference_document_once(
 def test_a_reference_document_emptied_before_the_assessment_reads_it_refuses(
     tmp_path: Path,
 ) -> None:
-    from tcip_annotation import json_io
     from tests._chain_fixtures import IMG, assess, confirm_count_trait
+    from tests._producer_fixtures import label_image
     from tests.test_assessment_guards import _trained
 
     _images_dir, drawn, selection_dir, checkpoint = _trained(
         tmp_path, "exp-emptied"
     )
     confirm_count_trait(tmp_path)
-    emptied = next(
-        s.ground_truth for s in drawn.samples if s.side == "holdout"
-    )
-    json_io.write_label_document(emptied, [], IMG, IMG, keep_empty=True)
+    emptied = next(s.source for s in drawn.samples if s.side == "holdout")
+    label_image(emptied, [], IMG, IMG)
 
     record = assess(tmp_path, checkpoint, selection_dir)
 

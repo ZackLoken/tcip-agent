@@ -273,7 +273,7 @@ def _drop_image_of_a(image: Path, ground_truth: Path | None) -> None:
 
     image.unlink()
     if ground_truth is None:
-        label_image(image, [], 16, 16, keep_empty=True)
+        label_image(image, [], 16, 16)
 
 
 @pytest.mark.parametrize(

@@ -81,7 +81,6 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
             [Annotation(subject="bud", geometry=BBox(x1, y1, x1 + w, y1 + h))],
             IMG,
             IMG,
-            keep_empty=True,
         )
 
     dataset = dataset_over("detection", str(images_dir), subject="bud")

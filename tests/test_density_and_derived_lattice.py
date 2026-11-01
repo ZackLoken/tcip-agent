@@ -306,7 +306,6 @@ def _mosaic(root: Path) -> Path:
         ],
         MOSAIC_WIDTH,
         MOSAIC_HEIGHT,
-        keep_empty=True,
     )
     return images_dir
 

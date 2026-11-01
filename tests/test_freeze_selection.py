@@ -94,7 +94,7 @@ def _real_drawn_experiment(
 def _damage_resolved(
     project: Path, experiment_id: str, change: Callable[[dict], None]
 ) -> None:
-    """Rewrite what a run's launch record says it resolved, on disk, bypassing its writer.
+    """Damage what a run's launch record says it resolved.
 
     The record is the run's under ``project``, rewritten on disk with ``change`` applied to its
     resolved block.
@@ -416,22 +416,21 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(
 
     A label edited after the run refuses the freeze, naming that member.
     """
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.data_tools import freeze_selection
+    from tests._producer_fixtures import label_image
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-moved")
 
-    json_io.write_label_document(
-        label_key(root, DATES[0], "a"),
+    label_image(
+        image_dir(root, DATES[0]) / "a.jpg",
         [
             Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20)),
             Annotation(subject=SUBJECT, geometry=BBox(30, 30, 50, 50)),
         ],
         64,
         64,
-        keep_empty=True,
     )
 
     result = freeze_selection(tmp_path, "exp-moved", actor=None)
@@ -490,19 +489,18 @@ def test_freeze_selection_refuses_a_resolved_scope_missing_its_attributes(
 def test_freeze_selection_refuses_labels_changed_since_the_run(
     tmp_path: Path,
 ) -> None:
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.data_tools import freeze_selection
+    from tests._producer_fixtures import label_image
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-stale-labels")
 
-    json_io.write_label_document(
-        label_key(root, DATES[0], "a"),
+    label_image(
+        image_dir(root, DATES[0]) / "a.jpg",
         [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))],
         64,
         64,
-        keep_empty=True,
     )
 
     result = freeze_selection(tmp_path, "exp-stale-labels", actor=None)

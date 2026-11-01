@@ -1,12 +1,13 @@
 """Label documents written and loaders built through the platform's own producers.
 
-The producers are ``label_queries.admit``, ``write_label_document`` and the one label save.
+The producers are ``label_queries.admit``, the one label save and the one writer of stored label
+records.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, overload
 
 from tcip_mcp.dataset_layout import (
     UNDATED_BUCKET,
@@ -23,10 +24,12 @@ if TYPE_CHECKING:
     import numpy as np
     import pytest
     from PIL import Image
+    from pydantic import JsonValue
     from torch.utils.data import Dataset
 
     from tcip_annotation.json_io import LabelDocument
     from tcip_annotation.state import Annotation, Attribute
+    from tcip_mcp.buckets import Bucket
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.augmentations import Transforms
     from tcip_mcp.pipelines.data.datasets import BespokeSource
@@ -47,22 +50,147 @@ if TYPE_CHECKING:
     """A paint color: one value for every band, or one value per band."""
 
 
+type Labels = Iterable[Annotation | dict]
+"""What a save is handed: annotations, or payloads as a client sends them."""
+
+
+@overload
 def label_image(
     image_path: str | Path,
+    labels: Labels,
+    width: int,
+    height: int,
+    *,
+    project: Path | None = None,
+    author: str = "user:breeder",
+    expect: Version | None = None,
+    gestures: Gestures = Gestures(),
+) -> tuple[Version, LabelDocument, dict[int, int]]: ...
+@overload
+def label_image(
+    image_path: str | Path,
+    labels: Labels,
+    *,
+    project: Path | None = None,
+    author: str = "user:breeder",
+    expect: Version | None = None,
+    gestures: Gestures = Gestures(),
+) -> tuple[Version, LabelDocument, dict[int, int]]: ...
+def label_image(
+    image_path: str | Path,
+    labels: Labels,
+    width: int | None = None,
+    height: int | None = None,
+    *,
+    project: Path | None = None,
+    author: str = "user:breeder",
+    expect: Version | None = None,
+    gestures: Gestures = Gestures(),
+) -> tuple[Version, LabelDocument, dict[int, int]]:
+    """Save ``labels`` as ``author`` as the label document of the image at ``image_path``.
+
+    The save is ``dataset_layout.save_label_document``'s for ``project``, against ``expect`` and
+    with ``gestures``, at ``width`` by ``height``, or at the image's own frame
+    (``image_utils.image_path_dimensions``) when no frame is stated. An annotation is handed over
+    as a client reads it (:class:`~tcip_annotation.json_io.ClientAnnotation`), so its content is
+    kept and its provenance is the save's; a payload as it is. Returns the save's answer.
+    """
+    from tcip_annotation.json_io import ClientAnnotation
+    from tcip_mcp.dataset_layout import save_label_document
+    from tcip_mcp.pipelines.image_utils import image_path_dimensions
+
+    frame = (
+        image_path_dimensions(image_path)
+        if width is None or height is None
+        else (width, height)
+    )
+    return save_label_document(
+        project,
+        image_label_key(image_path),
+        [
+            label
+            if isinstance(label, dict)
+            else ClientAnnotation.of(label).model_dump(mode="json")
+            for label in labels
+        ],
+        width=frame[0],
+        height=frame[1],
+        author=author,
+        actor=author,
+        expect=expect,
+        gestures=gestures,
+    )
+
+
+def published_document(
+    project: Path,
+    name: str,
+    image: str | Path,
     annotations: Iterable[Annotation],
     width: int,
     height: int,
-    **kwargs: object,
-) -> Version | None:
-    """Write ``annotations`` as the label document of the image at ``image_path``.
+) -> Bucket:
+    """Publish ``annotations`` at ``width`` by ``height`` as the bucket ``name``'s one document.
 
-    The document is written by :func:`~tcip_annotation.json_io.write_label_document` at the
-    image's own key. Returns the new version.
+    The document is the image at ``image``'s, encoded by ``json_io.document_payload`` and
+    published by ``buckets.publish`` under the image's dataset root for ``project``, proposed by
+    ``agent:test`` under no class scope. Returns the bucket.
     """
-    from tcip_annotation.json_io import write_label_document
+    from tcip_annotation.json_io import document_payload
+    from tcip_mcp.buckets import Document, Proposed, publish, source_root
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
-    return write_label_document(
-        image_label_key(image_path), annotations, width, height, **kwargs
+    return publish(
+        project,
+        source_root([image]),
+        name,
+        [Document(str(image), document_payload(annotations, width, height))],
+        producer=Proposed(proposed_by="agent:test"),
+        scope=ClassScope(),
+        execution=None,
+        raster_path=None,
+        raster_identity=None,
+        assessment_id=None,
+        actor=None,
+    )
+
+
+def store_labels(
+    image_path: str | Path,
+    document: dict[str, JsonValue],
+    *,
+    flags: dict[str, JsonValue] | None = None,
+) -> dict[str, JsonValue]:
+    """Write ``document`` and ``flags`` as stored for the image at ``image_path``.
+
+    The write is ``dataset_layout.write_label_records``', admitted against the image's capture,
+    its frame and the dataset's own subject registry, its source the image's path and its digest
+    the document's ``json_io.canonical_digest``. Returns the writer's answer.
+    """
+    from tcip_annotation.json_io import canonical_digest
+    from tcip_mcp.dataset_layout import (
+        ImageLabels,
+        parse_image_path,
+        write_label_records,
+    )
+    from tcip_mcp.subject_registry import read_registry
+
+    root, capture, _stem = parse_image_path(image_path)
+    return write_label_records(
+        root,
+        {
+            capture: {
+                Path(image_path).name: ImageLabels(
+                    document=document, flags=flags
+                )
+            }
+        },
+        registry=read_registry(root),
+        faults=(),
+        source=str(image_path),
+        digest=canonical_digest(document),
+        facts={},
+        actor=None,
     )
 
 
@@ -200,13 +328,13 @@ def stub_images(images_dir: Path, names: list[str]) -> list[Path]:
 def one_labeled_capture(root: Path) -> Path:
     """Write a three-byte JPEG stub ``a_1.jpg`` into ``root``'s ``2026-03-04`` capture.
 
-    The stub has a kept empty label document over an 8 by 8 frame, and ``root``'s subject
-    registry declares ``bud``. Returns ``root``.
+    The stub has an empty label document saved over an 8 by 8 frame (:func:`label_image`), and
+    ``root``'s subject registry declares ``bud``. Returns ``root``.
     """
     image = image_dir(root, "2026-03-04") / "a_1.jpg"
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_bytes(b"\xff\xd8\xff")
-    label_image(image, [], 8, 8, keep_empty=True)
+    label_image(image, [], 8, 8)
     registry_over(root, registry_of("bud"))
     return root
 
@@ -258,13 +386,11 @@ def labeled_frame(
     width: int,
     height: int,
     background: tuple[int, int, int],
-    **kwargs: object,
 ) -> Path:
     """Write a labeled :func:`painted_frame` of ``background`` at ``path``.
 
     The frame is :data:`BRIGHT` over the extent of each of ``annotations`` that has one and is no
-    crowd region, and labeled with ``annotations`` (:func:`label_image`, ``kwargs`` its own).
-    Returns ``path``.
+    crowd region, and labeled with ``annotations`` (:func:`label_image`). Returns ``path``.
     """
     from tcip_annotation.state import Point, bbox_of
 
@@ -280,7 +406,7 @@ def labeled_frame(
         background,
         [((b.x1, b.y1, b.x2, b.y2), BRIGHT) for b in boxes],
     ).save(path)
-    label_image(path, annotations, width, height, **kwargs)
+    label_image(path, annotations, width, height)
     return path
 
 
@@ -489,60 +615,23 @@ def mark_complete(
 ) -> tuple[Version, LabelDocument, dict[int, int]]:
     """Mark ``subject`` complete over ``rect`` on the label document of the image at ``image_path``.
 
-    The mark goes through ``dataset_layout.save_label_document`` as ``by``, with gestures of
-    ``rect`` and ``proposals_hidden``, passing the document's stored annotations back as client
-    annotations. Returns the new version.
+    The mark goes through :func:`label_image` as ``by``, at the image's own frame, with gestures
+    of ``rect`` and ``proposals_hidden``, handing the document's stored annotations back.
+    Returns the save's answer.
     """
-    from tcip_annotation.json_io import (
-        ClientAnnotation,
-        read_document_versioned,
-    )
+    from tcip_annotation.json_io import read_document_versioned
 
     doc, _version = read_document_versioned(image_label_key(image_path))
-    return save_labels(
-        project,
+    return label_image(
         image_path,
-        [
-            ClientAnnotation.of(a).model_dump(mode="json")
-            for a in doc.annotations
-        ],
+        doc.annotations,
+        project=project,
         author=by,
         gestures=Gestures(
             complete={subject: True},
             rect=rect,
             proposals_hidden=proposals_hidden,
         ),
-    )
-
-
-def save_labels(
-    project: Path,
-    image: str | Path,
-    payloads: list[dict],
-    *,
-    author: str = "user:breeder",
-    expect: Version | None = None,
-    gestures: Gestures = Gestures(),
-) -> tuple[Version, LabelDocument, dict[int, int]]:
-    """Save ``payloads`` as the label document of the image at ``image``, as ``author``.
-
-    The save is ``dataset_layout.save_label_document``'s at the image's own dimensions, against
-    ``expect`` and with ``gestures``. Returns its answer.
-    """
-    from tcip_mcp.dataset_layout import save_label_document
-    from tcip_mcp.pipelines.image_utils import image_path_dimensions
-
-    width, height = image_path_dimensions(image)
-    return save_label_document(
-        project,
-        image_label_key(image),
-        payloads,
-        width=width,
-        height=height,
-        author=author,
-        actor=author,
-        expect=expect,
-        gestures=gestures,
     )
 
 

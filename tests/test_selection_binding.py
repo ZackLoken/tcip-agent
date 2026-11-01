@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import image_dir, parse_image_path
 from tcip_mcp.pipelines.data.datasets import BaseDataset
@@ -64,7 +63,6 @@ def _write_stem(
         64,
         64,
         (100, 120, 90),
-        keep_empty=True,
     )
 
 
@@ -492,9 +490,7 @@ def test_a_selected_label_emptied_since_the_draw_refuses_the_run(
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     emptied = drawn.on("train")[0]
-    json_io.write_label_document(
-        emptied.ground_truth, [], 64, 64, keep_empty=True
-    )
+    label_image(emptied.source, [], 64, 64)
 
     with pytest.raises(ValueError, match="no longer admissible"):
         _train_val(tmp_path, "detection", _run_data_cfg(root, out))
@@ -514,9 +510,7 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     emptied = drawn.on("train")[0]
-    json_io.write_label_document(
-        emptied.ground_truth, [], 64, 64, keep_empty=True
-    )
+    label_image(emptied.source, [], 64, 64)
     mark_complete(emptied.source, SUBJECT, project=root)
 
     train_ds, val_ds, partition, _data = _train_val(
@@ -583,7 +577,6 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
         [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
         64,
         64,
-        keep_empty=True,
     )
     table = root / "values.csv"
     table.write_text("image,value\na.jpg,1\n", encoding="utf-8")
@@ -918,7 +911,7 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(
 
 
 def _strip_the_recorded_subject(out: Path) -> None:
-    """Rewrite a drawn selection's record with no subject, past the writer."""
+    """Damage a drawn selection's record: its scope's subject set to null."""
     import tcip_store as ts
     from tcip_mcp.pipelines.data.selection import selection_key
 

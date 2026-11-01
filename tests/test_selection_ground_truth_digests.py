@@ -204,7 +204,7 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
         assignment: dict[str, str],
         group_of: Callable[[str], str],
     ) -> list[Sample]:
-        label_image(first, [], IMG, IMG, keep_empty=True)
+        label_image(first, [], IMG, IMG)
         return real_samples(self, assignment, group_of)
 
     monkeypatch.setattr(label_queries.Admission, "samples", emptied_first)

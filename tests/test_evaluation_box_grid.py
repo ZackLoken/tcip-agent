@@ -118,15 +118,16 @@ def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(
     """Stored labels scored against predictions reproducing them match exactly."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key
     from tcip_mcp.pipelines.training.evaluation import (
         detection_metrics,
         records_from_annotation,
     )
+    from tests._producer_fixtures import label_image
 
     label = label_key(tmp_path, UNDATED_BUCKET, "image_one")
-    json_io.write_label_document(
-        label,
+    label_image(
+        image_dir(tmp_path, UNDATED_BUCKET) / "image_one.png",
         [
             Annotation(subject="target", geometry=BBox(*ON_GRID_BOX)),
             Annotation(

@@ -1,9 +1,10 @@
 """A crowd region reaches each ground-truth reader tested here as a crowd region, not an object.
 
-Each fixture is written through the platform's own label writer and read back through the
-reader under test: the loaders and their crop, the trainer's and the validation loss's hand-off
-to the heads, the model contract's overfit probe, the completion mark's digest, the editor's
-proposal pairing, and the assessment's size, spacing and merge threshold. Where a reader forms a
+Each fixture is saved through the platform's own label save, or encoded and decoded by the label
+document's own encoder and decoder, and read back through the reader under test: the loaders
+and their crop, the trainer's and the validation loss's hand-off to the heads, the model
+contract's overfit probe, the completion mark's digest, the editor's proposal pairing, and the
+assessment's size, spacing and merge threshold. Where a reader forms a
 number from objects, the same records with and without crowd regions give the same number.
 """
 
@@ -24,11 +25,11 @@ from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.dataset_layout import (  # noqa: E402
     UNDATED_BUCKET,
     image_dir,
-    label_key,
 )
 from tests._producer_fixtures import (  # noqa: E402
     label_image,
     labeled_frame,
+    published_document,
     write_image,
 )
 from tests._training_values import (  # noqa: E402
@@ -78,14 +79,15 @@ def build_recording_detector(
     return RecordingDetector(in_chans=in_chans)
 
 
-def _read_back(root: Path, stem: str, anns: list) -> list:
-    """Write ``anns`` as the label document of the image ``stem`` and return them read back.
+def _read_back(anns: list) -> list:
+    """Return ``anns`` as the label document reader reads them back from their stored record.
 
-    The document lies under ``root`` and is read back through the platform's own reader.
+    The record is the encoder's (``json_io.document_payload``) at ``IMG`` px, scores and crowd
+    flags as given, read by the decoder (``json_io.label_document``).
     """
-    key = label_key(root, UNDATED_BUCKET, stem)
-    json_io.write_label_document(key, anns, IMG, IMG)
-    return json_io.read_label_document(key).annotations
+    return json_io.label_document(
+        json_io.document_payload(anns, IMG, IMG)
+    ).annotations
 
 
 def _labeled(
@@ -327,9 +329,7 @@ def test_the_completion_digest_changes_with_the_crowd_flag(
     digests = []
     for crowd in (False, True):
         read = _read_back(
-            tmp_path,
-            "a",
-            [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=crowd)],
+            [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=crowd)]
         )
         digests.append(json_io.subject_digest(read, SUBJECT))
     assert digests[0] != digests[1]
@@ -361,7 +361,7 @@ def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
             ]
         records.append(
             records_from_annotation(
-                _read_back(tmp_path, f"r{i}_{crowd}", anns),
+                _read_back(anns),
                 [],
                 width=IMG,
                 height=IMG,
@@ -441,9 +441,7 @@ def test_a_crowd_prediction_is_no_detection_at_the_scoring_side(
     )
 
     preds = _read_back(
-        tmp_path,
-        "p",
-        [Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True)],
+        [Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True)]
     )
     record = records_from_annotation(
         [], preds, width=IMG, height=IMG, cap=None
@@ -466,12 +464,10 @@ def test_one_selector_answers_both_halves_of_the_crowd_split(
     from tcip_annotation.state import instances
 
     gt = _read_back(
-        tmp_path,
-        "g",
         [
             Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True),
             Annotation(subject=SUBJECT, geometry=OBJECT),
-        ],
+        ]
     )
     assert [a.geometry for a in instances(gt, crowd=True)] == [CROWD]
     assert [a.geometry for a in instances(gt)] == [OBJECT]
@@ -490,23 +486,19 @@ def test_the_editors_pairing_never_pairs_with_or_as_a_crowd_region(
 
     inside = BBox(60.0, 60.0, 80.0, 80.0)
     gt = _read_back(
-        tmp_path,
-        "g",
         [
             Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True),
             Annotation(subject=SUBJECT, geometry=OBJECT),
-        ],
+        ]
     )
     preds = _read_back(
-        tmp_path,
-        "p",
         [
             Annotation(
                 subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True
             ),
             Annotation(subject=SUBJECT, geometry=inside, score=0.9),
             Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9),
-        ],
+        ]
     )
 
     assert pair_proposals(
@@ -536,29 +528,23 @@ def _center_records(tmp_path: Path) -> list[dict]:
     records = []
     for i in range(9):
         gt = _read_back(
-            tmp_path,
-            f"g{i}",
-            [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)],
+            [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)]
         )
         preds = _read_back(
-            tmp_path,
-            f"p{i}",
             [
                 Annotation(
                     subject=SUBJECT,
                     geometry=BBox(60.0, 60.0, 80.0, 80.0),
                     score=0.9,
                 )
-            ],
+            ]
         )
         records.append(
             records_from_annotation(
                 gt, preds, width=IMG, height=IMG, cap=None, name_id=name_id
             )
         )
-    missed = _read_back(
-        tmp_path, "missed", [Annotation(subject=SUBJECT, geometry=OBJECT)]
-    )
+    missed = _read_back([Annotation(subject=SUBJECT, geometry=OBJECT)])
     records.append(
         records_from_annotation(
             missed, [], width=IMG, height=IMG, cap=None, name_id=name_id
@@ -628,35 +614,18 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(
     A crowd region beside the one matching detection is no surplus, and a reference holding
     crowd regions alone is no missed image.
     """
-    pytest.importorskip("torch")
     from tcip_mcp.tools.vision_tools import get_worst_predictions
-    from tests._chain_fixtures import published
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
     a, b = (
         write_image(images / f"{stem}.png", (IMG, IMG), (40, 40, 40))
         for stem in ("a", "b")
     )
-    bucket = published(
+    # Crowd regions published beside the detection.
+    bucket = published_document(
         tmp_path,
         "preds",
-        [
-            {
-                "image": str(a),
-                "width": IMG,
-                "height": IMG,
-                "boxes": [[OBJECT.x1, OBJECT.y1, OBJECT.x2, OBJECT.y2]],
-                "scores": [0.9],
-                "labels": [1],
-                "count": 1,
-                "cap": 2,
-            }
-        ],
-        scope={"subject": SUBJECT},
-    )
-    # Crowd regions beside the detection, as an edit in place would leave them.
-    json_io.write_label_document(
-        bucket.document_key("a"),
+        a,
         [
             Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9),
             *[
@@ -718,7 +687,7 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(
                 ] * 3
             out.append(
                 records_from_annotation(
-                    _read_back(tmp_path, f"s{i}_{crowd}", anns),
+                    _read_back(anns),
                     [],
                     width=IMG,
                     height=IMG,

@@ -57,7 +57,6 @@ def _multiband_detection_fixture(
         [Annotation(subject="bud", geometry=BBox(px, py, px + 6, py + 6))],
         width,
         height,
-        keep_empty=True,
     )
     return images_dir
 
@@ -133,7 +132,6 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(
         [Annotation(subject="bud", geometry=BBox(1, 12, 4, 18))],
         pil_w,
         pil_h,
-        keep_empty=True,
     )
 
     with pytest.raises(
@@ -217,7 +215,6 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path: Path) -> None:
         [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))],
         40,
         24,
-        keep_empty=True,
     )
 
     ds = dataset_over(

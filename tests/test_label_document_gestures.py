@@ -24,8 +24,8 @@ from tcip_mcp.dataset_layout import (
 from tcip_mcp.pipelines.proposal import Proposal
 from tests._producer_fixtures import (
     image_label_key,
+    label_image,
     registry_of,
-    save_labels,
     staged_box,
     write_image,
 )
@@ -63,13 +63,13 @@ def test_correcting_a_value_keeps_the_geometry(tmp_path: Path) -> None:
         "rings": [RING],
         "attributes": {"stage": "open"},
     }
-    save_labels(tmp_path, image, [drawn], author="user:first")
+    label_image(image, project=tmp_path, labels=[drawn], author="user:first")
 
     (loaded,) = _as_loaded(tmp_path, image)
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [{**loaded, "attributes": {"stage": "closed"}}],
+        project=tmp_path,
+        labels=[{**loaded, "attributes": {"stage": "closed"}}],
         author="user:second",
     )
 
@@ -83,15 +83,19 @@ def test_correcting_the_geometry_keeps_the_confirmed_value(
     tmp_path: Path,
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [{"subject": "bud", "bbox": BOX, "attributes": {"stage": "open"}}],
+        project=tmp_path,
+        labels=[
+            {"subject": "bud", "bbox": BOX, "attributes": {"stage": "open"}}
+        ],
     )
 
     (loaded,) = _as_loaded(tmp_path, image)
-    save_labels(
-        tmp_path, image, [{**loaded, "bbox": [41.0, 31.0, 61.0, 51.0]}]
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[{**loaded, "bbox": [41.0, 31.0, 61.0, 51.0]}],
     )
 
     (after,) = _stored(tmp_path, image).annotations
@@ -103,12 +107,14 @@ def test_adding_a_missed_object_writes_it_with_its_value(
     tmp_path: Path,
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    label_image(
+        image, project=tmp_path, labels=[{"subject": "bud", "bbox": BOX}]
+    )
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [
+        project=tmp_path,
+        labels=[
             *_as_loaded(tmp_path, image),
             {
                 "subject": "bud",
@@ -132,13 +138,17 @@ def test_accepting_a_paired_proposal_confirms_the_annotation_without_a_second_on
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
-    save_labels(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    label_image(
+        image, project=tmp_path, labels=[{"subject": "bud", "bbox": BOX}]
+    )
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        _as_loaded(tmp_path, image),
-        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
+        project=tmp_path,
+        labels=_as_loaded(tmp_path, image),
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+        ),
     )
 
     assert len(_stored(tmp_path, image).annotations) == 1
@@ -150,11 +160,13 @@ def test_accepting_an_unpaired_proposal_adds_it_authored_by_its_producer(
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [],
-        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
+        project=tmp_path,
+        labels=[],
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+        ),
     )
 
     (accepted,) = _stored(tmp_path, image).annotations
@@ -197,11 +209,13 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     ).annotations
     assert proposal.attributes == {"color": "blue"}
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [],
-        gestures=Gestures(decide=Decisions(bucket=bucket.name, verdicts={0: "accepted"})),
+        project=tmp_path,
+        labels=[],
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket.name, verdicts={0: "accepted"})
+        ),
     )
 
     (accepted,) = _stored(tmp_path, image).annotations
@@ -215,11 +229,13 @@ def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_rea
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [],
-        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
+        project=tmp_path,
+        labels=[],
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+        ),
     )
 
     key = verdict_key_of(image_label_key(image), bucket)
@@ -247,10 +263,10 @@ def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(
 
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [],
+        project=tmp_path,
+        labels=[],
         gestures=Gestures(
             decide=Decisions(bucket=bucket, verdicts={0: "accepted"}),
             complete={"bud": True},
@@ -290,12 +306,14 @@ def test_rejecting_a_paired_proposal_records_the_rejection_and_keeps_the_annotat
     root = open_new_project(tmp_path / "proj").root
     image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(root, image, BOX)
-    save_labels(root, image, [{"subject": "bud", "bbox": BOX}])
+    label_image(image, project=root, labels=[{"subject": "bud", "bbox": BOX}])
     body = {
         "image_path": str(image),
         "user": "breeder",
         "annotations": _as_loaded(root, image),
-        "gestures": {"decide": {"bucket": bucket, "verdicts": {"0": "rejected"}}},
+        "gestures": {
+            "decide": {"bucket": bucket, "verdicts": {"0": "rejected"}}
+        },
     }
 
     resp = client.post("/api/annotate/labels", json=body)
@@ -317,15 +335,20 @@ def test_accepting_a_paired_proposal_signs_the_tools_annotation_off(
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
-    save_labels(
-        tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector"
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": BOX}],
+        author="detector",
     )
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        _as_loaded(tmp_path, image),
-        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
+        project=tmp_path,
+        labels=_as_loaded(tmp_path, image),
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+        ),
     )
 
     (after,) = _stored(tmp_path, image).annotations
@@ -343,15 +366,20 @@ def test_accepting_a_paired_proposal_signs_the_tools_annotation_off(
 def test_rejecting_a_paired_proposal_signs_nothing_off(tmp_path: Path) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(tmp_path, image, BOX)
-    save_labels(
-        tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector"
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": BOX}],
+        author="detector",
     )
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        _as_loaded(tmp_path, image),
-        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "rejected"})),
+        project=tmp_path,
+        labels=_as_loaded(tmp_path, image),
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "rejected"})
+        ),
     )
 
     (after,) = _stored(tmp_path, image).annotations
@@ -385,18 +413,21 @@ def test_confirming_a_tools_annotation_signs_it_off_without_changing_it(
     tmp_path: Path,
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector"
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": BOX}],
+        author="detector",
     )
     (before,) = _stored(tmp_path, image).annotations
     assert (
         json_io.authorship_of(before.created_by, before.accepted_by) == "tool"
     )
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        _as_loaded(tmp_path, image),
+        project=tmp_path,
+        labels=_as_loaded(tmp_path, image),
         gestures=Gestures(confirm=frozenset({0})),
     )
 
@@ -417,10 +448,10 @@ def test_confirming_a_position_the_save_writes_nothing_at_refuses_before_any_wri
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
 
     with pytest.raises(ValueError, match="none at position 1 to confirm"):
-        save_labels(
-            tmp_path,
+        label_image(
             image,
-            [{"subject": "bud", "bbox": BOX}],
+            project=tmp_path,
+            labels=[{"subject": "bud", "bbox": BOX}],
             gestures=Gestures(confirm=frozenset({1})),
         )
 
@@ -434,8 +465,11 @@ def test_the_save_route_confirms_an_annotation_and_answers_the_document_it_wrote
 
     root = open_new_project(tmp_path / "proj").root
     image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        root, image, [{"subject": "bud", "bbox": BOX}], author="detector"
+    label_image(
+        image,
+        project=root,
+        labels=[{"subject": "bud", "bbox": BOX}],
+        author="detector",
     )
     body = {
         "image_path": str(image),
@@ -472,20 +506,22 @@ def test_an_accepted_proposal_answers_the_annotation_it_resolved_to(
     boxed = {"subject": "bud", "bbox": BOX}
 
     later = {"subject": "leaf", "bbox": [60.0, 60.0, 70.0, 70.0]}
-    _, paired_doc, paired = save_labels(
-        tmp_path,
+    _, paired_doc, paired = label_image(
         image,
-        [drawn, boxed, later],
-        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
+        project=tmp_path,
+        labels=[drawn, boxed, later],
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+        ),
     )
     assert paired == {0: 1} and len(paired_doc.annotations) == 3
 
     other = write_image(images / "b.jpg", (WIDTH, HEIGHT))
     other_bucket = staged_box(tmp_path, other, BOX)
-    _, appended_doc, appended = save_labels(
-        tmp_path,
+    _, appended_doc, appended = label_image(
         other,
-        [drawn],
+        project=tmp_path,
+        labels=[drawn],
         gestures=Gestures(
             decide=Decisions(bucket=other_bucket, verdicts={0: "accepted"})
         ),
@@ -506,7 +542,9 @@ def test_the_save_route_answers_the_annotation_an_accepted_proposal_resolved_to(
         json={
             "image_path": str(image),
             "user": "breeder",
-            "gestures": {"decide": {"bucket": bucket, "verdicts": {"0": "accepted"}}},
+            "gestures": {
+                "decide": {"bucket": bucket, "verdicts": {"0": "accepted"}}
+            },
             "annotations": [
                 {"subject": "leaf", "bbox": [60.0, 60.0, 70.0, 70.0]}
             ],
@@ -673,16 +711,18 @@ def test_a_save_from_a_stale_read_conflicts_and_writes_nothing(
     tmp_path: Path,
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    first, _document, _accepted = save_labels(
-        tmp_path, image, [{"subject": "bud", "bbox": BOX}]
+    first, _document, _accepted = label_image(
+        image, project=tmp_path, labels=[{"subject": "bud", "bbox": BOX}]
     )
-    save_labels(tmp_path, image, [], author="user:second", expect=first)
+    label_image(
+        image, project=tmp_path, labels=[], author="user:second", expect=first
+    )
 
     with pytest.raises(ts.VersionConflictError):
-        save_labels(
-            tmp_path,
+        label_image(
             image,
-            [{"subject": "bud", "bbox": [1.0, 1.0, 9.0, 9.0]}],
+            project=tmp_path,
+            labels=[{"subject": "bud", "bbox": [1.0, 1.0, 9.0, 9.0]}],
             author="user:third",
             expect=first,
         )
@@ -727,7 +767,12 @@ def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(
 
     images = image_dir(tmp_path, DATE)
     image = write_image(images / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(tmp_path, image, [], gestures=Gestures(complete={"bud": True}))
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[],
+        gestures=Gestures(complete={"bud": True}),
+    )
     queued = _prepare_queue_sources(str(images), "bud")
     assert not isinstance(queued, dict), queued
     assert queued == ([], [image])
@@ -746,7 +791,12 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
     root = open_new_project(tmp_path / "proj").root
     image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(root, image, BOX)
-    save_labels(root, image, [], gestures=Gestures(complete={"bud": True}))
+    label_image(
+        image,
+        project=root,
+        labels=[],
+        gestures=Gestures(complete={"bud": True}),
+    )
 
     proposals = client.get(
         "/api/annotate/proposals",
@@ -798,10 +848,13 @@ def test_the_loaded_annotations_carry_the_index_a_pairing_names(
     root = open_new_project(tmp_path / "proj").root
     image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
     bucket = staged_box(root, image, BOX)
-    save_labels(
-        root,
+    label_image(
         image,
-        [{"subject": "leaf", "points": RING}, {"subject": "bud", "bbox": BOX}],
+        project=root,
+        labels=[
+            {"subject": "leaf", "points": RING},
+            {"subject": "bud", "bbox": BOX},
+        ],
     )
 
     loaded = client.get(
@@ -825,19 +878,19 @@ def test_an_edit_invalidates_the_marks_of_its_own_subject_only(
     tmp_path: Path,
 ) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [{"subject": "bud", "bbox": BOX}],
+        project=tmp_path,
+        labels=[{"subject": "bud", "bbox": BOX}],
         gestures=Gestures(complete={"bud": True, "leaf": True}),
     )
     assert _stored(tmp_path, image).state("bud") == "complete"
     assert _stored(tmp_path, image).state("leaf") == "negative"
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [
+        project=tmp_path,
+        labels=[
             *_as_loaded(tmp_path, image),
             {"subject": "bud", "bbox": [5.0, 5.0, 15.0, 15.0]},
         ],
@@ -845,10 +898,10 @@ def test_an_edit_invalidates_the_marks_of_its_own_subject_only(
     assert _stored(tmp_path, image).state("bud") == "partial"
     assert _stored(tmp_path, image).state("leaf") == "negative"
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [
+        project=tmp_path,
+        labels=[
             *_as_loaded(tmp_path, image),
             {"subject": "leaf", "bbox": [70.0, 5.0, 90.0, 15.0]},
         ],
@@ -859,14 +912,17 @@ def test_an_edit_invalidates_the_marks_of_its_own_subject_only(
 def test_a_mark_made_with_proposals_hidden_says_so(tmp_path: Path) -> None:
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
 
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [],
+        project=tmp_path,
+        labels=[],
         gestures=Gestures(complete={"bud": True}, proposals_hidden=True),
     )
-    save_labels(
-        tmp_path, image, [], gestures=Gestures(complete={"leaf": True})
+    label_image(
+        image,
+        project=tmp_path,
+        labels=[],
+        gestures=Gestures(complete={"leaf": True}),
     )
 
     marks = _stored(tmp_path, image).marks
@@ -892,7 +948,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
     registry_over(root, registry_of("bud"))
     images = image_dir(root, DATE)
     image = write_image(images / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(root, image, [])
+    label_image(image, project=root, labels=[])
 
     def readers() -> tuple[int, int, str]:
         counts = admit(
@@ -913,7 +969,12 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
 
     assert readers() == (0, 0, "unannotated")
 
-    save_labels(root, image, [], gestures=Gestures(complete={"bud": True}))
+    label_image(
+        image,
+        project=root,
+        labels=[],
+        gestures=Gestures(complete={"bud": True}),
+    )
 
     assert readers() == (1, 1, "negative")
 
@@ -993,10 +1054,10 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    save_labels(
-        tmp_path,
+    label_image(
         image,
-        [
+        project=tmp_path,
+        labels=[
             {"subject": "bud", "bbox": [10.0, 10.0, 30.0, 30.0]},
             {
                 "subject": "bud",

@@ -115,7 +115,7 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path: Path) -> None:
     label_image(images[0], [box, box, box], 100, 80)
     label_image(images[1], [box], 100, 80)
     for negative in images[2:]:
-        label_image(negative, [], 100, 80, keep_empty=True)
+        label_image(negative, [], 100, 80)
         mark_complete(negative, "bud", project=tmp_path)
 
     res = draw_splits(

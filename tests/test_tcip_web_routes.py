@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import tcip_store
-from tcip_annotation.json_io import read_label_document
+from tcip_annotation.json_io import document_payload, read_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import image_dir, image_root, parse_image_path
 from tcip_mcp.pipelines.proposal import Proposal
@@ -27,6 +27,7 @@ from tests._producer_fixtures import (
     image_label_key,
     label_image,
     registry_over,
+    store_labels,
     write_image,
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
@@ -51,7 +52,6 @@ def _write_gt(
     *,
     w: int = 100,
     h: int = 80,
-    keep_empty: bool = False,
     subject: str = "bud",
 ) -> None:
     """Save the label document of ``image`` holding ``boxes`` of ``subject``.
@@ -59,7 +59,7 @@ def _write_gt(
     Each box is pixel-xyxy ``(x1, y1, x2, y2)``.
     """
     anns = [Annotation(subject=subject, geometry=BBox(*b)) for b in boxes]
-    label_image(image, anns, w, h, keep_empty=keep_empty)
+    label_image(image, anns, w, h)
 
 
 def _stored(image: Path) -> list[Annotation]:
@@ -707,8 +707,8 @@ def test_annotate_load_authorship_person_tool_and_unattributed(
     """The load route's authorship field classifies each record.
 
     A person's own created_by reads person, a bare producer with no accepted_by reads tool, and
-    no created_by at all reads unattributed. The records are written through ``label_image``,
-    the platform's own writer.
+    no created_by at all reads unattributed. The records are written as stored through
+    ``store_labels``, the platform's one writer of stored label records.
     """
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     anns = [
@@ -722,7 +722,7 @@ def test_annotate_load_authorship_person_tool_and_unattributed(
         ),
         Annotation(subject="bush", geometry=BBox(21, 21, 30, 30)),
     ]
-    label_image(img_path, anns, 100, 80)
+    store_labels(img_path, document_payload(anns, 100, 80))
 
     body = opened_client.get(
         "/api/annotate/labels",
@@ -764,7 +764,7 @@ def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
             accepted_by="user:breeder",
         ),
     ]
-    label_image(img_path, anns, 100, 80)
+    store_labels(img_path, document_payload(anns, 100, 80))
 
     body = opened_client.get(
         "/api/annotate/labels",
@@ -789,7 +789,7 @@ def test_annotate_load_authorship_tool_accepted_through_the_editor(
     tool proposal, not the person's own hand.
     """
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
-    _write_gt(img_path, [], keep_empty=True)
+    _write_gt(img_path, [])
     bucket = _write_pred(
         dataset_root, {img_path.name: [(40, 32, 60, 48, 0.9)]}, subject="bush"
     )
@@ -897,7 +897,7 @@ def test_annotate_save_refuses_a_token_the_document_has_moved_past(
     base = _save_box(opened_client, img_path).json()["document"]["base_mtime"]
 
     # A concurrent writer changes the document after our client loaded it.
-    _write_gt(img_path, [], keep_empty=True)
+    _write_gt(img_path, [])
 
     resp = opened_client.post(
         "/api/annotate/labels",
@@ -1714,7 +1714,9 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
     assert job.status == "failed"
     assert "a bucket is published once" in job.error
     assert (
-        tcip_store.read_versioned(bucket_key(dataset_root, launch.bucket)).version
+        tcip_store.read_versioned(
+            bucket_key(dataset_root, launch.bucket)
+        ).version
         == before
     )
     assert len(audit_rows(Path(dataset_root))) == logged
@@ -1746,7 +1748,9 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["bucket"] == f"{NAME}/{date}"
-    assert not tcip_store.exists(bucket_key(dataset_root, resp.json()["bucket"]))
+    assert not tcip_store.exists(
+        bucket_key(dataset_root, resp.json()["bucket"])
+    )
 
 
 def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
@@ -2169,19 +2173,21 @@ def test_annotate_load_returns_provenance(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
-    label_image(
+    store_labels(
         img_path,
-        [
-            Annotation(
-                subject="bud",
-                geometry=BBox(10, 10, 40, 40),
-                created_by="derived:user:breeder",
-                created_at="2026-02-11T00:00:00+00:00",
-                accepted_by="user:breeder",
-            )
-        ],
-        100,
-        80,
+        document_payload(
+            [
+                Annotation(
+                    subject="bud",
+                    geometry=BBox(10, 10, 40, 40),
+                    created_by="derived:user:breeder",
+                    created_at="2026-02-11T00:00:00+00:00",
+                    accepted_by="user:breeder",
+                )
+            ],
+            100,
+            80,
+        ),
     )
     resp = opened_client.get(
         "/api/annotate/labels",
@@ -2203,19 +2209,21 @@ def test_annotate_resave_preserves_original_creator(
     created by the saving annotator.
     """
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
-    label_image(
+    store_labels(
         img_path,
-        [
-            Annotation(
-                subject="bud",
-                geometry=BBox(10, 10, 40, 40),
-                created_by="derived:user:breeder",
-                created_at="2026-02-11T00:00:00+00:00",
-                accepted_by="user:breeder",
-            )
-        ],
-        100,
-        80,
+        document_payload(
+            [
+                Annotation(
+                    subject="bud",
+                    geometry=BBox(10, 10, 40, 40),
+                    created_by="derived:user:breeder",
+                    created_at="2026-02-11T00:00:00+00:00",
+                    accepted_by="user:breeder",
+                )
+            ],
+            100,
+            80,
+        ),
     )
     loaded = opened_client.get(
         "/api/annotate/labels", params={"image_path": str(img_path)}
@@ -2339,24 +2347,28 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
     from tcip_mcp.tools.annotation_tools import read_annotations as mcp_read
 
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
-    label_image(
+    store_labels(
         img_path,
-        [
-            Annotation(
-                subject="bud",
-                geometry=BBox(10, 10, 40, 40),
-                iscrowd=True,
-                created_by="user:breeder",
-                created_at="2026-02-11T00:00:00+00:00",
-            ),
-            Annotation(
-                subject="bud",
-                geometry=Polygon([[(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]]),
-                attributes={"stage": "open"},
-            ),
-        ],
-        100,
-        100,
+        document_payload(
+            [
+                Annotation(
+                    subject="bud",
+                    geometry=BBox(10, 10, 40, 40),
+                    iscrowd=True,
+                    created_by="user:breeder",
+                    created_at="2026-02-11T00:00:00+00:00",
+                ),
+                Annotation(
+                    subject="bud",
+                    geometry=Polygon(
+                        [[(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]]
+                    ),
+                    attributes={"stage": "open"},
+                ),
+            ],
+            100,
+            80,
+        ),
     )
 
     web = opened_client.get(
@@ -2377,18 +2389,22 @@ def test_annotate_polygons_keep_and_stamp_provenance(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
-    label_image(
+    store_labels(
         img_path,
-        [
-            Annotation(
-                subject="bud",
-                geometry=Polygon([[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)]]),
-                created_by="user:emily",
-                created_at="2026-03-02T00:00:00+00:00",
-            )
-        ],
-        100,
-        80,
+        document_payload(
+            [
+                Annotation(
+                    subject="bud",
+                    geometry=Polygon(
+                        [[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)]]
+                    ),
+                    created_by="user:emily",
+                    created_at="2026-03-02T00:00:00+00:00",
+                )
+            ],
+            100,
+            80,
+        ),
     )
     loaded = opened_client.get(
         "/api/annotate/labels", params={"image_path": str(img_path)}

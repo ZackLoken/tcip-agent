@@ -7,23 +7,25 @@ and stem).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue, StrictInt
 
 import tcip_store
 from tcip_annotation.flags import FlagRequest, ProposalTarget
 from tcip_annotation.verdicts import VerdictAction
+from tcip_mcp.workspace import PathSegment
 from tcip_store import Key, decode_value
 
 if TYPE_CHECKING:
     from tcip_annotation.json_io import LabelDocument
     from tcip_annotation.state import Annotation
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.subject_registry import SubjectRegistry
 
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
 TASKS = ("detect", "segment")
@@ -613,8 +615,12 @@ def save_label_document(
                     "stem": stem,
                     "n_annotations": len(annotations),
                     "version": version.token,
-                    "accepted": sorted(v.proposal for v in verdicts if v.action == "accepted"),
-                    "rejected": sorted(v.proposal for v in verdicts if v.action == "rejected"),
+                    "accepted": sorted(
+                        v.proposal for v in verdicts if v.action == "accepted"
+                    ),
+                    "rejected": sorted(
+                        v.proposal for v in verdicts if v.action == "rejected"
+                    ),
                     "confirmed": sorted(gestures.confirm),
                     "complete": dict(gestures.complete),
                     "flagged": [flag.id for flag in new_flags],
@@ -629,6 +635,216 @@ def save_label_document(
             ).stored(),
         )
     return version, label_document(written), accepted
+
+
+class ImageLabels(BaseModel):
+    """One image's label records as its dataset stores them.
+
+    ``document`` is its label document and ``flags`` its flags record, ``None`` for an image
+    holding no flags record.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document: dict[str, JsonValue]
+    flags: dict[str, JsonValue] | None
+
+
+class ImageFrame(BaseModel):
+    """An image claimed at the frame a source states for it, with no label record to write."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    width: StrictInt
+    height: StrictInt
+
+
+type CaptureLabels = dict[PathSegment, dict[str, ImageLabels | ImageFrame]]
+"""Images claimed by capture, then by the file name of the image each is for: each with its
+label records, or at a stated frame alone."""
+
+
+LABELS_IMPORTED = "labels_imported"
+"""The audit line every write of :func:`write_label_records` leaves."""
+
+
+def admitted(
+    dataset_root: Path,
+    labels: CaptureLabels,
+    registry: SubjectRegistry,
+) -> tuple[dict[Key, ImageLabels | ImageFrame], list[str]]:
+    """Return the label key of each image ``labels`` claims and what refuses writing them.
+
+    Each file name must name exactly one logical image its capture holds
+    (``image_utils.list_logical_images``): an ordinary image by its own file name, a band group by
+    its stem whatever the name's extension; two file names naming one image are refused. A
+    claim's stated frame (:class:`ImageFrame`), or its document's, must be the frame its image
+    decodes to (``SourceHeader.display_frame``); a document must read
+    (:func:`~tcip_annotation.json_io.label_document`) and its flags record must read
+    (:func:`~tcip_annotation.flags.flags_of`). Every subject a document's annotations and live
+    completion marks name must be declared by the dataset's registry as ``registry`` declares it,
+    each such fault naming the subject once with the images that name it. Each fault names what
+    to do instead; an image named no image is given no key.
+    """
+    from pydantic import ValidationError
+
+    from tcip_annotation.flags import flags_of
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocumentError,
+        label_document,
+    )
+    from tcip_mcp.pipelines.image_utils import (
+        BandGroupRef,
+        list_logical_images,
+        refuse_incomplete_band_group,
+        stem_of,
+    )
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.subject_registry import registry_for_dataset_root
+
+    keys: dict[Key, ImageLabels | ImageFrame] = {}
+    claimed: dict[Key, str] = {}
+    faults: list[str] = []
+    naming: dict[str, list[str]] = {}
+    for capture, names in labels.items():
+        images = list_logical_images(image_dir(dataset_root, capture))
+        for name, item in names.items():
+            where = f"{capture}/{name}"
+            image = images.get(Path(name).stem)
+            if not isinstance(image, BandGroupRef) and (
+                image is None or image.name != name
+            ):
+                faults.append(
+                    f"{where} names no image of {image_dir(dataset_root, capture)}; "
+                    "ingest the image with ingest_images first"
+                )
+                continue
+            key = label_key(dataset_root, capture, stem_of(image))
+            if key in claimed:
+                faults.append(
+                    f"{claimed[key]} and {where} name one image, {stem_of(image)!r}; "
+                    "name each image once"
+                )
+                continue
+            keys[key], claimed[key] = item, where
+            labeled: tuple[int | None, int | None]
+            if isinstance(item, ImageFrame):
+                labeled = (item.width, item.height)
+            else:
+                try:
+                    document = label_document(item.document)
+                    flags_of(item.flags)
+                except (UnreadableLabelDocumentError, ValidationError) as exc:
+                    faults.append(f"{where} does not read: {exc}")
+                    continue
+                labeled = (document.width, document.height)
+                for subject in {a.subject for a in document.annotations} | set(
+                    document.marks
+                ):
+                    naming.setdefault(subject, []).append(where)
+            frame = SourceHeader(
+                refuse_incomplete_band_group(image)
+            ).display_frame
+            if labeled != frame:
+                faults.append(
+                    f"{where} is labeled at {labeled}, but its image decodes to {frame}; "
+                    "ingest the image the labels were drawn on"
+                )
+    here = registry_for_dataset_root(dataset_root)
+    for subject, wheres in sorted(naming.items()):
+        declared = None if here is None else here.subject(subject)
+        if declared is None:
+            faults.append(
+                f"{sorted(wheres)} name the subject {subject!r}, which "
+                f"{subjects_path(dataset_root)} does not declare; declare it with "
+                "write_subject_registry"
+            )
+        elif declared != registry.subject(subject):
+            faults.append(
+                f"{sorted(wheres)} name the subject {subject!r}, which "
+                f"{subjects_path(dataset_root)} declares otherwise than the labels' registry; "
+                "write the labels' declaration with write_subject_registry"
+            )
+    return keys, faults
+
+
+def write_label_records(
+    dataset_root: Path,
+    labels: CaptureLabels,
+    *,
+    registry: SubjectRegistry,
+    faults: Sequence[str],
+    source: str,
+    digest: str,
+    facts: dict[str, JsonValue],
+    actor: str | None,
+) -> dict:
+    """Write the label records ``labels`` carries into the captures of ``dataset_root``, and a line.
+
+    Every image ``labels`` claims is admitted together (:func:`admitted`); the label records of
+    each claim carrying them (:class:`ImageLabels`) are written as stored, and a claim at a
+    stated frame alone (:class:`ImageFrame`) writes nothing. ``faults`` are the caller's own. Inside
+    one transaction they are refused together with the faults :func:`admitted` finds against
+    ``registry`` and with every label record to be written already present: any of them
+    refuses the write (``ValueError``) naming ``source`` and every fault, with nothing written.
+    Otherwise the label documents and flags records to be written, each at the key
+    :func:`admitted` resolved, and one :data:`LABELS_IMPORTED` line by ``actor`` on the
+    dataset's audit log commit together. The line's arguments are ``source``, ``facts`` and
+    ``written``, each capture's stems in order, beside ``source_digest``, the caller's digest of
+    the bytes the labels were read from; a write of no image commits nothing and leaves no line.
+    Returns the line's arguments.
+    """
+    from tcip_annotation.flags import flag_key
+    from tcip_mcp.audit import audit_line, audit_log_key
+
+    keys, found = admitted(dataset_root, labels, registry)
+    found = [*faults, *found]
+    writes: dict[Key, JsonValue] = {}
+    written: dict[str, list[str]] = {}
+    for key, item in sorted(keys.items(), key=lambda pair: pair[0].parts):
+        if isinstance(item, ImageFrame):
+            continue
+        writes[key] = item.document
+        if item.flags is not None:
+            writes[flag_key(key)] = item.flags
+        capture, stem = key.parts
+        written.setdefault(capture, []).append(stem)
+    arguments = {"source": source, **facts, "written": written}
+    audit = audit_log_key(dataset_root)
+    with tcip_store.transaction(audit, *writes) as txn:
+        present = sorted(
+            {
+                "/".join(key.parts)
+                for key in writes
+                if txn.read_versioned(key, default=None).version
+                != tcip_store.Version.ABSENT
+            }
+        )
+        if present:
+            found.append(
+                f"{dataset_root} already holds label records for {present}; import into a "
+                "dataset holding none for them"
+            )
+        if found:
+            raise ValueError(
+                f"{source} was not imported, nothing written: "
+                + "; ".join(found)
+            )
+        if not writes:
+            return arguments
+        for key, value in writes.items():
+            txn.write(key, value)
+        txn.append(
+            audit,
+            audit_line(
+                LABELS_IMPORTED,
+                arguments,
+                actor,
+                "ok",
+                {"source_digest": digest},
+            ).stored(),
+        )
+    return arguments
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:

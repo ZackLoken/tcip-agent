@@ -162,7 +162,7 @@ class TestEvaluatePredictionsDetail:
 def _write_empty_label(image: Path, w: int, h: int) -> None:
     from tests._producer_fixtures import label_image
 
-    label_image(image, [], w, h, keep_empty=True)
+    label_image(image, [], w, h)
 
 
 class TestEvaluateFolderEnumeration:

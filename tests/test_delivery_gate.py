@@ -171,10 +171,12 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
     An act recorded for six detections does not ship twelve: the delivery refuses as another
     result, writes no CSV, and the log holds the one acknowledgment line.
     """
+    import tcip_store
     from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
     from tests._audit_fixtures import audit_rows
     from tests._chain_fixtures import predicted
+    from tests._record_damage_fixtures import damage_record
 
     bucket = _bucket(
         tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT] * 6)]
@@ -191,9 +193,16 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
         _image(tmp_path, "a").stem
     )
     assert document is not None
-    annotations = json_io.read_predictions(document).annotations
-    # Twelve where six were published, as an edit in place would leave it: no head re-emits one.
-    json_io.write_label_document(document, annotations * 2, 64, 64)
+    published = json_io.read_predictions(document)
+    # Damage: twelve where six were published, as an edit in place would leave it.
+    damage_record(
+        document,
+        tcip_store.encode_record(
+            json_io.document_payload(
+                published.annotations * 2, 64, 64, cap=published.cap
+            )
+        ),
+    )
 
     with pytest.raises(DeliveryRefusedError, match="another result"):
         _deliver(tmp_path, bucket, act.acknowledgment_id)

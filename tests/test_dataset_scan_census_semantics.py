@@ -11,13 +11,13 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, label_key
+from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir
 from tcip_mcp.tools.data_tools import scan_dataset
 from tests._producer_fixtures import (
     WrittenDataset,
-    image_label_key,
+    label_image,
+    published_document,
     write_jpegs,
 )
 
@@ -37,12 +37,9 @@ def _lopsided_dataset(root: Path) -> WrittenDataset:
         ["plotA_0_0", "plotA_0_1", "plotB_0_0", "plotB_0_1", "plotC_0_0"],
         (96, 64),
     )
-    for key in (
-        *(image_label_key(image) for image in images[:2]),
-        label_key(root, DATE, "plotZ_9_9"),
-    ):
-        json_io.write_label_document(
-            key,
+    for image in (*images[:2], images_dir / "plotZ_9_9.jpg"):
+        label_image(
+            image,
             [Annotation(subject=SUBJECT, geometry=BBox(11, 7, 39, 51))],
             96,
             64,
@@ -81,7 +78,7 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(
     predictions.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.dataset_layout import bucket_key, prediction_key
+    from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import published
 
     root, _images_dir, images = _lopsided_dataset(tmp_path / "ds")
@@ -102,12 +99,16 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(
         ],
         scope={"subject": SUBJECT},
     )
-    json_io.write_label_document(
-        prediction_key(root, f"staged/{DATE}", "plotC_0_0"),
+    published_document(
+        tmp_path,
+        f"staged/{DATE}",
+        images[4],
         [Annotation(subject=SUBJECT, geometry=BBox(12, 8, 40, 52), score=0.8)],
         96,
         64,
     )
+    # Damage: the staged bucket's record removed, its document left behind.
+    ts.delete(bucket_key(root, f"staged/{DATE}"))
 
     result = scan_dataset(tmp_path, str(root))
 

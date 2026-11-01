@@ -10,11 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.dataset_layout import image_dir, label_key
 from tcip_mcp.tools.gui_tools import focus_human_attention
-from tests._producer_fixtures import stub_images
+from tests._producer_fixtures import label_image, stub_images
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -23,9 +22,9 @@ if TYPE_CHECKING:
 def _label(
     root: Path, subject: str, date: str, task: str, stem: str, count: int
 ) -> None:
-    """Write the per-image label document, holding ``count`` shapes of ``subject``.
+    """Save the per-image label document, holding ``count`` shapes of ``subject``.
 
-    ``count`` 0 writes a present empty document, else ``count`` shapes of ``subject`` with the
+    ``count`` 0 saves a present empty document, else ``count`` shapes of ``subject`` with the
     geometry ``task`` names: ``segment`` a polygon, ``point`` a point, any other task a box.
     """
     geoms = {
@@ -36,9 +35,7 @@ def _label(
     for _ in range(count):
         geom = geoms.get(task, BBox(10.0, 10.0, 20.0, 20.0))
         anns.append(Annotation(subject=subject, geometry=geom))
-    json_io.write_label_document(
-        label_key(root, date, stem), anns, 100, 100, keep_empty=True
-    )
+    label_image(image_dir(root, date) / f"{stem}.JPG", anns, 100, 100)
 
 
 def _unreadable(root: Path, date: str, stem: str) -> None:

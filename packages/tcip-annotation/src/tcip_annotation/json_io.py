@@ -1015,31 +1015,6 @@ def document_payload(
     return payload
 
 
-def write_label_document(
-    key: Key,
-    annotations: Iterable[Annotation],
-    width: int,
-    height: int,
-    *,
-    keep_empty: bool = False,
-    expect: Version | None = None,
-    marks: Mapping[str, list[CompletionMark]] | None = None,
-) -> Version | None:
-    """Write all of an image's annotations as the document ``key`` names.
-
-    The completion ``marks`` still live over them are written with them
-    (:func:`document_payload`). A document holding neither an annotation nor a live mark is
-    written empty under ``keep_empty``, else removed. ``expect`` (a version token) makes the write
-    a compare-and-set raising ``VersionConflictError`` with nothing written. Returns the new
-    version, or ``None`` when the document was removed.
-    """
-    payload = document_payload(annotations, width, height, marks=marks)
-    if not (keep_empty or payload[ANNOTATIONS_KEY] or COMPLETION_KEY in payload):
-        tcip_store.delete(key, expect=expect)
-        return None
-    return tcip_store.replace(key, payload, expect=expect)
-
-
 # ── attribute values as ids ──────────────────────────────────────────────────
 
 

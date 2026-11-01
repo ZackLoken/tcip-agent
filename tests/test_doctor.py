@@ -89,8 +89,8 @@ def _project(tmp_path: Path) -> Path:
         for name in ("IMG_A", "IMG_B", "IMG_C")
     )
     # A: confirmed negative (empty + a mark). B: empty with no mark. C: holds an object.
-    label_image(a, [], 32, 32, keep_empty=True)
-    label_image(b, [], 32, 32, keep_empty=True)
+    label_image(a, [], 32, 32)
+    label_image(b, [], 32, 32)
     label_image(
         c, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32
     )
@@ -160,7 +160,7 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path: Path) -> None:
     registry_over(root, registry_of("bud"))
     jpeg = write_image(images / "foo.jpg", (32, 32))
     write_image(images / "foo.png", (32, 32))
-    label_image(jpeg, [], 32, 32, keep_empty=True)
+    label_image(jpeg, [], 32, 32)
 
     found = _diagnosed(root)
 
@@ -257,7 +257,7 @@ def test_the_tool_through_a_handshake_answers_the_functions_findings_and_leaves_
         write_image(images / f"{name}.JPG", (32, 32))
         for name in ("IMG_E", "IMG_U")
     )
-    label_image(labeled, [], 32, 32, keep_empty=True)
+    label_image(labeled, [], 32, 32)
     fx.propose(root, fx.entry("leaf", ("leaf_length",)))
     before = audit_rows(root)
 
@@ -292,7 +292,6 @@ def test_diagnosing_a_rollback_journal_database_changes_and_locks_nothing(
         [],
         32,
         32,
-        keep_empty=True,
     )
     bound = binding_for(root)
     ts.release_root(root)
@@ -334,7 +333,7 @@ def test_an_unmarked_empty_label_is_named_by_its_capture_and_stem(
     date = "2026-03-04"
     root, images = _layout_project(tmp_path, date)
     image = write_image(images / "IMG_R.JPG", (48, 32))
-    label_image(image, [], 48, 32, keep_empty=True)
+    label_image(image, [], 48, 32)
 
     found = _diagnosed(root)
 
@@ -355,7 +354,7 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(
     new_project(root)
     registry_over(root, registry_of("bud"))
     image = write_image(images / "IMG_F.JPG", (40, 24))
-    label_image(image, [], 40, 24, keep_empty=True)
+    label_image(image, [], 40, 24)
     mark_complete(image, "bud", project=root)
 
     found = _diagnosed(root)
@@ -678,7 +677,9 @@ def _reviewed_bucket(
             height=32,
             author="user:breeder",
             actor=None,
-            gestures=Gestures(decide=Decisions(bucket=name, verdicts={0: "rejected"})),
+            gestures=Gestures(
+                decide=Decisions(bucket=name, verdicts={0: "rejected"})
+            ),
         )
     return name
 
@@ -824,7 +825,7 @@ def _unreadable_label(image: Path) -> None:
     """Write a label document for ``image`` and damage its stored bytes so they do not decode."""
     from tests._record_damage_fixtures import damage_record
 
-    label_image(image, [], 32, 32, keep_empty=True)
+    label_image(image, [], 32, 32)
     damage_record(image_label_key(image), b"not json {][")
 
 
@@ -855,7 +856,7 @@ def test_a_marked_empty_label_is_clean_to_the_data_quality_check(
     """
     root, images = _layout_project(tmp_path, "2026-03-04")
     image = write_image(images / "IMG_S.JPG", (32, 32))
-    label_image(image, [], 32, 32, keep_empty=True)
+    label_image(image, [], 32, 32)
     mark_complete(image, "bud", project=root)
 
     findings: list[tuple[str, str]] = []

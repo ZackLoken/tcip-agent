@@ -36,6 +36,7 @@ from tcip_mcp.dataset_layout import (
 from tests._producer_fixtures import (
     image_label_key,
     label_image,
+    published_document,
     registry_of,
     saved_annotations,
     scope_over,
@@ -67,8 +68,11 @@ def test_point_round_trips_through_the_per_image_document(
     tmp_path: Path,
 ) -> None:
     key = label_key(tmp_path, UNDATED_BUCKET, "IMG_0001")
-    json_io.write_label_document(
-        key, [Annotation(subject="bud", geometry=Point(12.5, 34.25))], 100, 80
+    label_image(
+        image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.png",
+        [Annotation(subject="bud", geometry=Point(12.5, 34.25))],
+        100,
+        80,
     )
 
     stored = tcip_store.read(key)
@@ -87,8 +91,8 @@ def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_document(
     tmp_path: Path,
 ) -> None:
     key = label_key(tmp_path, UNDATED_BUCKET, "IMG_0002")
-    json_io.write_label_document(
-        key,
+    label_image(
+        image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0002.png",
         [
             Annotation(subject="bud", geometry=BOX),
             Annotation(subject="bud", geometry=Polygon([RING])),
@@ -123,7 +127,12 @@ def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
         Annotation(subject="bud", geometry=BOX),
     ]
     key = label_key(tmp_path, UNDATED_BUCKET, "IMG_0001")
-    json_io.write_label_document(key, annotations, 100, 80)
+    label_image(
+        image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.png",
+        annotations,
+        100,
+        80,
+    )
     stored = json_io.read_label_document(key).annotations
     target = json_det_targets(
         stored, scope_over(tmp_path / "plain", registry_of("bud"), "bud")
@@ -235,32 +244,16 @@ def test_records_from_annotation_omits_a_point_and_its_category() -> None:
 def test_worst_predictions_does_not_count_a_point_as_a_detection(
     tmp_path: Path,
 ) -> None:
-    pytest.importorskip("torch")
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.vision_tools import get_worst_predictions
-    from tests._chain_fixtures import published
 
     image = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.jpg")
     label_image(image, [Annotation(subject="bud", geometry=BOX)], 100, 80)
-    bucket = published(
+    # A point published beside the box.
+    bucket = published_document(
         tmp_path,
         "pred/2026-01-01",
-        [
-            {
-                "image": str(image),
-                "width": 100,
-                "height": 80,
-                "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]],
-                "scores": [1.0],
-                "labels": [1],
-                "cap": 2,
-            }
-        ],
-        scope={"subject": "bud"},
-    )
-    # A point beside the published box, as an edit in place would leave it: no head emits one.
-    json_io.write_label_document(
-        bucket.document_key(image.stem),
+        image,
         [
             Annotation(subject="bud", geometry=BOX, score=1.0),
             Annotation(subject="bud", geometry=Point(60.0, 60.0), score=1.0),
@@ -278,13 +271,13 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(
 
 
 def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
-    from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
     from tcip_mcp.traits import PositiveState
 
-    path = prediction_key(tmp_path, "m/2026-01-01", "IMG_0001")
-    json_io.write_label_document(
-        path,
+    path = published_document(
+        tmp_path,
+        "m/2026-01-01",
+        image_dir(tmp_path, "2026-01-01") / "IMG_0001.png",
         [
             Annotation(
                 subject="bud",
@@ -301,7 +294,8 @@ def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
         ],
         100,
         80,
-    )
+    ).document_key("IMG_0001")
+    assert path is not None
     total, positive, unclassified = count_by_class(
         path,
         PositiveState(attribute="opening", value="open"),

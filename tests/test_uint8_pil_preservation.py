@@ -311,7 +311,6 @@ def _detection_project(
         [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
         w,
         h,
-        keep_empty=True,
     )
     return images_dir
 

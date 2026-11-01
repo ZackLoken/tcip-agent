@@ -18,7 +18,11 @@ from tcip_mcp import subject_registry as cr
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import PositiveState
-from tests._producer_fixtures import registry_of, scope_over
+from tests._producer_fixtures import (
+    published_document,
+    registry_of,
+    scope_over,
+)
 from tests._training_values import VERTEX_SPACING
 
 if TYPE_CHECKING:
@@ -29,11 +33,19 @@ COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "high"))
 
 
-def _document(tmp_path: Path) -> Key:
-    """Return the key of a prediction document of the bucket ``m`` under ``tmp_path``."""
-    from tcip_mcp.dataset_layout import prediction_key
+def _published(
+    tmp_path: Path, name: str, annotations: list[Annotation]
+) -> Key:
+    """Publish ``annotations`` at 8 px as the bucket ``name``'s document of ``img``; return its key.
 
-    return prediction_key(tmp_path, "m", "img")
+    The publication is :func:`~tests._producer_fixtures.published_document`'s.
+    """
+    image = image_dir(tmp_path, "2024-05-01") / "img.png"
+    key = published_document(tmp_path, name, image, annotations, 8, 8).document_key(
+        "img"
+    )
+    assert key is not None
+    return key
 
 
 def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts_none_positive(
@@ -44,9 +56,9 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
     Under a scope declaring only ``color``, a record carrying the state's ``grade`` value counts
     as one object, no positive and one unclassified.
     """
-    p = _document(tmp_path)
-    json_io.write_label_document(
-        p,
+    p = _published(
+        tmp_path,
+        "m",
         [
             Annotation(
                 subject=SUBJECT,
@@ -55,8 +67,6 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
                 attributes={"grade": "high"},
             )
         ],
-        8,
-        8,
     )
 
     total, positive, unclassified = phenology.count_by_class(
@@ -76,9 +86,9 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(
     Under a scope declaring ``color`` and ``grade``, the state's own ``grade`` decides, not
     ``color``; a record carrying no ``grade`` value refuses by name.
     """
-    p = _document(tmp_path)
-    json_io.write_label_document(
-        p,
+    p = _published(
+        tmp_path,
+        "m",
         [
             Annotation(
                 subject=SUBJECT,
@@ -93,16 +103,15 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(
                 attributes={"color": "blue", "grade": "low"},
             ),
         ],
-        8,
-        8,
     )
     scope = scope_over(tmp_path, registry_of(SUBJECT, COLOR, GRADE), SUBJECT)
 
     assert phenology.count_by_class(
         p, PositiveState(attribute="grade", value="high"), scope=scope
     ) == (2, 1, 0)
-    json_io.write_label_document(
-        p,
+    unassessed = _published(
+        tmp_path,
+        "m2",
         [
             Annotation(
                 subject=SUBJECT,
@@ -111,12 +120,12 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(
                 attributes={"color": "red"},
             )
         ],
-        8,
-        8,
     )
     with pytest.raises(json_io.UndeclaredValueError, match="'grade'"):
         phenology.count_by_class(
-            p, PositiveState(attribute="grade", value="high"), scope=scope
+            unassessed,
+            PositiveState(attribute="grade", value="high"),
+            scope=scope,
         )
 
 

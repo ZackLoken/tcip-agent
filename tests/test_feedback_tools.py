@@ -80,7 +80,7 @@ def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
     images = image_dir(root, DATE)
     for stem in ("imgA", "imgB"):
         image = write_image(images / f"{stem}.png", (64, 64), (120, 120, 120))
-        label_image(image, [], 64, 64, keep_empty=True)
+        label_image(image, [], 64, 64)
         if stem in marked:
             mark_complete(image, "bud", project=tmp_path)
     return images
@@ -739,7 +739,7 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
     images = image_dir(tmp_path, UNDATED_BUCKET)
     for stem in ("a", "b", "c"):
         write_image(images / f"{stem}.png", (64, 64), (90, 110, 70))
-    label_image(images / "c.png", [], 64, 64, keep_empty=True)
+    label_image(images / "c.png", [], 64, 64)
     mark_complete(images / "c.png", "bud", project=tmp_path)
 
     r = prioritize_review_queue(

@@ -33,6 +33,7 @@ from tests._chain_fixtures import (  # noqa: E402
     synthetic_capture,
     train_on,
 )
+from tests._producer_fixtures import label_image  # noqa: E402
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 
@@ -140,9 +141,7 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(
         reads: dict[Key | str, Versioned],
     ) -> tuple[list[RetainedFile], list[Sample]]:
         edited.append(samples[0].ground_truth)
-        json_io.write_label_document(
-            samples[0].ground_truth, [], IMG, IMG, keep_empty=True
-        )
+        label_image(samples[0].source, [], IMG, IMG)
         return real_retained(run_dir, samples, reads)
 
     monkeypatch.setattr(assessment_mod, "_retained", edited_first)
@@ -182,8 +181,8 @@ def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass
         "calibration"
     ):
         held = json_io.read_label_document(sample.ground_truth).annotations
-        json_io.write_label_document(
-            sample.ground_truth,
+        label_image(
+            sample.source,
             [
                 *held,
                 Annotation(subject=SUBJECT, geometry=BBox(50, 50, 60, 60)),
@@ -343,9 +342,7 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
             )
         )
     else:
-        json_io.write_label_document(
-            member.ground_truth, annotations, IMG, IMG
-        )
+        label_image(member.source, annotations, IMG, IMG)
 
     out_csv = tmp_path / "per_image_counts.csv"
     delivered = deliver_per_image_counts(

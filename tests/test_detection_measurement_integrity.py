@@ -727,7 +727,7 @@ def _full_frame(
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     image = write_image(images_dir / "a.png", (128, 128))
-    label_image(image, annotations, 128, 128, keep_empty=True)
+    label_image(image, annotations, 128, 128)
     install(monkeypatch, stub)
     checkpoint = checkpoint or verified_checkpoint(tmp_path)
     return run_full_frame_evaluation(

@@ -18,6 +18,7 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_annotation.verdicts import read_verdicts
 from tcip_mcp.dataset_layout import (
+    LABELS_IMPORTED,
     Decisions,
     Gestures,
     image_dir,
@@ -31,7 +32,6 @@ from tests._producer_fixtures import (
     label_image,
     registry_of,
     registry_over,
-    save_labels,
     staged_box,
     write_image,
 )
@@ -70,19 +70,23 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
     image = _capture(image_dir(tmp_path, DATE))[0]
     bucket = staged_box(tmp_path, image, [24.0, 24.0, 40.0, 40.0])
     shard = verdict_key_of(image_label_key(image), bucket)
-    first = save_labels(
-        tmp_path, image, [{"subject": BUD, "bbox": [1.0, 1.0, 9.0, 9.0]}]
+    first = label_image(
+        image,
+        [{"subject": BUD, "bbox": [1.0, 1.0, 9.0, 9.0]}],
+        project=tmp_path,
     )[0]
-    save_labels(tmp_path, image, [], expect=first)
+    label_image(image, [], project=tmp_path, expect=first)
     saves = len(audit_rows(tmp_path, "save_label_document"))
 
     with pytest.raises(ts.VersionConflictError):
-        save_labels(
-            tmp_path,
+        label_image(
             image,
             [],
+            project=tmp_path,
             expect=first,
-            gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
+            gestures=Gestures(
+                decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+            ),
         )
 
     assert read_verdicts(shard) == []
@@ -92,12 +96,14 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
     assert len(audit_rows(tmp_path, "save_label_document")) == saves
 
     current = ts.read_versioned(image_label_key(image)).version
-    save_labels(
-        tmp_path,
+    label_image(
         image,
         [],
+        project=tmp_path,
         expect=current,
-        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+        ),
     )
 
     assert [v.action for v in read_verdicts(shard)] == ["accepted"]
@@ -173,19 +179,19 @@ def test_a_coco_import_writes_every_document_or_none(
     assert [ts.exists(image_label_key(p)) for p in images] == [False] * len(
         images
     )
-    assert audit_rows(root, "coco_document_imported") == []
+    assert audit_rows(root, LABELS_IMPORTED) == []
 
     monkeypatch.setattr(audit.AuditLine, "stored", real_stored)
     imported = import_coco_document(
         document, root, date=DATE, project=root, **stated, actor=None
     )
 
-    assert imported["written"] == list(STEMS)
+    assert imported["written"] == {DATE: list(STEMS)}
     assert [
         len(json_io.read_label_document(image_label_key(p)).annotations)
         for p in images
     ] == [1, 1, 1]
-    assert len(audit_rows(root, "coco_document_imported")) == 1
+    assert len(audit_rows(root, LABELS_IMPORTED)) == 1
 
 
 def test_an_import_refuses_over_a_present_record_whatever_it_holds(
@@ -203,7 +209,7 @@ def test_an_import_refuses_over_a_present_record_whatever_it_holds(
     ts.replace(image_label_key(images[-1]), None)
 
     with pytest.raises(
-        ValueError, match=r"already holds a label document for \['c'\]"
+        ValueError, match=rf"already holds label records for \['{DATE}/c'\]"
     ):
         import_coco_document(
             _coco(tmp_path, images),
@@ -415,11 +421,16 @@ def test_the_dump_decodes_to_the_documents_the_platform_reads(
 
     root = tmp_path / "ds"
     images = _capture(image_dir(root, DATE))
-    save_labels(
-        tmp_path, images[0], [{"subject": BUD, "bbox": [1.0, 1.0, 9.0, 9.0]}]
+    label_image(
+        images[0],
+        [{"subject": BUD, "bbox": [1.0, 1.0, 9.0, 9.0]}],
+        project=tmp_path,
     )
-    save_labels(
-        tmp_path, images[1], [], gestures=Gestures(complete={BUD: True})
+    label_image(
+        images[1],
+        [],
+        project=tmp_path,
+        gestures=Gestures(complete={BUD: True}),
     )
     bucket = staged_box(tmp_path, images[2], [24.0, 24.0, 40.0, 40.0])
     keys = [

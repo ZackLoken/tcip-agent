@@ -863,7 +863,7 @@ def _write_canopy_document(
         )
         for (x0, y0, x1, y1) in boxes
     ]
-    label_image(raster_path, anns, 64, 64, keep_empty=True)
+    label_image(raster_path, anns, 64, 64)
 
 
 def test_canopy_segments_attribute_by_containment_and_name_every_gap(
