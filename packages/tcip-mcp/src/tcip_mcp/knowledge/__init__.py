@@ -1,8 +1,9 @@
 """The domain-knowledge directory and its reader.
 
 Every document a client reaches is a file under :data:`KNOWLEDGE_DIR`: the domain documents beside
-this module and the per-crop documents plus ``crops.yml`` (the trait authority) under ``crops/``.
-The two-field frontmatter (``name``, ``description``) each document carries is its selection hint.
+this module and the per-crop documents under ``crops/``, each selected by the two-field
+frontmatter (``name``, ``description``) it carries, and :data:`CROPS`, the trait authority's
+``crops.yml`` beside them, whose name and description are stated here.
 """
 
 from __future__ import annotations
@@ -23,6 +24,18 @@ class DocumentInfo:
     name: str
     description: str
     path: Path
+
+
+CROPS = DocumentInfo(
+    name="crops",
+    description=(
+        "The trait authority, crops.yml, served whole: the name, definition, format, units and "
+        "crops of every trait. Read it before asserting that a trait exists, naming one in a "
+        "revision or a delivery, or assigning one to a crop."
+    ),
+    path=KNOWLEDGE_DIR / "crops" / "crops.yml",
+)
+"""The trait vocabulary, served under its own name and description with its text whole."""
 
 
 def _iter_markdown_paths() -> list[Path]:
@@ -77,26 +90,27 @@ def _parse_frontmatter(path: Path) -> tuple[dict, str]:
 def list_documents() -> list[DocumentInfo]:
     """List every knowledge document's name, description and path.
 
-    One entry per ``.md`` file under :data:`KNOWLEDGE_DIR`. Raises ``ValueError`` naming the file
-    for a document whose frontmatter is missing or malformed, and the same error for a document
-    whose name duplicates an earlier one.
+    One entry per ``.md`` file under :data:`KNOWLEDGE_DIR`, then :data:`CROPS`. Raises
+    ``ValueError`` naming the file for a document whose frontmatter is missing or malformed, and
+    the same error for a document whose name duplicates an earlier one.
     """
     documents: list[DocumentInfo] = []
     seen: dict[str, Path] = {}
     for path in _iter_markdown_paths():
         front, _ = _parse_frontmatter(path)
-        name = front["name"]
-        if name in seen:
-            raise ValueError(
-                f"{path}: document name {name!r} duplicates {seen[name]}; every knowledge "
-                "document name must be unique"
-            )
-        seen[name] = path
         documents.append(
             DocumentInfo(
-                name=name, description=front["description"], path=path
+                name=front["name"], description=front["description"], path=path
             )
         )
+    documents.append(CROPS)
+    for document in documents:
+        if document.name in seen:
+            raise ValueError(
+                f"{document.path}: document name {document.name!r} duplicates "
+                f"{seen[document.name]}; every knowledge document name must be unique"
+            )
+        seen[document.name] = document.path
     return documents
 
 
@@ -117,14 +131,11 @@ def document_path(name: str) -> Path:
 
 
 def read_document(name: str) -> str:
-    """Return one named document's body, its frontmatter stripped.
+    """Return one named document's body, its frontmatter stripped, or :data:`CROPS`'s text whole.
 
     Raises ``KeyError`` for a name no document declares.
     """
+    if name == CROPS.name:
+        return CROPS.path.read_bytes().decode("utf-8")
     _, body = _parse_frontmatter(document_path(name))
     return body
-
-
-def crops_yml_path() -> Path:
-    """Return the path of ``crops.yml``."""
-    return KNOWLEDGE_DIR / "crops" / "crops.yml"

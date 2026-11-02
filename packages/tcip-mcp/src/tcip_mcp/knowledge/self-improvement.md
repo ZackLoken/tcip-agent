@@ -6,29 +6,29 @@ description: "How the agent turns friction and findings into a durable record th
 # Self-improvement: learning that stays with the project
 
 Learning lands with the project it came from, in that project's `.tcip/` store. Nothing a
-session learns writes into the repo: skills, `CLAUDE.md`, and platform code change only when the
-owner changes them.
+session learns writes into the platform: the knowledge documents, the operating contract among
+them, and platform code change only when the owner changes them.
 
 Where something is genuinely general, the owner is the transport: they read these records and
 decide what becomes a platform change.
 
-This document is itself one of the platform's domain knowledge documents. Claude Code reaches it
-as a generated skill; a client without generated skills reaches the identical text through the
-`serve_domain_knowledge` tool.
+This document is itself one of the platform's domain knowledge documents. Every harness reaches it
+as a skill of its name, which reads it through the `serve_domain_knowledge` tool.
 
-The loop is three live tools, no separate journal file; the two that write are audited:
+The `operating-contract` document's posture says when friction is reported and when work ends in
+a retrospective; this document is how. The loop is three live tools, no separate journal file;
+the two that write are audited:
 
-| When | Tool | Lands |
+| Record | Tool | Lands |
 |---|---|---|
-| The moment friction happens | `report_friction` | the project's friction reports |
-| End of substantial work, even if incomplete | `write_retrospective` | the project's retrospectives |
-| Before a long wait on a run, as the `training` skill states it | `write_retrospective`, as a hand-off | the project's retrospectives |
-| Start of the next session | `load_project_memory`, as the `project-setup` skill's Orient step reads it | read back into context |
+| A friction report | `report_friction` | the project's friction reports |
+| A retrospective, even of incomplete work | `write_retrospective` | the project's retrospectives |
+| A hand-off before a long wait on a run, as the `training` skill states it | `write_retrospective` | the project's retrospectives |
+| The project's memory, as the `project-setup` skill's Orient step reads it | `load_project_memory` | read back into context |
 
-## Capture: the moment friction happens
+## Capture: what counts as friction
 
-Call `report_friction` when you notice any of these. One line is enough in the moment; the free-text
-`detail` matters far more than the category.
+Each of these is friction for `report_friction`; one line in its free-text `detail` is enough.
 
 - Pushback / correction: "no, do it this way", "don't do X", "actually it's Y". Call
   `report_friction` with `user_disagreement=True` for these; it's a separate signal from
@@ -43,14 +43,14 @@ Call `report_friction` when you notice any of these. One line is enough in the m
 - Environment / setup friction: a missing dependency, a stale path, a slow default.
 - A blocked or failed mandated action: a mandated call that errored, a permission rule that denied
   a read-only command, a new agent terminal conversation that started with no orientation in its
-  context (a resumed one is told nothing new by design). Never skip one silently.
+  context (a resumed one is told nothing new by design).
 
 Over-report.
 
 ## Record: what the retrospective should contain
 
-At the end of substantial work, call `write_retrospective`. Write what a future session working
-this project would need, and be honest about what failed.
+A retrospective holds what a future session working this project would need, and is honest about
+what failed.
 
 - What you measured about this dataset: object scale and elongation from the GT, capture
   cadence and missing dates, class imbalance, where the operating point resolved and on what
@@ -58,8 +58,8 @@ this project would need, and be honest about what failed.
 - What you tried that did not work: dead ends, approaches abandoned and why.
 - Assumptions that turned out wrong.
 - Domain questions for the breeder: anything about what a trait *means* that you could not
-  settle from `crops.yml`. Trait semantics are the expert's to confirm; surface the question,
-  never invent the answer.
+  settle from `crops.yml` (`serve_domain_knowledge(name='crops')`). Trait semantics are the
+  expert's to confirm; surface the question, never invent the answer.
 - Tools that were missing or unusable.
 
 ### The hand-off before a long wait
@@ -71,7 +71,8 @@ for.
 ### What must not go in a retrospective
 
 - A reusable pipeline shape. Record what you *measured* that led you to a shape, not the shape.
-- An inventory of existing machinery. Read the source, or run `tools/list_tools.py`.
+- An inventory of existing machinery. Your harness's tool list and the `toolkit-inventory`
+  document hold it.
 - A workaround as technique: a tool's module imported and called in place of the tool, or a label
   saved under another person's name. Report it with `report_friction` as the friction it was.
 
@@ -83,7 +84,7 @@ written, applied, or promoted. After reviewing a worksheet, call `record_distill
 the one audited write in this loop, kept out of the script. It acts on the project this server was
 started for (a worksheet covering other projects is recorded by a server started for each) and
 only records the pass in that project's audit log, from which `inspect_project` counts the
-backlog since it; turning a recurring theme into a skill line, a `CLAUDE.md` rule, or a tool
+backlog since it; turning a recurring theme into a skill line, an operating-contract rule, or a tool
 change stays your own separate edit, per the scoping above.
 
 ## Reading the record back

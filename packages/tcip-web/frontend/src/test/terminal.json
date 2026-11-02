@@ -74,8 +74,6 @@
         "<settings>",
         "--setting-sources",
         "project",
-        "--add-dir",
-        "<add-dir>",
         "--permission-mode",
         "default",
         "--mcp-config",
@@ -83,8 +81,11 @@
         "--strict-mcp-config"
       ],
       "version": "FAKE_TERMINAL_READY",
-      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
-      "prepared": [],
+      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, resolved against the workspace it runs in and merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
+      "prepared": [
+        "wrote the operating contract into /scratch/workspace/CLAUDE.md",
+        "wrote 19 knowledge skills under /scratch/workspace/.claude/skills"
+      ],
       "resumed": {
         "kind": "not_resumed",
         "why": "This project records no earlier session of Claude Code, so this launch starts a new conversation."
@@ -101,8 +102,6 @@
         "<settings>",
         "--setting-sources",
         "project",
-        "--add-dir",
-        "<add-dir>",
         "--permission-mode",
         "default",
         "--mcp-config",
@@ -112,8 +111,11 @@
         "conv-1"
       ],
       "version": "FAKE_TERMINAL_READY",
-      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
-      "prepared": [],
+      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, resolved against the workspace it runs in and merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
+      "prepared": [
+        "wrote the operating contract into /scratch/workspace/CLAUDE.md",
+        "wrote 19 knowledge skills under /scratch/workspace/.claude/skills"
+      ],
       "resumed": { "kind": "resumed", "conversation": "conv-1", "session": "<session 7>" }
     }
   },
