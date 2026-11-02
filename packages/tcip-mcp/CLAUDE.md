@@ -1,7 +1,7 @@
 # packages/tcip-mcp
 
-MCP server package (`python -m tcip_mcp`). Loads on top of the root `CLAUDE.md`: invariants,
-operating posture, and pipeline/model rules there apply here and aren't restated.
+MCP server package (`python -m tcip_mcp`). Loads on top of the root `CLAUDE.md` and the operating
+contract it imports, which apply here and aren't restated.
 
 ## Layout
 
@@ -9,9 +9,8 @@ operating posture, and pipeline/model rules there apply here and aren't restated
 src/tcip_mcp/
   server.py, __main__.py   # MCP entry point; registers all tool modules
   knowledge/      # the canonical domain-knowledge directory (the domain documents plus
-                  # crops/<crop>.md, crops/crops.yml), read through __init__.py; source
-                  # for the generated Claude Code, Codex and Antigravity skills, AGENTS.md's
-                  # generated block, and the serve_domain_knowledge tool
+                  # crops/<crop>.md, crops/crops.yml), read through __init__.py, served by
+                  # serve_domain_knowledge and written for each harness by harness_files.py
   cli/            # the operator-only command modules, and run_tool, the one adapter running any
                   # registered tool as the tcip command of its own name
   tools/          # domain tools, one module per area: annotation, calibration (the assessment

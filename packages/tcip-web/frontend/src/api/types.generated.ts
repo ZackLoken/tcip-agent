@@ -310,6 +310,7 @@ export type SessionOrientation = Told | NothingTold;
 export interface SessionStartReport {
   conversation: string;
   source: "startup" | "resume" | "clear" | "compact" | "fork";
+  transcript_path: string | null;
 }
 
 export interface SubmitRequest {

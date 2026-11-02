@@ -149,20 +149,13 @@ class TraitUnknownError(KeyError):
     """Raised for a trait with no record in the project, listing the traits it has."""
 
 
-def crops_yml_path() -> Path:
-    """Return the crops.yml controlled vocabulary file's path."""
-    from tcip_mcp.knowledge import crops_yml_path as _knowledge_crops_yml_path
-
-    return _knowledge_crops_yml_path()
-
-
 def _crops_traits() -> list[dict]:
     """Read crops.yml's trait records whole; a file that is missing or will not parse raises."""
     import yaml
 
-    return yaml.safe_load(crops_yml_path().read_text(encoding="utf-8"))[
-        "traits"
-    ]
+    from tcip_mcp.knowledge import CROPS, read_document
+
+    return yaml.safe_load(read_document(CROPS.name))["traits"]
 
 
 def registered_crops() -> set[str]:

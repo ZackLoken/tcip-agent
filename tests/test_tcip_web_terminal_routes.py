@@ -29,11 +29,13 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
+from tcip_mcp.knowledge import harness_files, list_documents, read_document
 from tcip_web import terminal as pty_host
 from tcip_web.app import app
 from tcip_web.routes import terminal as terminal_routes
 from tcip_web.routes.audit_gap import AuditGapRefusal
 from tcip_web.state import OpenProject
+from tests import REPO_ROOT
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._terminal_fixtures import (
     ABSENT,
@@ -367,7 +369,10 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     exec form in its handed settings, whose permission lists are the shipped ones and name no
     console command, Codex's as a shell line in its overrides, and Antigravity's as a shell line
     naming the session's start route in the workspace's hooks file, beside allowing only the
-    tcip tools.
+    tcip tools. Each row's preparation writes the operating contract, the knowledge document's
+    text, and every document's skill into the workspace where its harness reads them. With the
+    backend's ``PYTHONPATH`` and ``PWD`` naming the repository, no argument names it, the child
+    inherits no ``PYTHONPATH`` and its ``PWD`` is the workspace.
     """
     from tcip_web.cli.session_hook import session_start_url
     from tcip_web.state import store
@@ -387,6 +392,10 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
     argv_file = tmp_path / "argv.json"
     monkeypatch.setenv("FAKE_TERMINAL_ARGV_FILE", str(argv_file))
+    env_file = tmp_path / "env.json"
+    monkeypatch.setenv("FAKE_TERMINAL_ENV_FILE", str(env_file))
+    monkeypatch.setenv("PYTHONPATH", str(REPO_ROOT / "packages"))
+    monkeypatch.setenv("PWD", str(REPO_ROOT))
 
     created = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "provider": row.id}
@@ -429,14 +438,40 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         )
         assert handed["permissions"] == shipped["permissions"]
         assert not any(
-            "tcip" in entry
+            word in entry
             for entries in handed["permissions"].values()
             for entry in entries
             if not entry.startswith("mcp__tcip__")
+            for word in ("tcip ", "tcip_")
         )
-    if row.prepare is None:
-        expected_prepared: list[str] = []
+    assert not any(
+        REPO_ROOT.as_posix() in Path(arg).as_posix() for arg in launched
+    )
+    child = json.loads(env_file.read_text(encoding="utf-8"))
+    assert "PYTHONPATH" not in child
+    assert child["PWD"] == str(store.workspace)
+    documents = list_documents()
+    instructions, skills_dir = (
+        store.workspace / row.files.instructions,
+        store.workspace / row.files.skills,
+    )
+    contract = read_document(harness_files.CONTRACT)
+    assert [
+        (skills_dir / d.name / "SKILL.md").read_text(encoding="utf-8")
+        for d in documents
+    ] == [harness_files.render_skill(d) for d in documents]
+    skills = f"wrote {len(documents)} knowledge skills under {skills_dir}"
+    if row.id != "antigravity":
+        block = instructions.read_text(encoding="utf-8")
+        assert block == (
+            f"{harness_files.BLOCK_START}\n{contract}{harness_files.BLOCK_END}\n"
+        )
+        expected_prepared = [
+            f"wrote the operating contract into {instructions}",
+            skills,
+        ]
     else:
+        assert contract in instructions.read_text(encoding="utf-8")
         hooks = store.workspace / pty_host.ANTIGRAVITY_HOOKS
         url = session_start_url(store.workspace, sid)
         assert _agy_hooks() == {
@@ -450,7 +485,6 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
             }
         }
         server = pty_host.mcp_server(opened)
-        rule = store.workspace / pty_host.ANTIGRAVITY_RULE
         expected_prepared = [
             pty_host.subprocess.list2cmdline(
                 [
@@ -465,7 +499,9 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
             ),
             f"allowed {len(_tool_names())} tcip entries in {settings}",
             f"registered the session hook in {hooks}",
-            f"wrote the orientation rule {rule}",
+            skills,
+            "wrote the operating contract and the orientation rule "
+            f"{instructions}",
         ]
         allowed = json.loads(settings.read_text(encoding="utf-8"))[
             "permissions"
@@ -483,19 +519,18 @@ def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
     tmp_path: Path,
     opened_project: Path,
 ) -> None:
-    """A row whose preparation step exits non-zero is refused, naming the failure.
+    """A row whose preparation command exits non-zero is refused, naming it by its argv.
 
     The launch answers 503, registers no session and records no start line.
     """
 
     def prepare(
-        executable: str, project: OpenProject | None, session: str
+        files: harness_files.HarnessFiles,
+        executable: str,
+        project: OpenProject | None,
+        session: str,
     ) -> list[str]:
-        return [
-            pty_host.run_to_completion(
-                [executable, "fail", "tcip"], "the fake step"
-            )
-        ]
+        return [pty_host.run_to_completion([executable, "fail", "tcip"])]
 
     row = dataclasses.replace(
         pty_host.PROVIDERS[0],
@@ -510,11 +545,100 @@ def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
     )
 
     assert resp.status_code == 503
-    assert (
-        "launch preparation failed: the fake step exited 3"
-        in resp.json()["detail"]
-    )
+    assert "fail tcip exited 3" in resp.json()["detail"]
     assert "FAKE_PREPARATION_FAILED" in resp.json()["detail"]
+    assert terminal_routes._SESSIONS == {}
+    assert audit_rows(opened_project, "agent_terminal_started") == []
+
+
+@pytest.mark.parametrize("row_id", ["claude", "codex"])
+def test_a_workspace_instruction_file_with_one_marker_refuses_the_launch_naming_it(
+    row_id: str,
+    client: TestClient,
+    fake_rows: dict[str, pty_host.Provider],
+    opened_project: Path,
+) -> None:
+    """A workspace instruction file carrying the contract's start marker alone refuses its row.
+
+    The launch answers 503 with the block writer's sentence, registers no session and records
+    no start line.
+    """
+    from tcip_web.state import store
+
+    files = {
+        "claude": harness_files.CLAUDE_CODE,
+        "codex": harness_files.AGENTS,
+    }
+    (store.workspace / files[row_id].instructions).write_text(
+        harness_files.BLOCK_START + "\nthe person's text\n", encoding="utf-8"
+    )
+
+    resp = client.post(
+        "/api/terminal/sessions", json={**LAUNCH, "provider": row_id}
+    )
+
+    assert resp.status_code == 503
+    assert (
+        "start marker or an end marker but not both" in resp.json()["detail"]
+    )
+    assert terminal_routes._SESSIONS == {}
+    assert audit_rows(opened_project, "agent_terminal_started") == []
+
+
+@pytest.mark.parametrize("row_id", ["claude", "codex"])
+def test_a_workspace_instruction_file_that_will_not_write_refuses_the_launch_naming_it(
+    row_id: str,
+    client: TestClient,
+    fake_rows: dict[str, pty_host.Provider],
+    opened_project: Path,
+) -> None:
+    """A workspace whose instruction file cannot be written refuses its row, naming the file.
+
+    A directory stands where the row's instruction file goes, so the filesystem refuses the
+    write; the launch answers 503 with the filesystem's sentence, registers no session and
+    records no start line.
+    """
+    from tcip_web.state import store
+
+    files = {
+        "claude": harness_files.CLAUDE_CODE,
+        "codex": harness_files.AGENTS,
+    }
+    (store.workspace / files[row_id].instructions).mkdir()
+
+    resp = client.post(
+        "/api/terminal/sessions", json={**LAUNCH, "provider": row_id}
+    )
+
+    assert resp.status_code == 503
+    assert files[row_id].instructions.name in resp.json()["detail"]
+    assert terminal_routes._SESSIONS == {}
+    assert audit_rows(opened_project, "agent_terminal_started") == []
+
+
+def test_a_spawn_that_fails_refuses_the_launch_with_the_failures_own_sentence(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_rows: dict[str, pty_host.Provider],
+    opened_project: Path,
+) -> None:
+    """A launch whose PTY spawn raises is refused with the exception's own sentence.
+
+    The launch answers 503 whose detail is that sentence and nothing else, registers no session
+    and records no start line.
+    """
+
+    def refused(*args: object) -> pty_host.Pty:
+        raise OSError("the spawn was refused")
+
+    monkeypatch.setattr(pty_host, "spawn_pty", refused)
+
+    resp = client.post(
+        "/api/terminal/sessions", json={**LAUNCH, "provider": "claude"}
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "the spawn was refused"
     assert terminal_routes._SESSIONS == {}
     assert audit_rows(opened_project, "agent_terminal_started") == []
 
@@ -553,9 +677,7 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     ]
 
     settings.write_text("[]", encoding="utf-8")
-    with pytest.raises(
-        pty_host.PreparationFailedError, match="does not hold a JSON object"
-    ):
+    with pytest.raises(ValueError, match="does not hold a JSON object"):
         pty_host.allow_tcip_tools(settings)
 
 
@@ -575,9 +697,7 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
     monkeypatch.setattr(
         pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
     )
-    monkeypatch.setattr(
-        pty_host, "run_to_completion", lambda argv, step: "added"
-    )
+    monkeypatch.setattr(pty_host, "run_to_completion", lambda argv: "added")
     _port_recorded()
     hooks = store.workspace / pty_host.ANTIGRAVITY_HOOKS
     hooks.parent.mkdir()
@@ -592,7 +712,9 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
     hooks.write_text(json.dumps({"my-linter-hook": linter}), encoding="utf-8")
 
     for session in ("term_first", "term_second"):
-        pty_host.prepare_antigravity("agy", opened, session)
+        pty_host.prepare_antigravity(
+            pty_host.ANTIGRAVITY, "agy", opened, session
+        )
 
     written = _agy_hooks()
     assert written.get("my-linter-hook") == linter
@@ -602,10 +724,10 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
     assert set(written) == {"my-linter-hook", pty_host.ANTIGRAVITY_HOOK_ENTRY}
 
     hooks.write_text("[]", encoding="utf-8")
-    with pytest.raises(
-        pty_host.PreparationFailedError, match="does not hold a JSON object"
-    ):
-        pty_host.prepare_antigravity("agy", opened, "term_third")
+    with pytest.raises(ValueError, match="does not hold a JSON object"):
+        pty_host.prepare_antigravity(
+            pty_host.ANTIGRAVITY, "agy", opened, "term_third"
+        )
 
 
 def test_agys_preparation_writes_one_always_on_rule_naming_the_orientations_tools(
@@ -615,9 +737,10 @@ def test_agys_preparation_writes_one_always_on_rule_naming_the_orientations_tool
 ) -> None:
     """Antigravity's preparation writes one always-on rule into the workspace, its line naming it.
 
-    The rule's frontmatter triggers it always; its text names each tool the orientation is read
-    from, as the project's orientation does, and says to read it again once earlier turns are
-    summarized. A later preparation replaces it, and a neighboring rule is left as it was.
+    The rule's frontmatter triggers it always; its text is the operating contract followed by a
+    sentence naming each tool the orientation is read from, as the project's orientation does,
+    and saying to read it again once earlier turns are summarized. A later preparation replaces
+    it, and a neighboring rule is left as it was.
     """
     import yaml
 
@@ -626,27 +749,30 @@ def test_agys_preparation_writes_one_always_on_rule_naming_the_orientations_tool
     monkeypatch.setattr(
         pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
     )
-    monkeypatch.setattr(
-        pty_host, "run_to_completion", lambda argv, step: "added"
-    )
+    monkeypatch.setattr(pty_host, "run_to_completion", lambda argv: "added")
     _port_recorded()
-    rule = store.workspace / pty_host.ANTIGRAVITY_RULE
+    rule = store.workspace / pty_host.ANTIGRAVITY.instructions
     rules = rule.parent
     rules.mkdir(parents=True)
     neighbor, ours = rules / "team.md", "---\ntrigger: manual\n---\nours\n"
     neighbor.write_text(ours, encoding="utf-8")
 
-    prepared = pty_host.prepare_antigravity("agy", opened, "term_first")
+    prepared = pty_host.prepare_antigravity(
+        pty_host.ANTIGRAVITY, "agy", opened, "term_first"
+    )
     assert str(rule) in prepared[-1]
     written = rule.read_text(encoding="utf-8")
     rule.write_text("stale", encoding="utf-8")
-    pty_host.prepare_antigravity("agy", opened, "term_second")
+    pty_host.prepare_antigravity(
+        pty_host.ANTIGRAVITY, "agy", opened, "term_second"
+    )
 
     assert rule.read_text(encoding="utf-8") == written
     assert sorted(rules.iterdir()) == sorted([neighbor, rule])
     assert neighbor.read_text(encoding="utf-8") == ours
     _, frontmatter, text = written.split("---\n", 2)
     assert yaml.safe_load(frontmatter)["trigger"] == "always_on"
+    assert text.startswith(read_document(harness_files.CONTRACT))
     assert "earlier turns have been summarized, read it again" in text
     told = _told(pty_host.orientation(opened, "startup"))
     for tool in pty_host.orientation_tools():
@@ -749,9 +875,7 @@ def test_claudes_codexs_and_agys_hooks_run_one_session_hook_argv(
     monkeypatch.setattr(
         pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
     )
-    monkeypatch.setattr(
-        pty_host, "run_to_completion", lambda argv, step: "added"
-    )
+    monkeypatch.setattr(pty_host, "run_to_completion", lambda argv: "added")
     _port_recorded()
     argv = pty_host.session_hook_argv()
     (claude_settings,) = pty_host.render_argv(
@@ -764,10 +888,10 @@ def test_claudes_codexs_and_agys_hooks_run_one_session_hook_argv(
     if interpreter != INTERPRETER:
         with pytest.raises(ValueError, match="shell line refuses"):
             pty_host.codex_overrides(opened, {})
-        with pytest.raises(
-            pty_host.PreparationFailedError, match="shell line refuses"
-        ):
-            pty_host.prepare_antigravity("agy", opened, "term_test")
+        with pytest.raises(ValueError, match="shell line refuses"):
+            pty_host.prepare_antigravity(
+                pty_host.ANTIGRAVITY, "agy", opened, "term_test"
+            )
         assert not (
             store.workspace / pty_host.ANTIGRAVITY_HOOKS.parent
         ).exists()
@@ -776,7 +900,9 @@ def test_claudes_codexs_and_agys_hooks_run_one_session_hook_argv(
     codex = _registered_hook(pty_host.codex_overrides(opened, {}))
     assert codex is not None
     assert codex["command"].split(" ") == argv
-    pty_host.prepare_antigravity("agy", opened, "term_test")
+    pty_host.prepare_antigravity(
+        pty_host.ANTIGRAVITY, "agy", opened, "term_test"
+    )
     (agy,) = _agy_hooks()[pty_host.ANTIGRAVITY_HOOK_ENTRY]["SessionStart"]
     assert agy["command"].split(" ") == [
         *argv,
@@ -2651,11 +2777,22 @@ def _told(told: pty_host.SessionOrientation) -> str:
     return told.text
 
 
+def _start_report(conversation: str, source: str) -> dict:
+    """Return a hook's report of ``conversation`` started by ``source``, its transcript named."""
+    return terminal_routes.SessionStartReport.model_validate(
+        {
+            "conversation": conversation,
+            "source": source,
+            "transcript_path": f"/transcripts/{conversation}.jsonl",
+        }
+    ).model_dump()
+
+
 def _started(client: TestClient, sid: str, source: str = "startup") -> str:
     """Report a start of session ``sid`` by ``source`` as its hook does; return what it is told."""
     resp = client.post(
         f"/api/terminal/sessions/{sid}/session-start",
-        json={"conversation": "conv-start", "source": source},
+        json=_start_report("conv-start", source),
     )
     assert resp.status_code == 200, resp.text
     return _told(
@@ -2821,7 +2958,7 @@ def _report(client: TestClient, sid: str, conversation: str) -> None:
     """Report ``conversation`` for session ``sid`` as its session hook does."""
     resp = client.post(
         f"/api/terminal/sessions/{sid}/session-start",
-        json={"conversation": conversation, "source": "startup"},
+        json=_start_report(conversation, "startup"),
     )
     assert resp.status_code == 200, resp.text
 
@@ -3186,7 +3323,7 @@ def test_a_report_for_a_session_the_backend_does_not_hold_answers_404(
 ) -> None:
     resp = client.post(
         "/api/terminal/sessions/term_gone/session-start",
-        json={"conversation": "conv-1", "source": "startup"},
+        json=_start_report("conv-1", "startup"),
     )
     assert resp.status_code == 404
     assert audit_rows(opened_project, "agent_terminal_reported") == []
@@ -3208,13 +3345,18 @@ def test_a_report_lands_as_one_line_by_no_one_and_the_newest_is_the_conversation
 
     lines = audit_rows(opened.root, "agent_terminal_reported")
     assert [line["arguments"] for line in lines] == [
-        {"conversation": c, "source": "startup", "session_id": sid}
+        {**_start_report(c, "startup"), "session_id": sid}
         for c in ("conv-1", "conv-2")
     ]
     assert not [line for line in lines if "actor" in line]
     recorded = terminal_routes.recorded_session(LAUNCH["provider"], opened)
     assert recorded is not None
-    assert (recorded.session_id, recorded.conversation) == (sid, "conv-2")
+    assert recorded.session_id == sid
+    assert recorded.report is not None
+    assert (
+        recorded.report.conversation,
+        recorded.report.transcript_path,
+    ) == ("conv-2", _start_report("conv-2", "startup")["transcript_path"])
 
 
 def test_a_report_whose_line_fails_answers_the_audit_gap_and_holds_nothing(
@@ -3235,7 +3377,7 @@ def test_a_report_whose_line_fails_answers_the_audit_gap_and_holds_nothing(
         refuse_audit_appends(refusing)
         resp = client.post(
             f"/api/terminal/sessions/{sid}/session-start",
-            json={"conversation": "conv-2", "source": "compact"},
+            json=_start_report("conv-2", "compact"),
         )
 
     assert resp.status_code == 409, resp.text
@@ -3243,7 +3385,8 @@ def test_a_report_whose_line_fails_answers_the_audit_gap_and_holds_nothing(
         AuditGapRefusal.model_validate(resp.json()["detail"]).committed is None
     )
     recorded = terminal_routes.recorded_session(LAUNCH["provider"], opened)
-    assert recorded is not None and recorded.conversation == "conv-1"
+    assert recorded is not None and recorded.report is not None
+    assert recorded.report.conversation == "conv-1"
 
 
 def _held_until(ws: WebSocketTestSession, count: int) -> list[int]:

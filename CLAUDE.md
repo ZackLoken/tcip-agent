@@ -1,113 +1,60 @@
 # CLAUDE.md
 
-Operating contract for Claude (and any Claude-driven agent) working in this repo: behavior and
-invariants, not documentation. When this file and a skill disagree on a domain fact, the skill wins;
-on behavior, this file wins. Machine and harness facts live in `CLAUDE.local.md` (not shipped);
-commit, push and prose rules that hold across projects live in the global `CLAUDE.md`.
+The developer's contract for Claude (and any Claude-driven agent) changing this repository. When
+this file or the operating contract and a knowledge document disagree on a domain fact, the
+document wins; on behavior, this file and the contract win. Machine and harness facts live in
+`CLAUDE.local.md` (not shipped); commit, push and prose rules that hold across projects live in the
+global `CLAUDE.md`.
 
 While the architecture contraction is underway, `docs/NEXT_SESSION_PROMPT.md` governs procedure
 only: which session does what, in what order, with which tools. This file governs what a change is
 and how it is judged, and the prompt never overrides it; a prompt sentence that would change how a
 change is judged is a conflict brought to the owner rather than followed.
 
-## The foundation
+## The operating contract
 
-The platform's job is to give the agent the facts it cannot otherwise know (what primitives exist
-and their interfaces, the trait semantics, the scientific rails, the objective, the data in hand)
-and then rely on the agent's own CV-scientist reasoning for a problem no one wrote a procedure for.
-It must not hand the agent recipes, prescribed pipelines, or "for trait X do Y". The test for every
-skill, tool, doc and code path: does it leave room to reason from facts, rails and a discoverable
-toolkit, or does it box the agent into a method? Trait semantics stay defined.
+The platform's agent works under one operating contract, a knowledge document every terminal
+launch renders into the workspace in the form its harness reads. It binds work in this repository
+too, and this file restates none of it:
 
-Only these are settled: `crops.yml` is the trait authority; PyTorch, TensorBoard and Ray Tune are
-the technology choices. Every other artifact may be changed or replaced. Do not cite one as a reason
-not to change it.
+@packages/tcip-mcp/src/tcip_mcp/knowledge/operating-contract.md
+
+## What is settled
+
+Beyond what the operating contract settles, every artifact may be changed or replaced. Do not cite
+one as a reason not to change it.
 
 ## What this is
 
-TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding, with you as the
-ML/CV engineer driving it. Scope today is 2D imagery, RGB and N-channel; 3D point clouds are not
-built. `README.md` has the pitch and the roadmap. Four packages under `packages/` share one `.tcip/`
+`README.md` has the pitch and the roadmap. Four packages under `packages/` share one `.tcip/`
 state directory, each with its own `CLAUDE.md` for layout. Domain knowledge lives in
-`packages/tcip-mcp/src/tcip_mcp/knowledge/` as repo files and reaches every harness through
-generated skills or the `serve_domain_knowledge` tool; a document is read in full by every route.
+`packages/tcip-mcp/src/tcip_mcp/knowledge/` as repo files and reaches every harness as a skill
+naming the `serve_domain_knowledge` tool, which serves it; a document is read in full by every route.
 
-## Operating posture
+## Working on the platform
 
-Your default failure is pushing through friction by guessing.
-
-- Project work confirms which project is active before touching data, and reads that project's own
-  memory first. Platform work skips the project ritual entirely.
-- Report friction through `report_friction` the moment you hit it: a missing tool, ambiguous data,
-  an op that failed twice, a decision needing human judgment, behavior that surprised you. The
-  free-text detail matters more than the category. A mandated action that is blocked is itself a
-  report, never a silent skip. End substantial work with `write_retrospective`.
-- Never state a fact about this codebase, a domain, or a workflow that you have not executed or read
-  this session. One docstring, one sample project, one capture rig describes that instance, not the
-  platform's general case; ask before generalizing. A claim about purpose is checked by testing its
-  premise.
+- Platform work skips the operating contract's project ritual entirely.
 - Orientation reads go by `git grep` or the Grep tool over a named subtree and then the file
   itself; no code index is maintained while the tree changes daily.
-- Progressive disclosure: start simple; add complexity only when data or metrics justify it.
 
-## Invariants that protect the science
+## Invariants for platform code
 
-These state guarantees the platform owes. They do not protect the mechanisms that happen to provide
-those guarantees today: where a tool, file, refusal or schema currently serves one, that
-implementation is replaceable and the guarantee is not.
+The operating contract's invariants and these state guarantees the platform owes. They do not
+protect the mechanisms that happen to provide those guarantees today: where a tool, file, refusal
+or schema currently serves one, that implementation is replaceable and the guarantee is not.
 
-- Measurement integrity is the highest rule. The domain expert defines each trait's measurement; you
-  operationalize their definition and never substitute your own, and when it is unclear you stop and
-  ask. A delivered number requires a breeder-confirmed operationalization and a validation against a
-  reference sized to the trait, with the provenance recording which reference answered for it. No
-  validated measurement, no result. Geometry measures dimensions on a validated mask with scale
-  calibration; it never stands in for finding the object or judging a biological state. Tentative
-  domain logic, whatever made it tentative, is labeled tentative and validated or removed; it never
-  becomes institutional truth by reuse.
-- Scientific defensibility: every phenotype reproducible and auditable end to end, from data and
-  environment through predictions and operating point to the measurement. Parameters are derived
-  from the data at runtime, never frozen constants; when a threshold varies by dataset, model or
-  trait, the deliverable is the capability to derive it, never the value. A pass that proposes
-  labels is inference whose producer is an engine instead of a checkpoint: it runs through the one
-  tiled pass, its execution record derived by the same derivations and published on its bucket;
-  a stated number, a knob or a toggle standing where a derivation exists is the defect, and a
-  second pass beside the first is one too.
 - Agent-legible and breeder-coherent: a discoverable toolkit with docs that match the code, and a
   GUI that guides the breeder without stranding them, at equal weight.
-- Every state change leaves a record, and a record that cannot be written is raised rather than
-  swallowed. Experiments are immutable: a new run, never an overwritten one.
-- A subject is an object class to isolate, not a trait.
-- No pilot vocabulary as framing: a trait's own name, state or column prefix never names a general
-  mechanism in identifiers, comments or docs; thread the real trait through as data from the
-  project's registry. A concrete trait is fine as one marked example.
-- A negative is an empty label document plus a human marking the image done with nothing on it. An
-  empty label document alone is never a negative, and empty label documents are never deleted
-  without asking.
-- Never train or evaluate on a format the data does not positively confirm; refuse rather than
-  guess.
-- Confirm before destructive or outward actions (deleting labels, overwriting weights, exporting
-  deliverables); approval for one does not extend to the next.
-- Enumerate the consumers before deleting anything; a deleted assertion's fact needs a new home.
-- When two code paths must agree, call one from the other. A consistency check whose two sides share
-  an implementation proves nothing.
-- A library the environment already carries is read before anything is written by hand: torch,
-  torchvision, numpy, rasterio, fiona, shapely, pyproj, pycocotools, SAHI, OpenCV, and scipy and
-  scikit-learn, which are in the lock through those and are declared where read. OpenCV is the
-  one image-processing library; scikit-image is never declared. A hand-written version of what
-  one of them provides and maintains is a defect; only a platform rule the library call cannot
-  carry stays, as a thin layer over the call. The platform's own code is the measurement gate,
-  the trait entry, the records and the rails, and as little else as possible.
-- No silent fallback when required information is missing. A required value is a pydantic field
-  or a parameter with no default, and its type is what refuses it unstated; nothing is written by
-  hand to say the same. A guessed value that can reach a delivered result is a fabrication with a
-  warning attached. A hand-written refusal exists in one place only: where the data cannot carry
-  what a claim needs and the message must name the primitive the caller should use instead, at
-  the one boundary that fact enters, never inside each reader of it; several readers each asking
-  the same question is the defect, and a check in each is how it survives. The few hand-written
-  refusals that remain each ship with a test, through the platform's own producer, that a
-  legitimate call still succeeds.
-- A stated format, subject or root is a claim the data must positively carry, never one it merely
-  fails to contradict.
+- Of the libraries the operating contract names, scipy and scikit-learn are in the lock through the
+  others and are declared where read; scikit-image is never declared. The platform's own code is
+  the measurement gate, the trait entry, the records and the rails, and as little else as possible.
+- A required value is a pydantic field or a parameter with no default, and its type is what refuses
+  it unstated; nothing is written by hand to say the same. A hand-written refusal exists in one
+  place only: where the data cannot carry what a claim needs and the message must name the
+  primitive the caller should use instead, at the one boundary that fact enters, never inside each
+  reader of it; several readers each asking the same question is the defect, and a check in each is
+  how it survives. The few hand-written refusals that remain each ship with a test, through the
+  platform's own producer, that a legitimate call still succeeds.
 - Nothing on disk is a consumer. Every project, record, lock, hash, log row and checkpoint that
   exists today is sample data made to exercise the implementation, and a change that re-keys,
   re-shapes or invalidates it conforms or discards it as part of the change. A mechanism is never
@@ -116,14 +63,6 @@ implementation is replaceable and the guarantee is not.
   restored so existing locks stay bound, no reader kept for rows already written. A live consumer is
   code with a caller. A sentence in a brief, a report, a recommendation or a review that names
   existing data as a reason to keep something is a defect in that sentence.
-
-## Pipelines, models, seeing
-
-No universal pipeline: derive the decomposition from the data in hand (`pipeline-design` skill);
-`toolkit-inventory` maps the pieces that already exist so you do not rebuild one. You can see
-images. The platform's renderers write to `.tcip/artifacts/viz/`; read the path with your
-image-capable tool, describe what you see, then recommend. External phenotyping resources are read
-for general techniques only, never for a per-trait pipeline; the endpoint is a trained model.
 
 ## Working a change
 
@@ -174,6 +113,12 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   on a break that only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
   as proof a change was safe, check that some fixture could have come out differently.
+- Every change names the behaviors it alters and the ones it preserves, each held by a test that
+  reads what the agent or the breeder receives through its producer (the hook's orientation, a
+  rendered instruction file, the settings, the argv, a route's answer), seen failing without the
+  change; a behavior no test can reach is named with the one check that reaches it. A
+  regression's scope is its introducing commit's whole removal set, each thing removed or moved
+  given a named home.
 - The production mypy gate is the full one; only `tests` keeps grandfathered codes, in `mypy.ini`.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs, never a narrative of the session that made it.
@@ -222,11 +167,9 @@ naming `--project` until a project is created, and the knowledge tools work.
 ## Conventions
 
 - Lazy-import torch and torchvision inside function bodies, so MCP startup stays fast.
-- A one-off script the agent writes for one project lives with that project, in the project's own
-  directory, never in this repository. A standing capability the agent uses is an MCP tool, which
-  every harness lists with its schema and runs outside the harness's own sandbox; when an operator
-  runs it too, its console command calls the same function. A capability only an operator uses is
-  a console command alone.
+- A standing capability the agent uses is an MCP tool, which every harness lists with its schema
+  and runs outside the harness's own sandbox; when an operator runs it too, its console command
+  calls the same function. A capability only an operator uses is a console command alone.
 - Crop traits are controlled vocabulary in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`; verify
   there before asserting.
 - Every piece of shipped prose (comments, docstrings, log and UI strings, test names, file names,

@@ -47,6 +47,13 @@ pytestmark = pytest.mark.usefixtures("fake_terminal")
 
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
 
+POSTURE_FACTS = (
+    f"goes to {report_friction.__name__} the moment it happens",
+    f"is itself a {report_friction.__name__}, never a silent skip",
+    f"ends with {write_retrospective.__name__}",
+)
+"""The sentences every orientation but a resume's tells the agent about reporting."""
+
 
 def _claude_start(conversation: str, source: str) -> dict:
     """Return Claude Code's ``SessionStart`` input, as its hooks page documents its fields."""
@@ -135,11 +142,12 @@ def started(client: TestClient) -> Iterator[terminal_routes.TerminalSession]:
 
 def _reported(
     project: OpenProject, session: terminal_routes.TerminalSession
-) -> str | None:
-    """Return the conversation ``session``'s hook last reported, as ``project``'s log records it."""
+) -> terminal_routes.SessionStartReport:
+    """Return the report ``session``'s hook last made, as ``project``'s log records it."""
     recorded = terminal_routes.recorded_session(LAUNCH["provider"], project)
     assert recorded is not None and recorded.session_id == session.id
-    return recorded.conversation
+    assert recorded.report is not None
+    return recorded.report
 
 
 def _hooked(
@@ -185,38 +193,61 @@ def test_each_harnesss_new_session_reports_and_is_told_the_whole_orientation(
         monkeypatch.setenv(TERMINAL_SESSION_ENV, started.id)
         argv = []
 
-    text = told(_hooked(monkeypatch, capsys, event("conv-new"), *argv))
+    started_by = event("conv-new")
+    text = told(_hooked(monkeypatch, capsys, started_by, *argv))
 
-    assert _reported(remembered, started) == "conv-new"
+    report = _reported(remembered, started)
+    assert report.conversation == "conv-new"
+    assert report.transcript_path == started_by.get(
+        "transcript_path", started_by.get("transcriptPath")
+    )
     for fact in (
         '"display_name": "Test project"',
         "2026-03-04/IMG_E: empty label document",
         "the newest report detail",
         "orientation-task",
         serve_domain_knowledge.__name__,
+        *POSTURE_FACTS,
     ):
         assert fact in text, fact
 
 
+def test_a_session_for_no_project_is_told_to_report_once_it_has_one() -> None:
+    """A session launched for no project is told the posture and to hold its reports.
+
+    It holds them until ``initialize_project`` creates the project they land in.
+    """
+    told = pty_host.orientation(None, "startup")
+    assert told.kind == "told"
+    for fact in POSTURE_FACTS:
+        assert fact in told.text, fact
+    assert "hold" in told.text and "initialize_project" in told.text
+
+
 @pytest.mark.parametrize("event", [_claude_start, _codex_start])
-def test_a_compaction_is_told_the_memory_and_the_knowledge_alone(
+def test_a_compaction_is_told_the_posture_the_memory_and_the_knowledge_alone(
     event: Callable[[str, str], dict],
     remembered: OpenProject,
     started: terminal_routes.TerminalSession,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A compacted session is told its project's memory and the knowledge, nothing else."""
+    """A compacted session is told the posture, its project's memory and the knowledge alone.
+
+    Neither the project's overview nor its findings are told again.
+    """
     monkeypatch.setenv(TERMINAL_SESSION_ENV, started.id)
 
     text = _additional_context(
         _hooked(monkeypatch, capsys, event("conv-c", "compact"))
     )
 
-    assert _reported(remembered, started) == "conv-c"
+    assert _reported(remembered, started).conversation == "conv-c"
     assert "the newest report detail" in text
     assert "orientation-task" in text
     assert serve_domain_knowledge.__name__ in text
+    for fact in POSTURE_FACTS:
+        assert fact in text, fact
     assert "display_name" not in text
     assert "IMG_E" not in text
 
@@ -234,7 +265,7 @@ def test_a_resumed_session_reports_its_conversation_and_is_told_nothing(
     printed = _hooked(monkeypatch, capsys, event("conv-r", "resume"))
 
     assert printed == ""
-    assert _reported(remembered, started) == "conv-r"
+    assert _reported(remembered, started).conversation == "conv-r"
 
 
 def test_a_report_whose_line_fails_fails_the_hook_and_prints_nothing(
@@ -465,9 +496,7 @@ def test_each_rows_own_hook_spelling_runs_reports_and_prints_its_orientation(
     monkeypatch.setattr(
         pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
     )
-    monkeypatch.setattr(
-        pty_host, "run_to_completion", lambda argv, step: "added"
-    )
+    monkeypatch.setattr(pty_host, "run_to_completion", lambda argv: "added")
     env = {**pty_host.os.environ, TERMINAL_SESSION_ENV: started.id}
     (settings,) = pty_host.render_argv(
         [pty_host.CLAUDE_SETTINGS_ARG],
@@ -489,7 +518,9 @@ def test_each_rows_own_hook_spelling_runs_reports_and_prints_its_orientation(
     ((codex_handler,),) = [
         group["hooks"] for group in codex_hooks["SessionStart"]
     ]
-    pty_host.prepare_antigravity("agy", remembered, started.id)
+    pty_host.prepare_antigravity(
+        pty_host.ANTIGRAVITY, "agy", remembered, started.id
+    )
     hooks = json.loads(
         (store.workspace / pty_host.ANTIGRAVITY_HOOKS).read_text(
             encoding="utf-8"
@@ -516,6 +547,6 @@ def test_each_rows_own_hook_spelling_runs_reports_and_prints_its_orientation(
         ran = _run(command, event, run_env)
         assert ran.returncode == 0, ran.stderr
         assert "the newest report detail" in told(ran.stdout)
-        assert _reported(remembered, started) == event.get(
+        assert _reported(remembered, started).conversation == event.get(
             "session_id", event.get("conversationId")
         )
