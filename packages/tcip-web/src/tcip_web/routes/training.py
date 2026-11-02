@@ -6,7 +6,7 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import (
@@ -17,7 +17,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.types import Receive, Scope, Send
 
 from tcip_mcp.experiments import (
@@ -29,6 +29,7 @@ from tcip_mcp.experiments import (
     training_listing,
 )
 from tcip_mcp.identity import actor
+from tcip_mcp.pipelines.schemas import Direction
 from tcip_mcp.pipelines.training.tensorboard_manager import (
     BOARD_PATH,
     TensorboardLaunch,
@@ -229,7 +230,7 @@ async def forward_to_board(
     from tcip_mcp.web_client import LOOPBACK_HOST
 
     serving = running(await asyncio.to_thread(_named, experiment_id))
-    if serving is None:
+    if serving.kind == "not_serving":
         raise HTTPException(404, f"no TensorBoard serves {experiment_id}")
     client = httpx.AsyncClient()
     try:
@@ -346,7 +347,7 @@ class CompareBestPayload(BaseModel):
 
     experiment_ids: list[str]
     metric: str
-    higher_is_better: bool | None = None
+    direction: Direction = "unstated"
     include_unverified: bool = False
 
 
@@ -366,7 +367,7 @@ def compare_best_route(payload: CompareBestPayload) -> Ranking:
         result = ranked_registered_model(
             store.held().root,
             payload.metric,
-            higher_is_better=payload.higher_is_better,
+            direction=payload.direction,
             include_unverified=payload.include_unverified,
             experiment_ids=payload.experiment_ids,
             tag=None,
@@ -394,16 +395,26 @@ class TrainingRowFrame(BaseModel):
 
 
 class TrainingStatusFrame(BaseModel):
-    """The terminal frame, carrying the run's row or an error.
-
-    ``status`` carries the run's row for a run this process can still identify, ``error`` is set
-    instead when it cannot.
-    """
+    """The terminal frame of a run that ended: its row."""
 
     type: Literal["status"] = "status"
     experiment_id: str
-    status: RunRow | None
-    error: str | None
+    status: RunRow
+
+
+class TrainingErrorFrame(BaseModel):
+    """The one frame of a stream to an id naming no run: why, in words for a person."""
+
+    type: Literal["error"] = "error"
+    experiment_id: str
+    error: str
+
+
+type TrainingFrame = Annotated[
+    TrainingRowFrame | TrainingStatusFrame | TrainingErrorFrame,
+    Field(discriminator="type"),
+]
+"""Every frame a run's metrics stream sends, told apart by its ``type``."""
 
 
 async def _stream_metrics(
@@ -420,8 +431,8 @@ async def _stream_metrics(
     last tick and a row still being written is replayed once it is complete. Rows are read after the
     observation, so a run the observation found in a terminal state has every row sent before its
     one status frame (``experiments.run_summary`` over the rows sent), which ends the stream.
-    An id naming no run directory under ``project`` ends the stream with one status frame
-    naming it. Every read runs off the event loop.
+    An id naming no run directory under ``project`` gets one :class:`TrainingErrorFrame` naming
+    it, and the stream ends. Every read runs off the event loop.
     """
     from tcip_mcp.experiments import (
         TERMINAL_STATES,
@@ -439,9 +450,8 @@ async def _stream_metrics(
     )
     if observation is None:
         await ws.send_json(
-            TrainingStatusFrame(
+            TrainingErrorFrame(
                 experiment_id=experiment_id,
-                status=None,
                 error=f"Run not found: {experiment_id}",
             ).model_dump(mode="json")
         )
@@ -475,9 +485,7 @@ async def _stream_metrics(
             )
             await ws.send_json(
                 TrainingStatusFrame(
-                    experiment_id=experiment_id,
-                    status=status,
-                    error=None,
+                    experiment_id=experiment_id, status=status
                 ).model_dump(mode="json")
             )
             break

@@ -8,11 +8,12 @@ module.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, get_args
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 import tifffile
+from typing_inspection.introspection import get_literal_values
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -31,7 +32,7 @@ from tcip_mcp.pipelines.band_stats import (
     stretch_band,
 )
 
-STRETCH_MODES = get_args(StretchMode)
+STRETCH_MODES = tuple(get_literal_values(StretchMode.__value__))
 
 
 def _composite_route_stretch(

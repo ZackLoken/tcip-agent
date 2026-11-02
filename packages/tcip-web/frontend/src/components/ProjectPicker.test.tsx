@@ -3,7 +3,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
-import type { OpenAnswer, SnapshotProject } from "@/api/types.generated";
+import { type OpenAnswer, type SnapshotProject, UNREAD } from "@/api/types.generated";
 import { LISTING_REFRESH_MS, ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -74,7 +74,8 @@ describe("ProjectPicker", () => {
     vi.mocked(api.projects.list).mockResolvedValue(LISTING);
     render(<ProjectPicker />);
 
-    expect(await screen.findByText(STRAY.record_problem!)).toBeInTheDocument();
+    if (STRAY.kind !== UNREAD) throw new Error("the produced stray's record read");
+    expect(await screen.findByText(STRAY.problem)).toBeInTheDocument();
     expect(screen.getByText(STRAY.tree.dataset_root)).toBeInTheDocument();
   });
 
@@ -88,7 +89,10 @@ describe("ProjectPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
-    expect(api.projects.open).toHaveBeenCalledWith({ id: VALLEY.record.id, user: "grower" });
+    expect(api.projects.open).toHaveBeenCalledWith({
+      id: VALLEY.record.id,
+      user: "grower",
+    });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
       dataset_root: VALLEY.tree.dataset_root,
       date: VALLEY.tree.captures.at(-1)!.name,
@@ -172,7 +176,10 @@ describe("ProjectPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     await waitFor(() =>
-      expect(api.projects.open).toHaveBeenCalledWith({ id: VALLEY.record.id, user: " jordan " }),
+      expect(api.projects.open).toHaveBeenCalledWith({
+        id: VALLEY.record.id,
+        user: " jordan ",
+      }),
     );
     expect(useStore.getState().user).toBe(" jordan ");
   });
@@ -389,9 +396,9 @@ describe("ProjectPicker", () => {
       expect(screen.queryByText(/valley refused/)).not.toBeInTheDocument();
 
       act(() =>
-        useStore
-          .getState()
-          .patchOpenStatus({ openError: { projectId: RIDGE.record.id, message: "ridge refused" } }),
+        useStore.getState().patchOpenStatus({
+          openError: { projectId: RIDGE.record.id, message: "ridge refused" },
+        }),
       );
       expect(screen.getByText(/ridge refused/)).toBeInTheDocument();
     });

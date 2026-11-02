@@ -13,13 +13,15 @@ export interface AgentActivity {
   client: string | null;
 }
 
-/** The client a record or a push declared: its name with its version appended when declared, or
- * null when it declared none (`identity` null being a record no launch named). */
-export function declaredClient(identity: RecordedIdentity | null): string | null {
-  const name = identity?.agent_client_name;
-  if (!name) return null;
-  const version = identity.agent_client_version;
+/** A declared client's name with its version appended when declared. */
+export function clientName(name: string, version: string | null): string {
   return version ? `${name} ${version}` : name;
+}
+
+/** The client a push declared (`clientName`), or null when it declared none. */
+export function declaredClient(identity: RecordedIdentity): string | null {
+  const name = identity.agent_client_name;
+  return name ? clientName(name, identity.agent_client_version) : null;
 }
 
 export interface AgentActivitySlice {

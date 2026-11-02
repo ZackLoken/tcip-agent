@@ -13,14 +13,20 @@ import csv
 import hashlib
 import io
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 
 import tcip_store
+from tcip_mcp.assessment import (
+    Assessment,
+    CheckpointAssessment,
+    assessment_dir,
+    read_assessment,
+)
 from tcip_mcp.audit import append_or_raise, audit_line
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.delivery_events_schema import (
@@ -28,6 +34,11 @@ from tcip_mcp.pipelines.delivery_events_schema import (
     BucketFinding,
     DeliveryEventRecord,
     PlantMapping,
+    Shipped,
+    ShippedAcknowledged,
+    ShippedValidated,
+    UnvalidatedBucket,
+    ValidatedBucket,
 )
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths
@@ -38,39 +49,56 @@ _DISCLOSURE: TypeAdapter[PlantMapping | None] = TypeAdapter(
 )
 
 if TYPE_CHECKING:
-    from tcip_mcp.assessment import Assessment
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.traits import TraitRevision
 
 
-class DeliveryRefusedError(ValueError):
-    """A delivery the gate refused, one sentence per reason.
+class Acknowledgeable(BaseModel):
+    """A refused delivery an acknowledgment can ship: the digest of the result it would ship."""
 
-    ``result_sha256`` is the digest of the result an acknowledgment would ship
-    (:func:`result_digest`), ``None`` for a delivery no acknowledgment can ship.
+    kind: Literal["acknowledgeable"] = "acknowledgeable"
+    result_sha256: str
+
+
+class Unacknowledgeable(BaseModel):
+    """A refused delivery no acknowledgment can ship."""
+
+    kind: Literal["unacknowledgeable"] = "unacknowledgeable"
+
+
+type Shipping = Annotated[
+    Acknowledgeable | Unacknowledgeable, Field(discriminator="kind")
+]
+"""Whether an acknowledgment can ship a refused delivery, told apart by its ``kind``."""
+
+
+class DeliveryRefusedError(ValueError):
+    """A delivery the gate refused, one sentence per reason, and whether an acknowledgment ships it.
+
+    ``shipping`` is the digest of the result an acknowledgment would ship (:func:`result_digest`),
+    or that none can; a refusal stating no digest is one no acknowledgment can ship.
     """
 
-    def __init__(self, message: str, result_sha256: str | None = None) -> None:
-        """Take the refusal's message and the digest an acknowledgment would ship, if any."""
+    def __init__(
+        self, message: str, shipping: Shipping = Unacknowledgeable()
+    ) -> None:
+        """Take the refusal's message and whether an acknowledgment ships the delivery."""
         super().__init__(message)
-        self.result_sha256 = result_sha256
+        self.shipping = shipping
 
     def as_detail(self) -> dict[str, Any]:
         """Return the structured refusal body, :class:`DeliveryRefusal` dumped."""
         return DeliveryRefusal(
-            message=str(self), result_sha256=self.result_sha256
+            message=str(self), shipping=self.shipping
         ).model_dump()
 
 
 class DeliveryRefusal(BaseModel):
-    """A delivery door's refusal: the gate's sentence and the digest an acknowledgment ships.
-
-    ``result_sha256`` is ``None`` for a delivery no acknowledgment can ship.
-    """
+    """A delivery door's refusal: the gate's sentence and whether an acknowledgment ships it."""
 
     kind: Literal["delivery"] = "delivery"
     message: str
-    result_sha256: str | None
+    shipping: Shipping
 
 
 class ProjectionDigests(BaseModel):
@@ -80,21 +108,44 @@ class ProjectionDigests(BaseModel):
     milestones: str
 
 
+class PhenologyCleared(BaseModel):
+    """A phenology measurement the delivery gate cleared."""
+
+    kind: Literal["cleared"] = "cleared"
+
+
 class PhenologyRefusal(BaseModel):
     """The gate's refusal of a phenology measurement shown unvalidated, with each digest."""
 
+    kind: Literal["shown_unvalidated"] = "shown_unvalidated"
     message: str
     digests: ProjectionDigests
 
 
-class OperatingPoint(BaseModel):
-    """The conf a bucket's assessment admits its predictions at, or ``None`` and why not.
+type PhenologyValidation = Annotated[
+    PhenologyCleared | PhenologyRefusal, Field(discriminator="kind")
+]
+"""What the delivery gate found of a phenology measurement, told apart by its ``kind``."""
 
-    ``reason`` is ``None`` when ``conf`` is admitted.
-    """
 
-    conf: float | None
-    reason: str | None
+class ConfAdmitted(BaseModel):
+    """The conf a bucket's assessment admits its predictions at."""
+
+    kind: Literal["conf_admitted"] = "conf_admitted"
+    conf: float
+
+
+class ConfRefused(BaseModel):
+    """A bucket whose predictions no conf is admitted for, and why not."""
+
+    kind: Literal["conf_refused"] = "conf_refused"
+    reason: str
+
+
+type OperatingPoint = Annotated[
+    ConfAdmitted | ConfRefused, Field(discriminator="kind")
+]
+"""What a bucket's assessment admits its predictions at, told apart by its ``kind``."""
 
 
 DELIVERY_COLUMNS = (
@@ -111,15 +162,14 @@ DELIVERY_COLUMNS = (
 class Clearance:
     """What the gate found.
 
-    It holds whether every bucket is validated, each bucket's own finding, the buckets' producer,
-    the scale assessment, and the acknowledgment the delivery ships under when it is not validated.
+    It holds each bucket's own finding, the buckets' producer, the scale assessment, and how the
+    delivery ships: validated, or under an acknowledgment.
     """
 
-    validated: bool
     buckets: list[BucketFinding]
     producer: Producer
     scale_assessment_id: str | None
-    acknowledgment: Acknowledgment | None
+    shipped: Shipped
 
 
 @dataclass(frozen=True)
@@ -149,31 +199,46 @@ class Result:
         return text.getvalue().encode("utf-8")
 
 
+@dataclass(frozen=True)
+class _Answers:
+    """An assessment read that answers under the revision it was read under."""
+
+    assessment: Assessment
+    kind: Literal["answers"] = "answers"
+
+
+@dataclass(frozen=True)
+class _Validates:
+    """The checkpoint's assessment validating a bucket."""
+
+    assessment: CheckpointAssessment
+    kind: Literal["validates"] = "validates"
+
+
+@dataclass(frozen=True)
+class _Unanswered:
+    """Why an assessment id answers for nothing, its assessment read or not."""
+
+    reason: str
+    kind: Literal["unanswered"] = "unanswered"
+
+
 def _assessment_finding(
-    project: Path,
-    assessment: Assessment,
-    *,
-    revision: TraitRevision,
-    delivery_kind: str | None,
-) -> str | None:
-    """Return why ``assessment`` answers for no ``delivery_kind`` delivery under ``revision``.
+    project: Path, assessment: Assessment, *, revision: TraitRevision
+) -> _Read:
+    """Return whether ``assessment`` answers under ``revision``, or why not in one sentence.
 
-    The reason is one sentence, or ``None`` when it answers: it passed, at this kind, under this
-    revision whole (number and content hash), over a reference that has not changed since.
+    It answers when it passed, under this revision whole (number and content hash), over a
+    reference that has not changed since.
     """
-    from tcip_mcp.assessment import assessment_dir
-
     aid = assessment.assessment_id
     if not assessment.passed:
-        return f"assessment {aid} did not pass ({', '.join(assessment.failures)})."
-    if assessment.delivery_kind != delivery_kind:
-        return (
-            f"assessment {aid} measured a {assessment.delivery_kind} delivery, not a "
-            f"{delivery_kind} one."
+        return _Unanswered(
+            f"assessment {aid} did not pass ({', '.join(assessment.failures)})."
         )
     judged = assessment.revision
     if judged != revision.ref:
-        return (
+        return _Unanswered(
             f"assessment {aid} was judged under {judged.trait!r} revision "
             f"{judged.trait_revision} ({judged.trait_revision_sha256[:12]}), "
             f"and this delivery ships under revision {revision.number} "
@@ -181,56 +246,120 @@ def _assessment_finding(
         )
     moved = assessment.reference.moved(assessment_dir(project, aid))
     if moved:
-        return (
+        return _Unanswered(
             f"the reference assessment {aid} measured has changed since ({', '.join(moved)}), "
             "so the number it earned no longer answers for it; assess again."
         )
-    return None
+    return _Answers(assessment)
 
 
-def _covers(assessment: Assessment, bucket: Bucket) -> bool:
-    """Return whether ``assessment``'s reference spans ``bucket``'s capture."""
-    return assessment.reference.covers(
-        dataset_id=bucket.dataset_id,
-        date=bucket.date,
-        raster_identity=bucket.raster_identity,
+type _Read = Annotated[_Answers | _Unanswered, Field(discriminator="kind")]
+"""An assessment read that answers, or why its id answers for nothing."""
+
+_SCALE: TypeAdapter[dict[str, _Read]] = TypeAdapter(dict[str, _Read])
+
+
+def _at_kind(read: _Read, delivery_kind: str) -> _Read:
+    """Return ``read``, or why its assessment measured something else than a ``delivery_kind``."""
+    if read.kind == "unanswered":
+        return read
+    assessment = read.assessment
+    if assessment.kind == "physical_scale":
+        measured = "a physical scale"
+    elif assessment.delivery_kind == delivery_kind:
+        return read
+    else:
+        measured = f"a {assessment.delivery_kind} delivery"
+    return _Unanswered(
+        f"assessment {assessment.assessment_id} measured {measured}, not a "
+        f"{delivery_kind} one."
     )
 
 
-def _bucket_reason(
-    bucket: Bucket,
-    assessment: Assessment | None,
-    finding: str | None,
-) -> str | None:
-    """Return why ``bucket`` is not validated, or ``None`` when it is.
+def _at_scale(
+    read: _Read, *, unit: str | None, buckets: Sequence[Bucket]
+) -> _Read:
+    """Return ``read``, or why its assessment answers for no scale in ``unit`` over ``buckets``.
 
-    ``assessment`` is the one it was published under (``None`` for none or one that could not be
-    read, ``finding`` then saying why) and ``finding`` that assessment's own
-    :func:`_assessment_finding`. It is validated when the assessment answers, and it measured the
-    bucket's own producer under its own execution record over a reference covering its capture.
+    It answers when it is a physical scale in ``unit`` whose reference covers every bucket.
     """
-    if bucket.assessment_id is None:
-        return (
+    if read.kind == "unanswered":
+        return read
+    scale = read.assessment
+    aid = scale.assessment_id
+    if scale.kind != "physical_scale":
+        return _Unanswered(
+            f"assessment {aid} measured a {scale.delivery_kind} delivery, not a "
+            "physical scale."
+        )
+    if scale.scale["unit"] != unit:
+        return _Unanswered(
+            f"scale assessment {aid} is in {scale.scale['unit']!r}, and this "
+            f"delivery is in {unit!r}."
+        )
+    if not all(scale.reference.covers(b) for b in buckets):
+        return _Unanswered(
+            f"scale assessment {aid}'s reference does not cover every delivered "
+            "capture."
+        )
+    return read
+
+
+def _validating(
+    bucket: Bucket, found: Mapping[str, _Read]
+) -> _Validates | _Unanswered:
+    """Return the assessment validating ``bucket``, or why none does.
+
+    ``found`` holds the assessment it was published under, as :func:`_assessments` read it. It
+    validates when it answers and measured the bucket's own producer under its own execution
+    record over a reference covering its capture.
+    """
+    aid = bucket.assessment_id
+    if aid is None:
+        return _Unanswered(
             f"no assessment answers for bucket {bucket.name!r}: assess its checkpoint "
             "against a held-out reference selection and publish its predictions under that "
             "assessment."
         )
-    if assessment is None or finding is not None:
-        return finding
-    if (assessment.producer, assessment.execution) != (
-        bucket.producer,
-        bucket.execution,
-    ):
-        return (
-            f"bucket {bucket.name!r} was not produced by the checkpoint and execution record "
-            f"assessment {assessment.assessment_id} measured."
+    read = found[aid]
+    if read.kind == "unanswered":
+        return read
+    assessment = read.assessment
+    if assessment.kind != "checkpoint" or (
+        assessment.producer,
+        assessment.execution,
+    ) != (bucket.producer, bucket.execution):
+        return _Unanswered(
+            f"bucket {bucket.name!r} was not produced by the checkpoint and execution "
+            f"record assessment {aid} measured."
         )
-    if not _covers(assessment, bucket):
-        return (
-            f"assessment {assessment.assessment_id}'s reference does not cover "
-            f"bucket {bucket.name!r}'s capture ({bucket.dataset_id}, {bucket.date})."
+    if not assessment.reference.covers(bucket):
+        return _Unanswered(
+            f"assessment {aid}'s reference does not cover bucket {bucket.name!r}'s "
+            f"capture ({bucket.dataset_id}, {bucket.date})."
         )
-    return None
+    return _Validates(assessment)
+
+
+def _bucket_finding(
+    bucket: Bucket, found: Mapping[str, _Read]
+) -> BucketFinding:
+    """Return what the gate finds for ``bucket``: validated (:func:`_validating`), or why not."""
+    read = _validating(bucket, found)
+    if read.kind == "validates":
+        return ValidatedBucket(
+            dataset_root=str(bucket.root),
+            bucket=bucket.name,
+            date=bucket.date,
+            assessment_id=read.assessment.assessment_id,
+        )
+    return UnvalidatedBucket(
+        dataset_root=str(bucket.root),
+        bucket=bucket.name,
+        date=bucket.date,
+        assessment_id=bucket.assessment_id,
+        reason=read.reason,
+    )
 
 
 def _assessments(
@@ -238,60 +367,52 @@ def _assessments(
     ids: Sequence[str | None],
     *,
     revision: TraitRevision | None,
-    delivery_kind: str | None,
-) -> dict[str | None, tuple[Assessment | None, str | None]]:
-    """Read each distinct assessment id among ``ids`` once, beside its finding.
+) -> dict[str, _Read]:
+    """Read each distinct assessment id among ``ids`` once, as :func:`_assessment_finding` finds it.
 
-    The finding is :func:`_assessment_finding` under ``revision`` (the assessment's own trait's
-    latest confirmed revision for ``None``) at ``delivery_kind`` (its own kind for ``None``); an id
-    naming none carries the sentence saying so, and ``None`` itself no assessment.
+    The finding is under ``revision``, or the assessment's own trait's latest confirmed
+    revision for ``None``; an id naming none is the sentence saying so, and ``None`` among
+    ``ids`` is skipped.
     """
-    from tcip_mcp.assessment import read_assessment
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.traits import TraitUnknownError
 
-    out: dict[str | None, tuple[Assessment | None, str | None]] = {
-        None: (None, None)
-    }
+    out: dict[str, _Read] = {}
     for aid in dict.fromkeys(ids):
         if aid is None:
             continue
         try:
             assessment = read_assessment(project, aid)
-            finding = _assessment_finding(
+            out[aid] = _assessment_finding(
                 project,
                 assessment,
                 revision=revision
                 or latest_confirmed(assessment.revision.trait, project),
-                delivery_kind=delivery_kind or assessment.delivery_kind,
             )
         except (ValueError, TraitUnknownError) as exc:
-            out[aid] = (None, str(exc))
-            continue
-        out[aid] = (assessment, finding)
+            out[aid] = _Unanswered(str(exc))
     return out
 
 
 def admitted_conf(project: Path, bucket: Bucket) -> OperatingPoint:
-    """Return the conf ``bucket``'s assessment admits its predictions at, and why not when none.
+    """Return the conf ``bucket``'s assessment admits its predictions at, or why none is.
 
-    The conf is the bucket's execution record's conf, on its assessment's authority, when the
-    assessment it was published under validates it at its own kind under that trait's latest
-    confirmed revision; else ``None`` and the sentence saying why.
+    The conf is the conf of the execution record the assessment it was published under measured,
+    when that assessment validates it (:func:`_validating`) under that trait's latest confirmed
+    revision.
     """
-    assessment, finding = _assessments(
-        project, [bucket.assessment_id], revision=None, delivery_kind=None
-    )[bucket.assessment_id]
-    reason = _bucket_reason(bucket, assessment, finding)
-    if reason is not None:
-        return OperatingPoint(conf=None, reason=reason)
-    if bucket.execution is None or bucket.execution.conf is None:
-        return OperatingPoint(
-            conf=None,
+    read = _validating(
+        bucket, _assessments(project, [bucket.assessment_id], revision=None)
+    )
+    if read.kind == "unanswered":
+        return ConfRefused(reason=read.reason)
+    conf = read.assessment.execution.conf
+    if conf is None:
+        return ConfRefused(
             reason=f"bucket {bucket.name!r} holds no detector's predictions, which no conf "
-            "admits.",
+            "admits."
         )
-    return OperatingPoint(conf=bucket.execution.conf, reason=None)
+    return ConfAdmitted(conf=conf)
 
 
 def result_digest(
@@ -301,13 +422,14 @@ def result_digest(
     revision: TraitRevision,
     producer: Producer,
     buckets: Sequence[BucketFinding],
-    scale_finding: str | None,
+    scale: dict[str, _Read],
 ) -> str:
     """Return the digest of the result a breeder's acknowledgment binds to.
 
     It covers ``result``'s rows as the CSV writes them (without the delivery's own cells, which
     are receipt), its population and plant-mapping disclosure, beside the kind, the trait
-    revision, the producer, each bucket's finding and the scale assessment's.
+    revision, the producer, each bucket's finding and the named scale assessment's
+    (:func:`_at_scale`), by its id.
     """
     return hashlib.sha256(
         encode_record(
@@ -321,7 +443,7 @@ def result_digest(
                 **revision.ref.model_dump(),
                 "producer": producer.model_dump(),
                 "buckets": [b.model_dump() for b in buckets],
-                "scale_finding": scale_finding,
+                "scale": _SCALE.dump_python(scale, mode="json"),
             }
         )
     ).hexdigest()
@@ -368,7 +490,7 @@ def gate(
         )
     shared_root(buckets)
     by_model = {
-        b.name: b.producer for b in buckets if isinstance(b.producer, Producer)
+        b.name: b.producer for b in buckets if b.producer.kind == "checkpoint"
     }
     proposed = [b.name for b in buckets if b.name not in by_model]
     if proposed:
@@ -381,7 +503,7 @@ def gate(
         raise DeliveryRefusedError(
             "the delivered buckets were produced by more than one checkpoint or run ("
             + "; ".join(
-                f"{name}: {p.checkpoint_sha256} / {p.experiment_id}"
+                f"{name}: {p.checkpoint_sha256}"
                 for name, p in by_model.items()
             )
             + "): one delivered series names one producer, so deliver the buckets one producer "
@@ -420,53 +542,25 @@ def gate(
             "physical-scale assessment (calibrate_physical_scale) they were "
             "scaled under."
         )
-    found = _assessments(
-        project,
-        [b.assessment_id for b in buckets],
-        revision=revision,
-        delivery_kind=delivery_kind,
-    )
-    rows = []
-    for bucket in buckets:
-        reason = _bucket_reason(bucket, *found[bucket.assessment_id])
-        rows.append(
-            BucketFinding(
-                dataset_root=str(bucket.root),
-                bucket=bucket.name,
-                date=bucket.date,
-                assessment_id=bucket.assessment_id,
-                validated=reason is None,
-                reason=reason,
-            )
-        )
-    scale_finding = None
-    if scale_assessment_id is not None:
-        scale, scale_finding = _assessments(
-            project,
-            [scale_assessment_id],
-            revision=revision,
-            delivery_kind=None,
-        )[scale_assessment_id]
-        if scale is not None and scale_finding is None:
-            assert scale.scale is not None, (
-                "a physical-scale assessment records its scale"
-            )
-            if scale.scale["unit"] != unit:
-                scale_finding = (
-                    f"scale assessment {scale_assessment_id} is in "
-                    f"{scale.scale['unit']!r}, and this delivery is in {unit!r}."
-                )
-            elif not all(_covers(scale, b) for b in buckets):
-                scale_finding = (
-                    f"scale assessment {scale_assessment_id}'s reference does not "
-                    "cover every delivered capture."
-                )
+    found = {
+        aid: _at_kind(read, delivery_kind)
+        for aid, read in _assessments(
+            project, [b.assessment_id for b in buckets], revision=revision
+        ).items()
+    }
+    rows = [_bucket_finding(bucket, found) for bucket in buckets]
+    scale = {
+        aid: _at_scale(read, unit=unit, buckets=buckets)
+        for aid, read in _assessments(
+            project, [scale_assessment_id], revision=revision
+        ).items()
+    }
     producer = next(iter(producers))
     unvalidated = [
-        *(r.reason for r in rows if r.reason is not None),
-        *([scale_finding] if scale_finding is not None else []),
+        *(r.reason for r in rows if r.kind == "unvalidated"),
+        *(r.reason for r in scale.values() if r.kind == "unanswered"),
     ]
-    acknowledgment = None
+    shipped: Shipped = ShippedValidated()
     if unvalidated:
         digest = result_digest(
             result,
@@ -474,25 +568,26 @@ def gate(
             revision=revision,
             producer=producer,
             buckets=rows,
-            scale_finding=scale_finding,
+            scale=scale,
         )
         if acknowledgment_id is None:
             raise DeliveryRefusedError(
-                " ".join(unvalidated), result_sha256=digest
+                " ".join(unvalidated),
+                Acknowledgeable(result_sha256=digest),
             )
         acknowledgment = read_acknowledgment(project, acknowledgment_id)
         if acknowledgment.result_sha256 != digest:
             raise DeliveryRefusedError(
                 f"acknowledgment {acknowledgment_id} was given for another result than the one "
                 f"this delivery computed: {' '.join(unvalidated)}",
-                result_sha256=digest,
+                Acknowledgeable(result_sha256=digest),
             )
+        shipped = ShippedAcknowledged(acknowledgment=acknowledgment)
     return Clearance(
-        validated=not unvalidated,
         buckets=rows,
         producer=producer,
         scale_assessment_id=scale_assessment_id,
-        acknowledgment=acknowledgment,
+        shipped=shipped,
     )
 
 
@@ -599,17 +694,16 @@ def deliver_csv(
     ``result`` is composed as a CSV (each row carrying the :data:`DELIVERY_COLUMNS` cells of this
     delivery) and its one delivery event (the door, the kind, the trait revision it ships under,
     the delivered file and its sha256, the producer, each bucket's finding, the scale assessment,
-    whether it is validated, the acknowledgment it ships under, and the result's population and
-    plant-mapping disclosure), the event validated before anything is written; then the CSV is
-    written at ``output_path``, the event, and its one audit line by ``actor``,
-    ``delivery_event``, in the log of the dataset root the buckets are published under. Returns
-    what was delivered: ``csv_path``, ``validated``, ``delivery_event_id``, ``trait_revision``,
-    ``producer`` and ``acknowledged_by``.
+    how it shipped, and the result's population and plant-mapping disclosure), the event
+    validated before anything is written; then the CSV is written at ``output_path``, the event,
+    and its one audit line by ``actor``, ``delivery_event``, in the log of the dataset root the
+    buckets are published under. Returns what was delivered: ``csv_path``, ``shipped``,
+    ``delivery_event_id``, ``trait_revision`` and ``producer``.
     """
     event_id = uuid.uuid4().hex
     data = result.encoded(
         {
-            "validated": clearance.validated,
+            "validated": clearance.shipped.kind == "validated",
             **revision.ref.model_dump(),
             "delivery_event_id": event_id,
         }
@@ -626,8 +720,7 @@ def deliver_csv(
         producer=clearance.producer,
         buckets=clearance.buckets,
         scale_assessment_id=clearance.scale_assessment_id,
-        validated=clearance.validated,
-        acknowledgment=clearance.acknowledgment,
+        shipped=clearance.shipped,
         population=list(result.population),
         plant_mapping=result.plant_mapping,
         produced_at=line.timestamp,
@@ -641,14 +734,12 @@ def deliver_csv(
         ),
     )
     append_or_raise(line, scope=clearance.buckets[0].dataset_root)
-    ack = clearance.acknowledgment
     return {
         "csv_path": str(path),
-        "validated": clearance.validated,
+        "shipped": clearance.shipped.model_dump(mode="json"),
         "delivery_event_id": event_id,
         "trait_revision": revision.number,
         "producer": clearance.producer.model_dump(),
-        "acknowledged_by": ack.acknowledged_by if ack is not None else None,
     }
 
 

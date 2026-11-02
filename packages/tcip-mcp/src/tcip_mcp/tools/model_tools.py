@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tcip_mcp.model_registry import (
     Listed,
@@ -16,6 +16,7 @@ from tcip_mcp.model_registry import (
     metric_keys,
     stamped,
 )
+from tcip_mcp.pipelines.schemas import Direction, StatedDirection
 from tcip_mcp.server import tool
 
 
@@ -23,20 +24,20 @@ class AvailableMetric(BaseModel):
     """One metric key registered models are stamped with: its role, declared direction, sources.
 
     ``role`` is ``comparability_only`` for a center-match comparability key, ``unlabeled``
-    otherwise; ``higher_is_better`` is the direction ``schemas.HIGHER_IS_BETTER_BY_METRIC``
-    declares, ``None`` for a metric no declaration names, and ``sources`` the distinct
+    otherwise; ``direction`` is ``schemas.declared_direction``'s, and ``sources`` the distinct
     ``metrics_source`` values among the entries stamped with it.
     """
 
     metric: str
     role: Literal["comparability_only", "unlabeled"]
-    higher_is_better: bool | None
+    direction: Direction
     sources: list[MetricsSource]
 
 
 class RegisteredModels(BaseModel):
     """A project's registered models as listed, with the metrics they carry."""
 
+    kind: Literal["listing"] = "listing"
     models: list[Listed]
     available_metrics: list[AvailableMetric]
 
@@ -44,14 +45,15 @@ class RegisteredModels(BaseModel):
 class Ranking(Listed):
     """The registered model a metric ranks best, as listed, with how the ranking was made.
 
-    ``metric`` is the key it was ranked by, ``higher_is_better`` the direction used and
+    ``metric`` is the key it was ranked by, ``direction`` the direction used and
     ``direction_source`` whether it was stated or declared; ``unregistered`` is each marked
     experiment id that registered no checkpoint, and ``skipped`` each entry
     :func:`~tcip_mcp.model_registry.best_model` left out.
     """
 
+    kind: Literal["ranking"] = "ranking"
     metric: str
-    higher_is_better: bool
+    direction: StatedDirection
     direction_source: Literal["stated", "declared"]
     unregistered: list[str]
     skipped: list[Skipped]
@@ -91,14 +93,14 @@ def register_model(
 def _labeled_available_metrics(models: list[Listed]) -> list[AvailableMetric]:
     """List the metric keys of ``models`` (:func:`metric_keys`), with roles, directions, sources.
 
-    ``higher_is_better`` is ``schemas.declared_higher_is_better``'s: an undeclared metric still
-    shows up here, it just needs a stated direction to be ranked. ``sources`` names the distinct
+    ``direction`` is ``schemas.declared_direction``'s: an undeclared metric still shows up here,
+    it just needs a stated direction to be ranked. ``sources`` names the distinct
     ``metrics_source`` values among entries :func:`stamped` with the key. Never refuses.
     """
     from tcip_mcp.pipelines.schemas import (
         CENTER_MATCH_COMPARABILITY_KEYS,
         VAL_METRIC_PREFIX,
-        declared_higher_is_better,
+        declared_direction,
     )
 
     result = []
@@ -118,7 +120,7 @@ def _labeled_available_metrics(models: list[Listed]) -> list[AvailableMetric]:
                 if k.removeprefix(VAL_METRIC_PREFIX)
                 in CENTER_MATCH_COMPARABILITY_KEYS
                 else "unlabeled",
-                higher_is_better=declared_higher_is_better(k),
+                direction=declared_direction(k),
                 sources=sources,
             )
         )
@@ -134,11 +136,11 @@ def _dumped_available_metrics(models: list[Listed]) -> list[dict]:
 def rank_registered_models(
     project: Path,
     metric: str = "",
-    higher_is_better: bool | None = None,
+    direction: Direction = "unstated",
     include_unverified: bool = False,
     experiment_ids: list[str] | None = None,
     tag: str | None = None,
-) -> RegisteredModels | Ranking | dict:
+) -> Annotated[RegisteredModels | Ranking, Field(discriminator="kind")] | dict:
     """List the project's registered models, or rank them by an explicit metric.
 
     ``metric=""`` (the default) lists rather than ranks: returns the :class:`RegisteredModels`
@@ -148,8 +150,8 @@ def rank_registered_models(
     once a center-match trait is in play, the IoU-convention precision/recall/F1 relabeled
     ``iou_*``) are a labeled comparability convention, not necessarily what governs a trait's
     phenotype (see the evaluation skill / ``resolve_match_criterion``). ``available_metrics``
-    labels each key ``comparability_only`` vs ``unlabeled``, its declared ``higher_is_better``,
-    and the ``metrics_source`` values it appears under.
+    labels each key ``comparability_only`` vs ``unlabeled``, its declared ``direction``, and
+    the ``metrics_source`` values it appears under.
 
     A stated ``metric`` ranks instead, answering the :class:`Ranking`: only
     ``metrics_source="trainer"`` entries by default; ``include_unverified=True`` also ranks
@@ -159,9 +161,9 @@ def rank_registered_models(
 
     Args:
         metric: Metric key to rank by; empty lists instead of ranking.
-        higher_is_better: Overrides the declared direction
-            (``schemas.HIGHER_IS_BETTER_BY_METRIC``, keyed by the ``val_``-stripped name) when
-            given; required when ``metric`` is undeclared.
+        direction: ``higher`` or ``lower`` overrides the declared direction
+            (``schemas.DIRECTION_BY_METRIC``, keyed by the ``val_``-stripped name);
+            required when ``metric`` is undeclared.
         include_unverified: Also rank entries whose ``metrics_source`` is not ``"trainer"``.
         experiment_ids: Narrow to entries produced by one of these experiments, applied before
             ``available_metrics`` or what the ranking skipped is derived, so both describe only
@@ -177,7 +179,7 @@ def rank_registered_models(
     return ranked_registered_model(
         project,
         metric,
-        higher_is_better=higher_is_better,
+        direction=direction,
         include_unverified=include_unverified,
         experiment_ids=experiment_ids,
         tag=tag,
@@ -190,7 +192,12 @@ def _narrowed(
     """Return ``models`` narrowed to ``experiment_ids`` when given."""
     if experiment_ids is None:
         return models
-    return [m for m in models if m.entry.experiment_id in set(experiment_ids)]
+    return [m for m in models if _run_ids([m]) & set(experiment_ids)]
+
+
+def _run_ids(models: list[Listed]) -> set[str]:
+    """Return the id of the run each of ``models`` came from, a foreign one naming none."""
+    return {m.entry.name for m in models if m.entry.origin == "run"}
 
 
 def registered_listing(
@@ -216,7 +223,7 @@ def ranked_registered_model(
     project: Path,
     metric: str,
     *,
-    higher_is_better: bool | None,
+    direction: Direction,
     include_unverified: bool,
     experiment_ids: list[str] | None,
     tag: str | None,
@@ -228,7 +235,7 @@ def ranked_registered_model(
     ``metric``, nothing registered, nothing registered by the marked experiments, an undeclared
     direction, every entry stamped with ``metric`` unverified, none stamped with it.
     """
-    from tcip_mcp.pipelines.schemas import declared_higher_is_better
+    from tcip_mcp.pipelines.schemas import declared_direction
     from tcip_store.values import NOT_FINITE_SUFFIX
 
     if not metric:
@@ -253,16 +260,13 @@ def ranked_registered_model(
             "n_models": len(models),
         }
 
-    declared = declared_higher_is_better(metric)
-    direction_source: Literal["stated", "declared"]
-    if higher_is_better is not None:
-        resolved_direction, direction_source = higher_is_better, "stated"
-    elif declared is not None:
-        resolved_direction, direction_source = declared, "declared"
-    else:
+    direction_source: Literal["stated", "declared"] = "stated"
+    if direction == "unstated":
+        direction, direction_source = declared_direction(metric), "declared"
+    if direction == "unstated":
         return {
             "error": f"'{metric}' has no declared ranking direction (schemas."
-            "HIGHER_IS_BETTER_BY_METRIC names no entry for it). State a direction to "
+            "DIRECTION_BY_METRIC names no entry for it). State a direction to "
             "rank by it anyway, or pick one of the available metrics.",
             "needs_direction": True,
             "available_metrics": _dumped_available_metrics(models),
@@ -272,7 +276,7 @@ def ranked_registered_model(
     best, left_out = best_model(
         models,
         metric,
-        higher_is_better=resolved_direction,
+        direction=direction,
         include_unverified=include_unverified,
     )
     if best is None:
@@ -290,11 +294,11 @@ def ranked_registered_model(
             "available_metrics": _dumped_available_metrics(models),
             "n_models": len(models),
         }
-    registered_ids = {m.entry.experiment_id for m in models}
+    registered_ids = _run_ids(models)
     return Ranking(
         **dict(best),
         metric=metric,
-        higher_is_better=resolved_direction,
+        direction=direction,
         direction_source=direction_source,
         unregistered=[
             e for e in experiment_ids or [] if e not in registered_ids

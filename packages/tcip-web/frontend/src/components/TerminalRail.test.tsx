@@ -90,9 +90,11 @@ vi.mock("@/api/terminal", () => ({
 
 import { terminalApi } from "@/api/terminal";
 import {
+  LAUNCHABLE,
   TERMINAL_ENDED_CLOSE_CODE,
   type TerminalEnd,
   type TerminalServedFrame,
+  UNLAUNCHABLE,
 } from "@/api/types.generated";
 import { TerminalRail } from "@/components/TerminalRail";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
@@ -204,8 +206,9 @@ describe("TerminalRail", () => {
     const { status_absent: absent } = TERMINAL_ANSWERS;
     vi.mocked(terminalApi.status).mockResolvedValue(absent);
     render(<TerminalRail />);
+    const [first] = absent.providers;
     expect(
-      await screen.findByText(absent.providers[0].unavailable_reason ?? ""),
+      await screen.findByText(first.kind === UNLAUNCHABLE ? first.why : ""),
     ).toBeInTheDocument();
     expect(terminalApi.createSession).not.toHaveBeenCalled();
   });
@@ -452,10 +455,11 @@ describe("TerminalRail", () => {
       const picker = (await screen.findByLabelText("Agent harness")) as HTMLSelectElement;
       const options = Array.from(picker.options);
       expect(options.map((o) => [o.value, o.disabled])).toEqual(
-        MIXED.providers.map((row) => [row.id, row.unavailable_reason !== null]),
+        MIXED.providers.map((row) => [row.id, row.kind === UNLAUNCHABLE]),
       );
-      const unavailable = MIXED.providers.findIndex((row) => row.unavailable_reason !== null);
-      expect(options[unavailable].title).toBe(MIXED.providers[unavailable].unavailable_reason);
+      const unavailable = MIXED.providers.findIndex((row) => row.kind === UNLAUNCHABLE);
+      const row = MIXED.providers[unavailable];
+      expect(options[unavailable].title).toBe(row.kind === UNLAUNCHABLE ? row.why : "");
       expect(picker.value).toBe(PROVIDER.id);
     });
 
@@ -526,7 +530,7 @@ describe("TerminalRail", () => {
         .mockResolvedValueOnce(RELAUNCH);
       await switchedWhileRunning();
       await waitFor(() =>
-        expect(submitted()).toEqual(atOnce.undelivered.map((text) => [SECOND_ID, text])),
+        expect(submitted()).toEqual(atOnce.end.undelivered.map((text) => [SECOND_ID, text])),
       );
       expect(vi.mocked(terminalApi.createSession).mock.calls[1][0]).toMatchObject({
         provider: SECOND.id,
@@ -602,8 +606,8 @@ describe("TerminalRail", () => {
     });
 
     it("launches the first row that can when the remembered one cannot", async () => {
-      const absent = MIXED.providers.find((row) => row.unavailable_reason !== null)!;
-      const [able] = MIXED.providers.filter((row) => row.unavailable_reason === null);
+      const absent = MIXED.providers.find((row) => row.kind === UNLAUNCHABLE)!;
+      const [able] = MIXED.providers.filter((row) => row.kind === LAUNCHABLE);
       useStore.setState({ terminalProvider: absent.id });
       vi.mocked(terminalApi.status).mockResolvedValue(MIXED);
       render(<TerminalRail />);

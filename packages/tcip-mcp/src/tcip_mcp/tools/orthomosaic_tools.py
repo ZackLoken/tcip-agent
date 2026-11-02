@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
     from tcip_mcp.pipelines.delivery_events_schema import (
         CanopySegmentDisclosure,
-        RasterDisclosure,
+        PlantMapping,
     )
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         OrthomosaicGeoreference,
@@ -181,7 +181,7 @@ def orthomosaic_plant_counts(
     )
 
     uncountable: dict[str, str] = {}
-    disclosure: RasterDisclosure
+    disclosure: PlantMapping
     if canopy_subject:
         counts, disclosure, uncountable = _segment_counts(
             raster_path,

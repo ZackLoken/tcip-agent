@@ -93,9 +93,7 @@ def _output(
     | terminal_routes.TerminalHeldFrame,
 ) -> str:
     """Return the output ``frame`` carries, empty for a held count."""
-    if isinstance(frame, terminal_routes.TerminalOutputFrame):
-        return frame.data
-    return ""
+    return frame.data if frame.type == "output" else ""
 
 
 def _read_until(
@@ -173,17 +171,17 @@ def _port_recorded() -> None:
 
 def test_resolve_command_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(pty_host.TERMINAL_CMD_ENV, "python fake.py")
-    assert pty_host.resolve_terminal_command(pty_host.PROVIDERS[0]) == (
-        ["python", "fake.py"],
-        True,
-    )
+    command = pty_host.launch_command(pty_host.PROVIDERS[0])
+    assert command == pty_host.Command(["python", "fake.py"], override=True)
 
 
-def test_resolve_command_none_when_the_rows_executable_is_absent(
+def test_a_row_cannot_launch_when_its_executable_is_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (row, *_) = _rows_with(monkeypatch, executable=ABSENT)
-    assert pty_host.resolve_terminal_command(row) is None
+    status = pty_host.provider_status(row)
+    assert status.kind == "unlaunchable", status
+    assert ABSENT in status.why
 
 
 def test_status_lists_every_row_available_with_fake(
@@ -191,7 +189,7 @@ def test_status_lists_every_row_available_with_fake(
 ) -> None:
     assert client.get("/api/terminal/status").json() == {
         "providers": [
-            {"id": row.id, "name": row.name, "unavailable_reason": None}
+            {"kind": "launchable", "id": row.id, "name": row.name}
             for row in pty_host.PROVIDERS
         ]
     }
@@ -203,12 +201,10 @@ def test_a_row_whose_executable_is_absent_reports_its_own_reason_and_refuses_cre
 ) -> None:
     rows = _rows_with(monkeypatch, executable=ABSENT)
     body = client.get("/api/terminal/status").json()
-    assert [entry["unavailable_reason"] for entry in body["providers"]] == [
-        row.unavailable_reason for row in rows
+    assert body["providers"] == [
+        pty_host.provider_status(row).model_dump(mode="json") for row in rows
     ]
-    assert all(
-        ABSENT in entry["unavailable_reason"] for entry in body["providers"]
-    )
+    assert all(ABSENT in entry["why"] for entry in body["providers"])
 
     resp = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "provider": rows[0].id}
@@ -258,8 +254,7 @@ def test_the_orientation_for_no_project_says_the_session_was_launched_with_none(
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
     from tcip_mcp.tools.project_tools import initialize_project
 
-    told = pty_host.orientation(None, "startup")
-    assert told is not None
+    told = _told(pty_host.orientation(None, "startup"))
     assert "launched with no project open" in told
     assert initialize_project.__name__ in told
     assert serve_domain_knowledge.__name__ in told
@@ -653,8 +648,7 @@ def test_agys_preparation_writes_one_always_on_rule_naming_the_orientations_tool
     _, frontmatter, text = written.split("---\n", 2)
     assert yaml.safe_load(frontmatter)["trigger"] == "always_on"
     assert "earlier turns have been summarized, read it again" in text
-    told = pty_host.orientation(opened, "startup")
-    assert told is not None
+    told = _told(pty_host.orientation(opened, "startup"))
     for tool in pty_host.orientation_tools():
         assert tool.__name__ in text and tool.__name__ in told, tool.__name__
 
@@ -1008,7 +1002,8 @@ def _launched_session(
     pty = StubPty(survives=True)
     wire_stub_spawn(monkeypatch, pty)
     session = terminal_routes.TerminalSession("term_test")
-    assert session.start(24, 80, row, "user:tester") is None
+    started = session.start(24, 80, row, "user:tester")
+    assert started.kind == "prepared", started
     return session, pty
 
 
@@ -1391,7 +1386,7 @@ def test_a_process_exiting_on_its_own_ends_its_session_by_no_one(
         "session_id": sid,
         "cause": "the agent's process exited",
         "undelivered": [],
-        "handed_off": None,
+        "hand_off": "not_asked",
     }
     assert "actor" not in line
 
@@ -1460,7 +1455,7 @@ def test_an_exit_ends_the_agent_by_the_person_and_a_create_after_it_is_a_fresh_l
         "session_id": sid,
         "cause": "the person ended it",
         "undelivered": [],
-        "handed_off": None,
+        "hand_off": "not_asked",
     }
     assert _end(client, sid).status_code == 404
 
@@ -1487,7 +1482,7 @@ def test_an_end_answers_the_requests_the_agent_was_never_given(
     ended = _end(client, sid)
 
     assert ended.status_code == 200, ended.text
-    assert ended.json() == {"undelivered": ["never given"]}
+    assert ended.json() == _end_answer("never given")
 
 
 def test_the_end_line_lands_in_the_launchs_project_after_the_gui_opened_another(
@@ -1730,7 +1725,7 @@ def test_a_submit_admitted_before_an_end_is_answered_by_that_end(
         assert not ending.done()
         release.set()
         assert submitting.result().status_code == 200
-        assert ending.result().json() == {"undelivered": ["taken"]}
+        assert ending.result().json() == _end_answer("taken")
 
     late = client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "late"}
@@ -1882,7 +1877,7 @@ def test_an_end_during_a_paste_answers_at_once_and_its_writer_writes_nothing_mor
     gc.collect()
 
     assert reports == []
-    assert answer == {"undelivered": ["held", "behind"]}
+    assert answer == _end_answer("held", "behind")
     assert pty.terminate_calls == 1 and not pty.isalive()
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
     assert line["arguments"]["undelivered"] == answer["undelivered"]
@@ -1914,9 +1909,10 @@ def test_a_paste_released_before_an_end_records_stays_among_its_undelivered(
     session = _pasting(client, monkeypatch, held, "held")
     writer = _writer_of(session)
 
-    def released() -> None:
+    def released() -> terminal_routes.HandOff:
         held.release.set()
         writer.join(timeout=30)
+        return session.hand_off_state()
 
     assert session.end("the person ended it", "user:tester", released)
 
@@ -1950,8 +1946,10 @@ def test_a_paste_leaves_the_held_count_only_once_all_of_it_reached_the_pty(
     noted: list[tuple[int, int]] = []
     broadcast = session._broadcast
 
-    def noting_broadcast(item: object) -> None:
-        if isinstance(item, terminal_routes.TerminalHeldFrame):
+    def noting_broadcast(
+        item: terminal_routes.TerminalServedFrame | tuple[int, str],
+    ) -> None:
+        if not isinstance(item, tuple) and item.type == "held":
             noted.append((item.count, len("".join(pty.writes))))
         broadcast(item)
 
@@ -2234,7 +2232,10 @@ def test_output_after_the_ended_close_reaches_no_socket(
     async def offered() -> list[object]:
         _, queue = session.attach()
         await asyncio.to_thread(
-            session.end, "the person ended it", "user:tester", lambda: None
+            session.end,
+            "the person ended it",
+            "user:tester",
+            session.hand_off_state,
         )
         session._on_output("late output")
         await asyncio.sleep(0)
@@ -2299,7 +2300,7 @@ def test_an_end_whose_line_fails_answers_the_audit_gap_with_the_undelivered_requ
 
     assert resp.status_code == 409
     refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
-    assert refusal.committed == {"undelivered": ["never given"]}
+    assert refusal.committed == _end_answer("never given")
     assert terminal_routes._SESSIONS == {}
 
 
@@ -2316,9 +2317,13 @@ def test_an_unattended_end_whose_line_fails_writes_it_to_the_stream_and_the_erro
     ]
     session = terminal_routes._SESSIONS[sid]
     broadcast = session._broadcast
-    seen: list[tuple[object, bool]] = []
+    seen: list[
+        tuple[terminal_routes.TerminalServedFrame | tuple[int, str], bool]
+    ] = []
 
-    def noting_broadcast(item: object) -> None:
+    def noting_broadcast(
+        item: terminal_routes.TerminalServedFrame | tuple[int, str],
+    ) -> None:
         logged = any("ended unrecorded" in r.message for r in caplog.records)
         seen.append((item, logged))
         broadcast(item)
@@ -2329,7 +2334,7 @@ def test_an_unattended_end_whose_line_fails_writes_it_to_the_stream_and_the_erro
         assert session.end_unattended("the agent's process exited") is True
 
     (shown, _), close = seen
-    assert isinstance(shown, terminal_routes.TerminalOutputFrame)
+    assert not isinstance(shown, tuple) and shown.type == "output"
     assert shown.data.startswith(
         f"\r\n{terminal_routes.NO_END_LINE}agent_terminal_ended completed and its audit entry"
     )
@@ -2350,9 +2355,8 @@ def test_shutdown_all_ends_every_live_session_with_one_line_by_no_one(
     ids = [f"term_shutdown_{n}" for n in range(2)]
     for sid in ids:
         session = terminal_routes.TerminalSession(sid)
-        assert (
-            session.start(24, 80, pty_host.PROVIDERS[0], "user:tester") is None
-        )
+        started = session.start(24, 80, pty_host.PROVIDERS[0], "user:tester")
+        assert started.kind == "prepared", started
         terminal_routes._SESSIONS[sid] = session
     terminal_routes._SESSIONS[ids[0]].submit("never given")
 
@@ -2446,12 +2450,12 @@ def test_the_resolved_cli_is_probed_for_the_version_it_declares(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (row, *_) = _rows_with(monkeypatch, executable=Path(sys.executable).name)
-    command = pty_host.resolve_terminal_command(row)
-    assert command is not None
+    command = pty_host.launch_command(row)
+    assert command.kind == "command", command
 
-    launched = pty_host.launched_program(*command)
+    launched = pty_host.launched_program(command.argv, command.override)
 
-    assert launched["argv"] == command[0]
+    assert launched["argv"] == command.argv
     assert Path(launched["argv"][0]).name == Path(sys.executable).name
     assert launched["version"].startswith("Python ")
 
@@ -2459,11 +2463,12 @@ def test_the_resolved_cli_is_probed_for_the_version_it_declares(
 def test_the_resolved_command_decides_whether_its_version_is_probed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    command = pty_host.resolve_terminal_command(pty_host.PROVIDERS[0])
-    assert command is not None
+    command = pty_host.launch_command(pty_host.PROVIDERS[0])
+    assert command.kind == "command", command
     monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV)
 
-    assert pty_host.launched_program(*command)["version"] is None
+    launched = pty_host.launched_program(command.argv, command.override)
+    assert launched["version"] is None
 
 
 def _versioned_executable(directory: Path, version_file: Path) -> Path:
@@ -2633,16 +2638,29 @@ def test_a_create_and_one_after_an_end_answer_the_launched_provider_and_program(
         )
 
 
-def _started(
-    client: TestClient, sid: str, source: str = "startup"
-) -> str | None:
-    """Report a start of session ``sid`` by ``source`` as its hook does; return its orientation."""
+def _end_answer(*undelivered: str) -> dict:
+    """Return an end's answer holding ``undelivered``, as the end route serves it."""
+    return terminal_routes.TerminalEnd(
+        undelivered=list(undelivered)
+    ).model_dump()
+
+
+def _told(told: pty_host.SessionOrientation) -> str:
+    """Return what ``told`` tells its agent; an orientation that tells nothing fails."""
+    assert told.kind == "told", told
+    return told.text
+
+
+def _started(client: TestClient, sid: str, source: str = "startup") -> str:
+    """Report a start of session ``sid`` by ``source`` as its hook does; return what it is told."""
     resp = client.post(
         f"/api/terminal/sessions/{sid}/session-start",
         json={"conversation": "conv-start", "source": source},
     )
     assert resp.status_code == 200, resp.text
-    return resp.json()["text"]
+    return _told(
+        TypeAdapter(pty_host.SessionOrientation).validate_python(resp.json())
+    )
 
 
 def test_a_session_start_is_answered_the_orientation_of_the_sessions_own_project(
@@ -2664,8 +2682,8 @@ def test_a_session_start_is_answered_the_orientation_of_the_sessions_own_project
 
     told = _started(client, created["session_id"])
 
-    assert told == pty_host.orientation(opened, "startup")
-    assert told is not None and "Test project" in told
+    assert told == _told(pty_host.orientation(opened, "startup"))
+    assert "Test project" in told
     assert "Hill block" not in told
 
 
@@ -2757,15 +2775,15 @@ def test_the_orientation_of_a_project_whose_record_will_not_read_states_why(
     from tests._record_damage_fixtures import damage_record
 
     damage_record(project_record_key(str(opened.root)), b"{not valid json")
-    _, problem = record_or_problem(opened.root)
-    assert problem is not None
+    reading = record_or_problem(opened.root)
+    assert reading.kind == "unread"
 
     created = client.post("/api/terminal/sessions", json=LAUNCH)
 
     assert created.status_code == 200, created.text
     told = _started(client, created.json()["session_id"])
     assert told is not None
-    assert f'"record_problem": {json.dumps(problem)}' in told
+    assert f'"problem": {json.dumps(reading.problem)}' in told
 
 
 # ── resuming a row's conversation ───────────────────────────────────────
@@ -3233,7 +3251,7 @@ def _held_until(ws: WebSocketTestSession, count: int) -> list[int]:
     counts: list[int] = []
     while not counts or counts[-1] != count:
         frame = _frame(ws)
-        if isinstance(frame, terminal_routes.TerminalHeldFrame):
+        if frame.type == "held":
             counts.append(frame.count)
     return counts
 
@@ -3268,7 +3286,7 @@ def test_the_socket_serves_the_held_count_on_attach_and_at_each_change(
         )
         assert _held_until(ws, 0) == [1, 0]
 
-    assert _end(client, sid).json() == {"undelivered": []}
+    assert _end(client, sid).json() == _end_answer()
 
 
 def test_an_end_answers_undelivered_the_requests_the_socket_counted_held(
@@ -3290,7 +3308,7 @@ def test_an_end_answers_undelivered_the_requests_the_socket_counted_held(
             )
         assert _held_until(ws, 2) == [1, 2]
 
-    assert _end(client, sid).json() == {"undelivered": ["first", "second"]}
+    assert _end(client, sid).json() == _end_answer("first", "second")
 
 
 # ── the hand-off before a switch of harness ─────────────────────────────
@@ -3349,7 +3367,7 @@ def test_a_switch_delivers_the_hand_off_request_and_ends_after_its_own_retrospec
 
     switched = _hand_off(client, sid)
     assert switched.status_code == 200, switched.text
-    assert switched.json() is None
+    assert switched.json() == terminal_routes.HandOffAsked().model_dump()
     session._on_output("\x1b[?2004h" + pty_host.PROVIDERS[0].composer_ready)
     assert pty.written(1) == [pty_host.paste(terminal_routes.HAND_OFF_REQUEST)]
 
@@ -3374,7 +3392,7 @@ def test_a_switch_delivers_the_hand_off_request_and_ends_after_its_own_retrospec
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
     assert line["actor"] == "user:tester"
     ended = _ended(line)
-    assert (ended.handed_off, ended.undelivered) == (True, [])
+    assert (ended.hand_off, ended.undelivered) == ("landed", [])
 
 
 class _SurvivesOnceStubPty(StubPty):
@@ -3416,7 +3434,7 @@ def test_a_hand_off_whose_end_fails_to_stop_the_agent_ends_it_on_the_next_output
     assert sid not in terminal_routes._SESSIONS
     assert pty.terminate_calls == 2
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
-    assert _ended(line).handed_off is True
+    assert _ended(line).hand_off == "landed"
 
 
 def test_an_end_during_a_hand_off_ends_at_once_and_records_no_hand_off(
@@ -3440,11 +3458,11 @@ def test_an_end_during_a_hand_off_ends_at_once_and_records_no_hand_off(
     ended = _end(client, sid)
 
     assert ended.status_code == 200, ended.text
-    assert ended.json() == {"undelivered": ["never given"]}
+    assert ended.json() == _end_answer("never given")
     assert sid not in terminal_routes._SESSIONS
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
     assert line["actor"] == "user:tester"
-    assert _ended(line).handed_off is False
+    assert _ended(line).hand_off == "not_landed"
 
 
 def test_an_end_whose_hand_off_evidence_will_not_read_leaves_the_agent_running_and_held(
@@ -3501,9 +3519,8 @@ def test_shutdown_ends_every_session_when_one_hand_off_will_not_read(
     ids = [f"term_unread_{n}" for n in range(2)]
     for sid in ids:
         session = terminal_routes.TerminalSession(sid)
-        assert (
-            session.start(24, 80, pty_host.PROVIDERS[0], "user:tester") is None
-        )
+        started = session.start(24, 80, pty_host.PROVIDERS[0], "user:tester")
+        assert started.kind == "prepared", started
         terminal_routes._SESSIONS[sid] = session
     first = terminal_routes._SESSIONS[ids[0]]
     assert first.hand_off("user:tester")
@@ -3561,5 +3578,10 @@ def test_a_switch_from_a_session_for_no_project_ends_it_at_once(
     switched = _hand_off(client, sid)
 
     assert switched.status_code == 200, switched.text
-    assert switched.json() == {"undelivered": ["never given"]}
+    assert (
+        switched.json()
+        == terminal_routes.EndedAtOnce(
+            end=terminal_routes.TerminalEnd(undelivered=["never given"])
+        ).model_dump()
+    )
     assert terminal_routes._SESSIONS == {}

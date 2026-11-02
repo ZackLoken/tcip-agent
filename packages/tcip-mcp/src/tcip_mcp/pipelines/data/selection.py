@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict, get_args
 
 from pydantic import (
+    BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
@@ -87,6 +88,29 @@ _TRANSIENT = Field(exclude=True)
 """A field of a sample this act holds and no record carries."""
 
 
+class WholeSource(BaseModel):
+    """A sample that is its whole source."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["whole"] = "whole"
+
+
+class SourceRegion(BaseModel):
+    """A sample that is the half-open pixel ``rect`` ``(x0, y0, x1, y1)`` of its source."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["region"] = "region"
+    rect: tuple[int, int, int, int]
+
+
+type Extent = Annotated[
+    WholeSource | SourceRegion, Field(discriminator="kind")
+]
+"""How much of its source a sample is, told apart by its ``kind``."""
+
+
 @dataclass(frozen=True)
 class Sample:
     """One sample of a selection.
@@ -97,13 +121,13 @@ class Sample:
     ``member`` is the name a membership record names this sample by, as its admission resolved it
     (:class:`~tcip_mcp.pipelines.data.label_queries.Admitted`). ``source`` is the image path, or
     the ``.bandgroup`` manifest path standing in for a grouped capture, or the raster path when
-    ``rect`` names a region of it. ``ground_truth`` is what answers for this sample: a per-image
+    the sample is a region of it. ``ground_truth`` is what answers for this sample: a per-image
     label document's key, or the path of a mask raster or a table. ``row_key`` names this
     sample's row inside a tabular ``ground_truth``, and is ``None`` when the whole file answers
     for the sample.
 
-    ``rect`` is the half-open pixel rect ``(x0, y0, x1, y1)`` a within-image draw assigned, or
-    ``None`` when the sample is the whole source. ``ground_truth_digest`` is the ground truth's
+    ``extent`` is the whole source or the region of it a within-image draw assigned.
+    ``ground_truth_digest`` is the ground truth's
     :func:`ground_truth_digest` when it was read, and ``read`` what that one read answered: the
     decoded label document, or the table row's value; ``None`` for a mask and for a sample no
     admission of this act has read; ``stored`` is what the store answered for that read
@@ -119,9 +143,7 @@ class Sample:
     ground_truth: GroundTruth
     group: Text
     side: Side
-    rect: Annotated[tuple[int, int, int, int] | None, _OMITTED_WHEN_NONE] = (
-        None
-    )
+    extent: Extent
     row_key: Annotated[str | None, _OMITTED_WHEN_NONE] = None
     ground_truth_digest: Annotated[str | None, _OMITTED_WHEN_NONE] = None
     read: Annotated[Any, _TRANSIENT] = field(
@@ -140,9 +162,9 @@ class Sample:
 
         Two samples at one location are one sample, whatever they are named.
         """
-        if self.rect is None:
+        if self.extent.kind == "whole":
             return self.source
-        return f"{self.source}[{self.rect[0]},{self.rect[1]},{self.rect[2]},{self.rect[3]}]"
+        return f"{self.source}[{','.join(map(str, self.extent.rect))}]"
 
     @property
     def shape(self) -> str:
@@ -334,8 +356,8 @@ def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
                 h.update(b"\0")
             by_source[sample.source] = h.digest()
         h = hashlib.sha256(by_source[sample.source])
-        if sample.rect is not None:
-            h.update(repr(sample.rect).encode("utf-8"))
+        if sample.extent.kind == "region":
+            h.update(repr(sample.extent.rect).encode("utf-8"))
         out[sample.location] = h.hexdigest()
     return out
 
@@ -343,10 +365,10 @@ def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
 def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
     """Refuse a sample no loader here can read whatever its ground truth is.
 
-    The refusal names what no loader honors: a ``rect`` (a within-image region).
+    The refusal names what no loader honors: a within-image region.
     """
     samples = list(samples)
-    with_rect = [s.location for s in samples if s.rect is not None]
+    with_rect = [s.location for s in samples if s.extent.kind == "region"]
     if with_rect:
         raise ValueError(
             f"{len(with_rect)} sample(s) of this selection name a pixel rect "

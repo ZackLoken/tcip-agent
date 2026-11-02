@@ -806,7 +806,11 @@ def _blob_capture(project: Path) -> Path:
     import datetime
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.tools.ingest_tools import ingest_images, state_capture_date
+    from tcip_mcp.tools.ingest_tools import (
+        IngestManifest,
+        ingest_images,
+        state_capture_date,
+    )
     from tests._producer_fixtures import label_image
 
     root, raw, date = project / "ds", project / "raw", "2026-01-01"
@@ -826,10 +830,10 @@ def _blob_capture(project: Path) -> Path:
             Annotation(subject="bud", geometry=b) for b in boxes
         ]
     ingested = ingest_images(root, source=str(raw), actor=None)
-    assert "error" not in ingested, ingested
+    assert isinstance(ingested, IngestManifest), ingested
     dated = state_capture_date(
         root,
-        images=[f["dest"] for f in ingested["files"]],
+        images=[f.dest for f in ingested.files],
         date=datetime.date.fromisoformat(date),
         rationale="the frames stand for one capture of that day",
         actor=None,

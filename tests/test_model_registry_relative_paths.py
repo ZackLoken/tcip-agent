@@ -194,7 +194,7 @@ def test_rank_registered_models_tool_answers_resolved_absolute(
     result = rank_registered_models(
         project,
         metric="val_map50",
-        higher_is_better=True,
+        direction="higher",
         include_unverified=True,
     )
 

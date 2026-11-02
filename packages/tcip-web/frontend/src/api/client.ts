@@ -36,7 +36,7 @@ import {
   type ScorerCatalog,
   type SelectAnswer,
   type ServedProposals,
-  type Staged,
+  type ProposeAnswer,
   type StretchMode,
   type ViewReads,
 } from "@/api/types.generated";
@@ -184,7 +184,7 @@ export const api = {
       loadedSave(await postJson<SavedLabels>(ROUTES.postAnnotateLabels, body, signal)),
 
     // Send the held points and boxes to the segmenter; the answer names the bucket it staged.
-    propose: (body: ProposePayload) => postJson<Staged | null>(ROUTES.postAnnotatePropose, body),
+    propose: (body: ProposePayload) => postJson<ProposeAnswer>(ROUTES.postAnnotatePropose, body),
 
     // Ask the detector for the boxes a phrase describes; they come back as prompts, unstaged.
     find: (body: FindPayload) => postJson<FindAnswer>(ROUTES.postAnnotateFind, body),

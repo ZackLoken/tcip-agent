@@ -9,6 +9,8 @@ import { IMAGE_ANSWERS } from "@/test/images";
 const { build: BUILD, running: RUNNING, completed: COMPLETED, failed: FAILED } = IMAGE_ANSWERS;
 const PATH = BUILD.path;
 const URL = `/api/images?path=${PATH}`;
+/** The error the produced failed build ended on. */
+const [FAILED_ERROR] = [FAILED.state].flatMap((s) => (s.status === "failed" ? [s.error] : []));
 
 describe("useOverviewBuild", () => {
   it("starts nothing while the image is loading normally (no refusal condition read)", () => {
@@ -51,7 +53,7 @@ describe("useOverviewBuild", () => {
     vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(FAILED);
 
     const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
-    await waitFor(() => expect(result.current.error).toBe(FAILED.error));
+    await waitFor(() => expect(result.current.error).toBe(FAILED_ERROR));
     expect(result.current.building).toBe(false);
     expect(result.current.reloadToken).toBe(0);
   });
@@ -78,7 +80,7 @@ describe("useOverviewBuild", () => {
     vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(FAILED);
 
     const { result, rerender } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
-    await waitFor(() => expect(result.current.error).toBe(FAILED.error));
+    await waitFor(() => expect(result.current.error).toBe(FAILED_ERROR));
     rerender();
     rerender();
     expect(build).toHaveBeenCalledTimes(1);

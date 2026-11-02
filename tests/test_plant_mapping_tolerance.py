@@ -18,8 +18,9 @@ from pyproj import Geod
 
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    DerivedRadius,
+    MappingBuild,
     MappingVerification,
-    MatchRadius,
     MatchTolerance,
     NoMatchRadiusError,
     NoMatchToleranceError,
@@ -38,10 +39,7 @@ from tests._mapping_fixtures import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        MappingBuild,
-        PlantRecord,
-    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
 DATE = "2026-02-11"
 ROW_ORIGIN = (43.19670, -90.058000)
@@ -103,9 +101,7 @@ def test_a_dates_radius_is_the_largest_error_its_photographs_report(
     build = _build(tmp_path, errors)
 
     radius = float(np.max(errors))
-    assert build.match_radius == {
-        DATE: MatchRadius(value=radius, source="h_pos_err", rationale=None)
-    }
+    assert build.match_radius == {DATE: DerivedRadius(value=radius)}
     assert (
         radius > grid_pitch_m(read_plant_csvs([tmp_path / "plants.csv"])) / 2
     )
@@ -127,9 +123,7 @@ def test_the_served_build_and_its_disclosure_read_the_recorded_radius(
     build = _build(tmp_path, [1.2, 2.5, 0.8, 1.0])
 
     recorded = build.to_record()["match_radius"]
-    assert recorded == {
-        DATE: {"value": 2.5, "source": "h_pos_err", "rationale": None}
-    }
+    assert recorded == {DATE: DerivedRadius(value=2.5).model_dump()}
     assert build.served().model_dump()["match_radius"] == recorded
     disclosure = build.delivery_disclosure(MappingVerification([], []), [DATE])
     assert disclosure.model_dump()["match_radius"] == recorded
@@ -176,13 +170,9 @@ def test_a_stated_radius_is_recorded_as_stated_with_its_reason(
 
     build = _build(tmp_path, [None, None, None, None], match_radius=stated)
 
-    assert build.match_radius == {
-        DATE: MatchRadius(
-            value=5.0,
-            source="stated",
-            rationale="the receiver's own spec sheet",
-        )
-    }
+    assert build.match_radius == {DATE: stated}
+    read_back = MappingBuild.from_record(build.to_record(), tmp_path, "stated")
+    assert read_back.match_radius == {DATE: stated}
     stray = {a.image: a for a in build.assignments[DATE]}["photo_3.jpg"]
     assert stray.plant_id == "P3"
 

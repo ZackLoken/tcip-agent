@@ -127,8 +127,8 @@ class TestE2EPipeline:
         assert (project_dir / ".tcip" / "artifacts").is_dir()
 
         status = inspect_project(project_dir)
-        assert status["record_problem"] is None
-        assert status["record"]["display_name"] == "North orchard"
+        assert status["reading"]["kind"] == "read"
+        assert status["reading"]["record"]["display_name"] == "North orchard"
 
         # ── Step 3: Load dataset ─────────────────────────────────────
         ds = scan_dataset(project_dir, root)
@@ -268,7 +268,8 @@ class TestE2EPipelineEdgeCases:
     def test_empty_project(self, tmp_path: Path) -> None:
         """An uninitialized project inspects as no record, its record problem named."""
         status = inspect_project(tmp_path)
-        assert status["record"] is None and status["record_problem"]
+        assert status["reading"]["kind"] == "unread"
+        assert status["reading"]["problem"]
 
     def test_dataset_with_missing_labels(self, tmp_path: Path) -> None:
         """scan_dataset counts three images, one label and two unlabeled images."""

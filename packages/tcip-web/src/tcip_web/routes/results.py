@@ -29,10 +29,15 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from tcip_mcp.assessment import Assessment
-from tcip_mcp.delivery import PhenologyRefusal, ProjectionDigests
+from tcip_mcp.delivery import (
+    PhenologyCleared,
+    PhenologyRefusal,
+    PhenologyValidation,
+    ProjectionDigests,
+)
 from tcip_mcp.pipelines.delivery_events_schema import (
     DeliveryEventRecord,
-    PlantMappingDisclosure,
+    Shipped,
 )
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 from tcip_mcp.pipelines.postprocessing.segment_attribution import PositionError
@@ -252,9 +257,9 @@ def _measure(root: Path, payload: PhenologyInputs) -> PhenologyMeasurement:
 class PhenologyAnswer(BaseModel):
     """Both phenology projections of one measurement, under the trait revision it is measured by.
 
-    ``curves`` is the per-(plant, date) projection. ``unvalidated`` is the delivery gate's
-    refusal with the projections' digests when no assessment answers for every delivered bucket,
-    ``None`` when the gate cleared. ``positive_class_assessed`` is the measurement's
+    ``curves`` is the per-(plant, date) projection. ``validation`` is the delivery gate's
+    clearance, or its refusal with the projections' digests when no assessment answers for every
+    delivered bucket. ``positive_class_assessed`` is the measurement's
     (:attr:`~tcip_mcp.pipelines.postprocessing.phenology.PhenologyMeasurement.positive_class_assessed`),
     and ``plant_mapping`` the delivery's mapping disclosure.
     """
@@ -262,7 +267,7 @@ class PhenologyAnswer(BaseModel):
     revision: TraitRevisionRef
     curves: list[phenology.CurveRow]
     milestones: list[phenology.MilestoneRow]
-    unvalidated: PhenologyRefusal | None
+    validation: PhenologyValidation
     positive_class_assessed: bool
     plant_mapping: plant_mapping.PlantMappingDisclosure
 
@@ -282,9 +287,8 @@ def phenology_measurement(payload: PhenologyPayload) -> PhenologyAnswer:
 
     root = store.held().root
     measurement = _measure(root, payload)
-    reason = None
-    digests: dict[phenology.Projection, str] = {}
-    for projection in get_args(phenology.Projection):
+    refused: dict[phenology.Projection, tuple[str, str]] = {}
+    for projection in get_args(phenology.Projection.__value__):
         try:
             gate(
                 root,
@@ -296,18 +300,25 @@ def phenology_measurement(payload: PhenologyPayload) -> PhenologyAnswer:
         except OperationalizationRefusedError as exc:
             raise HTTPException(400, exc.as_detail()) from exc
         except DeliveryRefusedError as exc:
-            if not payload.show_unvalidated or exc.result_sha256 is None:
+            shipping = exc.shipping
+            if (
+                not payload.show_unvalidated
+                or shipping.kind == "unacknowledgeable"
+            ):
                 raise HTTPException(400, exc.as_detail()) from exc
-            reason, digests[projection] = str(exc), exc.result_sha256
+            refused[projection] = (str(exc), shipping.result_sha256)
     return PhenologyAnswer(
         revision=measurement.revision.ref,
         curves=measurement.phenology.curves,
         milestones=measurement.phenology.milestones,
-        unvalidated=None
-        if reason is None
-        else PhenologyRefusal(
-            message=reason, digests=ProjectionDigests(**digests)
-        ),
+        validation=PhenologyRefusal(
+            message=next(iter(refused.values()))[0],
+            digests=ProjectionDigests(
+                **{p: digest for p, (_, digest) in refused.items()}
+            ),
+        )
+        if refused
+        else PhenologyCleared(),
         positive_class_assessed=measurement.positive_class_assessed,
         plant_mapping=measurement.plant_mapping,
     )
@@ -336,13 +347,9 @@ class SavedExport(BaseModel):
 
 
 class CountExport(SavedExport):
-    """What a count export delivered: where, whether validated, and who acknowledged it if not.
+    """What a count export delivered: where, and how it shipped (its delivery event's)."""
 
-    ``acknowledged_by`` is ``None`` for a validated delivery.
-    """
-
-    validated: bool
-    acknowledged_by: str | None
+    shipped: Shipped
 
 
 def exported(saved: SavedExport) -> Response:
@@ -551,7 +558,11 @@ def export_count_csv(
     answers 409. The answer reports a :class:`CountExport` (:func:`exported`).
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
-    from tcip_mcp.delivery import DeliveryRefusal, DeliveryRefusedError
+    from tcip_mcp.delivery import (
+        DeliveryRefusal,
+        DeliveryRefusedError,
+        Unacknowledgeable,
+    )
     from tcip_mcp.identity import actor
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.traits import TraitUnknownError
@@ -617,14 +628,12 @@ def export_count_csv(
     except (TraitUnknownError, ValueError) as exc:
         raise HTTPException(
             400,
-            DeliveryRefusal(message=str(exc), result_sha256=None).model_dump(),
+            DeliveryRefusal(
+                message=str(exc), shipping=Unacknowledgeable()
+            ).model_dump(),
         ) from exc
     return exported(
-        CountExport(
-            saved_path=str(saved_path),
-            validated=result["validated"],
-            acknowledged_by=result["acknowledged_by"],
-        )
+        CountExport(saved_path=str(saved_path), shipped=result["shipped"])
     )
 
 
@@ -679,9 +688,8 @@ def list_delivery_events() -> DeliveryEvents:
                 resolved_key=resolved_mapping_key_for_citation(
                     root, pm.name, pm.record_sha256
                 )
-                if isinstance(
-                    pm := event.plant_mapping, PlantMappingDisclosure
-                )
+                if (pm := event.plant_mapping) is not None
+                and pm.kind == "plant_mapping"
                 else None,
             )
             for event in events
@@ -692,12 +700,6 @@ def list_delivery_events() -> DeliveryEvents:
 # ── Traits and the breeder's confirmation of a revision ────────────────
 
 
-class ServedRevision(TraitRevision):
-    """One revision as the trait routes serve it: the stored revision and whether it stands."""
-
-    confirmed = computed_field(TraitRevision.confirmed)
-
-
 class ServedTrait(BaseModel):
     """One trait's stored record, revisions oldest first, with the revision a delivery reads.
 
@@ -705,22 +707,16 @@ class ServedTrait(BaseModel):
     """
 
     trait: str
-    revisions: list[ServedRevision]
-    latest_confirmed: ServedRevision | None
+    revisions: list[TraitRevision]
+    latest_confirmed: TraitRevision | None
 
     @classmethod
     def of(cls, name: str, record: TraitRecord) -> ServedTrait:
         """Return the record ``name``'s trait holds as served."""
-        latest = record.latest_confirmed
         return cls(
             trait=name,
-            revisions=[
-                ServedRevision.model_validate(r, from_attributes=True)
-                for r in record.revisions
-            ],
-            latest_confirmed=None
-            if latest is None
-            else ServedRevision.model_validate(latest, from_attributes=True),
+            revisions=list(record.revisions),
+            latest_confirmed=record.latest_confirmed,
         )
 
 
@@ -792,7 +788,7 @@ class ConfirmedRevision(BaseModel):
     ``audit_warning`` is ``None`` when the confirmation's audit line was written.
     """
 
-    revision: ServedRevision
+    revision: TraitRevision
     audit_warning: str | None
 
 
@@ -856,7 +852,7 @@ def confirm_trait_revision(
     except (TraitUnknownError, ValueError) as e:
         raise HTTPException(400, str(e)) from e
     return ConfirmedRevision(
-        revision=ServedRevision.model_validate(revision, from_attributes=True),
+        revision=revision,
         audit_warning=audit_warning,
     )
 

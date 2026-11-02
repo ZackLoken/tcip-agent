@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { trainingApi } from "@/api/training";
-import type { Comparison } from "@/api/types.generated";
+import { COMPARED, type Comparison, RUN, UNCOMPARED } from "@/api/types.generated";
 import { NO_MARKED_CHECKPOINT, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { formatNumber } from "@/lib/numberFormat";
 import { thrown } from "@/test/refusals";
@@ -16,12 +16,17 @@ const [METRIC] = Object.keys(BEST.facts.metrics);
  *  an undeclared one and a string. */
 const [RICH] = readColumns(COMPARISONS.rich).filter((c) => c.registry.length > 0);
 
-/** The direction the produced rich comparison serves for each metric key, `null` where none is
- *  declared. */
-const RICH_DIRECTIONS = COMPARISONS.rich.higher_is_better;
+/** The direction the produced rich comparison serves for each metric key, `unstated` where none
+ *  is declared. */
+const RICH_DIRECTIONS = COMPARISONS.rich.directions;
 const [DECLARED_KEYS, UNDECLARED_KEYS] = [true, false].map((declared) =>
-  Object.keys(RICH_DIRECTIONS).filter((key) => (RICH_DIRECTIONS[key] !== null) === declared),
+  Object.keys(RICH_DIRECTIONS).filter((key) => (RICH_DIRECTIONS[key] !== "unstated") === declared),
 );
+
+/** The dataset fingerprints `comparison`'s read columns carry, in column order. */
+function fingerprintsOf(comparison: Comparison): (string | null)[] {
+  return readColumns(comparison).map((c) => c.dataset_fingerprint);
+}
 
 /** A metric the produced rich comparison serves with no declared direction. */
 const [UNDECLARED] = UNDECLARED_KEYS;
@@ -30,7 +35,9 @@ afterEach(cleanup);
 
 /** The id each column of `comparison` was asked for, read or not. */
 function idsOf(comparison: Comparison): string[] {
-  return comparison.experiments.map((c) => ("run" in c ? c.run.experiment_id : c.experiment_id));
+  return comparison.experiments.map((c) =>
+    c.kind === COMPARED ? c.run.experiment_id : c.experiment_id,
+  );
 }
 
 /** The runs `comparison` compared, marked in its columns' order. */
@@ -46,21 +53,25 @@ function compared(comparison: Comparison) {
 }
 
 describe("RunComparison data lines", () => {
-  it("reads the images line as same source images when the tool says so", async () => {
-    expect(COMPARISONS.same.dataset_fingerprints).toBe("same");
+  it("reads the images line as same source images when the columns carry one fingerprint", async () => {
+    const [first, second] = fingerprintsOf(COMPARISONS.same);
+    expect(first).not.toBeNull();
+    expect(second).toBe(first);
     compared(COMPARISONS.same);
     expect(await screen.findByText("same source images")).toBeInTheDocument();
   });
 
-  it("reads the images line as not the same when the tool says so", async () => {
-    expect(COMPARISONS.compare.dataset_fingerprints).toBe("different");
+  it("reads the images line as not the same when the columns carry two", async () => {
+    const [first, second] = fingerprintsOf(COMPARISONS.compare);
+    expect([first, second]).not.toContain(null);
+    expect(second).not.toBe(first);
     compared(COMPARISONS.compare);
     expect(await screen.findByText("not the same source images")).toBeInTheDocument();
   });
 
   it("names which columns it could not read when the images line reads not comparable", async () => {
     const [, unread] = idsOf(COMPARISONS.unread);
-    expect(COMPARISONS.unread.dataset_fingerprints).toBe("unread");
+    expect(COMPARISONS.unread.experiments.map((c) => c.kind)).toContain(UNCOMPARED);
     compared(COMPARISONS.unread);
     expect(
       await screen.findByText(`not comparable: ${unread} could not be read`),
@@ -69,7 +80,7 @@ describe("RunComparison data lines", () => {
 
   it("names which columns carry no fingerprint when the tool says one is unset", async () => {
     const [, loose] = idsOf(COMPARISONS.unset);
-    expect(COMPARISONS.unset.dataset_fingerprints).toBe("unset");
+    expect(fingerprintsOf(COMPARISONS.unset)).toContain(null);
     compared(COMPARISONS.unset);
     expect(
       await screen.findByText(`not comparable: ${loose} carry no fingerprint`),
@@ -78,12 +89,15 @@ describe("RunComparison data lines", () => {
 
   it("reads the partition line from each column's own split state", async () => {
     const [bound, drawn] = readColumns(COMPARISONS.bound).map((c) => c.split);
+    if (bound.case !== "bound" || drawn.case !== "drawn") {
+      throw new Error("the produced bound comparison holds no bound and drawn column");
+    }
     compared(COMPARISONS.bound);
     expect(
-      await screen.findByText(new RegExp(`bound to ${String(bound.selection_dir)}`)),
+      await screen.findByText(new RegExp(`bound to ${bound.selection_dir}`)),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(new RegExp(`drawn again \\(seed ${String(drawn.seed)}\\)`)),
+      screen.getByText(new RegExp(`drawn again \\(seed ${drawn.seed}\\)`)),
     ).toBeInTheDocument();
   });
 });
@@ -203,9 +217,9 @@ describe("RunComparison rank exclusions", () => {
 });
 
 describe("RunComparison rank answer", () => {
-  it("shows the winner's own value for the ranked metric, and its name once when it equals the experiment id", async () => {
+  it("shows the winner's own value for the ranked metric, and its name once", async () => {
     const winner = RANKINGS.rich;
-    expect(winner.entry.name).toBe(winner.entry.experiment_id);
+    expect(winner.entry.origin).toBe(RUN);
     vi.spyOn(trainingApi, "compareBest").mockResolvedValue(winner);
 
     compared(COMPARISONS.rich);
@@ -382,10 +396,10 @@ describe("RunComparison rank answer, a stamped-value exclusion", () => {
   it("names every fact a checkpoint was left out for when both hold, by the metric ranked", async () => {
     const ranking = RANKINGS.verified;
     const [both] = ranking.skipped.filter((s) => s.unverified && s.unstamped);
-    const directions = COMPARISONS.verified.higher_is_better;
+    const { directions } = COMPARISONS.verified;
     // A declared metric other than the one ranked by: the sentence names the answer's metric.
     const [chosen] = Object.keys(directions).filter(
-      (key) => directions[key] !== null && key !== ranking.metric,
+      (key) => directions[key] !== "unstated" && key !== ranking.metric,
     );
     vi.spyOn(trainingApi, "compareBest").mockResolvedValue(ranking);
 

@@ -94,7 +94,7 @@ type CrossingBound = Literal[
 ]
 """How a milestone crossing's date was read (:class:`Crossing`)."""
 
-Projection = Literal["curves", "milestones"]
+type Projection = Literal["curves", "milestones"]
 """A phenology measurement's two deliverable projections: the per-(plant, capture) curve rows and
 the per-plant milestone rows."""
 

@@ -85,9 +85,9 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
 
     A checkpoint saved through an untrained run's context carries the config its spec records,
     paths read back against the project: each field of that config, and its data section but
-    ``images_dir`` and ``labels_dir``.
+    its data locations (``experiments.DATA_PATHS``).
     """
-    from tcip_mcp.experiments import CONFIG_PATHS
+    from tcip_mcp.experiments import CONFIG_PATHS, DATA_PATHS
     from tcip_mcp.registry_paths import runtime_paths
 
     ctx, launched = _ctx(tmp_path)
@@ -102,7 +102,7 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
         tmp_path,
     )
     assert isinstance(stored, dict)
-    locations = {"images_dir", "labels_dir"}
+    locations = {field[0] for field in DATA_PATHS}
     assert {k: v for k, v in stored.items() if k != "data"} == {
         k: v for k, v in launched.items() if k != "data"
     }

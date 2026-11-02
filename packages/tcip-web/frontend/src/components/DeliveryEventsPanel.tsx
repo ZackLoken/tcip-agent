@@ -4,12 +4,7 @@
  * confirmed, which it names, so this panel carries no confirm/withdraw affordance.
  */
 
-import {
-  isCanopySegmentDisclosure,
-  isPlantMappingDisclosure,
-  isPlantRegistryDisclosure,
-} from "@/api/inference";
-import type { ServedDeliveryEvent } from "@/api/types.generated";
+import { ACKNOWLEDGED, type ServedDeliveryEvent } from "@/api/types.generated";
 import { deliveredDatesLine, outsideRasterLine } from "@/lib/disclosureLines";
 
 function DeliveryEventRow({
@@ -35,13 +30,13 @@ function DeliveryEventRow({
         <dt className="text-tcip-muted">Output path</dt>
         <dd>{record.output_path}</dd>
         <dt className="text-tcip-muted">Validated</dt>
-        <dd>{record.validated ? "yes" : "no"}</dd>
-        {record.acknowledgment && (
+        <dd>{record.shipped.kind === ACKNOWLEDGED ? "no" : "yes"}</dd>
+        {record.shipped.kind === ACKNOWLEDGED && (
           <>
             <dt className="text-tcip-muted">Acknowledged by</dt>
-            <dd>{record.acknowledgment.acknowledged_by}</dd>
+            <dd>{record.shipped.acknowledgment.acknowledged_by}</dd>
             <dt className="text-tcip-muted">Reason</dt>
-            <dd>{record.acknowledgment.reason}</dd>
+            <dd>{record.shipped.acknowledgment.reason}</dd>
           </>
         )}
       </dl>
@@ -53,13 +48,13 @@ function DeliveryEventRow({
             className="font-mono text-[13px] text-tcip-muted"
           >
             {`${bucket.bucket}: ` +
-              (bucket.validated
+              (bucket.kind === "validated"
                 ? `validated by assessment ${bucket.assessment_id}`
                 : `not validated (${bucket.reason})`)}
           </div>
         ))}
       </div>
-      {record.plant_mapping && isCanopySegmentDisclosure(record.plant_mapping) && (
+      {record.plant_mapping?.kind === "canopy_segments" && (
         <div className="mt-2 text-[13px] text-tcip-muted" data-testid="canopy-disclosure">
           {(() => {
             const pm = record.plant_mapping;
@@ -87,7 +82,7 @@ function DeliveryEventRow({
           })()}
         </div>
       )}
-      {record.plant_mapping && isPlantRegistryDisclosure(record.plant_mapping) && (
+      {record.plant_mapping?.kind === "plant_registry" && (
         <div className="mt-2 text-[13px] text-tcip-muted">
           <div>
             {`Plant registry ${record.plant_mapping.plant_registry.name}: ` +
@@ -100,7 +95,7 @@ function DeliveryEventRow({
           )}
         </div>
       )}
-      {record.plant_mapping && isPlantMappingDisclosure(record.plant_mapping) && (
+      {record.plant_mapping?.kind === "plant_mapping" && (
         <div className="mt-2 text-[13px] text-tcip-muted">
           {deliveredDatesLine(record.plant_mapping)}
           {resolved_key === null && " (the cited mapping record no longer resolves)"}

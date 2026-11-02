@@ -64,34 +64,39 @@ def _config(project: Path, images_dir: Path) -> dict:
     )
 
 
+def _fingerprints(ids: list[str], project: Path) -> list[str | None]:
+    """Return the dataset fingerprint each compared run of ``ids`` carries, in order."""
+    fingerprints = []
+    for entry in compare_experiments(ids, project=project).experiments:
+        assert entry.kind == "compared", entry
+        fingerprints.append(entry.dataset_fingerprint)
+    return fingerprints
+
+
 def test_compare_experiments_surfaces_shared_fingerprint(
     tmp_path: Path,
 ) -> None:
     first = _config(tmp_path, _make_dataset(tmp_path / "first"))
     opened_run(tmp_path, first, experiment_id="a")
     opened_run(tmp_path, first, experiment_id="b")
-    assert (
-        compare_experiments(["a", "b"], project=tmp_path).dataset_fingerprints
-        == "same"
-    )
+    a, b = _fingerprints(["a", "b"], tmp_path)
+    assert a is not None and a == b
     opened_run(
         tmp_path,
         _config(tmp_path, _make_dataset(tmp_path / "second", shade=200)),
         experiment_id="c",
     )
-    assert (
-        compare_experiments(["a", "c"], project=tmp_path).dataset_fingerprints
-        == "different"
-    )
+    a, c = _fingerprints(["a", "c"], tmp_path)
+    assert None not in (a, c) and a != c
 
 
 def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
     tmp_path: Path,
 ) -> None:
-    """Comparing a run of known fingerprint with one of none reports unknown identity, not same.
+    """Comparing a run of known fingerprint with one of none carries the none, not a match.
 
-    The second run is over a dataset holding no label document, and the comparison's
-    ``dataset_fingerprints`` is ``unset``.
+    The second run is over a dataset holding no label document, and its column carries no
+    fingerprint.
     """
     from tests._verified_checkpoint_fixtures import table_images
     from tests.tiny_trainer_fixtures import (
@@ -121,10 +126,8 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
         ),
         experiment_id="b",
     )
-    assert (
-        compare_experiments(["a", "b"], project=tmp_path).dataset_fingerprints
-        == "unset"
-    )
+    a, b = _fingerprints(["a", "b"], tmp_path)
+    assert a is not None and b is None
 
 
 def test_dataset_identity_helper_registered_vs_bespoke(tmp_path: Path) -> None:

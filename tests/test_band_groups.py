@@ -736,7 +736,7 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     refused, naming that file; an unrelated group in that pass, with no such collision, forms.
     """
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
 
     src = tmp_path / "raw"
     src.mkdir()
@@ -763,8 +763,8 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
 
     project = tmp_path / "proj_bandcollide_case"
     manifest = ingest_images(project, source=str(src), actor=None)
-    assert "error" not in manifest
-    bg = manifest["band_groups"]
+    assert isinstance(manifest, IngestManifest), manifest
+    bg = manifest.band_groups
     assert len(bg["refused"]) == 1
     refusal = bg["refused"][0]
     assert refusal["group_id"] == "capA"
@@ -1036,16 +1036,20 @@ def test_ingest_images_groups_real_dji_bucket(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import (
+        IngestManifest,
+        bucket_of,
+        ingest_images,
+    )
 
     proj = tmp_path / "ms_valley_farm"
     manifest = ingest_images(proj, source=str(REAL_DJI_DIR), actor=None)
-    assert "error" not in manifest
-    assert manifest["copied"] == 64
-    assert len(manifest["band_groups"]["formed"]) == 16
-    assert manifest["band_groups"]["refused"] == []
+    assert isinstance(manifest, IngestManifest), manifest
+    assert manifest.copied == 64
+    assert len(manifest.band_groups["formed"]) == 16
+    assert manifest.band_groups["refused"] == []
 
-    (bucket,) = {f["bucket"] for f in manifest["files"]}
+    (bucket,) = {bucket_of(f.date) for f in manifest.files}
     images_dir = image_dir(proj, bucket)
     assert len(list(images_dir.glob("*.bandgroup"))) == 16
     assert (
@@ -1058,7 +1062,7 @@ def test_an_ingest_of_per_band_captures_forms_their_groups(
 ) -> None:
     """An ingest of per-band captures forms their groups with nothing stated about them."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
 
     src = tmp_path / "raw"
     src.mkdir()
@@ -1078,11 +1082,12 @@ def test_an_ingest_of_per_band_captures_forms_their_groups(
 
     manifest = ingest_images(tmp_path / "proj", source=str(src), actor=None)
 
-    assert sorted(g["stem"] for g in manifest["band_groups"]["formed"]) == [
+    assert isinstance(manifest, IngestManifest), manifest
+    assert sorted(g["stem"] for g in manifest.band_groups["formed"]) == [
         "capA",
         "capB",
     ]
-    assert len(manifest["band_groups"]["manifests"]) == 2
+    assert len(manifest.band_groups["manifests"]) == 2
 
 
 def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(

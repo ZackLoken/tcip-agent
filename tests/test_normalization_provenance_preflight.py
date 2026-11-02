@@ -588,7 +588,7 @@ def test_a_selection_bound_runs_checkpoint_records_statistics_preflight_admits(
 
     windows = checkpoint.spec.model_source.normalization.source.windows
     assert {label for label, _ in windows} == _train_side(
-        tmp_path, checkpoint.experiment_id
+        tmp_path, "exp-own-statistics"
     )
     recorded = runtime_paths(checkpoint.stamp.config, CONFIG_PATHS, tmp_path)
     assert isinstance(recorded, dict)

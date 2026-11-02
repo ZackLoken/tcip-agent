@@ -79,7 +79,8 @@ every `CLAUDE`-prefixed one, so a backend started from a Claude Code session doe
 agent as a nested session, and every prompt-cache control Claude Code ranks above the row's
 `promptCacheTtl` or that turns its caching off, so the lifetime the row requests is the one its
 agent runs with. Session create names a row by its exact id; the status route lists every row
-with the reason it cannot launch, if any, and the rail lets the breeder pick one. A row is added
+as `provider_status` answers it, launchable or with the reason it cannot launch, and the rail lets
+the breeder pick one. A row is added
 only after its harness's real flags are read from the installed CLI and one live smoke
 (`tools/smoke_terminal_e2e.py <id>`, with `--workspace` naming one the person trusted by hand for a
 harness that asks to trust its workspace) passes: the smoke serves the backend on a loopback port
@@ -118,7 +119,8 @@ the end route answers from. Whether a launch resumes, and why not, is decided on
 `launch_resumes` over `recorded_session`; a session whose backend stopped without ending it is
 resumed so, and no end line is written for it, as is one whose person's End answered that its end
 line could not be written. A switch of harness while an agent runs is `hand_off_session`, and
-`TerminalSession.hand_off_landed` is what answers for its hand-off. The session delivers the
+`TerminalSession.hand_off_state` is what answers for its hand-off: none asked, asked and not
+landed, or landed, the end line's `hand_off`. The session delivers the
 requests the rail submits under the condition `Provider` states, and its socket serves
 `TerminalServedFrame` (`TerminalOutputFrame` and `TerminalHeldFrame`, each frame's docstring its
 contract). Which agent harness the program is comes from the harness's own MCP

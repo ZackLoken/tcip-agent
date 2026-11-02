@@ -22,10 +22,10 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     Assignment,
     MappingBuild,
-    MatchRadius,
     PlantRegistry,
     PlantRegistryReference,
     RegistryCsv,
+    StatedRadius,
 )
 from tcip_mcp.tools.phenology_tools import (
     build_plant_mapping,
@@ -236,10 +236,8 @@ def _persist_synthetic_mapping(
         built_at=FIXTURE_INSTANT,
         dates_requested=None,
         match_radius={
-            d: MatchRadius(
-                value=10.0,
-                source="stated",
-                rationale="a synthetic mapping's radius",
+            d: StatedRadius(
+                value=10.0, rationale="a synthetic mapping's radius"
             )
             for d in assignments
         },

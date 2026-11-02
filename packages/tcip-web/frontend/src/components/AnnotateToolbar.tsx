@@ -9,16 +9,16 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { subjectColor } from "@/api/subjects";
-import type { ImageBands } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { ReviewQueueLaunch } from "@/components/annotate/ReviewQueueLaunch";
 import { BandPicker } from "@/components/BandPicker";
 import { Stepper } from "@/components/Stepper";
+import { unended } from "@/hooks/jobPoll";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useReviewQueuePoll } from "@/hooks/useReviewQueue";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
-import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
+import { showsBandPicker, type BandChoice } from "@/lib/bandSelection";
 import {
   filteredIndices,
   IMAGE_FILTER_WORDS,
@@ -156,9 +156,7 @@ export function AnnotateToolbar({
   onCancelSave,
   saveDisabled,
   dirty,
-  bandsInfo,
-  bandSelection,
-  onBandSelectionChange,
+  bandChoice,
   subjectState,
   onComplete,
   proposing,
@@ -174,10 +172,8 @@ export function AnnotateToolbar({
   onCancelSave: () => void;
   saveDisabled: boolean;
   dirty: boolean;
-  // Band-composite picker (multispectral only): omitted/null for a standard RGB dataset.
-  bandsInfo?: ImageBands | null;
-  bandSelection?: BandSelection | null;
-  onBandSelectionChange?: (next: BandSelection) => void;
+  // The image's band choice, which the band picker shows and records.
+  bandChoice: BandChoice;
   // The dataset subject's state on this image as the backend serves it; null until loaded.
   subjectState: SubjectState | null;
   // Mark the dataset subject complete over the whole image (true) or withdraw its marks (false).
@@ -234,6 +230,7 @@ export function AnnotateToolbar({
 
   const imageName = currentImage(dataset)?.name ?? null;
   const nav = useImageNav();
+  const ranking = annotateUi.reviewQueue !== null && unended(annotateUi.reviewQueue.state);
   const [launching, setLaunching] = useState(false);
   useReviewQueuePoll();
   const finished = isFinished(subjectState);
@@ -460,16 +457,13 @@ export function AnnotateToolbar({
           {saving ? "Saving" : dirty ? "Save" : "Saved"}
         </button>
 
-        {bandsInfo &&
-          bandSelection &&
-          onBandSelectionChange &&
-          showsBandPicker(bandsInfo, bandSelection) && (
-            <BandPicker
-              info={bandsInfo}
-              selection={bandSelection}
-              onChange={onBandSelectionChange}
-            />
-          )}
+        {bandChoice.kind === "banded" && showsBandPicker(bandChoice) && (
+          <BandPicker
+            info={bandChoice.info}
+            selection={bandChoice.selection}
+            onChange={bandChoice.choose}
+          />
+        )}
 
         <div className="flex-1" />
 
@@ -505,8 +499,8 @@ export function AnnotateToolbar({
                   {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f, nav.ranked ?? []).length})`}
                 </option>
               ))}
-              <option value={RANK_QUEUE} disabled={annotateUi.reviewQueue?.live ?? false}>
-                {annotateUi.reviewQueue?.live ? "ranking a review queue" : "rank a review queue"}
+              <option value={RANK_QUEUE} disabled={ranking}>
+                {ranking ? "ranking a review queue" : "rank a review queue"}
               </option>
             </select>
             {launching && (

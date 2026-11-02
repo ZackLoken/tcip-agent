@@ -28,6 +28,7 @@ def test_push_panel_event_reports_an_undelivered_event_as_not_ok(
     from tcip_mcp.web_client import Banner
 
     res = push_panel_event(bound, "annotate", Banner(text="load the labels"))
+    assert res.kind == "not_posted", res
     assert isinstance(res.reason, str) and "pytest" in res.reason
 
 

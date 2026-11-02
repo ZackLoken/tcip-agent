@@ -257,6 +257,36 @@ def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_it
     ]
 
 
+def test_a_foreign_checkpoint_fails_its_assessment_on_unknown_training_membership(
+    tmp_path: Path,
+) -> None:
+    """A checkpoint no run of the project produced fails on its unknown training membership.
+
+    A checkpoint registered through ``register_model``'s explicit mode is assessed over the
+    project's reference: no run's completion registered it, so nothing states what it was trained
+    on, the record fails with ``training_membership_unknown`` and its disjointness states the
+    reference's two sides alone.
+    """
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+
+    root = tmp_path / "ds"
+    synthetic_capture(root)
+    selection_dir = tmp_path / "selection"
+    draw_reference_selection(tmp_path, root, selection_dir)
+    confirm_count_trait(tmp_path)
+    checkpoint = foreign_checkpoint(tmp_path, name="foreign")
+
+    record = assess(tmp_path, checkpoint, selection_dir)
+
+    assert "error" not in record, record["error"]
+    assert "training_membership_unknown" in record["failures"], record[
+        "failures"
+    ]
+    assert set(record["disjointness"]) == {"holdout_shares_calibration"}, (
+        record["disjointness"]
+    )
+
+
 def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     tmp_path: Path,
 ) -> None:
@@ -498,7 +528,7 @@ def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_ma
         iou_jitter_px=fx.IOU_JITTER_PX,
         iou_margin=fx.IOU_MARGIN,
     )
-    assert confirmed.confirmed
+    assert confirmed.state.kind == "confirmed"
     assert (confirmed.entry.iou_jitter_px, confirmed.entry.iou_margin) == (
         fx.IOU_JITTER_PX,
         fx.IOU_MARGIN,
@@ -581,13 +611,16 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(
     revision = latest_confirmed(fx.COUNT_TRAIT, tmp_path)
     first = chain.read()
 
-    assert gate(
-        tmp_path,
-        [first],
-        delivery_kind="per_image_count",
-        revision=revision,
-        result=nothing,
-    ).validated
+    assert (
+        gate(
+            tmp_path,
+            [first],
+            delivery_kind="per_image_count",
+            revision=revision,
+            result=nothing,
+        ).shipped.kind
+        == "validated"
+    )
     with pytest.raises(
         DeliveryRefusedError, match="more than one checkpoint"
     ) as refused:
@@ -647,13 +680,16 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
     nothing = Result((), (), population=())
     revision = latest_confirmed(fx.COUNT_TRAIT, tmp_path)
     bucket = chain.read()
-    assert gate(
-        tmp_path,
-        [bucket],
-        delivery_kind="per_image_count",
-        revision=revision,
-        result=nothing,
-    ).validated
+    assert (
+        gate(
+            tmp_path,
+            [bucket],
+            delivery_kind="per_image_count",
+            revision=revision,
+            result=nothing,
+        ).shipped.kind
+        == "validated"
+    )
     assessment = read_assessment(tmp_path, chain.assessment["assessment_id"])
     source = assessment.reference.samples[0].sample.source
     with Image.open(source) as frame:
@@ -690,7 +726,11 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
     from types import SimpleNamespace
 
     from tcip_mcp.assessment import AssessmentRefusedError, _scalar
-    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+    from tcip_mcp.pipelines.data.selection import (
+        ClassScope,
+        Sample,
+        WholeSource,
+    )
     from tcip_mcp.pipelines.execution import Pass, execution_record
     from tests._producer_fixtures import write_image
 
@@ -722,6 +762,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
         ground_truth=str(tmp_path / "t.csv"),
         group="a",
         side="holdout",
+        extent=WholeSource(),
         row_key="a",
     )
     entry = fx.COUNT_SPEC.model_copy(

@@ -73,7 +73,7 @@ def test_a_listing_and_a_ranking_answer_each_entry_with_its_checkpoints_facts(
     ranked = ranked_registered_model(
         tmp_path,
         "val_map50",
-        higher_is_better=True,
+        direction="higher",
         include_unverified=True,
         experiment_ids=None,
         tag=None,
@@ -113,7 +113,7 @@ def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(
         {
             "metric": "val_map50",
             "role": "comparability_only",
-            "higher_is_better": True,
+            "direction": "higher",
             "sources": ["caller"],
         }
     ]
@@ -124,8 +124,8 @@ def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(
     )
     assert not isinstance(ranked, dict), ranked
     assert ranked.entry.name == "b"
-    assert (ranked.higher_is_better, ranked.direction_source) == (
-        True,
+    assert (ranked.direction, ranked.direction_source) == (
+        "higher",
         "declared",
     )
 
@@ -232,7 +232,7 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
     ]
 
     assert no_direction == (
-        "'val_map99' has no declared ranking direction (schemas.HIGHER_IS_BETTER_BY_METRIC "
+        "'val_map99' has no declared ranking direction (schemas.DIRECTION_BY_METRIC "
         "names no entry for it). State a direction to rank by it anyway, or pick one of the "
         "available metrics."
     )
@@ -242,7 +242,7 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
     )
     for text in (no_direction, all_unverified):
         for parameter in (
-            "higher_is_better",
+            "direction=",
             "include_unverified",
             "available_metrics",
             "rank_registered_models",
@@ -323,14 +323,14 @@ def test_best_model_lower_is_better_for_loss(tmp_path: Path) -> None:
     ).list_models()
 
     best, _ = best_model(
-        models, "val_loss", higher_is_better=False, include_unverified=True
+        models, "val_loss", direction="lower", include_unverified=True
     )
     assert best is not None and best.entry.name == "lo"
     # A metric no model has: None, cleanly distinguishable from "no models".
     none, _ = best_model(
         models,
         "nonexistent",
-        higher_is_better=False,
+        direction="lower",
         include_unverified=True,
     )
     assert none is None
@@ -351,7 +351,7 @@ def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(
     ).list_models()
 
     best, _ = best_model(
-        models, "val_loss", higher_is_better=False, include_unverified=True
+        models, "val_loss", direction="lower", include_unverified=True
     )
     assert best is not None and best.entry.name == "real"
 
@@ -631,7 +631,7 @@ def test_an_ordinary_registry_payload_is_still_registered(
     best, _ = best_model(
         reg.list_models(),
         "val_map50",
-        higher_is_better=True,
+        direction="higher",
         include_unverified=True,
     )
     assert best is not None and best.facts.metrics["val_map50"] == 0.70

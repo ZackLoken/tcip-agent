@@ -11,17 +11,23 @@ import {
   type SplitChoices,
   type SweepGroup,
   type TrainingListing,
+  TRIAL,
 } from "@/api/types.generated";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
-import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
+import {
+  type EmbeddedToolOutcome,
+  type EmbeddedToolStepResult,
+  PENDING,
+  useEmbeddedToolRetry,
+} from "@/hooks/useEmbeddedToolRetry";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
 import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
-import { declaredClient } from "@/store/slices/agentActivity";
+import { clientName } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
 import {
@@ -36,16 +42,22 @@ const NO_LISTING: TrainingListing = { runs: [], sweeps: [] };
 
 /** What a run's launch event says about who started it. */
 function launcherSentence(launch: RunRow["launch"]): string {
-  if (!launch) return "no launch event recorded";
-  return declaredClient(launch) ? "started by the agent" : "started with no agent declared";
+  if (launch.kind === "no_launch_line") return "no launch event recorded";
+  return launch.kind === "agent" ? "started by the agent" : "started with no agent declared";
 }
 
 /** The longer sentence behind a row's launcher mark, reachable by assistive technology through
  * aria-describedby: what the mark means, with the declared client named for an agent launch. */
 function launcherDescription(launch: RunRow["launch"]): string {
-  if (!launch) return "No launch event names this run.";
-  const client = declaredClient(launch);
-  return client ? `Launched by the agent ${client}.` : "Launched with no agent named.";
+  if (launch.kind === "no_launch_line") return "No launch event names this run.";
+  return launch.kind === "agent"
+    ? `Launched by the agent ${clientName(launch.agent_client_name, launch.agent_client_version)}.`
+    : "Launched with no agent named.";
+}
+
+/** A row's best value under its selection metric, or nothing before one. */
+function bestLine(run: RunRow): string | null {
+  return run.best && `best ${run.best.metric} ${formatNumber(run.best.value)}`;
 }
 
 /** How long ago a status record's own heartbeat instant was stamped, in whole minutes. No
@@ -66,16 +78,17 @@ function stateLine(state: string, heartbeat: string): string {
  * order the visible row itself reads in. */
 function runRowLabel(run: RunRow): string {
   const base = `${run.experiment_id} ${stateLine(run.state, run.heartbeat)}, ${launcherSentence(run.launch)}`;
-  if (run.best_metric === null || !run.best_metric_name) return base;
-  return `${base}, best ${run.best_metric_name} ${formatNumber(run.best_metric)}`;
+  const best = bestLine(run);
+  return best ? `${base}, ${best}` : base;
 }
 
 /** What a sweep's trials amount to so far, under the selection metric it ranks them by. */
 function sweepOutcomeLine(sweep: SweepGroup): string {
-  const { best_params, best_value, best_value_state } = sweep.outcome;
-  return best_params === null
-    ? "no completed trial yet"
-    : `best ${sweep.selection_metric} ${best_value === null ? best_value_state : formatNumber(best_value)}`;
+  const { outcome } = sweep;
+  if (outcome.kind === "no_best") return "no completed trial yet";
+  const value =
+    outcome.kind === "finite_best" ? formatNumber(outcome.best_value) : outcome.best_value_state;
+  return `best ${sweep.selection_metric} ${value}`;
 }
 
 function runLaunchRow(
@@ -92,7 +105,7 @@ function runLaunchRow(
         <span className="block font-mono text-[13px]">{run.experiment_id}</span>
         <span className="block text-[12px] text-tcip-muted">
           {run.builder} · {run.task}
-          {run.sweep ? ` · trial of ${run.sweep}` : ""}
+          {run.kind === TRIAL ? ` · trial of ${run.sweep_id}` : ""}
         </span>
         <span className="block text-[12px] text-tcip-muted">
           {new Date(run.created).toLocaleString()} · {run.state}
@@ -174,11 +187,7 @@ function RunItem({
               {launcherDescription(run.launch)}
             </span>
           </span>
-          {run.best_metric !== null && run.best_metric_name && (
-            <span className="tabular-nums">
-              best {run.best_metric_name} {formatNumber(run.best_metric)}
-            </span>
-          )}
+          {run.best && <span className="tabular-nums">{bestLine(run)}</span>}
         </div>
         {run.status_error && <div className="text-[12px] tcip-problem">{run.status_error}</div>}
       </button>
@@ -264,8 +273,6 @@ export function TrainingTab() {
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [latestBatch, setLatestBatch] = useState<MetricsRow | null>(null);
-  // The run's own TensorBoard refusal for a board holding no logs, once one answers.
-  const [tbNoLogs, setTbNoLogs] = useState<NoLogsRefusal | null>(null);
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedExperimentIds, setMarkedExperimentIds] = useState<Set<string>>(new Set());
   // Cancel in flight, by run or sweep id: disables that row's own Cancel button with a pending
@@ -377,7 +384,7 @@ export function TrainingTab() {
     });
     setPickerOpen(false);
     void refreshRuns();
-    setSelectedRun("sweep_id" in result ? result.sweep_id : result.experiment_id);
+    setSelectedRun(result.kind === "sweep" ? result.sweep_id : result.experiment_id);
   }
 
   // The run list's own poll keeps a state per run, which the metrics stream reads without reopening.
@@ -406,17 +413,14 @@ export function TrainingTab() {
         setMetrics((prev) => mergeMetric(prev, msg.row));
       } else if (msg.type === "batch") {
         setLatestBatch(msg.row);
-      } else if (msg.type === "status") {
-        // A known run carries its row and no error; an unknown run carries error and no row,
-        // is not terminal, and the socket keeps reconnecting behind it.
-        if (msg.error) {
-          if (!errorToasted) {
-            errorToasted = true;
-            useStore.getState().pushToast(`Training stream error: ${msg.error}`);
-          }
-          return;
+      } else if (msg.type === "error") {
+        // An unknown run is not terminal, and the socket keeps reconnecting behind it.
+        if (!errorToasted) {
+          errorToasted = true;
+          useStore.getState().pushToast(`Training stream error: ${msg.error}`);
         }
-        if (msg.status !== null && !alreadyTerminal)
+      } else if (msg.type === "status") {
+        if (!alreadyTerminal)
           useStore.getState().pushToast(`Training ${selectedRun}: ${msg.status.state}`, "info");
         void refreshRuns();
       }
@@ -424,61 +428,38 @@ export function TrainingTab() {
     return () => streamRef.current?.();
   }, [selectedRun, streaming, projectRoot, refreshRuns, comparing]);
 
-  // tbNoLogs is a step side effect below, not part of the hook's own outcome, since its text
-  // overrides tbError's; reset it on the same triggers the hook itself resets url/error on.
-  useEffect(() => {
-    setTbNoLogs(null);
-  }, [selectedRun, tbAttempt]);
-
   // Adopt the TensorBoard already serving this run, trial or sweep, or start one, retrying on a
   // timer while it is live.
   const tbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
-    if (!selectedRun) return { url: null, error: null, done: true };
+    if (!selectedRun) return { outcome: PENDING, done: true };
     const experimentId = selectedRun;
+    const unreached = (e: unknown): EmbeddedToolOutcome => ({
+      kind: "unreached",
+      message: messageOf(e),
+    });
     let detail;
     try {
       detail = await trainingApi.getRun(experimentId);
     } catch (e) {
-      return { url: null, error: messageOf(e), done: true };
+      return { outcome: unreached(e), done: true };
     }
 
-    let url = detail.tensorboard?.url ?? null;
-    let failure: string | null = null;
-    let noLogs: NoLogsRefusal | null = null;
-    if (!url) {
-      try {
-        const launched = await trainingApi.launchTensorboard(experimentId);
-        if ("url" in launched) {
-          url = launched.url;
-        } else {
-          failure = launched.output ? `${launched.error}: ${launched.output}` : launched.error;
-        }
-      } catch (e) {
-        noLogs = refusalOf<NoLogsRefusal>(e, NO_LOGS);
-        if (!noLogs) failure = messageOf(e);
-      }
+    let outcome: EmbeddedToolOutcome;
+    try {
+      outcome =
+        detail.tensorboard.kind === "serving"
+          ? detail.tensorboard
+          : await trainingApi.launchTensorboard(experimentId);
+    } catch (e) {
+      outcome = refusalOf<NoLogsRefusal>(e, NO_LOGS) ?? unreached(e);
     }
-
-    if (url) {
-      setTbNoLogs(null);
-      return { url, error: null, done: true };
-    }
-    // The route answers a detail carrying the run or the sweep its id names.
-    const status = (detail.run ?? detail.sweep)!;
-    if (!TERMINAL_STATES.has(status.state)) return { url: null, error: null, done: false };
-    if (noLogs) {
-      setTbNoLogs(noLogs);
-      return { url: null, error: null, done: true };
-    }
-    return { url: null, error: failure ?? "No TensorBoard is serving this run.", done: true };
+    if (outcome.kind === "serving") return { outcome, done: true };
+    const status = detail.kind === "run" ? detail.run : detail.sweep;
+    if (!TERMINAL_STATES.has(status.state)) return { outcome: PENDING, done: false };
+    return { outcome, done: true };
   }, [selectedRun]);
 
-  const { url: tbUrl, error: tbError } = useEmbeddedToolRetry(
-    selectedRun,
-    !!selectedRun,
-    tbAttempt,
-    tbStep,
-  );
+  const tbOutcome = useEmbeddedToolRetry(selectedRun, !!selectedRun, tbAttempt, tbStep);
 
   // TensorBoard's own header button reloads its data in place, keeping the person's run and groups.
   const tbFrame = useRef<HTMLIFrameElement>(null);
@@ -515,8 +496,6 @@ export function TrainingTab() {
 
   const selectedRow = rows.find((r) => r.experiment_id === selectedRun);
   const selectedTerminal = selectedRow !== undefined && TERMINAL_STATES.has(selectedRow.state);
-
-  const noLogsMessage = tbNoLogs?.message ?? null;
 
   const metricKeys = useMemo(() => unionMetricKeys(metrics), [metrics]);
   const batch = inProgressBatch(metrics, latestBatch);
@@ -650,11 +629,9 @@ export function TrainingTab() {
                 <div className="h-[60vh] min-h-[360px] shrink-0">
                   <EmbeddedTool
                     title="TensorBoard"
-                    url={tbUrl}
+                    outcome={tbOutcome}
                     frameRef={tbFrame}
-                    loading={!tbUrl && !tbError && !tbNoLogs}
-                    error={noLogsMessage ?? tbError}
-                    onRetry={tbNoLogs ? undefined : () => setTbAttempt((n) => n + 1)}
+                    onRetry={() => setTbAttempt((n) => n + 1)}
                   />
                 </div>
               )}

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
@@ -29,7 +29,11 @@ from tcip_annotation.json_io import stored_box_extent_ok
 from tcip_annotation.state import Rings
 from tcip_annotation.viz import render_candidates, render_detections
 from tcip_mcp.audit import now, record_event_or_raise
-from tcip_mcp.pipelines.execution import Execution, ExecutionRefusedError
+from tcip_mcp.pipelines.execution import (
+    ExecutionRefusedError,
+    NoPass,
+    ProposalExecution,
+)
 from tcip_mcp.pipelines.image_utils import (
     BandGroupIncompleteError,
     resolve_image_path,
@@ -81,9 +85,8 @@ class ProposalCandidate(BaseModel):
 class ProposalStaging(BaseModel):
     """The candidates one proposal run produced for one dataset image.
 
-    It names the ``engine``, the content identity of the pixels it ran on, and the ``execution``
-    record of the inference pass that produced the candidates (``None`` for a proposal no such
-    pass made), which the bucket its accepted candidates publish to carries;
+    It names the ``engine``, the content identity of the pixels it ran on, and what produced the
+    candidates (``execution``), which the bucket its accepted candidates publish to carries;
     :func:`proposal_staging_key` addresses it by the run's id.
     """
 
@@ -92,7 +95,7 @@ class ProposalStaging(BaseModel):
     engine: str
     candidates: list[ProposalCandidate]
     image_identity: RasterIdentity
-    execution: Execution | None
+    execution: ProposalExecution
 
 
 class Assignment(BaseModel):
@@ -143,6 +146,7 @@ class ProposedCandidates(BaseModel):
 class Staged(BaseModel):
     """One run's kept candidates as published: the overlay, the bucket and its count."""
 
+    kind: Literal["staged"] = "staged"
     image_path: str
     bucket: str
     summary: str
@@ -152,6 +156,7 @@ class Staged(BaseModel):
 class StagedShapes(BaseModel):
     """Explicit shapes as published: the boxes and polygons staged, boxes dropped, the bucket."""
 
+    kind: Literal["shapes"] = "shapes"
     n_detect: int
     n_segment: int
     dropped_boxes: int
@@ -649,7 +654,7 @@ def _stage_document(
     annotations: list[Annotation],
     img_w: int,
     img_h: int,
-    execution: Execution | None,
+    execution: ProposalExecution,
     actor: str | None,
 ) -> str:
     """Publish ``annotations``, at least one, as one staged proposal's bucket for ``image``.
@@ -658,8 +663,8 @@ def _stage_document(
     root, all three read off the staging key ``address`` (:func:`proposal_staging_key`), so the
     name says which staging it publishes and never lands on an earlier one
     (:func:`~tcip_mcp.buckets.publish`); its record names ``producer`` as what proposed them and
-    carries ``execution``, the record of the inference pass that produced them, and its
-    publication's audit line ``actor`` as who staged them.
+    carries ``execution``, what produced them, and its publication's audit line ``actor`` as who
+    staged them.
     """
     from tcip_annotation import json_io
     from tcip_mcp.buckets import Document, Proposed, publish
@@ -851,7 +856,7 @@ def _stage_explicit_regime(
             annotations=proposals,
             img_w=img_w,
             img_h=img_h,
-            execution=None,
+            execution=NoPass(),
             actor=actor,
         )
     except ValueError as exc:
@@ -883,7 +888,7 @@ def stage_proposals(
     polygons: list[dict] | None = None,
     model_name: PathSegment | None = None,
     actor: str | None,
-) -> Staged | StagedShapes | dict:
+) -> Annotated[Staged | StagedShapes, Field(discriminator="kind")] | dict:
     """Stage model-/agent-proposed shapes as an image's proposal bucket of predictions.
 
     Never writes ground truth.
@@ -916,8 +921,9 @@ def stage_proposals(
     for explicit shapes): ``id`` is the run's ``staging_id`` for ``assignments`` and
     a fresh one (:func:`~tcip_mcp.experiments.mint_experiment_id`) for explicit shapes. Its record
     names the engine or ``model_name`` as what proposed it, carries the execution record of the
-    tiled pass the proposal ran through, ``None`` where none ran (a prompt window, explicit
-    shapes), and names no checkpoint or class scope. A bucket is published once: a second stage
+    tiled pass the proposal ran through, or no pass where none ran (a prompt window, explicit
+    shapes; :data:`~tcip_mcp.pipelines.execution.ProposalExecution`), and names no checkpoint or
+    class scope. A bucket is published once: a second stage
     of the same run refuses (:class:`~tcip_mcp.buckets.BucketExistsError`), and a new run or new
     explicit shapes publish a bucket of their own, so nothing overwrites reviewed predictions or
     orphans their verdicts. The publication's audit line names ``actor``, the person who staged

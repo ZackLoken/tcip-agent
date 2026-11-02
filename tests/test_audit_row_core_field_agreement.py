@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 import tcip_mcp.audit as audit_module
 import tcip_store
+from tcip_web.routes.subjects import NoRegistry
 
 
 def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
@@ -29,7 +30,7 @@ def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
         json={
             "dataset_root": str(dataset_root),
             "subjects": {"bud": {"description": "one bud"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )

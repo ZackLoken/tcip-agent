@@ -3,9 +3,9 @@
  * dataset inside it (the project's own tree) via /dataset/select.
  */
 
-import { api, type ProjectSummary } from "@/api/client";
+import { api } from "@/api/client";
 import { messageOf } from "@/api/http";
-import type { Capture, DatasetTree, ProjectRecord } from "@/api/types.generated";
+import type { Capture, DatasetTree, ReadProject } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
 import { settleVisits } from "@/lib/sessionLifecycle";
@@ -17,11 +17,6 @@ import type { OpenHold } from "@/store/slices/projectOpen";
 export function defaultDate(captures: Capture[]): string | null {
   return (captures.filter((c) => c.date !== null).at(-1) ?? captures.at(-1))?.name ?? null;
 }
-
-/** A listed project whose record reads. */
-export type OpenableProject = ProjectSummary & { record: ProjectRecord };
-
-export const openable = (p: ProjectSummary): p is OpenableProject => p.record !== null;
 
 let lastRequestId = 0;
 
@@ -55,7 +50,7 @@ export function releaseOpenHold(requestId: number): void {
  *  the backend to open, before selecting a dataset and again before adopting. */
 async function performOpen(
   requestId: number,
-  p: OpenableProject,
+  p: ReadProject,
   date: string | null,
   subject: string | null,
   bucket: string | null,
@@ -95,7 +90,7 @@ async function performOpen(
  *  toasted so a tab that replaced the picker does not hide it. An image visit the settlement
  *  stopped and no departure closed resumes counting when the open ends, whatever its outcome. */
 export async function startOpen(
-  p: OpenableProject,
+  p: ReadProject,
   date: string | null,
   subject: string | null,
   bucket: string | null,
@@ -147,7 +142,7 @@ function newestLabeledDate(tree: DatasetTree): string | null {
 
 /** Start opening the listed project ``p`` on sensible defaults, preferring the newest date that
  *  actually has labels. */
-export function openWithDefaults(p: OpenableProject): Promise<void> {
+export function openWithDefaults(p: ReadProject): Promise<void> {
   // Prefers a labeled date: an agent ingesting a still-unlabeled newer date would
   // otherwise land the human on a blank canvas with no date selector to recover.
   const { tree } = p;

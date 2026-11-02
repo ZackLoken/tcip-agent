@@ -19,7 +19,9 @@ import "@xterm/xterm/css/xterm.css";
 import { committedOf, messageOf, StructuredRefusalError } from "@/api/http";
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import {
+  ENDED,
   TERMINAL_ENDED_CLOSE_CODE,
+  type HandOffAnswer,
   type LaunchedProgram,
   type ProviderStatus,
   type TerminalEnd,
@@ -39,10 +41,17 @@ const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 480;
 const WIDTH_KEY = "tcip.terminal_width";
 
+/** What the rail was answered about the providers: nothing yet, the sentence saying the backend
+ * could not be asked, or the backend's status. */
+type Asked =
+  | { kind: "unasked" }
+  | { kind: "unreachable"; why: string }
+  | { kind: "answered"; status: TerminalStatus };
+
 /** The row the rail launches: the remembered one if the table lists it and it can launch,
  * else the first row that can launch, else the first row. */
 function chooseRow(rows: ProviderStatus[], remembered: string | null): ProviderStatus | null {
-  const launchable = rows.filter((row) => row.unavailable_reason === null);
+  const launchable = rows.filter((row) => row.kind === "launchable");
   return launchable.find((row) => row.id === remembered) ?? launchable[0] ?? rows[0] ?? null;
 }
 
@@ -101,7 +110,7 @@ function columnWidth(host: HTMLElement | null, cols: number): number | null {
  * Field-station terminal theme. A terminal UI draws with the 16 ANSI slots, so mapping
  * them to the app palette re-skins the real TUI: green → SI-green (the app accent), yellow
  * → late-summer gold, red → FP red, dim gray → sage. Background stays tcip-bg so the rail
- * sits flush with the app chrome; the cursor is persimmon, the accent the SeasonRail ends on.
+ * sits flush with the app chrome; the cursor is #E6976B, the accent the SeasonRail ends on.
  * The greens are lifted from the #507754 accent toward legibility so the TUI keeps contrast.
  */
 const FIELD_STATION_THEME = {
@@ -131,15 +140,11 @@ const FIELD_STATION_THEME = {
 export function TerminalRail() {
   const open = useStore((s) => s.terminalOpen);
   const setOpen = useStore((s) => s.setTerminalOpen);
-  // The status answer and the row chosen from its providers, whose own reason says why it cannot
-  // launch; a backend that could not be asked leaves no answer and the sentence saying so.
-  const [status, setStatus] = useState<TerminalStatus | null>(null);
-  const [unreachable, setUnreachable] = useState<string | null>(null);
-  const asked = status !== null || unreachable !== null;
+  // What the backend answered, and the row chosen from its providers, whose own reason says why
+  // it cannot launch.
+  const [asked, setAsked] = useState<Asked>({ kind: "unasked" });
   const selected = useStore((s) => s.terminalProvider);
-  const row = status ? chooseRow(status.providers, selected) : null;
-  const reason = asked ? (unreachable ?? row?.unavailable_reason ?? null) : null;
-  const available = status !== null && reason === null && row !== null;
+  const row = asked.kind === "answered" ? chooseRow(asked.status.providers, selected) : null;
   const [error, setError] = useState<string | null>(null);
   // Live PTY link state, surfaced as a header dot (green = attached, amber = (re)connecting).
   const [conn, setConn] = useState<"connecting" | "open" | "reconnecting">("connecting");
@@ -268,21 +273,25 @@ export function TerminalRail() {
   }
 
   useEffect(() => {
-    if (!open || asked) return;
+    if (!open || asked.kind !== "unasked") return;
     terminalApi
       .status()
-      .then(setStatus)
+      .then((status) => setAsked({ kind: "answered", status }))
       .catch(() =>
         // Backend unreachable is not a missing harness; say so, and keep Retry viable.
-        setUnreachable("Couldn't reach the TCIP backend. Is it running? Retry once it's up."),
+        setAsked({
+          kind: "unreachable",
+          why: "Couldn't reach the TCIP backend. Is it running? Retry once it's up.",
+        }),
       );
   }, [open, asked]);
 
-  // Terminal lifecycle: build xterm, attach the PTY WebSocket while the agent runs, wire input
-  // and resize. Closing the rail drops the socket; the session survives and reopening replays it.
+  // Terminal lifecycle: build xterm, attach the PTY WebSocket while a chosen row can launch, wire
+  // input and resize. Closing the rail drops the socket; the session survives and reopening replays.
   useEffect(() => {
-    if (!open || !available || !hostRef.current) return;
-    const rows = status.providers;
+    if (!open || asked.kind !== "answered" || !hostRef.current) return;
+    const rows = asked.status.providers;
+    if (chooseRow(rows, useStore.getState().terminalProvider)?.kind !== "launchable") return;
     setConn("connecting");
 
     const term = new Terminal({
@@ -441,7 +450,7 @@ export function TerminalRail() {
       term.dispose();
       termRef.current = null;
     };
-  }, [open, available, status, submitStaged, showEnded, switchToChosen]);
+  }, [open, asked, submitStaged, showEnded, switchToChosen]);
 
   useEffect(() => {
     if (pendingMessages.length) submitStaged();
@@ -496,9 +505,9 @@ export function TerminalRail() {
     if (!id || !ran || terminalPhase !== "live") return;
     setTerminalProvider(provider);
     setPhase("handing-off");
-    let ended: TerminalEnd | null;
+    let answer: HandOffAnswer;
     try {
-      ended = await terminalApi.handOff(id, { user });
+      answer = await terminalApi.handOff(id, { user });
     } catch (e) {
       setError(messageOf(e));
       setTerminalProvider(ran);
@@ -506,8 +515,20 @@ export function TerminalRail() {
       return;
     }
     // An End or the socket's ended close may have closed the switch while the answer was awaited.
-    if (ended !== null) settleEnd(ended, useStore.getState().terminalPhase === "handing-off");
+    if (answer.kind === ENDED) {
+      settleEnd(answer.end, useStore.getState().terminalPhase === "handing-off");
+    }
   }
+
+  /** Why the rail runs no agent, in words for the person, and Retry, which asks the backend again. */
+  const refused = (why: string) => (
+    <div className="p-4 flex flex-col gap-3">
+      <p className="text-[13px] text-tcip-muted">{why}</p>
+      <button className="tcip-btn self-start" onClick={() => setAsked({ kind: "unasked" })}>
+        Retry
+      </button>
+    </div>
+  );
 
   if (!open) return null;
 
@@ -541,7 +562,7 @@ export function TerminalRail() {
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-medium text-tcip-muted">TCIP Agent</span>
-          {status && (
+          {asked.kind === "answered" && (
             <select
               aria-label="Agent harness"
               title={PICKER_TITLE[phase]}
@@ -550,19 +571,19 @@ export function TerminalRail() {
               onChange={(e) => void choose(e.target.value)}
               className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[13px] text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70 disabled:opacity-40"
             >
-              {status.providers.map((r) => (
+              {asked.status.providers.map((r) => (
                 <option
                   key={r.id}
                   value={r.id}
-                  disabled={r.unavailable_reason !== null}
-                  title={r.unavailable_reason ?? undefined}
+                  disabled={r.kind === "unlaunchable"}
+                  title={r.kind === "unlaunchable" ? r.why : undefined}
                 >
                   {r.name}
                 </option>
               ))}
             </select>
           )}
-          {available && running(phase) && (
+          {row?.kind === "launchable" && running(phase) && (
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
                 conn === "open" ? "bg-tcip-accent" : "bg-tcip-warn animate-pulse"
@@ -644,19 +665,10 @@ export function TerminalRail() {
         </p>
       )}
 
-      {reason !== null ? (
-        <div className="p-4 flex flex-col gap-3">
-          <p className="text-[13px] text-tcip-muted">{reason}</p>
-          <button
-            className="tcip-btn self-start"
-            onClick={() => {
-              setStatus(null);
-              setUnreachable(null);
-            }}
-          >
-            Retry
-          </button>
-        </div>
+      {asked.kind === "unreachable" ? (
+        refused(asked.why)
+      ) : row?.kind === "unlaunchable" ? (
+        refused(row.why)
       ) : (
         <>
           <div className="flex-1 min-h-0 relative">

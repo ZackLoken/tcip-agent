@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import { refusalOf, StructuredRefusalError } from "@/api/http";
 import { inferenceApi, resultsApi } from "@/api/inference";
 import {
+  ACKNOWLEDGED,
   EXPORT_HEADER,
   type LaunchInferencePayload,
   NOTHING_STATED,
   OPERATIONALIZATION,
   type OperationalizationRefusal,
+  VALIDATED,
 } from "@/api/types.generated";
 import {
   ACKNOWLEDGED_COUNT_EXPORT,
@@ -96,11 +98,8 @@ describe("downloadCountCsv's reported export", () => {
     answering(COUNT_EXPORT);
     const event = eventOf(COUNT_EXPORT);
     const { blob, exported } = await resultsApi.downloadCountCsv(REQUEST);
-    expect(exported).toMatchObject({
-      saved_path: event.output_path,
-      validated: event.validated,
-      acknowledged_by: null,
-    });
+    expect(event.shipped.kind).toBe(VALIDATED);
+    expect(exported).toMatchObject({ saved_path: event.output_path, shipped: event.shipped });
     expect(await blob.text()).toBe(COUNT_EXPORT.file);
   });
 
@@ -108,9 +107,10 @@ describe("downloadCountCsv's reported export", () => {
     answering(ACKNOWLEDGED_COUNT_EXPORT);
     const event = eventOf(ACKNOWLEDGED_COUNT_EXPORT);
     const { exported } = await resultsApi.downloadCountCsv(REQUEST);
-    expect(exported).toMatchObject({
-      validated: event.validated,
-      acknowledged_by: event.acknowledgment?.acknowledged_by,
+    if (event.shipped.kind !== ACKNOWLEDGED) throw new Error("the produced event validated");
+    expect(exported.shipped).toMatchObject({
+      kind: ACKNOWLEDGED,
+      acknowledgment: { acknowledged_by: event.shipped.acknowledgment.acknowledged_by },
     });
   });
 

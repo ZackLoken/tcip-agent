@@ -142,7 +142,10 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
     assert checkpoint["path"].endswith("model_best.pt")
     verified = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
     assert verified.sha256 == checkpoint["sha256"]
-    assert verified.experiment_id == run_dir.name
+    assert (verified.entry.origin, verified.entry.name) == (
+        "run",
+        run_dir.name,
+    )
 
 
 def _refuse_the_closing_audit_line(monkeypatch: pytest.MonkeyPatch) -> None:

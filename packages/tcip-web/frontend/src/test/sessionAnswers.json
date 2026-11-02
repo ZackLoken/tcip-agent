@@ -1,23 +1,18 @@
 {
-  "landed": {
-    "status": "ok",
-    "session": { "started": "2000-01-01T00:00:00+00:00", "ended": false }
-  },
+  "landed": { "kind": "landed", "started": "2000-01-01T00:00:00+00:00" },
   "repeated": {
-    "status": "noop",
-    "session": { "started": "2000-01-01T00:00:00+00:00", "ended": true }
+    "kind": "repeated",
+    "started": "2000-01-01T00:00:00+00:00",
+    "state": { "kind": "ended", "ended": "2000-01-01T00:00:01+00:00" }
   },
-  "empty": { "status": "noop", "session": null },
+  "empty": { "kind": "nothing_recorded" },
   "audit_gap": {
     "status": 409,
     "body": {
       "detail": {
         "kind": "audit_entry_not_written",
         "message": "image_event completed and its audit entry could not be written: the audit log could not be appended to. Whatever the call changed is committed and unrecorded, so do not retry it blind: repair the audit log's destination, then reconcile the trail against what the call did.",
-        "committed": {
-          "status": "ok",
-          "session": { "started": "2000-01-01T00:00:02+00:00", "ended": false }
-        }
+        "committed": { "kind": "landed", "started": "2000-01-01T00:00:02+00:00" }
       }
     }
   },
@@ -38,7 +33,7 @@
       {
         "user": "user:grower",
         "started": "2000-01-01T00:00:02+00:00",
-        "ended": null,
+        "state": { "kind": "open" },
         "entries": [
           {
             "contribution_id": "c3",
@@ -61,7 +56,7 @@
       {
         "user": "user:grower",
         "started": "2000-01-01T00:00:00+00:00",
-        "ended": "2000-01-01T00:00:01+00:00",
+        "state": { "kind": "ended", "ended": "2000-01-01T00:00:01+00:00" },
         "entries": [
           {
             "contribution_id": "c1",

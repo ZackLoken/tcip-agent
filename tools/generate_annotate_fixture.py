@@ -55,6 +55,7 @@ from tools.fixture_session import (
     answered,
     normalized,
     opened,
+    registry_base,
     scratch_session,
     write_fixture,
 )
@@ -447,7 +448,7 @@ def _registry(client: TestClient, dataset_root: str, date: str) -> JsonValue:
     through the subjects save route over the version the load route answers.
     """
     from tcip_mcp.subject_registry import Subject
-    from tcip_web.routes.subjects import SaveSubjectsPayload, SubjectsLoad
+    from tcip_web.routes.subjects import SaveSubjectsPayload
 
     def load() -> JsonValue:
         return answered(
@@ -467,7 +468,7 @@ def _registry(client: TestClient, dataset_root: str, date: str) -> JsonValue:
                 for name in (SUBJECT, POINT_SUBJECT, SECOND_SUBJECT)
             ),
             dataset_root=dataset_root,
-            version=SubjectsLoad.model_validate(load()).version,
+            version=registry_base(load()),
             user=ACTOR,
         ),
     )

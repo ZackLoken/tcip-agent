@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field, fields
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -119,9 +119,10 @@ class Execution:
     (``explicit`` for a value the caller stated, ``derived`` for the checkpoint's own recorded
     one, ``native_ratio``), or the derivation or fit that produced it, by name; ``postprocess`` is
     only ever stated. ``rationale`` is why the caller stated what it did, ``None`` when it stated
-    nothing.
+    nothing. ``kind`` tells a pass's record from :class:`NoPass` (:data:`ProposalExecution`).
     """
 
+    kind: Literal["pass"]
     conf: float | None
     density: float | None
     masks: bool
@@ -167,6 +168,21 @@ class Execution:
 
 EXECUTION_RECORD = TypeAdapter(Execution)
 """The execution record's validation and its JSON form."""
+
+
+class NoPass(BaseModel):
+    """A proposal no inference pass produced."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["no_pass"] = "no_pass"
+
+
+type ProposalExecution = Annotated[
+    Execution | NoPass, Field(discriminator="kind")
+]
+"""What produced a proposal's candidates: a pass, by its execution record, or no pass, told apart
+by its ``kind``."""
 
 
 class Stated(BaseModel):
@@ -459,6 +475,7 @@ def execution_record(
         )
     if geometry is None:
         return Execution(
+            kind="pass",
             conf=values.get("conf"),
             density=values.get("density"),
             masks=masks,
@@ -509,6 +526,7 @@ def execution_record(
         basis="the reference's ground truth",
     )
     return Execution(
+        kind="pass",
         conf=values.get("conf"),
         density=values.get("density"),
         masks=masks,
@@ -548,6 +566,7 @@ def proposal_execution(
         basis="the proposal pass",
     )
     return Execution(
+        kind="pass",
         conf=None,
         density=None,
         masks=False,

@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from tcip_mcp.dataset_layout import image_dir
+from tcip_web.routes.subjects import NoRegistry, StoredVersion
 from tests._producer_fixtures import (
     box_annotation,
     image_label_key,
@@ -39,7 +40,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
                 "Bud": {"description": "a second spelling a human typed"},
                 "bush": {"description": "one plant crown"},
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "breeder",
         },
     )
@@ -49,7 +50,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
     subjects = client.get(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
-    ).json()["subjects"]
+    ).json()["registry"]["subjects"]
     assert set(subjects) == {"bud", "Bud", "bush"}
     assert subjects["bud"]["description"] == "the first spelling a human typed"
     assert subjects["Bud"]["description"] == "a second spelling a human typed"
@@ -81,7 +82,7 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
-    assert body["subjects"] is None
+    assert body["registry"] == NoRegistry().model_dump()
     assert set(body["discovered"]) == {"bud", "Bud", "bush"}
     assert body["unreadable"] == []
 
@@ -138,7 +139,7 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"bud": {"description": "first pass"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "breeder",
         },
     )
@@ -152,7 +153,9 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
                 "bud": {"description": "corrected"},
                 "hazel_leaf": {"description": "one leaf blade"},
             },
-            "version": first.json()["version"],
+            "version": StoredVersion(
+                version=first.json()["version"]
+            ).model_dump(),
             "user": "breeder",
         },
     )
@@ -162,7 +165,7 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     subjects = client.get(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
-    ).json()["subjects"]
+    ).json()["registry"]["subjects"]
     assert set(subjects) == {"bud", "hazel_leaf"}
     assert subjects["bud"]["description"] == "corrected"
     assert (

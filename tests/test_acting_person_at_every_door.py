@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX, is_person
 from tcip_mcp.identity import NoActorError, actor
+from tcip_web.routes.subjects import NoRegistry
 from tests import ADMITTED_NAMES, REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._route_walk import route_generator
@@ -45,7 +46,7 @@ DOORS = [
         {
             "subjects": {"bud": {"description": "one bud"}},
             "dataset_root": "d",
-            "version": None,
+            "version": NoRegistry().model_dump(),
         },
     ),
     (

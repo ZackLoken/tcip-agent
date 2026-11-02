@@ -55,7 +55,7 @@ def _dataset(tmp_path: Path, stems: tuple[str, ...] = STEMS) -> OpenProject:
     from PIL import Image
 
     from tcip_mcp.tools.annotation_tools import write_subject_registry
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tests._image_fixtures import capture_exif
     from tests._web_fixtures import named_project
 
@@ -68,7 +68,7 @@ def _dataset(tmp_path: Path, stems: tuple[str, ...] = STEMS) -> OpenProject:
         )
     made = named_project(tmp_path / "fruit_count", "Fruit count")
     ingested = ingest_images(made.root, source=str(raw), actor=None)
-    assert "error" not in ingested, ingested
+    assert isinstance(ingested, IngestManifest), ingested
     registered = write_subject_registry(
         made.root,
         str(made.root),

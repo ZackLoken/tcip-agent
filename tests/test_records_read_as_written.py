@@ -33,11 +33,11 @@ def test_a_registered_entry_ranks_through_best_model(tmp_path: Path) -> None:
 
     models = ModelRegistry(str(tmp_path)).list_models()
     best, _ = best_model(
-        models, "val_map50", higher_is_better=True, include_unverified=True
+        models, "val_map50", direction="higher", include_unverified=True
     )
     assert best is not None and best.entry.name == "m"
-    # Each entry's own recorded producer reads back: this foreign one names none.
-    assert [m.entry.experiment_id for m in models] == [None]
+    # Each entry's own recorded origin reads back: this one is foreign.
+    assert [m.entry.origin for m in models] == ["foreign"]
 
 
 def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(

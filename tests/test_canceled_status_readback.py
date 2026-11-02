@@ -23,6 +23,7 @@ def test_a_canceled_inference_job_reads_as_canceled(
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import Stated
+    from tcip_web.jobstore import Canceled
     from tcip_web.routes import inference
     from tests._producer_fixtures import write_image
     from tests._training_values import RATIONALE
@@ -51,7 +52,7 @@ def test_a_canceled_inference_job_reads_as_canceled(
         inference._registry.launch(job, inference._worker)
         assert job.thread is not None
         job.thread.join(timeout=60)
-        assert inference._registry.get("canceled-job").status == "canceled"
+        assert inference._registry.get("canceled-job").state == Canceled()
     finally:
         inference._registry.jobs.clear()
 

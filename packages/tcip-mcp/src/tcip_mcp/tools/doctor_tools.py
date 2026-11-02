@@ -140,7 +140,7 @@ def check_registry(
     """
     from pydantic import ValidationError
 
-    from tcip_mcp.model_registry import Producer, registered_entries
+    from tcip_mcp.model_registry import registered_entries
     from tcip_mcp.registry_paths import (
         RegistryPathEmptyError,
         RegistryPathTraversalError,
@@ -195,7 +195,7 @@ def check_registry(
     registered_shas = {m.sha256 for m in entries}
     for name, bucket in buckets.items():
         if (
-            isinstance(bucket.producer, Producer)
+            bucket.producer.kind == "checkpoint"
             and bucket.producer.checkpoint_sha256 not in registered_shas
         ):
             findings.append(
@@ -306,7 +306,7 @@ def check_traits(root: Path, findings: list) -> None:
         except (StoreError, ValidationError) as exc:
             findings.append(("error", f"trait {name!r} will not read: {exc}"))
             continue
-        if not record.latest.confirmed:
+        if record.latest.state.kind != "confirmed":
             findings.append(
                 (
                     "warn",
@@ -321,9 +321,9 @@ def check_project_record(root: Path, findings: list) -> None:
     """Append an error when the project record is absent, damaged, or on an unreadable root."""
     from tcip_mcp.project_record import record_or_problem
 
-    _, problem = record_or_problem(root)
-    if problem is not None:
-        findings.append(("error", problem))
+    reading = record_or_problem(root)
+    if reading.kind == "unread":
+        findings.append(("error", reading.problem))
 
 
 @tool()

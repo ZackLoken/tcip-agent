@@ -128,35 +128,30 @@
   "image_missing": { "status": 404, "headers": {} },
   "build": {
     "job_id": "<built job>",
-    "status": "running",
-    "error": null,
+    "state": { "status": "running" },
     "path": "/scratch/workspace/images/unbuilt.tif",
-    "bytes_written": 3278515,
-    "live": true
+    "bytes_written": 3278515
   },
   "running": {
     "job_id": "<built job>",
-    "status": "running",
-    "error": null,
+    "state": { "status": "running" },
     "path": "/scratch/workspace/images/unbuilt.tif",
-    "bytes_written": 3278515,
-    "live": true
+    "bytes_written": 3278515
   },
   "completed": {
     "job_id": "<built job>",
-    "status": "completed",
-    "error": null,
+    "state": { "status": "completed" },
     "path": "/scratch/workspace/images/unbuilt.tif",
-    "bytes_written": 3278515,
-    "live": false
+    "bytes_written": 3278515
   },
   "failed": {
     "job_id": "<failed job>",
-    "status": "failed",
-    "error": "a sample failure the scene's builder raises for this file",
+    "state": {
+      "status": "failed",
+      "error": "a sample failure the scene's builder raises for this file"
+    },
     "path": "/scratch/workspace/images/broken.tif",
-    "bytes_written": 0,
-    "live": false
+    "bytes_written": 0
   },
   "unknown": { "status": 404, "body": { "detail": "job not found: ovr-unknown" } }
 }

@@ -3,9 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { resultsApi } from "@/api/inference";
-import { type CaptureInvariances, type ServedMapping } from "@/api/types.generated";
+import {
+  type CaptureInvariances,
+  CONFIRMED,
+  READ,
+  type ServedMapping,
+} from "@/api/types.generated";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
-import { openable } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
@@ -19,7 +23,9 @@ const initialStoreState = useStore.getState();
 const { listing: LISTING, correction: CORRECTION, refusal: REFUSAL } = PROJECT_FIXTURES;
 /** The listed project the produced correction corrected. */
 const CORRECTED_ID = CORRECTION.record.id;
-const CORRECTED = LISTING.projects.filter(openable).find((p) => p.record.id === CORRECTED_ID)!;
+const CORRECTED = LISTING.projects
+  .filter((p) => p.kind === READ)
+  .find((p) => p.record.id === CORRECTED_ID)!;
 /** An invariances block's answers, field by field. */
 const answers = (block: CaptureInvariances) =>
   Object.entries(block) as [string, boolean | number][];
@@ -138,8 +144,10 @@ describe("SetupTab trait revisions", () => {
 
     fireEvent.click(within(listed).getByRole("button", { name: `Revision ${FIRST.number}` }));
     expect(within(row).getByText(statementOf(FIRST))).toBeInTheDocument();
+    if (FIRST.state.kind !== CONFIRMED)
+      throw new Error("the produced first revision is unconfirmed");
     expect(
-      within(row).getByText(new RegExp(`Confirmed by ${String(FIRST.confirmed_by)}`)),
+      within(row).getByText(new RegExp(`Confirmed by ${FIRST.state.confirmed_by}`)),
     ).toBeInTheDocument();
   });
 
@@ -280,6 +288,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
   it("names the stated radius with its reason for source stated", async () => {
     await buildAnswering(STATED);
     const [radius] = Object.values(STATED.match_radius);
+    if (radius.source !== "stated") throw new Error("the produced radius was not stated");
     expect(
       await linesHolding(`radius ${radius.value.toFixed(2)} m stated: ${radius.rationale}`),
     ).not.toHaveLength(0);
@@ -297,7 +306,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
     await waitFor(() =>
       expect(resultsApi.buildPlantMapping).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          match_radius: { value: 4, rationale: "the receiver's spec sheet" },
+          match_radius: { source: "stated", value: 4, rationale: "the receiver's spec sheet" },
         }),
       ),
     );

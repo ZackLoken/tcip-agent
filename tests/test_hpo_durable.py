@@ -85,7 +85,7 @@ def test_run_hyperparameter_search_threads_the_sweeps_directory_and_records_its_
     assert captured["metric"] == "objective"
     sweep = tt.monitor_training(tmp_path, captured["sweep_dir"].name)["sweep"]
     assert sweep["state"] == "completed"
-    assert sweep["trials"] == [] and sweep["outcome"]["best_params"] is None
+    assert sweep["trials"] == [] and sweep["outcome"]["kind"] == "no_best"
 
 
 def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluation_block(

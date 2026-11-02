@@ -21,6 +21,7 @@ from tcip_mcp.dataset_layout import (
     image_dir,
     prediction_key,
 )
+from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -42,8 +43,8 @@ def _stub_gui(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         web_client,
         "post_panel_event",
-        lambda *a, **k: web_client.PanelEventAnswer(
-            url=None, reason="no backend answered"
+        lambda *a, **k: web_client.PanelEventNotPosted(
+            reason="no backend answered"
         ),
     )
 
@@ -611,7 +612,7 @@ class _FakeSingleBoxEngine:
                     "score": 0.9,
                 }
             ],
-            None,
+            NoPass(),
         )
 
 
@@ -807,7 +808,7 @@ class _FakeMultiRingEngine:
                     "score": 0.9,
                 }
             ],
-            None,
+            NoPass(),
         )
 
 

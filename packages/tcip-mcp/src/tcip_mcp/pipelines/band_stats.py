@@ -23,11 +23,11 @@ if TYPE_CHECKING:
 DISPLAY_CLIP_PERCENTILES = (2.0, 98.0)
 
 # The stretches a composite is shown through, each over the band's own values.
-CompositeStretch = Literal["minmax", "percent_clip"]
+type CompositeStretch = Literal["minmax", "percent_clip"]
 
 # The stretches :func:`stretch_band` implements and a caller may ask for, the one declaration of
 # this vocabulary: a composite's, and ``none``, the dtype's own full scale.
-StretchMode = Literal[CompositeStretch, "none"]
+type StretchMode = Literal[CompositeStretch, "none"]
 
 DEFAULT_STRETCH: CompositeStretch = "minmax"
 """The stretch a composite is shown through unless one is asked for, a platform default."""

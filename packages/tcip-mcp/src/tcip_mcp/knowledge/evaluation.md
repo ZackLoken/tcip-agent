@@ -91,8 +91,8 @@ with neither a statement nor a basis refuses naming it.
 An evaluation answers for no delivery: only an assessment does.
 
 `rank_registered_models` requires a `metric` (no default) and resolves its ranking direction from
-`schemas.HIGHER_IS_BETTER_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);
-`higher_is_better` overrides the declaration when a caller states one, required for a metric the
+`schemas.DIRECTION_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);
+`direction` overrides the declaration when a caller states one, required for a metric the
 declaration does not name. It ranks only `metrics_source="trainer"` entries by default (the
 platform's own `default_train` measured them); `include_unverified=True` also ranks
 `"training_source"`/`"caller"` entries, whose numbers were never measured by the platform. The

@@ -10,7 +10,10 @@ import { sessionsApi } from "@/api/sessions";
 import {
   AUDIT_ENTRY_NOT_WRITTEN,
   type AuditGapRefusal,
+  ENDED,
   type ImageEventPayload,
+  NOTHING_RECORDED,
+  REPEATED,
   type SessionWrite,
 } from "@/api/types.generated";
 import { useStore } from "@/store";
@@ -38,14 +41,13 @@ function forgetSession(started: string): void {
 function adopt(contribution: ImageEventPayload, written: SessionWrite): void {
   const { retireContribution, setRecordedSession, openProject } = useStore.getState();
   retireContribution(contribution);
-  const place = written.session;
-  if (place === null) return;
-  if (place.ended) {
-    forgetSession(place.started);
+  if (written.kind === NOTHING_RECORDED) return;
+  if (written.kind === REPEATED && written.state.kind === ENDED) {
+    forgetSession(written.started);
   } else if (contribution.project_id === openProject?.id) {
     setRecordedSession({
       project_id: contribution.project_id,
-      started: place.started,
+      started: written.started,
       user: contribution.user,
     });
   }

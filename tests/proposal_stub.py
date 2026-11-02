@@ -16,6 +16,7 @@ class StubProposer:
     """A proposer handing back one fixed candidate box, in the neutral proposal schema."""
 
     def propose(self, image_path: str, **params: object) -> Proposal:
+        from tcip_mcp.pipelines.execution import NoPass
         from tcip_mcp.pipelines.proposal import Proposal
 
         return Proposal(
@@ -31,7 +32,7 @@ class StubProposer:
                     ],
                 }
             ],
-            None,
+            NoPass(),
         )
 
 

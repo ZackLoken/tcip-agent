@@ -358,26 +358,38 @@ def view_gui_state(project: Path) -> dict:
     return state.model_dump(mode="json")
 
 
+class MappingsListed(BaseModel):
+    """Every plant-mapping name persisted under a project."""
+
+    kind: Literal["listed"] = "listed"
+    names: list[str]
+
+
+class MappingsUnlisted(BaseModel):
+    """A project whose plant-mapping listing will not read, and why."""
+
+    kind: Literal["unlisted"] = "unlisted"
+    problem: str
+
+
 @tool()
 def inspect_project(project: Path) -> dict:
     """Get an overview of the project.
 
-    Carries the project's ``record`` beside ``record_problem`` from
-    ``tcip_mcp.project_record.record_or_problem``: the record is set, or ``record_problem`` names
-    why it is not (a damaged record, or a root the store refuses to read). ``plant_mappings``
-    carries every mapping name persisted under the project, the same shape:
-    ``plant_mappings_problem`` names why the listing came back empty when the store refuses to
-    read the root. ``recent_activity`` is :func:`_recent_activity`'s.
+    Carries the project's ``reading``, ``tcip_mcp.project_record.record_or_problem``'s: the
+    record on ``kind`` ``read``, or on ``unread`` the ``problem`` naming why it will not read (a
+    damaged record, or a root the store refuses to read). ``plant_mappings`` is on ``kind``
+    ``listed`` every mapping name persisted under the project (:class:`MappingsListed`), or on
+    ``unlisted`` why the store refuses to read the root (:class:`MappingsUnlisted`).
+    ``recent_activity`` is :func:`_recent_activity`'s.
     """
     from tcip_mcp.project_record import record_or_problem
 
     tcip = project / ".tcip"
 
-    record, problem = record_or_problem(project)
     status: dict = {
         "project_path": str(project),
-        "record": None if record is None else record.model_dump(mode="json"),
-        "record_problem": problem,
+        "reading": record_or_problem(project).model_dump(mode="json"),
     }
 
     # Models
@@ -404,11 +416,12 @@ def inspect_project(project: Path) -> dict:
     )
     from tcip_store import StoreError
 
+    mappings: MappingsListed | MappingsUnlisted
     try:
-        status["plant_mappings"] = plant_mapping_names(project)
+        mappings = MappingsListed(names=plant_mapping_names(project))
     except StoreError as exc:
-        status["plant_mappings"] = []
-        status["plant_mappings_problem"] = str(exc)
+        mappings = MappingsUnlisted(problem=str(exc))
+    status["plant_mappings"] = mappings.model_dump(mode="json")
 
     status["recent_activity"] = _recent_activity(project)
     return status

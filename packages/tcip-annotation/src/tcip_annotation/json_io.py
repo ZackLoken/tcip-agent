@@ -376,7 +376,7 @@ COMPLETION_KEY = "complete"
 CAP_KEY = "cap"
 """The prediction document key holding the detection cap its frame was predicted under."""
 
-SubjectState = Literal["complete", "negative", "partial", "unannotated"]
+type SubjectState = Literal["complete", "negative", "partial", "unannotated"]
 """What one document says about one subject: finished with or without annotations of it
 (``complete``, ``negative``), or not finished with or without them (``partial``,
 ``unannotated``)."""

@@ -1,10 +1,15 @@
+import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { type ImageBands, PLAIN } from "@/api/types.generated";
+import { useBandSelection } from "@/hooks/useBandSelection";
 import {
   bandSetSignature,
   compositeParams,
   defaultBandSelection,
   showsBandPicker,
+  type BandChoice,
+  type BandSelection,
 } from "@/lib/bandSelection";
 import { BAND_ANSWERS } from "@/test/bands";
 
@@ -18,8 +23,17 @@ const SELECTION = { r: NAMES[2], g: NAMES[1], b: NAMES[0], stretch: FOUR.default
 /** `SELECTION` with its blue channel naming a band `FOUR` does not declare. */
 const STALE = { ...SELECTION, b: `${NAMES[0]}-elsewhere` };
 
-/** A selection of `RGBA`'s default bands, the ones a composite of it would read. */
-const RGBA_SELECTION = defaultBandSelection(RGBA);
+/** The band choice `useBandSelection` answers for `bandsInfo`. */
+function choiceOf(bandsInfo: ImageBands | null): BandChoice {
+  return renderHook(() => useBandSelection(bandsInfo)).result.current;
+}
+
+/** The band choice answered for `bandsInfo`, holding `selection` as the person chose it. */
+function chosen(bandsInfo: ImageBands, selection: BandSelection): BandChoice {
+  const choice = choiceOf(bandsInfo);
+  if (choice.kind !== "banded") throw new Error("the image offers no band choice");
+  return { ...choice, selection };
+}
 
 describe("defaultBandSelection", () => {
   it("assigns the server's default bands to R, G, B at the server's default stretch", () => {
@@ -40,42 +54,40 @@ describe("bandSetSignature", () => {
 
 describe("compositeParams", () => {
   it("carries bands/stretch for a multispectral frame whose bands the selection actually names", () => {
-    expect(compositeParams(FOUR, SELECTION)).toEqual({
+    expect(compositeParams(chosen(FOUR, SELECTION))).toEqual({
       bands: [SELECTION.r, SELECTION.g, SELECTION.b],
       stretch: SELECTION.stretch,
     });
   });
 
-  it("carries nothing for a frame the server displays plain, even with a selection in hand", () => {
-    expect(RGBA.plain).toBe(true);
-    expect(compositeParams(RGBA, RGBA_SELECTION)).toEqual({});
+  it("carries nothing for a frame the server displays plain", () => {
+    expect(RGBA.read.kind).toBe(PLAIN);
+    expect(compositeParams(choiceOf(RGBA))).toEqual({});
   });
 
   it("carries nothing when the selection names a band this metadata doesn't declare", () => {
-    expect(compositeParams(FOUR, STALE)).toEqual({});
+    expect(compositeParams(chosen(FOUR, STALE))).toEqual({});
   });
 
-  it("carries nothing with no bandsInfo or no selection", () => {
-    expect(compositeParams(null, SELECTION)).toEqual({});
-    expect(compositeParams(FOUR, null)).toEqual({});
+  it("carries nothing with no bandsInfo", () => {
+    expect(compositeParams(choiceOf(null))).toEqual({});
   });
 });
 
 describe("showsBandPicker", () => {
   it("shows for a multispectral frame with a selection matching its bands", () => {
-    expect(showsBandPicker(FOUR, SELECTION)).toBe(true);
+    expect(showsBandPicker(chosen(FOUR, SELECTION))).toBe(true);
   });
 
   it("hides for a frame the server displays plain", () => {
-    expect(showsBandPicker(RGBA, RGBA_SELECTION)).toBe(false);
+    expect(showsBandPicker(choiceOf(RGBA))).toBe(false);
   });
 
   it("hides when the selection names a band the current metadata doesn't declare", () => {
-    expect(showsBandPicker(FOUR, STALE)).toBe(false);
+    expect(showsBandPicker(chosen(FOUR, STALE))).toBe(false);
   });
 
-  it("hides while bandsInfo or the selection is not yet known", () => {
-    expect(showsBandPicker(null, SELECTION)).toBe(false);
-    expect(showsBandPicker(FOUR, null)).toBe(false);
+  it("hides while bandsInfo is not yet known", () => {
+    expect(showsBandPicker(choiceOf(null))).toBe(false);
   });
 });

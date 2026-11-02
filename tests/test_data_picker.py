@@ -27,6 +27,7 @@ pytest.importorskip("torchvision")
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
+from tcip_mcp.tools.training_tools import Admitted, UnreadSelectionChoice
 from tests._chain_fixtures import (
     FRAME_STATISTICS,
     training_config,
@@ -42,6 +43,9 @@ from tests.test_selection_binding import (
     _draw,
     _two_subject_two_date_dataset,
 )
+
+ADMITTED = Admitted().model_dump()
+"""A choice's check as served when it admits the choice."""
 
 
 def _bespoke_config(
@@ -322,7 +326,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
         choice["selection_dir"]: choice for choice in result["selections"]
     }
     assert str(root / "splits" / "rows") in offered, result
-    assert offered[str(root / "splits" / "rows")]["reason"] is None, offered
+    assert offered[str(root / "splits" / "rows")]["check"] == ADMITTED, offered
 
 
 def test_list_split_choices_route_404s_for_an_unknown_experiment(
@@ -408,24 +412,23 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
 
     expected = default_selection.counts()
     default_entry = by_dir[str(dataset_default)]
-    assert default_entry["reason"] is None
+    assert default_entry["check"] == ADMITTED
     assert default_entry["train"] == expected["train"]
     assert default_entry["val"] == expected["val"]
     assert default_entry["calibration"] == expected["calibration"]
 
     elsewhere_entry = by_dir[str(elsewhere)]
-    assert elsewhere_entry["reason"] is None
+    assert elsewhere_entry["check"] == ADMITTED
     assert elsewhere_entry["train"] > 0 and elsewhere_entry["val"] > 0
 
     # A partition drawn for another subject is a real offer: choosing it drops the stated
     # scope, since a bound run reads its scope off the selection.
     other_subject_entry = by_dir[str(other_subject_dir)]
-    assert other_subject_entry["reason"] is None
+    assert other_subject_entry["check"] == ADMITTED
     chosen = _chosen(picked_cfg, str(other_subject_dir), tmp_path)
     assert "scope" not in chosen["data"]
 
-    broken_entry = by_dir[str(broken_dir)]
-    assert broken_entry["reason"] is not None
+    UnreadSelectionChoice.model_validate(by_dir[str(broken_dir)])
 
 
 def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path) -> None:
@@ -450,7 +453,7 @@ def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path) -> None:
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
     entry = by_dir[frozen["selection_dir"]]
-    assert entry["reason"] is None
+    assert entry["check"] == ADMITTED
 
 
 def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directory(
@@ -484,8 +487,8 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     ).model_dump()
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
-    assert by_dir[first["selection_dir"]]["reason"] is None
-    assert by_dir[second["selection_dir"]]["reason"] is None
+    assert by_dir[first["selection_dir"]]["check"] == ADMITTED
+    assert by_dir[second["selection_dir"]]["check"] == ADMITTED
 
 
 def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight(
@@ -506,7 +509,10 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
 
     result = list_split_choices(tmp_path, "exp-moved-dirs").model_dump()
 
-    assert "Not found: data.images_dir" in result["as_recorded"]["reason"]
+    assert (
+        "Not found: data.images_dir"
+        in result["as_recorded"]["check"]["reason"]
+    )
 
 
 def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces(
@@ -939,7 +945,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     offered = next(
         m["selection_dir"]
         for m in choices["selections"]
-        if m["reason"] is None
+        if m["check"] == ADMITTED
     )
     assert offered in (str(real_dir), str(link_dir))
     other_spelling = (

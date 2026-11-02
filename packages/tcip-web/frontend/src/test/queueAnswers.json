@@ -139,66 +139,60 @@
   },
   "launched": {
     "job_id": "<completed job>",
-    "status": "pending",
-    "error": null,
+    "state": { "status": "pending" },
     "project": "/scratch/workspace/valley",
     "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
     "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
     "subject": "bud",
-    "ranked": null,
-    "live": true,
     "dataset_root": "/scratch/workspace/valley/ds",
     "capture": "2026-01-01"
   },
   "running": {
     "job_id": "<completed job>",
-    "status": "running",
-    "error": null,
+    "state": { "status": "running" },
     "project": "/scratch/workspace/valley",
     "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
     "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
     "subject": "bud",
-    "ranked": null,
-    "live": true,
     "dataset_root": "/scratch/workspace/valley/ds",
     "capture": "2026-01-01"
   },
   "completed": {
     "job_id": "<completed job>",
-    "status": "completed",
-    "error": null,
+    "state": {
+      "status": "completed",
+      "ranked": {
+        "scorer": { "name": "uncertainty" },
+        "budget": 4,
+        "rationale": "a sample reason the scene states",
+        "task": "detection",
+        "total_candidates": 4,
+        "reviewed_skipped": 1,
+        "queue": [
+          { "image": "img5.jpg", "score": 0.498589, "reference_member": null },
+          { "image": "img1.jpg", "score": 0.498403, "reference_member": null },
+          { "image": "img3.jpg", "score": 0.498339, "reference_member": null },
+          { "image": "img4.jpg", "score": 0.498339, "reference_member": null }
+        ]
+      }
+    },
     "project": "/scratch/workspace/valley",
     "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
     "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
     "subject": "bud",
-    "ranked": {
-      "scorer": { "name": "uncertainty" },
-      "budget": 4,
-      "rationale": "a sample reason the scene states",
-      "task": "detection",
-      "total_candidates": 4,
-      "reviewed_skipped": 1,
-      "queue": [
-        { "image": "img5.jpg", "score": 0.498589, "reference_member": null },
-        { "image": "img1.jpg", "score": 0.498403, "reference_member": null },
-        { "image": "img3.jpg", "score": 0.498339, "reference_member": null },
-        { "image": "img4.jpg", "score": 0.498339, "reference_member": null }
-      ]
-    },
-    "live": false,
     "dataset_root": "/scratch/workspace/valley/ds",
     "capture": "2026-01-01"
   },
   "failed": {
     "job_id": "<failed job>",
-    "status": "failed",
-    "error": "diversity ranks each image by its distance to the capture's labeled images, and the capture has no image finished for the subject: name the subject, and mark the images annotated complete, or rank by 'uncertainty'.",
+    "state": {
+      "status": "failed",
+      "error": "diversity ranks each image by its distance to the capture's labeled images, and the capture has no image finished for the subject: name the subject, and mark the images annotated complete, or rank by 'uncertainty'."
+    },
     "project": "/scratch/workspace/valley",
     "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
     "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
     "subject": "subject_a",
-    "ranked": null,
-    "live": false,
     "dataset_root": "/scratch/workspace/valley/ds",
     "capture": "2026-01-01"
   },

@@ -131,9 +131,7 @@ def import_coco_document(
         f"category {name} is not a subject the registry declares"
         for name in sorted(set(map(repr, categories.values())) - declared)
     ]
-    listed: dict[
-        str, dataset_layout.ImageLabels | dataset_layout.ImageFrame
-    ] = {}
+    listed: dict[str, dataset_layout.ImageClaim] = {}
     ids: set[int] = set()
     for i, record in enumerate(images):
         if not isinstance(record, dict):

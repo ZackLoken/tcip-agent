@@ -17,8 +17,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 import tcip_store
 from tcip_mcp import dataset_layout
@@ -63,6 +64,7 @@ class Dated:
 
     date: str
     source: str
+    kind: Literal["dated"] = "dated"
 
 
 @dataclass(frozen=True)
@@ -70,10 +72,54 @@ class Unreadable:
     """Why a file's container could not be read far enough to find its capture date."""
 
     reason: str
+    kind: Literal["unreadable"] = "unreadable"
 
 
-type CaptureDate = Dated | Unreadable | None
-"""What a file states of its capture date; ``None`` for a file that states none."""
+@dataclass(frozen=True)
+class Unstated:
+    """A file whose container states no capture date, or has nowhere to state one."""
+
+    kind: Literal["unstated"] = "unstated"
+
+
+type CaptureDate = Annotated[
+    Dated | Unreadable | Unstated, Field(discriminator="kind")
+]
+"""What a file states of its capture date, told apart by its ``kind``."""
+
+
+def bucket_of(date: CaptureDate) -> str:
+    """Return the capture a file stating ``date`` lands in: its date, else the undated one."""
+    return date.date if date.kind == "dated" else dataset_layout.UNDATED_BUCKET
+
+
+class IngestedFile(BaseModel):
+    """One ingested file: its source, where it landed and what it states of its capture date.
+
+    Its capture is :func:`bucket_of` its date.
+    """
+
+    source: str
+    dest: str
+    date: CaptureDate
+
+
+class IngestManifest(BaseModel):
+    """What one ingestion did.
+
+    It holds the project's image root, how many sources were found, copied and moved, each
+    ingested file, each exact re-ingest skipped, each source whose copy failed, and the band
+    groups found over the touched buckets.
+    """
+
+    image_root: str
+    found: int
+    copied: int
+    moved: int
+    files: list[IngestedFile]
+    skipped_collisions: list[dict[str, str]]
+    errors: list[dict[str, str]]
+    band_groups: dict[str, list]
 
 
 def _photographic_capture_date(path: Path) -> CaptureDate:
@@ -96,7 +142,7 @@ def _photographic_capture_date(path: Path) -> CaptureDate:
     except Exception as exc:
         return Unreadable(f"image header could not be read: {exc}")
     if raw is None:
-        return None
+        return Unstated()
     iso = _iso_date(raw)
     if iso is None:
         return Unreadable(
@@ -135,7 +181,7 @@ def _gdal_capture_date(path: Path, date_item: str | None) -> CaptureDate:
         return Unreadable(f"raster metadata could not be read: {exc}")
     found = next(((k, v) for k, v in stated.items() if v), None)
     if found is None:
-        return None
+        return Unstated()
     item, raw = found
     iso = _iso_date(raw)
     if iso is None:
@@ -148,10 +194,10 @@ def _gdal_capture_date(path: Path, date_item: str | None) -> CaptureDate:
 def _capture_iso_date(path: Path, date_item: str | None) -> CaptureDate:
     """Read what one file states of its capture date.
 
-    A raster's ``date_item`` is asked after its own tags (:func:`_gdal_capture_date`). ``None``
-    is the undated fact: a photo with no EXIF date, a raster stating none, or an array file or
-    band group, which has nowhere to put one and is not read. :class:`Unreadable` is the
-    different fact that the container itself could not be read this far. The container family
+    A raster's ``date_item`` is asked after its own tags (:func:`_gdal_capture_date`).
+    :class:`Unstated` is the undated fact: a photo with no EXIF date, a raster stating none, or an
+    array file or band group, which has nowhere to put one and is not read. :class:`Unreadable` is
+    the different fact that the container itself could not be read this far. The container family
     is the file's :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind`: EXIF in a
     photograph, raster metadata in a TIFF, nothing in any other.
     """
@@ -162,7 +208,7 @@ def _capture_iso_date(path: Path, date_item: str | None) -> CaptureDate:
         return _photographic_capture_date(path)
     if kind == "tif":
         return _gdal_capture_date(path, date_item)
-    return None
+    return Unstated()
 
 
 def _iter_source_images(source: str, recursive: bool) -> Iterator[Path]:
@@ -247,7 +293,7 @@ def ingest_images(
     raster_date_item: str | None = None,
     *,
     actor: str | None,
-) -> dict:
+) -> IngestManifest | dict[str, str]:
     """Copy raw images into the project, bucketed by the capture date each file states.
 
     The copy is ``actor``'s.
@@ -280,13 +326,14 @@ def ingest_images(
             after the raster's TIFF ``DateTime`` tag and EXIF date. Omitted, a raster stating
             neither lands in ``undated/``.
 
-    Returns a manifest: ``{image_root, found, copied, moved, files, skipped_collisions, errors,
-    move, band_groups}``, where ``files`` holds one entry per ingested file, ``{source, dest,
-    bucket, date_source, date_unreadable}``: ``date_source`` is the metadata item that dated it
-    (``TIFFTAG_DATETIME``, ``EXIF_DateTimeOriginal`` or ``raster_date_item``), ``None`` for a file
-    no source dated, which lands in ``undated/``, and ``date_unreadable`` why its container could
-    not be read that far, else ``None``. ``skipped_collisions`` names only an exact re-ingest.
-    ``band_groups`` is ``{formed, refused, manifests}`` over the touched buckets.
+    Returns the :class:`IngestManifest`, whose ``files`` hold one :class:`IngestedFile` per
+    ingested file: its ``date`` is told apart by its ``kind``, ``dated`` with the date and the
+    metadata item that stated it (``TIFFTAG_DATETIME``, ``EXIF_DateTimeOriginal`` or
+    ``raster_date_item``) as its ``source``, ``unstated`` for a file that states none, and
+    ``unreadable`` with the ``reason`` its container could not be read that far; the last two land
+    in ``undated/``. ``skipped_collisions`` names only an exact re-ingest, each ``{stem, source,
+    existing, bucket}``; ``errors`` each ``{source, error}``; ``band_groups`` is ``{formed,
+    refused, manifests}`` over the touched buckets.
 
     """
     source = str(located(source, project))
@@ -299,13 +346,7 @@ def ingest_images(
         for src_path in sources
     }
     resolved_sources = [
-        (
-            src_path,
-            date.date
-            if isinstance(date, Dated)
-            else dataset_layout.UNDATED_BUCKET,
-        )
-        for src_path, date in captured.items()
+        (src_path, bucket_of(date)) for src_path, date in captured.items()
     ]
 
     collision_error = _collision_refusal(project, resolved_sources)
@@ -314,9 +355,9 @@ def ingest_images(
 
     copied = 0
     moved = 0
-    files: list[dict] = []
-    skipped_collisions: list[dict] = []
-    errors: list[dict] = []
+    files: list[IngestedFile] = []
+    skipped_collisions: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
     touched_buckets: set[str] = set()
 
     for src_path, bucket in resolved_sources:
@@ -361,17 +402,7 @@ def ingest_images(
 
         touched_buckets.add(bucket)
         files.append(
-            {
-                "source": str(src_path),
-                "dest": str(dest),
-                "bucket": bucket,
-                "date_source": date.source
-                if isinstance(date, Dated)
-                else None,
-                "date_unreadable": date.reason
-                if isinstance(date, Unreadable)
-                else None,
-            }
+            IngestedFile(source=str(src_path), dest=str(dest), date=date)
         )
 
     band_groups_result: dict = {"formed": [], "refused": [], "manifests": []}
@@ -384,17 +415,16 @@ def ingest_images(
             band_groups_result["refused"].append({**g, "bucket": bucket})
         band_groups_result["manifests"].extend(result["manifests"])
 
-    return {
-        "image_root": str(dataset_layout.image_root(project)),
-        "found": len(sources),
-        "copied": copied,
-        "moved": moved,
-        "files": files,
-        "skipped_collisions": skipped_collisions,
-        "errors": errors,
-        "move": not copy,
-        "band_groups": band_groups_result,
-    }
+    return IngestManifest(
+        image_root=str(dataset_layout.image_root(project)),
+        found=len(sources),
+        copied=copied,
+        moved=moved,
+        files=files,
+        skipped_collisions=skipped_collisions,
+        errors=errors,
+        band_groups=band_groups_result,
+    )
 
 
 @tool()

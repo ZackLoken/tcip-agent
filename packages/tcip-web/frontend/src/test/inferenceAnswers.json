@@ -3,8 +3,7 @@
     "jobs": [
       {
         "job_id": "<failed job>",
-        "status": "running",
-        "error": null,
+        "state": { "status": "running" },
         "project": "/scratch/workspace/inference",
         "checkpoint_path": "/scratch/workspace/inference/model.pt",
         "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -24,7 +23,6 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": true,
         "dataset_root": "/scratch/workspace/inference",
         "capture": "2026-02-11"
       }
@@ -34,8 +32,10 @@
     "type": "final",
     "job": {
       "job_id": "<failed job>",
-      "status": "failed",
-      "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+      "state": {
+        "status": "failed",
+        "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own."
+      },
       "project": "/scratch/workspace/inference",
       "checkpoint_path": "/scratch/workspace/inference/model.pt",
       "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -55,15 +55,13 @@
       "assessment_id": null,
       "total": 0,
       "done": 0,
-      "live": false,
       "dataset_root": "/scratch/workspace/inference",
       "capture": "2026-02-11"
     }
   },
   "launched": {
     "job_id": "<held job>",
-    "status": "pending",
-    "error": null,
+    "state": { "status": "pending" },
     "project": "/scratch/workspace/inference",
     "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
     "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -83,7 +81,6 @@
     "assessment_id": null,
     "total": 0,
     "done": 0,
-    "live": true,
     "dataset_root": "/scratch/workspace/inference",
     "capture": "2026-02-11"
   },
@@ -91,8 +88,10 @@
     "jobs": [
       {
         "job_id": "<failed job>",
-        "status": "failed",
-        "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+        "state": {
+          "status": "failed",
+          "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own."
+        },
         "project": "/scratch/workspace/inference",
         "checkpoint_path": "/scratch/workspace/inference/model.pt",
         "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -112,14 +111,12 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": false,
         "dataset_root": "/scratch/workspace/inference",
         "capture": "2026-02-11"
       },
       {
         "job_id": "<held job>",
-        "status": "running",
-        "error": null,
+        "state": { "status": "running" },
         "project": "/scratch/workspace/inference",
         "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
         "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -139,7 +136,6 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": true,
         "dataset_root": "/scratch/workspace/inference",
         "capture": "2026-02-11"
       }
@@ -149,8 +145,10 @@
     "jobs": [
       {
         "job_id": "<failed job>",
-        "status": "failed",
-        "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+        "state": {
+          "status": "failed",
+          "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own."
+        },
         "project": "/scratch/workspace/inference",
         "checkpoint_path": "/scratch/workspace/inference/model.pt",
         "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -170,14 +168,12 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": false,
         "dataset_root": "/scratch/workspace/inference",
         "capture": "2026-02-11"
       },
       {
         "job_id": "<held job>",
-        "status": "running",
-        "error": null,
+        "state": { "status": "running" },
         "project": "/scratch/workspace/inference",
         "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
         "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -197,7 +193,6 @@
         "assessment_id": null,
         "total": 9,
         "done": 1,
-        "live": true,
         "dataset_root": "/scratch/workspace/inference",
         "capture": "2026-02-11"
       }
@@ -207,8 +202,7 @@
     "type": "progress",
     "job": {
       "job_id": "<held job>",
-      "status": "running",
-      "error": null,
+      "state": { "status": "running" },
       "project": "/scratch/workspace/inference",
       "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
       "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -228,7 +222,6 @@
       "assessment_id": null,
       "total": 9,
       "done": 1,
-      "live": true,
       "dataset_root": "/scratch/workspace/inference",
       "capture": "2026-02-11"
     }
@@ -241,8 +234,7 @@
         "message": "bucket 'baseline/2026-02-11' under /scratch/workspace/inference is the bucket job <held job> is still writing.",
         "job": {
           "job_id": "<held job>",
-          "status": "running",
-          "error": null,
+          "state": { "status": "running" },
           "project": "/scratch/workspace/inference",
           "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
           "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -262,7 +254,6 @@
           "assessment_id": null,
           "total": 9,
           "done": 1,
-          "live": true,
           "dataset_root": "/scratch/workspace/inference",
           "capture": "2026-02-11"
         }
@@ -271,8 +262,7 @@
   },
   "cancel": {
     "job_id": "<held job>",
-    "status": "running",
-    "error": null,
+    "state": { "status": "running" },
     "project": "/scratch/workspace/inference",
     "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
     "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -292,7 +282,6 @@
     "assessment_id": null,
     "total": 9,
     "done": 1,
-    "live": true,
     "dataset_root": "/scratch/workspace/inference",
     "capture": "2026-02-11"
   },
@@ -300,8 +289,10 @@
     "jobs": [
       {
         "job_id": "<failed job>",
-        "status": "failed",
-        "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+        "state": {
+          "status": "failed",
+          "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own."
+        },
         "project": "/scratch/workspace/inference",
         "checkpoint_path": "/scratch/workspace/inference/model.pt",
         "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -321,14 +312,12 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": false,
         "dataset_root": "/scratch/workspace/inference",
         "capture": "2026-02-11"
       },
       {
         "job_id": "<held job>",
-        "status": "canceled",
-        "error": null,
+        "state": { "status": "canceled" },
         "project": "/scratch/workspace/inference",
         "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
         "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -348,7 +337,6 @@
         "assessment_id": null,
         "total": 9,
         "done": 1,
-        "live": false,
         "dataset_root": "/scratch/workspace/inference",
         "capture": "2026-02-11"
       }
@@ -358,8 +346,7 @@
     "type": "final",
     "job": {
       "job_id": "<held job>",
-      "status": "canceled",
-      "error": null,
+      "state": { "status": "canceled" },
       "project": "/scratch/workspace/inference",
       "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
       "images_dir": "/scratch/workspace/inference/images/2026-02-11",
@@ -379,7 +366,6 @@
       "assessment_id": null,
       "total": 9,
       "done": 1,
-      "live": false,
       "dataset_root": "/scratch/workspace/inference",
       "capture": "2026-02-11"
     }
@@ -388,5 +374,5 @@
     "status": 404,
     "body": { "detail": "checkpoint not found: /scratch/workspace/inference/absent.pt" }
   },
-  "unknown_job": { "type": "final", "error": "job not found" }
+  "unknown_job": { "type": "missing", "error": "job not found" }
 }

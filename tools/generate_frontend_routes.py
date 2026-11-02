@@ -3,8 +3,9 @@
 This script emits the route module at :data:`GENERATED_PATH`: one exported name per path and
 method of each route the FastAPI app has registered whose name the frontend's non-test sources
 read, the reads ``tests.READS_SCRIPT`` finds through the TypeScript compiler, run under ``node``. A
-path parameter is typed by the alias ``tools/generate_frontend_types.py`` generates for its
-declared ``Literal`` vocabulary, and ``string`` where it is declared ``str``. It also emits the
+path parameter is typed by the name of the ``type`` statement declaring its ``Literal``
+vocabulary, which ``tools/generate_frontend_types.py`` renders, and ``string`` where it is
+declared ``str``. It also emits the
 dev-proxy module at :data:`PROXY_GENERATED_PATH`: one dev-proxy prefix per distinct first path
 segment of every registered HTTP or WebSocket route, ``ws`` true wherever a socket is mounted
 under it, excluding the paths ``tcip_web.app.FRONTEND_SERVING_PATHS`` names (the app's own
@@ -24,7 +25,7 @@ import json
 import re
 from collections.abc import Collection
 from string import Formatter
-from typing import TYPE_CHECKING, Any, cast, get_args
+from typing import TYPE_CHECKING, Any, cast, get_type_hints
 
 from fastapi.routing import (
     APIRoute,
@@ -40,10 +41,7 @@ from tests import (
     printed_json,
     write_generated,
 )
-from tools.generate_frontend_types import (
-    GENERATED_PATH as TYPES_PATH,
-    literal_aliases,
-)
+from tools.generate_frontend_types import GENERATED_PATH as TYPES_PATH
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -124,8 +122,9 @@ def collect_routes(app: FastAPI) -> list[tuple[str, str, str, dict[str, Any]]]:
             if isinstance(context.original_route, APIWebSocketRoute)
             else cast("set[str]", context.methods) - {"HEAD", "OPTIONS"}
         )
+        hints = get_type_hints(context.endpoint)
         parameters = {
-            field.name: field.field_info.annotation
+            field.name: hints[field.name]
             for field in context.dependant.path_params
         }
         for method in sorted(methods):
@@ -179,26 +178,22 @@ def render(app: FastAPI, names: Collection[str]) -> str:
     """Return the generated module over :func:`read_routes` of ``names``, formatted.
 
     A parameter declared ``str`` is typed ``string``, and one declared as a ``Literal``
-    vocabulary by the alias :func:`literal_aliases` names, which the module imports from the
+    vocabulary by the name of its ``type`` statement, which the module imports from the
     generated types module.
     """
-    aliases = {members: alias for alias, members in literal_aliases().items()}
     entries = [
         (
             name,
             path,
             {
-                param: "string"
-                if declared is str
-                else aliases[get_args(declared)]
+                param: "string" if declared is str else declared.__name__
                 for param, declared in parameters.items()
             },
         )
         for name, path, _, parameters in read_routes(app, names)
     ]
     named = sorted(
-        {t for _, _, types in entries for t in types.values()}
-        & set(aliases.values())
+        {t for _, _, types in entries for t in types.values()} - {"string"}
     )
     module = TYPES_PATH.relative_to(GENERATED_PATH.parent).with_suffix("")
     imports = (

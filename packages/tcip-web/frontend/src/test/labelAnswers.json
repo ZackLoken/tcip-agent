@@ -182,7 +182,7 @@
   },
   "proposals": {
     "operating_point": {
-      "conf": null,
+      "kind": "conf_refused",
       "reason": "no assessment answers for bucket '<staged bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
     },
     "proposals": [
@@ -311,10 +311,18 @@
       }
     }
   },
-  "registry_bare": {
-    "subjects": { "bud": { "description": "one bud" } },
+  "registry_unstored": {
+    "registry": { "kind": "no_registry" },
     "discovered": ["bud"],
-    "version": "<version n1>",
+    "unreadable": []
+  },
+  "registry_bare": {
+    "registry": {
+      "kind": "stored",
+      "version": "<version n1>",
+      "subjects": { "bud": { "description": "one bud" } }
+    },
+    "discovered": ["bud"],
     "unreadable": []
   },
   "registry_saved": {
@@ -343,14 +351,17 @@
     }
   },
   "registry_loaded": {
-    "subjects": {
-      "bud": {
-        "description": "one bud",
-        "attributes": { "opening": { "type": "categorical", "values": ["closed", "open"] } }
+    "registry": {
+      "kind": "stored",
+      "version": "<version n3>",
+      "subjects": {
+        "bud": {
+          "description": "one bud",
+          "attributes": { "opening": { "type": "categorical", "values": ["closed", "open"] } }
+        }
       }
     },
     "discovered": ["bud"],
-    "version": "<version n3>",
     "unreadable": []
   }
 }

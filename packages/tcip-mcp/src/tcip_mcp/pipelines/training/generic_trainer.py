@@ -50,6 +50,7 @@ from tcip_mcp.pipelines.schemas import (
     SchedulerSpec,
     StageSpec,
     StatedDetectorGeometry,
+    StatedDirection,
     TrainConfigSchema,
     TrainGeometry,
     TraitRevisionRef,
@@ -569,13 +570,13 @@ def _build_scheduler(
     optimizer: torch.optim.Optimizer,
     spec: SchedulerSpec,
     *,
-    higher_is_better: bool,
+    direction: StatedDirection,
 ) -> torch.optim.lr_scheduler.LRScheduler:
     """Build the scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) over ``optimizer``.
 
     It runs at every setting ``spec`` carries, a horizon-bound one over the block's own
-    ``horizon_epochs``, a plateau one watching the selection value in its direction,
-    ``higher_is_better`` (``schemas.selection_of``).
+    ``horizon_epochs``, a plateau one watching the selection value in its ``direction``
+    (``schemas.selection_of``).
     """
     if isinstance(spec, CosineSchedule):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -584,7 +585,7 @@ def _build_scheduler(
     elif isinstance(spec, PlateauSchedule):
         return torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            mode="max" if higher_is_better else "min",
+            mode="max" if direction == "higher" else "min",
             factor=spec.factor,
             patience=spec.patience,
             threshold=spec.threshold,
@@ -713,15 +714,15 @@ def _improves(
     candidate: float,
     incumbent: float,
     *,
-    higher_is_better: bool,
+    direction: StatedDirection,
     min_delta: float = 0.0,
 ) -> bool:
     """Return whether ``candidate`` beats ``incumbent`` by more than ``min_delta``.
 
-    Both are selection values, compared in the direction the run's selection metric improves
+    Both are selection values, compared in the ``direction`` the run's selection metric improves
     in.
     """
-    if higher_is_better:
+    if direction == "higher":
         return candidate > incumbent + min_delta
     return candidate < incumbent - min_delta
 
@@ -869,11 +870,11 @@ def train(
     """
     run.status = "running"
     run.start_time = time.time()
-    selection_metric, higher_is_better = selection_of(
+    selection_metric, direction = selection_of(
         run.spec.evaluation.selection_metric
     )
     # The losing-side sentinel for this run's own direction: any real value beats it.
-    losing_side = float("-inf") if higher_is_better else float("inf")
+    losing_side = float("-inf") if direction == "higher" else float("inf")
     best: dict | None = None  # the run's best epoch (_epoch_state)
 
     try:
@@ -1050,7 +1051,7 @@ def train(
             # Inter-stage LR warmup from the handed-off learning rates (default off).
             warmup_n = stage_warmup_epochs if warmup_starts else 0
             scheduler = _build_scheduler(
-                optimizer, scheduler_spec, higher_is_better=higher_is_better
+                optimizer, scheduler_spec, direction=direction
             )
 
             start_epoch = 0
@@ -1263,9 +1264,7 @@ def train(
                 stage_incumbent = (
                     stage_best["selection"] if stage_best else losing_side
                 )
-                if _improves(
-                    sel, stage_incumbent, higher_is_better=higher_is_better
-                ):
+                if _improves(sel, stage_incumbent, direction=direction):
                     stage_best = _epoch_state(
                         model,
                         optimizer,
@@ -1279,7 +1278,7 @@ def train(
                 if _improves(
                     sel,
                     es_best,
-                    higher_is_better=higher_is_better,
+                    direction=direction,
                     min_delta=stop_rule.min_delta,
                 ):
                     es_best, es_counter = sel, 0
@@ -1322,7 +1321,7 @@ def train(
             if previous is None or _improves(
                 selection,
                 previous["selection"],
-                higher_is_better=higher_is_better,
+                direction=direction,
             ):
                 best = stage_best
             if canceled:
@@ -1330,7 +1329,7 @@ def train(
             if previous is not None and not _improves(
                 selection,
                 previous["selection"],
-                higher_is_better=higher_is_better,
+                direction=direction,
                 min_delta=stop_rule.min_delta,
             ):
                 logger.info(

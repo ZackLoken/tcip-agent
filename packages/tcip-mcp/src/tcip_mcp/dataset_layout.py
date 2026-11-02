@@ -11,9 +11,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, JsonValue, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt
 
 import tcip_store
 from tcip_annotation.flags import FlagRequest, ProposalTarget
@@ -646,6 +646,7 @@ class ImageLabels(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    kind: Literal["labels"] = "labels"
     document: dict[str, JsonValue]
     flags: dict[str, JsonValue] | None
 
@@ -655,13 +656,19 @@ class ImageFrame(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    kind: Literal["frame"] = "frame"
     width: StrictInt
     height: StrictInt
 
 
-type CaptureLabels = dict[PathSegment, dict[str, ImageLabels | ImageFrame]]
-"""Images claimed by capture, then by the file name of the image each is for: each with its
-label records, or at a stated frame alone."""
+type ImageClaim = Annotated[
+    ImageLabels | ImageFrame, Field(discriminator="kind")
+]
+"""One image's claim, with its label records or at a stated frame alone, told apart by its
+``kind``."""
+
+type CaptureLabels = dict[PathSegment, dict[str, ImageClaim]]
+"""Images claimed by capture, then by the file name of the image each is for."""
 
 
 LABELS_IMPORTED = "labels_imported"
@@ -672,7 +679,7 @@ def admitted(
     dataset_root: Path,
     labels: CaptureLabels,
     registry: SubjectRegistry,
-) -> tuple[dict[Key, ImageLabels | ImageFrame], list[str]]:
+) -> tuple[dict[Key, ImageClaim], list[str]]:
     """Return the label key of each image ``labels`` claims and what refuses writing them.
 
     Each file name must name exactly one logical image its capture holds
@@ -702,7 +709,7 @@ def admitted(
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.subject_registry import registry_for_dataset_root
 
-    keys: dict[Key, ImageLabels | ImageFrame] = {}
+    keys: dict[Key, ImageClaim] = {}
     claimed: dict[Key, str] = {}
     faults: list[str] = []
     naming: dict[str, list[str]] = {}
@@ -728,7 +735,7 @@ def admitted(
                 continue
             keys[key], claimed[key] = item, where
             labeled: tuple[int | None, int | None]
-            if isinstance(item, ImageFrame):
+            if item.kind == "frame":
                 labeled = (item.width, item.height)
             else:
                 try:
@@ -802,7 +809,7 @@ def write_label_records(
     writes: dict[Key, JsonValue] = {}
     written: dict[str, list[str]] = {}
     for key, item in sorted(keys.items(), key=lambda pair: pair[0].parts):
-        if isinstance(item, ImageFrame):
+        if item.kind == "frame":
             continue
         writes[key] = item.document
         if item.flags is not None:

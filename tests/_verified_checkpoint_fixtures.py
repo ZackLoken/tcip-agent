@@ -175,7 +175,7 @@ def opened_run(
     experiment_id: str | None = None,
     **facts: str | float | dict | None,
 ) -> Path:
-    """Open a run directory under the project ``root`` over ``config`` validated.
+    """Open a run launched on its own under the project ``root`` over ``config`` validated.
 
     Its sources are staged a single time (``model_build.staged_sources``), resolved by the
     launcher's own producer (``split_construction.resolve_run``) and opened by its own writer
@@ -201,6 +201,7 @@ def opened_run(
         sources,
         resolution.record,
         created=now(),
+        launched_as=experiments.Standalone(),
         **facts,
     )
     return run_dir

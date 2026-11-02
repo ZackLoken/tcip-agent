@@ -7,6 +7,8 @@ import {
   SUBJECT_COLORS,
   subjectColor,
 } from "@/api/subjects";
+import { adoptLoad } from "@/lib/registrySave";
+import { useStore } from "@/store";
 import { LABEL_ANSWERS } from "@/test/labels";
 import { fetchAnswers } from "@/test/refusals";
 
@@ -40,16 +42,18 @@ describe("registry save", () => {
   it("carries the version it was loaded at, so a stale save is refused", async () => {
     fetchAnswers(200, LABEL_ANSWERS.registry_saved);
     const subjects = { bush: { description: "one bush crown" } };
+    adoptLoad(LABEL_ANSWERS.registry_loaded);
+    const { version } = useStore.getState().registry;
     await subjectsApi.save({
       subjects,
       dataset_root: "C:/data",
-      version: "v1",
+      version,
       user: "jordan",
     });
     expect(sentBody()).toEqual({
       subjects,
       dataset_root: "C:/data",
-      version: "v1",
+      version,
       user: "jordan",
     });
   });

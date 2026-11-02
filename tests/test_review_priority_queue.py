@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.dataset_layout import image_dir
+from tcip_web.jobstore import Failed, Pending
+from tcip_web.routes.annotate import QueueRanked
 from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
@@ -67,15 +69,17 @@ def stub_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
 def ended(client: TestClient, job_id: str) -> dict:
     """Wait for the queue job ``job_id`` to end; return its record as the status route answers.
 
-    Ended is the record's own ``live`` read false.
+    Ended is the record read back through its model holding a final state.
     """
-    from tcip_web.routes.annotate import _pq_registry
+    from tcip_mcp.experiments import FINAL_STATES
+    from tcip_web.routes.annotate import PriorityQueueJob, _pq_registry
 
     job = _pq_registry.get(job_id)
     assert job is not None and job.thread is not None, job_id
     job.thread.join(timeout=60)
     body = client.get(f"/api/annotate/queue/{job_id}").json()
-    assert body["live"] is False, body
+    state = PriorityQueueJob.model_validate(body).state
+    assert state.status in FINAL_STATES, body
     return body
 
 
@@ -251,16 +255,16 @@ def test_job_completes_and_carries_the_tool_s_own_queue_and_the_capture_it_ranke
     launched = resp.json()
 
     body = ended(opened_client, launched["job_id"])
-    assert body["status"] == "completed", body
     # Both routes answer the one job record; the launch's has no ranking yet.
     assert launched.keys() == body.keys()
-    assert launched["ranked"] is None
+    assert launched["state"] == Pending().model_dump()
     # The record names the capture as the selection does.
     assert (body["dataset_root"], body["capture"]) == (
         selection["dataset_root"],
         selection["date"],
     )
-    ranked = body["ranked"]
+    QueueRanked.model_validate(body["state"])
+    ranked = body["state"]["ranked"]
     assert {name: ranked[name] for name in QUEUE} == QUEUE
     assert [entry["image"] for entry in ranked["queue"]] == ["b.jpg", "a.jpg"]
     # The checkpoint is located once, at the route's arrival.
@@ -323,7 +327,6 @@ def test_job_fails_on_the_ranking_s_own_refusal(
         rationale=QUEUE["rationale"],
     )
     assert isinstance(refusal, dict), refusal
-    assert body["status"] == "failed"
-    assert body["error"] == refusal["error"]
-    assert "no image finished" in body["error"]
-    assert body["ranked"] is None
+    failed = Failed.model_validate(body["state"])
+    assert failed.error == refusal["error"]
+    assert "no image finished" in failed.error

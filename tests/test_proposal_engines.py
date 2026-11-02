@@ -486,7 +486,7 @@ def test_a_tiled_proposal_records_its_lattice_and_merges_its_seams() -> None:
     )
 
     execution = proposal.execution
-    assert execution is not None
+    assert execution.kind == "pass"
     assert (
         execution.tile_size,
         execution.overlap,
@@ -532,7 +532,7 @@ def test_a_lattice_reaching_the_frame_runs_whole_recording_its_lattice(
     )
 
     assert lattices == []
-    assert proposal.execution is not None
+    assert proposal.execution.kind == "pass"
     assert proposal.execution.tile_size == 2000
     assert proposal.execution.sources["tile_size"] == TILE_EDGE_DERIVATION
     assert [c["bbox"] for c in proposal.candidates] == [
@@ -546,7 +546,7 @@ def test_a_large_frame_the_whole_frame_pass_finds_nothing_on_refuses() -> None:
     A frame within the model edge proposes nothing, with no record, and the large frame with the
     lattice stated runs, its record naming both ``explicit``.
     """
-    from tcip_mcp.pipelines.execution import ExecutionRefusedError
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, NoPass
     from tcip_mcp.pipelines.proposal_engines import detected_proposal
 
     blank = _squares_frame([])
@@ -580,9 +580,9 @@ def test_a_large_frame_the_whole_frame_pass_finds_nothing_on_refuses() -> None:
         overlap=0.2,
     )
 
-    assert small == ([], None)
+    assert small == ([], NoPass())
     assert stated.candidates == []
-    assert stated.execution is not None
+    assert stated.execution.kind == "pass"
     assert stated.execution.sources == {
         "tile_size": "explicit",
         "overlap": "explicit",
@@ -605,7 +605,7 @@ def test_a_frame_within_the_models_edge_runs_whole_recording_its_floored_lattice
         overlap=None,
     )
 
-    assert proposal.execution is not None
+    assert proposal.execution.kind == "pass"
     assert proposal.execution.tile_size == 800
     assert len(proposal.candidates) == 2
 
@@ -699,6 +699,7 @@ class BoxProposer:
     """A proposer answering one ringless candidate at :data:`BOX`."""
 
     def propose(self, image_path: str, **params: object) -> Proposal:
+        from tcip_mcp.pipelines.execution import NoPass
         from tcip_mcp.pipelines.proposal import Proposal
         from tcip_mcp.pipelines.proposal_engines import box_candidate
 
@@ -711,7 +712,7 @@ class BoxProposer:
                     engine_meta={"label": "nut"},
                 )
             ],
-            None,
+            NoPass(),
         )
 
 
@@ -836,7 +837,9 @@ import sys
 from huggingface_hub import is_offline_mode
 
 from tcip_mcp.pipelines import proposal_engines, slicing
-from tcip_mcp.pipelines.execution import EXECUTION_RECORD
+from pydantic import TypeAdapter
+
+from tcip_mcp.pipelines.execution import ProposalExecution
 from tcip_mcp.pipelines.proposal import resolve_proposer
 
 engine, image, params = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
@@ -861,10 +864,8 @@ else:
     proposal = resolve_proposer(engine).propose(image, **params)
     answer["held_on"] = next(load(checkpoint)[0].parameters()).device.type
     answer["candidates"] = proposal.candidates
-    answer["execution"] = (
-        None
-        if proposal.execution is None
-        else EXECUTION_RECORD.dump_python(proposal.execution, mode="json")
+    answer["execution"] = TypeAdapter(ProposalExecution).dump_python(
+        proposal.execution, mode="json"
     )
 print(json.dumps(answer))
 """

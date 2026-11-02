@@ -3,6 +3,8 @@ import {
   type CompositeStretch,
   type ImageBand,
   type ImageBands,
+  OVERVIEW,
+  SAMPLED,
 } from "@/api/types.generated";
 import type { BandSelection } from "@/lib/bandSelection";
 
@@ -32,16 +34,14 @@ function samplePercent(fraction: number): string {
 
 /**
  * An R/G/B band-composite picker plus a stretch select, collapses to a single dropdown (every
- * channel set together) when the source is single-band. The mount-level gate (the server's
- * `plain`, never shown for a frame displayed as its own pixels) lives with each caller; this
- * component only renders whatever bands `info` reports.
+ * channel set together) when the source is single-band. It renders the bands `info` reports.
  *
  * When the reported band ranges were read from part of the raster rather than all of it, the
  * picker says so: the stretch a viewer picks is built on those numbers, and a value in a window
  * the sample missed is not in them.
  */
 export function BandPicker({
-  info: { band_count: bandCount, bands, sampled, pixel_fraction: pixelFraction, overview_size },
+  info: { band_count: bandCount, bands, read },
   selection,
   onChange,
 }: {
@@ -91,20 +91,20 @@ export function BandPicker({
           </option>
         ))}
       </select>
-      {sampled && pixelFraction !== null && (
+      {read.kind === SAMPLED && read.pixel_fraction < 1 && (
         <span
           className="text-[12px] text-tcip-muted"
           title="These band ranges were read from a seeded sample of this raster's pixels, not from every pixel, so a more extreme value in a window the sample missed is not in them."
         >
-          {`stats from a ${samplePercent(pixelFraction)}% pixel sample`}
+          {`stats from a ${samplePercent(read.pixel_fraction)}% pixel sample`}
         </span>
       )}
-      {overview_size !== null && (
+      {read.kind === OVERVIEW && (
         <span
           className="text-[12px] text-tcip-muted"
           title="These band ranges were read from a reduced-resolution overview of this raster, not from its native pixels; averaged overview values sit inside the native range, so the true extremes can lie outside these numbers."
         >
-          {`stats from a ${overview_size[0]}x${overview_size[1]} overview`}
+          {`stats from a ${read.overview_size[0]}x${read.overview_size[1]} overview`}
         </span>
       )}
     </div>

@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tcip_mcp.experiments import RunRow, SweepOutcome
+    from tcip_mcp.experiments import SweepOutcome, TrialRun
     from tcip_mcp.pipelines.data.selection import Selection
     from tcip_mcp.workspace import BoundProject
 
@@ -1653,17 +1653,19 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
 
 def _trial_rows(
     sweep: Path, trials: list[tuple[float, int | None, float | None]]
-) -> list[RunRow]:
+) -> list[TrialRun]:
     """Open each ``(lr, seed, value)`` trial under ``sweep`` and return its listing rows.
 
     Each trial is opened by its own producer (``training_tools.open_trial``), ``value`` logged as
     its ``selection`` through the envelope's own sink and the trial ended ``completed``, or
-    ``failed`` with nothing logged when ``value`` is ``None``; the rows the project's listing
-    reads for them are returned in that order.
+    ``failed`` with nothing logged when ``value`` is ``None``; the rows the sweep's own reader
+    (``experiments.read_sweep``) lists for them are returned in that order.
     """
     from tcip_mcp.audit import now
     from tcip_mcp.experiments import (
+        observe_sweep,
         project_of_run,
+        read_sweep,
         run_rows,
         write_final_status,
     )
@@ -1686,7 +1688,10 @@ def _trial_rows(
         )
         names.append(trial.name)
     by_name = {
-        row.experiment_id: row for row in run_rows(project_of_run(sweep))
+        row.experiment_id: row
+        for row in read_sweep(
+            observe_sweep(sweep), run_rows(project_of_run(sweep))
+        ).trials
     }
     return [by_name[name] for name in names]
 
@@ -1746,6 +1751,7 @@ def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
         ],
     )
 
+    assert outcome.kind == "finite_best", outcome
     assert outcome.best_params == {"optimizer.head_lr": 0.2}
     assert outcome.best_value == pytest.approx(0.3)
     spread = outcome.best_value_spread
@@ -1779,6 +1785,7 @@ def test_a_sweeps_outcome_marks_a_group_with_a_failed_draw_ineligible(
     )
 
     # The lr=0.1 point never became eligible, so lr=0.2 wins even though 0.9 alone looked worse.
+    assert outcome.kind == "finite_best", outcome
     assert outcome.best_params == {"optimizer.head_lr": 0.2}
     assert outcome.best_value == pytest.approx(0.45)
 
@@ -1804,6 +1811,7 @@ def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_ever
         ],
     )
 
+    assert outcome.kind == "finite_best", outcome
     assert outcome.best_params == {"optimizer.head_lr": 0.2}
     assert outcome.best_value == pytest.approx(0.85)
 
@@ -1816,9 +1824,7 @@ def test_a_sweeps_outcome_is_a_null_best_when_no_point_is_eligible(
         tmp_path, real_hpo_base_config, [(0.1, 42, 0.9), (0.1, 43, None)]
     )
 
-    assert outcome.best_params is None
-    assert outcome.best_value is None
-    assert outcome.best_value_state is None
+    assert outcome.kind == "no_best", outcome
 
 
 # -- group_split_draws direct coverage ----------------------------------------------

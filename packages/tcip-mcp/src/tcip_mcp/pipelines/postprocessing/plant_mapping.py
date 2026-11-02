@@ -24,6 +24,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Annotated,
     ClassVar,
     Literal,
     NamedTuple,
@@ -147,31 +148,31 @@ ToleranceSource = Literal["grid_pitch", "stated", "stated_capped"]
 """Where a match tolerance came from (:func:`resolve_nn_tolerance_m`): the plant grid's pitch,
 the stated value, or the stated value capped to half the grid pitch."""
 
-RadiusSource = Literal["h_pos_err", "stated"]
-"""Where a date's match radius came from (:func:`date_match_radius`): the positioning error its
-photographs report, or the caller's statement."""
-
 
 class StatedRadius(BaseModel):
     """A match radius (meters) a mapping build states for its captures, and how it is known."""
 
     model_config = ConfigDict(extra="forbid")
 
+    source: Literal["stated"] = "stated"
     value: PositiveFloat
     rationale: str = Field(min_length=1)
 
 
-class MatchRadius(BaseModel):
-    """How far (meters) from a plant one date's captures were matched to it, and its source.
-
-    ``rationale`` is the stated radius's own, ``None`` for a derived one.
-    """
+class DerivedRadius(BaseModel):
+    """A date's match radius (meters) derived from the positioning error its photographs report."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
+    source: Literal["h_pos_err"] = "h_pos_err"
     value: float
-    source: RadiusSource
-    rationale: str | None
+
+
+type MatchRadius = Annotated[
+    DerivedRadius | StatedRadius, Field(discriminator="source")
+]
+"""How far from a plant one date's captures were matched to it (:func:`date_match_radius`),
+told apart by its ``source``."""
 
 
 class DateCounts(BaseModel):
@@ -223,6 +224,7 @@ class PlantMappingDisclosure(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["plant_mapping"] = "plant_mapping"
     name: str
     dataset_id: str
     dataset_root: str
@@ -1317,9 +1319,7 @@ def date_match_radius(
     """
     positioned = [s for s in stamps if s.position is not None]
     if stated is not None:
-        return MatchRadius(
-            value=stated.value, source="stated", rationale=stated.rationale
-        )
+        return stated
     unreported = sorted(s.name for s in positioned if s.h_pos_err is None)
     if unreported:
         raise NoMatchRadiusError(
@@ -1330,7 +1330,7 @@ def date_match_radius(
     errors = [s.h_pos_err for s in positioned if s.h_pos_err is not None]
     if not errors:
         return None
-    return MatchRadius(value=max(errors), source="h_pos_err", rationale=None)
+    return DerivedRadius(value=max(errors))
 
 
 def assign_plants(
@@ -1596,7 +1596,8 @@ def _citing_delivery_event_ids(
     return sorted(
         event.event_id
         for event in read_delivery_events(project)
-        if isinstance(event.plant_mapping, PlantMappingDisclosure)
+        if event.plant_mapping is not None
+        and event.plant_mapping.kind == "plant_mapping"
         and (event.plant_mapping.name, event.plant_mapping.record_sha256)
         == (name, digest)
     )

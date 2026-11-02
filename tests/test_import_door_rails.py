@@ -454,7 +454,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         root, str(root), crop="currant", actor=None
     )
     confirmed = seed_confirmed_count(root)
-    assert confirmed.confirmed
+    assert confirmed.state.kind == "confirmed"
 
     from tests._verified_checkpoint_fixtures import finished_run
 
@@ -555,8 +555,8 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
 
     sweep = tt.monitor_training(dest, sweep_id)["sweep"]
     assert sweep["state"] == "completed"
-    assert [t["trial_params"] for t in sweep["trials"]] == [
-        {"optimizer.head_lr": 0.1}
+    assert [(t["kind"], t["params"]) for t in sweep["trials"]] == [
+        ("trial", {"optimizer.head_lr": 0.1})
     ]
 
     selection = read_selection(dest / "splits_out", project=dest)

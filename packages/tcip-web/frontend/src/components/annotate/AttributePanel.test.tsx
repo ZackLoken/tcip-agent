@@ -4,16 +4,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { subjectsApi } from "@/api/subjects";
 import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
+import { adoptLoad } from "@/lib/registrySave";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
-import { BARE_REGISTRY, LABEL_ANSWERS, SERVED_ATTRIBUTES } from "@/test/labels";
+import {
+  BARE_REGISTRY,
+  LABEL_ANSWERS,
+  SERVED_ATTRIBUTES,
+  storedOf,
+  tokenOf,
+  UNSTORED,
+} from "@/test/labels";
 import { thrown } from "@/test/refusals";
 import { openTestProject, selected } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
 /** The subject the registry the load route served declares. */
-const [SUBJECT] = Object.keys(LABEL_ANSWERS.registry_loaded.subjects ?? {});
+const LOADED = storedOf(LABEL_ANSWERS.registry_loaded);
+const [SUBJECT] = Object.keys(LOADED.subjects);
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
@@ -60,7 +69,7 @@ const landed = LABEL_ANSWERS.registry_saved;
 
 /** The served subject as declared before any attribute was, and as served with its attribute. */
 const BARE = BARE_REGISTRY[SUBJECT];
-const DECLARING = (LABEL_ANSWERS.registry_loaded.subjects ?? {})[SUBJECT];
+const DECLARING = LOADED.subjects[SUBJECT];
 
 /** The served subject's one declared attribute, its name and its values. */
 const [[DECLARED, { values: DECLARED_VALUES }]] = Object.entries(SERVED_ATTRIBUTES);
@@ -68,7 +77,7 @@ const ADD_A_VALUE = new RegExp(`^Add an? ${DECLARED} value$`);
 
 describe("AttributePanel attribute kinds", () => {
   it("offers exactly the kinds the backend's registry declares", () => {
-    act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }));
+    act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }, UNSTORED));
     render(<AttributePanel focused={null} />);
     fireEvent.click(screen.getByText("Add attribute"));
     const options = screen.getByLabelText("attribute type").querySelectorAll("option");
@@ -85,7 +94,7 @@ describe("AttributePanel presence", () => {
   });
 
   it("shows the active subject's attribute block and the focused shape's subject", () => {
-    act(() => useStore.getState().setRegistry({ [SUBJECT]: DECLARING }));
+    act(() => useStore.getState().setRegistry({ [SUBJECT]: DECLARING }, UNSTORED));
     render(<AttributePanel focused={focusedBox()} />);
     expect(screen.getByText(`${SUBJECT} attributes`)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add attribute" })).toBeInTheDocument();
@@ -97,7 +106,7 @@ describe("AttributePanel presence", () => {
 
 describe("AttributePanel authoring", () => {
   it("posts the grown registry with the loaded version, installs it and counts the unset shapes", async () => {
-    act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }));
+    act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }, UNSTORED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(landed);
     render(<AttributePanel focused={focusedBox()} />);
     fillAttributeDraft("size", ["small", "large"]);
@@ -110,13 +119,13 @@ describe("AttributePanel authoring", () => {
         attributes: { size: { type: "categorical", values: ["small", "large"] } },
       },
     });
-    expect(saveSpy.mock.calls[0][0].version).toBeNull();
-    expect(useStore.getState().registry.version).toBe(landed.version);
+    expect(saveSpy.mock.calls[0][0].version).toEqual(UNSTORED);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(landed.version);
     expect(screen.getByText(`size: 1 of 1 ${SUBJECT} shapes unset`)).toBeInTheDocument();
   });
 
   it("declares every value entered, the one still in the box included, as one attribute", async () => {
-    act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }));
+    act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }, UNSTORED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(landed);
     render(<AttributePanel focused={null} />);
     fillAttributeDraft("opening", ["closed", "half"]);
@@ -135,7 +144,7 @@ describe("AttributePanel authoring", () => {
   });
 
   it("adds several values to a declared attribute with no shape focused", async () => {
-    act(() => useStore.getState().setRegistry({ [SUBJECT]: DECLARING }));
+    act(() => useStore.getState().setRegistry({ [SUBJECT]: DECLARING }, UNSTORED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(landed);
     render(<AttributePanel focused={null} />);
     fireEvent.click(screen.getByRole("button", { name: ADD_A_VALUE }));
@@ -157,11 +166,7 @@ describe("AttributePanel authoring", () => {
   });
 
   it("refuses a name the subject already declares, inline, and posts nothing", async () => {
-    act(() =>
-      useStore
-        .getState()
-        .setRegistry({ [SUBJECT]: DECLARING }, LABEL_ANSWERS.registry_loaded.version),
-    );
+    act(() => adoptLoad(LABEL_ANSWERS.registry_loaded));
     const saveSpy = vi.spyOn(subjectsApi, "save");
     render(<AttributePanel focused={null} />);
     fillAttributeDraft(DECLARED, ["large"]);
@@ -173,7 +178,7 @@ describe("AttributePanel authoring", () => {
 });
 
 describe("AttributePanel registry-growing on a lost audit line", () => {
-  beforeEach(() => act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE })));
+  beforeEach(() => act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }, UNSTORED)));
 
   it("adopts the committed registry and toasts the gap message on the audit-gap 409", async () => {
     const gap = LABEL_ANSWERS.registry_audit_gap;
@@ -186,7 +191,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     // The committed registry is adopted as though the save had answered 200, and the gap
     // itself is surfaced as a toast rather than swallowed.
     const { committed, message } = gap.body.detail;
-    expect(useStore.getState().registry.version).toBe(committed.version);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(committed.version);
     expect(useStore.getState().toasts.some((t) => t.message === message)).toBe(true);
   });
 
@@ -199,7 +204,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     fillAttributeDraft("opening", ["closed", "open"]);
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
-    expect(useStore.getState().registry.subjects).toEqual(loaded.subjects);
-    expect(useStore.getState().registry.version).toBe(loaded.version);
+    expect(useStore.getState().registry.subjects).toEqual(LOADED.subjects);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
   });
 });

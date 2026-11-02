@@ -156,12 +156,12 @@ def _gather(
             *(
                 entry.record.detail
                 for entry in reports
-                if isinstance(entry.record, FrictionReport)
+                if entry.kind == "read"
             ),
             *(
                 section
                 for entry in retros
-                if isinstance(entry.record, Retrospective)
+                if entry.kind == "read"
                 for section in entry.record.model_dump(
                     exclude={"timestamp"}
                 ).values()
@@ -177,14 +177,13 @@ def _entry_line(entry: MemoryEntry[Any], width: int) -> str:
     The bullet carries a report's category and detail, a retrospective's line of work and task,
     or ``malformed`` and the reason a record will not read.
     """
-    record = entry.record
     label: str
-    if isinstance(record, FrictionReport):
+    if entry.kind == "unread":
+        label, text = "malformed", entry.reason
+    elif isinstance(record := entry.record, FrictionReport):
         label, text = record.category, record.detail
-    elif isinstance(record, Retrospective):
-        label, text = record.project_id, record.task
     else:
-        label, text = "malformed", record.reason
+        label, text = record.project_id, record.task
     return f"- [{label}] {text.replace(chr(10), ' ')[:width]}"
 
 
@@ -205,8 +204,7 @@ def build_worksheet(project: Path) -> str:
     disagreements = [
         entry
         for entry in reports
-        if isinstance(entry.record, FrictionReport)
-        and entry.record.user_disagreement
+        if entry.kind == "read" and entry.record.user_disagreement
     ]
     if disagreements:
         lines.append(

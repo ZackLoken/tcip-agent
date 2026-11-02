@@ -655,9 +655,6 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import read_delivery_events
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        PlantRegistryDisclosure,
-    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         MatchTolerance,
         grid_pitch_m,
@@ -677,7 +674,7 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
     assert "error" not in _deliver(tmp_path, bucket, registry, _GRID)
     (event,) = read_delivery_events(tmp_path)
     pm = event.plant_mapping
-    assert isinstance(pm, PlantRegistryDisclosure)
+    assert pm is not None and pm.kind == "plant_registry"
     plants = read_plant_csvs([plant_csv])
     assert pm.plant_registry.name == registry
     assert pm.detections_unattributed == 1
@@ -702,7 +699,7 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
         for e in read_delivery_events(tmp_path)
         if e.event_id != event.event_id
     ][0]
-    assert isinstance(latest, PlantRegistryDisclosure)
+    assert latest is not None and latest.kind == "plant_registry"
     assert latest.nn_tolerance_m == MatchTolerance(
         value=stated, source="stated"
     )

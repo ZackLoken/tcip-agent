@@ -1,8 +1,23 @@
 import { committedOf, messageOf } from "@/api/http";
 import { subjectsApi } from "@/api/subjects";
-import type { RegistrySave, RegistrySubjects } from "@/api/types.generated";
+import {
+  type RegistrySave,
+  type RegistrySubjects,
+  STORED,
+  type SubjectsLoad,
+} from "@/api/types.generated";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
+
+/** Hold the subject registry the load answer `loaded` found: a stored one's subjects at its
+ *  version, or none declared over no registry. */
+export function adoptLoad(loaded: SubjectsLoad): void {
+  const { setRegistry } = useStore.getState();
+  if (loaded.registry.kind === STORED) {
+    const { subjects, ...version } = loaded.registry;
+    setRegistry(subjects, version, loaded.discovered);
+  } else setRegistry({}, loaded.registry, loaded.discovered);
+}
 
 /** Grow the open dataset's subject registry to `next`: adopted locally at once, saved against the
  *  version this browser holds, and reloaded from the server when the save is refused. Answers
@@ -19,20 +34,19 @@ export async function saveRegistry(next: RegistrySubjects, failure: string): Pro
       version: registry.version,
       user,
     });
-    setRegistry(next, saved.version, registry.discovered);
+    setRegistry(next, { kind: STORED, version: saved.version }, registry.discovered);
     return true;
   } catch (e) {
     const message = messageOf(e);
     const saved = committedOf<RegistrySave>(e);
     if (saved) {
-      setRegistry(next, saved.version, registry.discovered);
+      setRegistry(next, { kind: STORED, version: saved.version }, registry.discovered);
       pushToast(message);
       return true;
     }
     pushToast(`${failure}: ${message}`);
     try {
-      const fresh = await subjectsApi.load(root, date);
-      setRegistry(fresh.subjects ?? {}, fresh.version, fresh.discovered);
+      adoptLoad(await subjectsApi.load(root, date));
     } catch {
       /* the reload itself failing leaves the optimistic registry in place */
     }

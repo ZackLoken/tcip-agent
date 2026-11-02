@@ -4,14 +4,47 @@ It prints, on one line, the pid of the child the manager tracks and the stand-in
 sleeps until killed or exits, by its ``mode`` argument. ``--no-tie`` disables the platform
 lifetime tie before the launch; ``--thread`` launches from a background thread that has finished
 before the pids print.
+
+It also holds the TensorBoard stand-ins the tests and the TensorBoard fixture's generator hand the
+manager: a listening one's argv and a child that dies during startup.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from subprocess import _FILE
+    from typing import TypedDict, Unpack
+
+    class PopenStreams(TypedDict, total=False):
+        """The stream keywords ``launch_tensorboard`` hands ``Popen``."""
+
+        stdout: _FILE
+        stderr: _FILE
+
+
+class DyingChild(subprocess.Popen):
+    """A real child that writes a missing-install message and exits with status 3.
+
+    It runs in place of the command it was handed, and construction waits for its exit.
+    """
+
+    def __init__(self, cmd: list[str], **kwargs: Unpack[PopenStreams]) -> None:
+        super().__init__(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('tensorboard is not installed\\n'); sys.exit(3)",
+            ],
+            **kwargs,
+        )
+        self.wait(timeout=30)
 
 
 def listening_argv(
@@ -96,7 +129,7 @@ def main() -> None:
         _launch()
 
     info = launched["info"]
-    if not isinstance(info, tb.TensorboardServing):
+    if info.kind != "serving":
         sys.exit(f"launch_tensorboard did not serve: {info}")
     returned_pid = tb._TB_PROCESSES[tb._board_key(directory)].proc.pid
     guardian_expected = sys.platform != "win32" and "--no-tie" not in flags

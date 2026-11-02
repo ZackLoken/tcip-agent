@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -462,6 +462,36 @@ def entry_sha256(entry: TraitEntry) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+class Proposed(BaseModel):
+    """A revision no breeder has confirmed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["proposed"] = "proposed"
+
+
+class Confirmed(BaseModel):
+    """A revision a breeder confirmed: who, and when."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["confirmed"] = "confirmed"
+    confirmed_by: str
+    confirmed_at: AwareDatetime
+
+
+class Withdrawn(BaseModel):
+    """A revision whose confirmation was withdrawn: both stamps, the confirmation's and its own."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["withdrawn"] = "withdrawn"
+    confirmed_by: str
+    confirmed_at: AwareDatetime
+    withdrawn_by: str
+    withdrawn_at: AwareDatetime
+
+
 class TraitRevision(BaseModel):
     """One proposed entry, as appended.
 
@@ -483,15 +513,10 @@ class TraitRevision(BaseModel):
     relayed_note: str
     """What the breeder said away from the GUI, relayed by the agent; never a confirmation."""
     proposed_at: AwareDatetime
-    confirmed_by: str | None
-    confirmed_at: AwareDatetime | None
-    withdrawn_by: str | None
-    withdrawn_at: AwareDatetime | None
-
-    @property
-    def confirmed(self) -> bool:
-        """Whether the breeder confirmed this revision and has not withdrawn the confirmation."""
-        return self.confirmed_at is not None and self.withdrawn_at is None
+    state: Annotated[
+        Proposed | Confirmed | Withdrawn, Field(discriminator="kind")
+    ]
+    """Whether the breeder confirmed this revision, and withdrew that confirmation."""
 
     @property
     def ref(self) -> TraitRevisionRef:
@@ -518,7 +543,14 @@ class TraitRecord(BaseModel):
     @property
     def latest_confirmed(self) -> TraitRevision | None:
         """The highest-numbered revision confirmed and not withdrawn, or ``None``."""
-        return next((r for r in reversed(self.revisions) if r.confirmed), None)
+        return next(
+            (
+                r
+                for r in reversed(self.revisions)
+                if r.state.kind == "confirmed"
+            ),
+            None,
+        )
 
     def revision(self, number: int, entry_sha256: str) -> TraitRevision:
         """Return revision ``number``, which must hold the entry ``entry_sha256`` hashes.
@@ -687,10 +719,7 @@ def propose_trait(
             rationale=rationale,
             relayed_note=relayed_note,
             proposed_at=line.timestamp,
-            confirmed_by=None,
-            confirmed_at=None,
-            withdrawn_by=None,
-            withdrawn_at=None,
+            state=Proposed(),
         )
         txn.write(
             key,
@@ -733,11 +762,12 @@ def confirm_revision(
         record = _record(trait, project, txn.read(key, default=None))
         revision = record.revision(number, entry_sha256)
         revisions = list(record.revisions)
-        if confirmed and revision.confirmed_at is not None:
+        state = revision.state
+        if confirmed and state.kind != "proposed":
             raise ValueError(
                 f"revision {number} of {trait!r} was already confirmed"
             )
-        if not confirmed and not revision.confirmed:
+        if not confirmed and state.kind != "confirmed":
             raise ValueError(
                 f"revision {number} of {trait!r} holds no confirmation to withdraw"
             )
@@ -752,12 +782,17 @@ def confirm_revision(
             actor,
             "ok",
         )
-        stamp = (
-            {"confirmed_by": actor, "confirmed_at": line.timestamp}
-            if confirmed
-            else {"withdrawn_by": actor, "withdrawn_at": line.timestamp}
+        stamped: Confirmed | Withdrawn = (
+            Confirmed(confirmed_by=actor, confirmed_at=line.timestamp)
+            if state.kind == "proposed"
+            else Withdrawn(
+                confirmed_by=state.confirmed_by,
+                confirmed_at=state.confirmed_at,
+                withdrawn_by=actor,
+                withdrawn_at=line.timestamp,
+            )
         )
-        revisions[number - 1] = revision.model_copy(update=stamp)
+        revisions[number - 1] = revision.model_copy(update={"state": stamped})
         txn.write(
             key,
             TraitRecord(revisions=tuple(revisions)).model_dump(mode="json"),

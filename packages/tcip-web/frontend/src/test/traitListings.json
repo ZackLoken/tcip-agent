@@ -47,11 +47,11 @@
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:00+00:00",
-              "confirmed_by": "user:grower",
-              "confirmed_at": "2000-01-01T00:00:01+00:00",
-              "withdrawn_by": null,
-              "withdrawn_at": null,
-              "confirmed": true
+              "state": {
+                "kind": "confirmed",
+                "confirmed_by": "user:grower",
+                "confirmed_at": "2000-01-01T00:00:01+00:00"
+              }
             },
             {
               "number": 2,
@@ -95,11 +95,7 @@
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:02+00:00",
-              "confirmed_by": null,
-              "confirmed_at": null,
-              "withdrawn_by": null,
-              "withdrawn_at": null,
-              "confirmed": false
+              "state": { "kind": "proposed" }
             }
           ],
           "latest_confirmed": {
@@ -144,11 +140,11 @@
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "2000-01-01T00:00:00+00:00",
-            "confirmed_by": "user:grower",
-            "confirmed_at": "2000-01-01T00:00:01+00:00",
-            "withdrawn_by": null,
-            "withdrawn_at": null,
-            "confirmed": true
+            "state": {
+              "kind": "confirmed",
+              "confirmed_by": "user:grower",
+              "confirmed_at": "2000-01-01T00:00:01+00:00"
+            }
           }
         }
       ],
@@ -194,11 +190,7 @@
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:06+00:00",
-              "confirmed_by": null,
-              "confirmed_at": null,
-              "withdrawn_by": null,
-              "withdrawn_at": null,
-              "confirmed": false
+              "state": { "kind": "proposed" }
             }
           ],
           "latest_confirmed": null
@@ -246,11 +238,11 @@
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:06+00:00",
-              "confirmed_by": "user:grower",
-              "confirmed_at": "2000-01-01T00:00:07+00:00",
-              "withdrawn_by": null,
-              "withdrawn_at": null,
-              "confirmed": true
+              "state": {
+                "kind": "confirmed",
+                "confirmed_by": "user:grower",
+                "confirmed_at": "2000-01-01T00:00:07+00:00"
+              }
             }
           ],
           "latest_confirmed": {
@@ -287,11 +279,11 @@
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "2000-01-01T00:00:06+00:00",
-            "confirmed_by": "user:grower",
-            "confirmed_at": "2000-01-01T00:00:07+00:00",
-            "withdrawn_by": null,
-            "withdrawn_at": null,
-            "confirmed": true
+            "state": {
+              "kind": "confirmed",
+              "confirmed_by": "user:grower",
+              "confirmed_at": "2000-01-01T00:00:07+00:00"
+            }
           }
         }
       ],
@@ -303,7 +295,7 @@
       "unreadable": [
         {
           "trait": "stem",
-          "reason": "2 validation errors for TraitRecord\nrevisions.0.entry.localization\n  Input should be '', 'center_match' or 'iou_match' [type=literal_error, input_value='anywhere', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/literal_error\nrevisions\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=[{'number': 1, 'entry': {..., 'withdrawn_at': None}], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short"
+          "reason": "2 validation errors for TraitRecord\nrevisions.0.entry.localization\n  Input should be '', 'center_match' or 'iou_match' [type=literal_error, input_value='anywhere', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/literal_error\nrevisions\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=[{'number': 1, 'entry': {...: {'kind': 'proposed'}}], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short"
         }
       ],
       "definitions": {}
@@ -361,11 +353,11 @@
                 "rationale": "The breeder counts every stem.",
                 "relayed_note": "",
                 "proposed_at": "2000-01-01T00:00:00+00:00",
-                "confirmed_by": "user:grower",
-                "confirmed_at": "2000-01-01T00:00:01+00:00",
-                "withdrawn_by": null,
-                "withdrawn_at": null,
-                "confirmed": true
+                "state": {
+                  "kind": "confirmed",
+                  "confirmed_by": "user:grower",
+                  "confirmed_at": "2000-01-01T00:00:01+00:00"
+                }
               },
               {
                 "number": 2,
@@ -409,11 +401,7 @@
                 "rationale": "The breeder counts every stem.",
                 "relayed_note": "",
                 "proposed_at": "2000-01-01T00:00:02+00:00",
-                "confirmed_by": null,
-                "confirmed_at": null,
-                "withdrawn_by": null,
-                "withdrawn_at": null,
-                "confirmed": false
+                "state": { "kind": "proposed" }
               }
             ],
             "latest_confirmed": {
@@ -458,11 +446,11 @@
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:00+00:00",
-              "confirmed_by": "user:grower",
-              "confirmed_at": "2000-01-01T00:00:01+00:00",
-              "withdrawn_by": null,
-              "withdrawn_at": null,
-              "confirmed": true
+              "state": {
+                "kind": "confirmed",
+                "confirmed_by": "user:grower",
+                "confirmed_at": "2000-01-01T00:00:01+00:00"
+              }
             }
           }
         }
@@ -511,11 +499,11 @@
         "rationale": "The breeder counts every stem.",
         "relayed_note": "",
         "proposed_at": "2000-01-01T00:00:02+00:00",
-        "confirmed_by": "user:grower",
-        "confirmed_at": "2000-01-01T00:00:03+00:00",
-        "withdrawn_by": null,
-        "withdrawn_at": null,
-        "confirmed": true
+        "state": {
+          "kind": "confirmed",
+          "confirmed_by": "user:grower",
+          "confirmed_at": "2000-01-01T00:00:03+00:00"
+        }
       },
       "audit_warning": null
     },
@@ -562,11 +550,13 @@
         "rationale": "The breeder counts every stem.",
         "relayed_note": "",
         "proposed_at": "2000-01-01T00:00:00+00:00",
-        "confirmed_by": "user:grower",
-        "confirmed_at": "2000-01-01T00:00:01+00:00",
-        "withdrawn_by": "user:grower",
-        "withdrawn_at": "2000-01-01T00:00:04+00:00",
-        "confirmed": false
+        "state": {
+          "kind": "withdrawn",
+          "confirmed_by": "user:grower",
+          "confirmed_at": "2000-01-01T00:00:01+00:00",
+          "withdrawn_by": "user:grower",
+          "withdrawn_at": "2000-01-01T00:00:04+00:00"
+        }
       },
       "audit_warning": null
     },
@@ -613,11 +603,13 @@
         "rationale": "The breeder counts every stem.",
         "relayed_note": "",
         "proposed_at": "2000-01-01T00:00:02+00:00",
-        "confirmed_by": "user:grower",
-        "confirmed_at": "2000-01-01T00:00:03+00:00",
-        "withdrawn_by": "user:grower",
-        "withdrawn_at": "2000-01-01T00:00:05+00:00",
-        "confirmed": false
+        "state": {
+          "kind": "withdrawn",
+          "confirmed_by": "user:grower",
+          "confirmed_at": "2000-01-01T00:00:03+00:00",
+          "withdrawn_by": "user:grower",
+          "withdrawn_at": "2000-01-01T00:00:05+00:00"
+        }
       },
       "audit_warning": "confirm_trait_revision completed and its audit entry could not be written: the audit log could not be appended to. Whatever the call changed is committed and unrecorded, so do not retry it blind: repair the audit log's destination, then reconcile the trail against what the call did."
     }

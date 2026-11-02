@@ -35,10 +35,14 @@ export function rankedNames(
   job: PriorityQueueJob | null,
   dataset: DatasetSelection | null,
 ): string[] | null {
-  if (!job?.ranked || job.dataset_root !== dataset?.dataset_root || job.capture !== dataset.date) {
+  if (
+    job?.state.status !== "completed" ||
+    job.dataset_root !== dataset?.dataset_root ||
+    job.capture !== dataset.date
+  ) {
     return null;
   }
-  return job.ranked.queue.map((entry) => entry.image);
+  return job.state.ranked.queue.map((entry) => entry.image);
 }
 
 /** The filter the stepper walks: the one `chosen`, except a review queue `ranked` does not hold

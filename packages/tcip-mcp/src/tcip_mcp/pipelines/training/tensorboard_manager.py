@@ -21,9 +21,9 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, cast
+from typing import IO, Annotated, Literal, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tcip_store import canonical_path
 
@@ -51,6 +51,7 @@ class TensorboardServing(BaseModel):
     TensorBoards it launched.
     """
 
+    kind: Literal["serving"] = "serving"
     url: str
     port: int
 
@@ -58,11 +59,27 @@ class TensorboardServing(BaseModel):
 class TensorboardFailure(BaseModel):
     """A TensorBoard launch that did not start: why, and what its child wrote when it ran."""
 
+    kind: Literal["failed"] = "failed"
     error: str
     output: str | None
 
 
-TensorboardLaunch = TensorboardServing | TensorboardFailure
+type TensorboardLaunch = Annotated[
+    TensorboardServing | TensorboardFailure, Field(discriminator="kind")
+]
+"""What a TensorBoard launch came to, told apart by its ``kind``."""
+
+
+class TensorboardNotServing(BaseModel):
+    """A board no TensorBoard of this process serves."""
+
+    kind: Literal["not_serving"] = "not_serving"
+
+
+type TensorboardState = Annotated[
+    TensorboardServing | TensorboardNotServing, Field(discriminator="kind")
+]
+"""Whether a TensorBoard of this process serves a board, told apart by its ``kind``."""
 
 
 @dataclass
@@ -397,14 +414,14 @@ def _running(key: str) -> _Launched | None:
     return entry
 
 
-def running(directory: Path) -> TensorboardServing | None:
-    """Return the TensorBoard this process runs over ``directory``'s board, or ``None``.
+def running(directory: Path) -> TensorboardState:
+    """Return the TensorBoard this process runs over ``directory``'s board, or that none does.
 
     ``directory`` is a run, trial or sweep directory, its board the one
     :func:`launch_tensorboard` tracks.
     """
     entry = _running(_board_key(directory))
-    return entry.serving if entry is not None else None
+    return entry.serving if entry is not None else TensorboardNotServing()
 
 
 def stop_tensorboard(logdir: str) -> dict:

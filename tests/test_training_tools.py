@@ -1320,7 +1320,8 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
     reported: list = []
     _trial({"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path)
     assert reported == [50.0, 40.0, 30.0]
-    assert _sweep_outcome(tmp_path).best_value == 30.0
+    outcome = _sweep_outcome(tmp_path)
+    assert outcome.kind == "finite_best" and outcome.best_value == 30.0
 
 
 @pytest.mark.parametrize(
@@ -1356,7 +1357,9 @@ def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
     _patch_hpo_trial_machinery(monkeypatch, fake_train, base, tmp_path)
     _trial({"optimizer.head_lr": head_lr}, lambda _value: None, base, tmp_path)
 
-    assert _sweep_outcome(tmp_path).best_at_range_end == at_end
+    outcome = _sweep_outcome(tmp_path)
+    assert outcome.kind == "finite_best", outcome
+    assert outcome.best_at_range_end == at_end
 
 
 def test_run_hpo_trial_that_fails_has_no_result(
@@ -1387,7 +1390,7 @@ def test_run_hpo_trial_that_fails_has_no_result(
     )
     assert reported == []
     assert observe(trial_dir).state == "failed"
-    assert _sweep_outcome(tmp_path).best_value is None
+    assert _sweep_outcome(tmp_path).kind == "no_best"
 
 
 def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric(
@@ -1417,7 +1420,8 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
     reported: list = []
     _trial({"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path)
     assert reported == [0.5, 0.9, 0.6]
-    assert _sweep_outcome(tmp_path).best_value == 0.9
+    outcome = _sweep_outcome(tmp_path)
+    assert outcome.kind == "finite_best" and outcome.best_value == 0.9
 
 
 def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
@@ -1462,6 +1466,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     )
 
     outcome = _sweep_outcome(tmp_path)
+    assert outcome.kind == "finite_best", outcome
     assert (outcome.best_params, outcome.best_value) == (
         {"optimizer.head_lr": 3e-4},
         0.7,
@@ -1535,7 +1540,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(
     resolved, at the nested field auto_train_val reads it from, beside the sampled point itself.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.experiments import read_run
+    from tcip_mcp.experiments import TrialPoint, read_run
 
     base = _detection_base(tmp_path)
     _patch_hpo_trial_machinery(monkeypatch, _completed_train, base, tmp_path)
@@ -1544,7 +1549,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(
 
     run = read_run(trial_dir)
     assert run.spec.data.split.seed == 7
-    assert run.trial_params == {"data.split.seed": 7}
+    assert run.launched_as == TrialPoint(params={"data.split.seed": 7})
     assert run.resolution.data.split.seed == 7
 
 
@@ -1659,7 +1664,7 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
     assert math.isfinite(
         reported[0]
     )  # epoch 1's real score, reported before the run died
-    assert _sweep_outcome(tmp_path).best_value is None
+    assert _sweep_outcome(tmp_path).kind == "no_best"
 
 
 # --------------------------------------------------------------------------
@@ -2369,7 +2374,12 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
     pytest.importorskip("torch")
     import math
 
-    from tcip_mcp.experiments import observe, read_run, request_cancel
+    from tcip_mcp.experiments import (
+        TrialPoint,
+        observe,
+        read_run,
+        request_cancel,
+    )
     from tests.tiny_trainer_fixtures import (
         regressor_config,
         write_regression_dataset,
@@ -2402,5 +2412,5 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
         reported[0]
     )  # epoch 1's real score, reported before the cancel
     assert observe(trial_dir).state == "canceled"
-    assert _sweep_outcome(tmp_path).best_value is None
-    assert read_run(trial_dir).trial_params == {}
+    assert _sweep_outcome(tmp_path).kind == "no_best"
+    assert read_run(trial_dir).launched_as == TrialPoint(params={})

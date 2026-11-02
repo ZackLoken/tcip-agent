@@ -20,8 +20,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 from tests._producer_fixtures import fake_popen
+from tests._tensorboard_parent import DyingChild
 from tests.test_run_launcher_identity import NoExecutableChild
-from tests.test_tensorboard_launch import DyingChild, LivingChild
+from tests.test_tensorboard_launch import LivingChild
 
 
 @pytest.mark.skipif(

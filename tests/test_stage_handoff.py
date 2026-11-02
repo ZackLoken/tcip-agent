@@ -934,7 +934,7 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum() -> None:
     scheduler = gt._build_scheduler(
         optimizer,
         spec.scheduler,
-        higher_is_better=selection_of(spec.evaluation.selection_metric)[1],
+        direction=selection_of(spec.evaluation.selection_metric)[1],
     )
     model(torch.ones(3, 2)).sum().backward()
     optimizer.step()
@@ -976,7 +976,7 @@ def _built(
     return gt._build_scheduler(
         optimizer,
         spec.scheduler,
-        higher_is_better=selection_of(spec.evaluation.selection_metric)[1],
+        direction=selection_of(spec.evaluation.selection_metric)[1],
     ), optimizer
 
 

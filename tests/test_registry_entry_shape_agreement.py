@@ -112,7 +112,8 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
 ) -> None:
     """A checkpoint copied to a path the registry does not hold resolves to the run that made it.
 
-    Its producer is the run's id and the original checkpoint's content hash.
+    Its entry is named by the run's id, and its producer is a run's checkpoint of the original's
+    content hash.
     """
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import (
@@ -131,9 +132,11 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     delivered.write_bytes(trained.read_bytes())
 
     checkpoint = load_registered_checkpoint(delivered, project=root)
+    assert checkpoint.entry.name == "bud_run3"
     assert checkpoint.producer == Producer(
+        kind="checkpoint",
         checkpoint_sha256=hashlib.sha256(trained.read_bytes()).hexdigest(),
-        experiment_id="bud_run3",
+        origin="run",
     )
 
 

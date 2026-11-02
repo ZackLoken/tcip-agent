@@ -14,10 +14,10 @@ import logging
 import uuid
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 from tcip_annotation.flags import Flag, PointTarget, covers
@@ -327,7 +327,7 @@ def load_proposals(image_path: str, bucket: str) -> ServedProposals:
 
     The bucket is the one so named under the image's dataset root. Each proposal is a
     :class:`ServedProposal`; beside them the bucket's operating point, the ``conf`` a review may
-    accept at on its assessment's authority or ``None`` with the ``reason``
+    accept at on its assessment's authority or the reason none is
     (:func:`~tcip_mcp.delivery.admitted_conf`), both read against the open project. A bucket that
     names no document for the image answers no proposals; one that will not read answers 400; no
     project open answers 409.
@@ -377,7 +377,7 @@ def image_stagings(image_path: str) -> ImageStagings:
     (:class:`~tcip_mcp.buckets.Proposed`); a model's prediction bucket is never listed. The
     buckets are read under the image's dataset root; no project open answers 409.
     """
-    from tcip_mcp.buckets import Proposed, buckets_under
+    from tcip_mcp.buckets import buckets_under
 
     store.held()
     key, _w, _h = _admitted(image_path)
@@ -386,7 +386,7 @@ def image_stagings(image_path: str) -> ImageStagings:
         buckets=[
             b.name
             for b in buckets_under(key.root)
-            if isinstance(b.producer, Proposed) and stem in b.documents
+            if b.producer.kind == "proposed" and stem in b.documents
         ]
     )
 
@@ -466,8 +466,21 @@ def _door[Answer: BaseModel | None](result: Answer | dict) -> Answer:
     return result
 
 
+class NothingProposed(BaseModel):
+    """A propose whose engine proposed no candidate for the image's prompts, and why."""
+
+    kind: Literal["nothing_proposed"] = "nothing_proposed"
+    why: str
+
+
+type ProposeAnswer = Annotated[
+    Staged | NothingProposed, Field(discriminator="kind")
+]
+"""What a propose staged, or that its engine proposed nothing, told apart by its ``kind``."""
+
+
 @router.post("/propose")
-def propose(payload: ProposePayload) -> Staged | None:
+def propose(payload: ProposePayload) -> ProposeAnswer:
     """Run the segmenter on the image's prompts and stage every candidate it answers.
 
     The image is admitted by :func:`~tcip_web.paths.allowed_file`. The points and boxes prompt
@@ -476,7 +489,7 @@ def propose(payload: ProposePayload) -> Staged | None:
     named by the ``staging_id`` it answers, is staged under ``subject`` through
     :func:`~tcip_mcp.tools.proposal_tools.stage_assignments`, both on the open project and both by
     the person :func:`~tcip_mcp.identity.actor` makes of ``user``; the answer is that staging, or
-    ``None`` when the engine proposed nothing. Either door's error answers 400 carrying its text;
+    that the engine proposed nothing. Either door's error answers 400 carrying its text;
     no project open answers 409.
     """
     from tcip_mcp.identity import actor
@@ -499,7 +512,9 @@ def propose(payload: ProposePayload) -> Staged | None:
         )
     )
     if proposed is None:
-        return None
+        return NothingProposed(
+            why="the segmenter proposed no candidate for these prompts."
+        )
     return _door(
         stage_assignments(
             project,
@@ -569,17 +584,25 @@ def list_scorers() -> ScorerCatalog:
     return scorer_catalog()
 
 
+class QueueRanked(jobstore.Completed):
+    """A review-queue job that ran to its end, and the queue its ranking answered.
+
+    ``ranked`` states the scorer block, budget and reason it ranked under.
+    """
+
+    ranked: ReviewQueue
+
+
 class PriorityQueueJob(jobstore.ProjectJob):
     """A review-queue job's record.
 
-    It carries the checkpoint it ranks under, the capture it ranks and its subject, its state,
-    and once completed the queue the ranking answered (``ranked``, which states the scorer block,
-    budget and reason it ranked under).
+    It carries the checkpoint it ranks under, the capture it ranks and its subject, and its
+    state, which once completed carries the queue (:class:`QueueRanked`).
     """
 
     kind: ClassVar[str] = "review priority-queue scoring pass"
     subject: str | None
-    ranked: ReviewQueue | None = None
+    state: jobstore.JobState[QueueRanked] = jobstore.Pending()
 
 
 _pq_registry: jobstore.JobRegistry[PriorityQueueJob] = jobstore.JobRegistry()
@@ -590,7 +613,7 @@ def _pq_worker(
     job: PriorityQueueJob, payload: LaunchPriorityQueuePayload
 ) -> None:
     try:
-        job.status = "running"
+        job.state = jobstore.Running()
         from tcip_mcp.tools.feedback_tools import ranked_review_queue
 
         result = ranked_review_queue(
@@ -603,12 +626,12 @@ def _pq_worker(
             subject=job.subject,
         )
         if isinstance(result, ReviewQueue):
-            job.status, job.ranked = "completed", result
+            job.state = QueueRanked(ranked=result)
         else:
-            job.status, job.error = "failed", result["error"]
+            job.state = jobstore.Failed(error=result["error"])
     except Exception as exc:
         logger.exception("priority-queue job %s failed", job.job_id)
-        job.status, job.error = "failed", str(exc)
+        job.state = jobstore.Failed(error=str(exc))
 
 
 @router.post("/queue/launch")

@@ -14,6 +14,8 @@ import { api } from "@/api/client";
 import { committedOf, messageOf, refusalOf } from "@/api/http";
 import { resultsApi } from "@/api/inference";
 import {
+  ACKNOWLEDGEABLE,
+  ACKNOWLEDGED,
   type CountExport,
   type DatasetTree,
   DELIVERY,
@@ -29,6 +31,7 @@ import {
   type PlantMappingDisclosure,
   type Projection,
   type SavedExport,
+  SHOWN_UNVALIDATED,
   type TraitsListing,
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
@@ -109,10 +112,6 @@ export function ResultsTab() {
   // carries no milestones.
   const positiveClassUnassessed = answer !== null && !answer.positive_class_assessed;
   const onset = answer !== null && answer.positive_class_assessed ? answer.milestones : [];
-  // The gate's refusal when no assessment answers for what is currently displayed, with each
-  // projection's digest the breeder's acknowledgment of exporting it binds to.
-  const shownUnvalidated = answer?.unvalidated ?? null;
-  const unvalidated = shownUnvalidated !== null;
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<DeliveryRefusal | null>(null);
   // The reason field for acknowledging and exporting an unvalidated measurement; shown once the
   // breeder opts into the acknowledged-export flow, cleared on every fresh compute.
@@ -145,7 +144,6 @@ export function ResultsTab() {
   const [countOperationalizationRefusal, setCountOperationalizationRefusal] =
     useState<OperationalizationRefusal | null>(null);
   const [countAckReason, setCountAckReason] = useState("");
-  const [countShowAck, setCountShowAck] = useState(false);
   const [countExported, setCountExported] = useState<CountExport | null>(null);
 
   // The trait a delivery is computed for, from this project's registered traits: the one when
@@ -266,17 +264,18 @@ export function ResultsTab() {
   }
 
   async function downloadCsv(payload: Projection) {
-    if (!lastInputs) return;
-    if (shownUnvalidated && !ackReason.trim()) return;
+    if (!lastInputs || answer === null) return;
+    const { validation } = answer;
+    if (validation.kind === SHOWN_UNVALIDATED && !ackReason.trim()) return;
     try {
       const body: ExportCsvPayload = {
         ...lastInputs,
         payload,
         user: useStore.getState().user,
-        acknowledgment: shownUnvalidated && {
-          reason: ackReason.trim(),
-          result_sha256: shownUnvalidated.digests[payload],
-        },
+        acknowledgment:
+          validation.kind === SHOWN_UNVALIDATED
+            ? { reason: ackReason.trim(), result_sha256: validation.digests[payload] }
+            : null,
       };
       const { blob, exported } = await resultsApi.downloadCsv(body);
       const url = URL.createObjectURL(blob);
@@ -310,7 +309,7 @@ export function ResultsTab() {
   async function exportCountCsv() {
     if (!projectRoot || !datasetRoot || !countBucket || !countFilename.trim()) return;
     if (countKindFieldsMissing) return;
-    if (countShowAck && !countAckReason.trim()) return;
+    if (countGateRefusal?.shipping.kind === ACKNOWLEDGEABLE && !countAckReason.trim()) return;
     setCountExporting(true);
     setCountError(null);
     setCountOperationalizationRefusal(null);
@@ -344,8 +343,11 @@ export function ResultsTab() {
         filename: countFilename.trim(),
         user: useStore.getState().user,
         acknowledgment:
-          countShowAck && countGateRefusal?.result_sha256
-            ? { reason: countAckReason.trim(), result_sha256: countGateRefusal.result_sha256 }
+          countGateRefusal?.shipping.kind === ACKNOWLEDGEABLE
+            ? {
+                reason: countAckReason.trim(),
+                result_sha256: countGateRefusal.shipping.result_sha256,
+              }
             : null,
       };
       const { blob, exported } = await resultsApi.downloadCountCsv(body);
@@ -356,7 +358,6 @@ export function ResultsTab() {
       a.click();
       URL.revokeObjectURL(url);
       setCountExported(exported);
-      setCountShowAck(false);
       setCountGateRefusal(null);
     } catch (e) {
       const committed = committedOf<SavedExport>(e);
@@ -372,7 +373,6 @@ export function ResultsTab() {
       const gateRefusal = refusalOf<DeliveryRefusal>(e, DELIVERY);
       if (gateRefusal) {
         setCountGateRefusal(gateRefusal);
-        setCountShowAck(gateRefusal.result_sha256 !== null);
         return;
       }
       setCountError(messageOf(e));
@@ -473,7 +473,6 @@ export function ResultsTab() {
                 setCountKind(e.target.value as typeof countKind);
                 setCountGateRefusal(null);
                 setCountOperationalizationRefusal(null);
-                setCountShowAck(false);
               }}
             >
               <option value="per_image_count">Per-image count</option>
@@ -612,7 +611,7 @@ export function ResultsTab() {
             {countGateRefusal && (
               <div className="tcip-problem flex flex-col gap-2">
                 <div>{countGateRefusal.message}</div>
-                {countShowAck && (
+                {countGateRefusal.shipping.kind === ACKNOWLEDGEABLE && (
                   <input
                     className="tcip-input"
                     placeholder="Reason for delivering unvalidated"
@@ -625,9 +624,8 @@ export function ResultsTab() {
             {countExported && (
               <div className="text-tcip-muted">
                 Saved to {countExported.saved_path}.
-                {countExported.validated ? "" : " Not validated."}
-                {countExported.acknowledged_by
-                  ? ` Acknowledged by ${countExported.acknowledged_by}.`
+                {countExported.shipped.kind === ACKNOWLEDGED
+                  ? ` Not validated. Acknowledged by ${countExported.shipped.acknowledgment.acknowledged_by}.`
                   : ""}
               </div>
             )}
@@ -639,10 +637,12 @@ export function ResultsTab() {
                 !countBucket ||
                 !countFilename.trim() ||
                 countKindFieldsMissing ||
-                (countShowAck && !countAckReason.trim())
+                (countGateRefusal?.shipping.kind === ACKNOWLEDGEABLE && !countAckReason.trim())
               }
             >
-              {countShowAck ? "Acknowledge and export" : "Export"}
+              {countGateRefusal?.shipping.kind === ACKNOWLEDGEABLE
+                ? "Acknowledge and export"
+                : "Export"}
             </button>
           </div>
         </div>
@@ -753,8 +753,8 @@ export function ResultsTab() {
                     </button>
                   </div>
                 )}
-                {shownUnvalidated && (
-                  <div className="tcip-problem">Not validated: {shownUnvalidated.message}</div>
+                {answer?.validation.kind === SHOWN_UNVALIDATED && (
+                  <div className="tcip-problem">Not validated: {answer.validation.message}</div>
                 )}
                 {answer && <MappingDisclosureLines disclosure={answer.plant_mapping} />}
                 <button
@@ -764,9 +764,9 @@ export function ResultsTab() {
                 >
                   Compute
                 </button>
-                {!unvalidated || !showAckExport ? (
+                {answer?.validation.kind !== SHOWN_UNVALIDATED || !showAckExport ? (
                   <div className="flex gap-1">
-                    {unvalidated ? (
+                    {answer?.validation.kind === SHOWN_UNVALIDATED ? (
                       <button
                         className="tcip-btn flex-1"
                         onClick={() => setShowAckExport(true)}
@@ -912,8 +912,8 @@ export function ResultsTab() {
                               <span className="text-tcip-muted" title="No detections on any date">
                                 no observations
                               </span>
-                            ) : rowValid && unvalidated ? (
-                              <span className="tcip-problem" title={shownUnvalidated?.message}>
+                            ) : rowValid && answer?.validation.kind === SHOWN_UNVALIDATED ? (
+                              <span className="tcip-problem" title={answer.validation.message}>
                                 unvalidated
                               </span>
                             ) : rowValid ? (

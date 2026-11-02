@@ -211,7 +211,11 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
     A launch record whose partition holds one member name under two dates freezes into a
     selection carrying both dates' samples, each side's count and each sample's ground truth.
     """
-    from tcip_mcp.pipelines.data.selection import Sample, ground_truth_digest
+    from tcip_mcp.pipelines.data.selection import (
+        Sample,
+        WholeSource,
+        ground_truth_digest,
+    )
     from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.tools.data_tools import freeze_selection
 
@@ -228,6 +232,7 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
                 ground_truth=key,
                 group=stem,
                 side="train" if index == 0 else "val",
+                extent=WholeSource(),
                 ground_truth_digest=ground_truth_digest(key),
             )
             (train if index == 0 else val).append(sample)

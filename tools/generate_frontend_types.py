@@ -17,11 +17,11 @@ mapping (``dict[str, T]``, ``additionalProperties`` a schema rather than a bare 
 signature beside its declared fields, a definition that is no object (a named type alias)
 renders as an ``export type``, and any other shape (including an object with its own fixed,
 non-``$ref`` property set) refuses by name.
+A union the backend names with a ``type`` statement is a definition of its own, named as the
+statement names it, so it renders as the ``export type`` of its members.
 The discriminator markers :func:`discriminator_markers` reads off the rendered models, the numbers
-and strings :func:`scalar_constants` names, and the vocabularies
-:func:`tuple_constants` names are projected alongside the models as runtime constants, and those
-:func:`literal_aliases` names as bare union types and those :func:`model_unions` names as unions
-of the generated interfaces, none of them schema-derived.
+and strings :func:`scalar_constants` names, and the vocabularies :func:`tuple_constants` names
+are projected alongside the models as runtime constants.
 
 Run it after changing a declared model; it rewrites the module in place.
 """
@@ -29,13 +29,10 @@ Run it after changing a declared model; it rewrites the module in place.
 from __future__ import annotations
 
 import json
+from typing import TypeAliasType
 
-from pydantic import BaseModel
-from pydantic.json_schema import (
-    GenerateJsonSchema,
-    JsonSchemaMode,
-    models_json_schema,
-)
+from pydantic import BaseModel, TypeAdapter
+from pydantic.json_schema import GenerateJsonSchema
 from pydantic_core import core_schema
 
 from tests import FRONTEND_SRC, formatted, write_generated
@@ -77,26 +74,36 @@ _PRIMITIVE = {
 }
 
 
-def _models_named(annotation: object) -> list[type[BaseModel]]:
-    """Return every model ``annotation`` names: itself, or each a union or a generic of it names."""
+type Declared = type[BaseModel] | TypeAliasType
+"""A model, or a union a ``type`` statement names."""
+
+
+def _models_named(annotation: object) -> list[Declared]:
+    """Return every model or named union ``annotation`` names.
+
+    That is ``annotation`` itself, or each one a bare union or a generic of it names.
+    """
     from typing import get_args
 
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+    if isinstance(annotation, TypeAliasType) or (
+        isinstance(annotation, type) and issubclass(annotation, BaseModel)
+    ):
         return [annotation]
     return [m for arg in get_args(annotation) for m in _models_named(arg)]
 
 
-def route_models() -> list[type[BaseModel]]:
-    """Return every model an HTTP route of the web app answers or takes as its body.
+def route_models() -> list[Declared]:
+    """Return every model or named union an HTTP route of the web app answers or takes.
 
-    They are in route order, each once; a union a route answers contributes each model it names.
+    They are in route order, each once; a bare union a route answers contributes each model it
+    names.
     """
     from fastapi.routing import APIRoute
 
     from tcip_web.app import app
     from tools.generate_frontend_routes import api_route_contexts
 
-    models: list[type[BaseModel]] = []
+    models: list[Declared] = []
     for context in api_route_contexts(app):
         route = context.original_route
         if not isinstance(route, APIRoute):
@@ -109,44 +116,33 @@ def route_models() -> list[type[BaseModel]]:
     return models
 
 
-def unrouted_models() -> list[type[BaseModel]]:
-    """Return the models the browser reads that no HTTP route answers or takes as itself.
+def unrouted_models() -> list[Declared]:
+    """Return the models and named unions the browser reads that no HTTP route carries.
 
     They are each a route's refusal detail (an ``HTTPException`` carries no model), the frames
-    the web app's sockets send, the panel events and the envelope that carries one, and the
-    record an export's answer reports in its header.
+    the web app's sockets send and take, the panel events and the envelope that carries one,
+    the record an export's answer reports in its header, and each ``Literal`` vocabulary the
+    browser names, a ``type`` statement rendered under its own name.
     """
+    from tcip_annotation.json_io import SubjectState
+    from tcip_annotation.verdicts import VerdictAction
     from tcip_mcp.delivery import DeliveryRefusal
     from tcip_mcp.operationalization import OperationalizationRefusal
-    from tcip_mcp.web_client import (
-        AnnotateFocus,
-        Banner,
-        CanvasStateRequest,
-        LabelsWritten,
-        ProjectNotOpenRefusal,
-    )
+    from tcip_mcp.pipelines.band_stats import CompositeStretch, StretchMode
+    from tcip_mcp.pipelines.postprocessing.phenology import Projection
+    from tcip_mcp.web_client import Panel, PanelEvent, ProjectNotOpenRefusal
     from tcip_web.routes.annotate import VersionConflictRefusal
     from tcip_web.routes.audit_gap import AuditGapRefusal
-    from tcip_web.routes.inference import (
-        BucketExistsRefusal,
-        InferenceJobFrame,
-        MissingJobFrame,
-    )
+    from tcip_web.routes.inference import BucketExistsRefusal, InferenceFrame
     from tcip_web.routes.results import (
         CountExport,
         RevisionMovedRefusal,
         SavedExport,
     )
-    from tcip_web.routes.terminal import (
-        TerminalHeldFrame,
-        TerminalInputFrame,
-        TerminalOutputFrame,
-        TerminalResizeFrame,
-    )
+    from tcip_web.routes.terminal import TerminalFrame, TerminalServedFrame
     from tcip_web.routes.training import (
         NoLogsRefusal,
-        TrainingRowFrame,
-        TrainingStatusFrame,
+        TrainingFrame,
     )
     from tcip_web.state import PanelEnvelope
 
@@ -161,27 +157,26 @@ def unrouted_models() -> list[type[BaseModel]]:
         NoLogsRefusal,
         SavedExport,
         CountExport,
-        TrainingRowFrame,
-        TrainingStatusFrame,
-        TerminalInputFrame,
-        TerminalResizeFrame,
-        TerminalOutputFrame,
-        TerminalHeldFrame,
-        InferenceJobFrame,
-        MissingJobFrame,
-        AnnotateFocus,
-        LabelsWritten,
-        CanvasStateRequest,
-        Banner,
+        TrainingFrame,
+        TerminalFrame,
+        TerminalServedFrame,
+        InferenceFrame,
+        PanelEvent,
         PanelEnvelope,
+        CompositeStretch,
+        Panel,
+        Projection,
+        StretchMode,
+        SubjectState,
+        VerdictAction,
     ]
 
 
-def declared_models() -> list[type[BaseModel]]:
-    """Return the models this script renders first, in the order their interfaces are emitted.
+def declared_models() -> list[Declared]:
+    """Return the models and named unions this script renders first, in their emitted order.
 
     They are :func:`route_models`, then each of :func:`unrouted_models` no route carries. A
-    model one of them nests by ``$ref`` is rendered after them.
+    model or named union one of them nests by ``$ref`` is rendered after them.
     """
     routed = route_models()
     return [*routed, *(m for m in unrouted_models() if m not in routed)]
@@ -232,10 +227,10 @@ DISCRIMINATORS = {"kind": "", "event_type": "PANEL_EVENT_"}
 
 
 def discriminator_markers() -> dict[str, str]:
-    """Return the marker of every rendered model that defaults a discriminator, by constant name.
+    """Return the marker of every rendered model stating a discriminator, by constant name.
 
     A model counts for a field :data:`DISCRIMINATORS` names when that field's schema is a
-    one-member ``Literal`` (``const``) defaulting to its one member; the constant is that member
+    one-member ``Literal`` (``const``), required or defaulted; the constant is that member
     upper-cased, behind the field's prefix.
     """
     return {
@@ -243,7 +238,6 @@ def discriminator_markers() -> dict[str, str]:
         for schema in _schemas()[1].values()
         for name, prefix in DISCRIMINATORS.items()
         if "const" in (field := schema.get("properties", {}).get(name, {}))
-        and field.get("default") == field["const"]
     }
 
 
@@ -253,13 +247,14 @@ def tuple_constants() -> dict[str, tuple[str, ...]]:
 
     from tcip_annotation.json_io import FINISHED_STATES
     from tcip_annotation.state import ATTR_TYPES
-    from tcip_mcp.experiments import TERMINAL_STATES, MetricsRow
+    from tcip_mcp.experiments import FINAL_STATES, TERMINAL_STATES, MetricsRow
     from tcip_mcp.pipelines.band_stats import CompositeStretch
     from tcip_mcp.web_client import TAB_NAMES
 
     return {
         "TAB_NAMES": TAB_NAMES,
-        "COMPOSITE_STRETCHES": get_args(CompositeStretch),
+        "COMPOSITE_STRETCHES": get_args(CompositeStretch.__value__),
+        "FINAL_STATES": FINAL_STATES,
         "TERMINAL_STATES": tuple(sorted(TERMINAL_STATES)),
         "METRICS_ROW_STAMPS": tuple(MetricsRow.model_fields),
         "ATTR_TYPES": ATTR_TYPES,
@@ -300,55 +295,6 @@ def default_constants() -> dict[str, tuple[str, object]]:
             TypeAdapter(Gestures).dump_python(Gestures(), mode="json"),
         ),
         "NOTHING_STATED": ("Stated", Stated().model_dump(mode="json")),
-    }
-
-
-def literal_aliases() -> dict[str, tuple[str, ...]]:
-    """Return each backend ``Literal`` vocabulary's values, by its TypeScript alias name."""
-    from typing import get_args
-
-    from tcip_annotation.json_io import SubjectState
-    from tcip_annotation.verdicts import VerdictAction
-    from tcip_mcp.pipelines.band_stats import CompositeStretch, StretchMode
-    from tcip_mcp.pipelines.postprocessing.phenology import Projection
-    from tcip_mcp.web_client import Panel
-    from tcip_web.jobstore import JobStatus
-
-    return {
-        "CompositeStretch": get_args(CompositeStretch),
-        "JobStatus": get_args(JobStatus),
-        "Panel": get_args(Panel),
-        "Projection": get_args(Projection),
-        "StretchMode": get_args(StretchMode),
-        "SubjectState": get_args(SubjectState),
-        "VerdictAction": get_args(VerdictAction),
-    }
-
-
-def model_unions() -> dict[str, tuple[str, ...]]:
-    """Return each backend union of declared models' member names, by its TypeScript alias name."""
-    from typing import get_args
-
-    from tcip_mcp.pipelines.training.tensorboard_manager import (
-        TensorboardLaunch,
-    )
-    from tcip_mcp.tools.training_tools import Launched
-    from tcip_mcp.web_client import PanelEvent
-    from tcip_web.routes.inference import InferenceFrame
-    from tcip_web.routes.terminal import TerminalFrame, TerminalServedFrame
-
-    (union, _) = get_args(TerminalFrame)
-    (served, _) = get_args(TerminalServedFrame)
-    (panel_events, _) = get_args(PanelEvent)
-    return {
-        "TerminalFrame": tuple(m.__name__ for m in get_args(union)),
-        "TerminalServedFrame": tuple(m.__name__ for m in get_args(served)),
-        "PanelEvent": tuple(m.__name__ for m in get_args(panel_events)),
-        "InferenceFrame": tuple(m.__name__ for m in get_args(InferenceFrame)),
-        "TensorboardLaunch": tuple(
-            m.__name__ for m in get_args(TensorboardLaunch)
-        ),
-        "Launched": tuple(m.__name__ for m in get_args(Launched)),
     }
 
 
@@ -465,21 +411,25 @@ def _interface(name: str, schema: dict) -> str:
 
 
 def _schemas() -> tuple[list[str], dict[str, dict]]:
-    """Return the declared models' definition names, in order, and every definition rendered.
+    """Return the declared definition names, in order, and every definition rendered.
 
-    The definitions are the declared models' and the state envelope's (``StateSnapshotMessage``)
-    as each serializes (:class:`SentSchema`), with every model they nest.
+    The definitions are the declared models' and named unions' and the state envelope's
+    (``StateSnapshotMessage``) as each serializes (:class:`SentSchema`), with every model and
+    named union they nest.
     """
     from tcip_web.state import StateSnapshotMessage
 
-    modes: list[tuple[type[BaseModel], JsonSchemaMode]] = [
-        (m, "serialization") for m in declared_models()
-    ]
-    refs, combined = models_json_schema(
-        [*modes, (StateSnapshotMessage, "serialization")],
+    declared = declared_models()
+    refs, combined = TypeAdapter.json_schemas(
+        [
+            (d, "serialization", TypeAdapter(d))
+            for d in [*declared, StateSnapshotMessage]
+        ],
         schema_generator=SentSchema,
     )
-    names = [refs[pair]["$ref"].rsplit("/", 1)[-1] for pair in modes]
+    names = [
+        refs[(d, "serialization")]["$ref"].rsplit("/", 1)[-1] for d in declared
+    ]
     return names, combined["$defs"]
 
 
@@ -512,16 +462,8 @@ def render() -> str:
         f"{json.dumps(entries)};\n\n"
         for name, entries in record_constants().items()
     )
-    aliases = "".join(
-        f"export type {name} = {' | '.join(json.dumps(m) for m in members)};\n\n"
-        for name, members in literal_aliases().items()
-    )
-    unions = "".join(
-        f"export type {name} = {' | '.join(members)};\n\n"
-        for name, members in model_unions().items()
-    )
     return formatted(
-        HEADER + scalars + tuples + records + aliases + unions + body,
+        HEADER + scalars + tuples + records + body,
         GENERATED_PATH,
     )
 

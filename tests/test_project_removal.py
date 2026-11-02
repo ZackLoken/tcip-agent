@@ -18,6 +18,7 @@ import pytest
 
 from tcip_mcp import workspace
 from tcip_mcp.dataset_layout import image_dir
+from tcip_web.jobstore import Completed, Running
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
@@ -215,7 +216,7 @@ def test_an_unfinished_inference_job_refuses_the_removal(
         image_dir("ds", "2026-01-01"),
         made.root,
         job_id="job-live",
-        status="running",
+        state=Running(),
     )
     inference._registry.launch(job, lambda _job: None)
     try:
@@ -228,7 +229,7 @@ def test_an_unfinished_inference_job_refuses_the_removal(
             },
         )
     finally:
-        job.status = "completed"
+        job.state = Completed()
 
     assert resp.status_code == 409
     assert "job-live" in resp.json()["detail"]

@@ -9,6 +9,11 @@ import { RAW_SELECTION } from "@/test/store";
 /** The capture the produced queue ranked, as the select route served it. */
 const QUEUE_SELECTION = QUEUE_ANSWERS.selection.selection;
 
+/** The produced completed queue's images in rank order. */
+const RANKED_IMAGES = [QUEUE_ANSWERS.completed.state].flatMap((s) =>
+  s.status === "completed" ? s.ranked.queue.map((e) => e.image) : [],
+);
+
 describe("stepTarget (shared by arrows + Prev/Next)", () => {
   it("steps by delta and clamps at the ends", () => {
     const all = [0, 1, 2, 3];
@@ -32,7 +37,7 @@ describe("stepTarget (shared by arrows + Prev/Next)", () => {
   it("from an image off a rank-ordered list, steps to the first entry lying that way", () => {
     // The produced queue skips the finished second photograph and ranks the fifth first.
     const names = QUEUE_SELECTION.images.map(({ name }) => name);
-    const ranked = QUEUE_ANSWERS.completed.ranked?.queue.map((e) => e.image) ?? [];
+    const ranked = RANKED_IMAGES;
     const order = filteredIndices(QUEUE_SELECTION.images, {}, "queue", ranked);
     const off = names.findIndex((name) => !ranked.includes(name));
     expect(off).toBe(1);
@@ -42,7 +47,7 @@ describe("stepTarget (shared by arrows + Prev/Next)", () => {
 
   it("steps along a rank-ordered list in its own order, whatever the indices' order", () => {
     // The produced queue's images in rank order, mapped to the selection's indices by name.
-    const ranked = QUEUE_ANSWERS.completed.ranked?.queue.map((e) => e.image) ?? [];
+    const ranked = RANKED_IMAGES;
     const order = filteredIndices(QUEUE_SELECTION.images, {}, "queue", ranked);
     expect(order).not.toEqual([...order].sort((a, b) => a - b));
     expect(order.map((i) => QUEUE_SELECTION.images[i].name)).toEqual(ranked);
@@ -84,8 +89,7 @@ describe("filteredIndices", () => {
 describe("rankedNames", () => {
   it("names the completed queue's images for the capture it ranked, and none for another", () => {
     const { completed, running } = QUEUE_ANSWERS;
-    const ranked = completed.ranked?.queue.map((e) => e.image);
-    expect(rankedNames(completed, QUEUE_SELECTION)).toEqual(ranked);
+    expect(rankedNames(completed, QUEUE_SELECTION)).toEqual(RANKED_IMAGES);
     expect(rankedNames(completed, QUEUE_ANSWERS.later_selection.selection)).toBeNull();
     expect(rankedNames(running, QUEUE_SELECTION)).toBeNull();
     expect(rankedNames(null, QUEUE_SELECTION)).toBeNull();

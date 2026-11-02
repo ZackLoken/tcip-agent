@@ -140,7 +140,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_root, label_key
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncompleteError
     from tcip_mcp.pipelines.data.datasets import _band_count
-    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.selection import Sample, WholeSource
     from tests._producer_fixtures import write_band_group
 
     images_dir = image_root(tmp_path)
@@ -163,6 +163,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
         ground_truth=label_key(tmp_path, UNDATED_BUCKET, "cap"),
         group="g",
         side="train",
+        extent=WholeSource(),
     )
     with pytest.raises(BandGroupIncompleteError):
         _band_count([sample])

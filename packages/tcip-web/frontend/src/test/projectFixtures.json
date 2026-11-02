@@ -4,6 +4,17 @@
     "open_id": null,
     "projects": [
       {
+        "modified": 946684801.0,
+        "tree": {
+          "dataset_root": "/scratch/workspace/valley",
+          "captures": [],
+          "subjects": [],
+          "subjects_by_date": {},
+          "buckets_by_date": {},
+          "label_problem": null
+        },
+        "image_count": 0,
+        "kind": "read",
         "record": {
           "id": "<valley id>",
           "display_name": "valley",
@@ -16,20 +27,20 @@
             "intensity": true,
             "scale": true
           }
-        },
-        "record_problem": null,
-        "modified": 946684801.0,
+        }
+      },
+      {
+        "modified": 946684800.0,
         "tree": {
-          "dataset_root": "/scratch/workspace/valley",
+          "dataset_root": "/scratch/workspace/other",
           "captures": [],
           "subjects": [],
           "subjects_by_date": {},
           "buckets_by_date": {},
           "label_problem": null
         },
-        "image_count": 0
-      },
-      {
+        "image_count": 0,
+        "kind": "read",
         "record": {
           "id": "<other id>",
           "display_name": "other",
@@ -42,18 +53,7 @@
             "intensity": true,
             "scale": true
           }
-        },
-        "record_problem": null,
-        "modified": 946684800.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/other",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0
+        }
       }
     ]
   },
@@ -116,8 +116,6 @@
     "open_id": null,
     "projects": [
       {
-        "record": null,
-        "record_problem": "/scratch/workspace/stray is not a project yet: create it with initialize_project",
         "modified": 946684803.0,
         "tree": {
           "dataset_root": "/scratch/workspace/stray",
@@ -127,9 +125,22 @@
           "buckets_by_date": {},
           "label_problem": null
         },
-        "image_count": 0
+        "image_count": 0,
+        "kind": "unread",
+        "problem": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
       },
       {
+        "modified": 946684802.0,
+        "tree": {
+          "dataset_root": "/scratch/workspace/empty",
+          "captures": [],
+          "subjects": [],
+          "subjects_by_date": {},
+          "buckets_by_date": {},
+          "label_problem": null
+        },
+        "image_count": 0,
+        "kind": "read",
         "record": {
           "id": "<empty block id>",
           "display_name": "Empty block",
@@ -142,34 +153,9 @@
             "intensity": true,
             "scale": true
           }
-        },
-        "record_problem": null,
-        "modified": 946684802.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/empty",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0
+        }
       },
       {
-        "record": {
-          "id": "<ridge farm id>",
-          "display_name": "Ridge farm",
-          "site": "north orchard",
-          "invariances": {
-            "horizontal_flip": true,
-            "vertical_flip": true,
-            "rotation": 180.0,
-            "color": true,
-            "intensity": true,
-            "scale": true
-          }
-        },
-        "record_problem": null,
         "modified": 946684801.0,
         "tree": {
           "dataset_root": "/scratch/workspace/ridge",
@@ -182,12 +168,11 @@
           "buckets_by_date": { "2026-02-11": [], "2026-03-01": [] },
           "label_problem": null
         },
-        "image_count": 2
-      },
-      {
+        "image_count": 2,
+        "kind": "read",
         "record": {
-          "id": "<valley farm id>",
-          "display_name": "Valley farm",
+          "id": "<ridge farm id>",
+          "display_name": "Ridge farm",
           "site": "north orchard",
           "invariances": {
             "horizontal_flip": true,
@@ -197,8 +182,9 @@
             "intensity": true,
             "scale": true
           }
-        },
-        "record_problem": null,
+        }
+      },
+      {
         "modified": 946684800.0,
         "tree": {
           "dataset_root": "/scratch/workspace/valley",
@@ -220,7 +206,21 @@
           },
           "label_problem": null
         },
-        "image_count": 4
+        "image_count": 4,
+        "kind": "read",
+        "record": {
+          "id": "<valley farm id>",
+          "display_name": "Valley farm",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        }
       }
     ]
   },
@@ -234,8 +234,6 @@
     "open_id": "<valley farm id>",
     "projects": [
       {
-        "record": null,
-        "record_problem": "/scratch/workspace/stray is not a project yet: create it with initialize_project",
         "modified": 946684803.0,
         "tree": {
           "dataset_root": "/scratch/workspace/stray",
@@ -245,9 +243,22 @@
           "buckets_by_date": {},
           "label_problem": null
         },
-        "image_count": 0
+        "image_count": 0,
+        "kind": "unread",
+        "problem": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
       },
       {
+        "modified": 946684802.0,
+        "tree": {
+          "dataset_root": "/scratch/workspace/empty",
+          "captures": [],
+          "subjects": [],
+          "subjects_by_date": {},
+          "buckets_by_date": {},
+          "label_problem": null
+        },
+        "image_count": 0,
+        "kind": "read",
         "record": {
           "id": "<empty block id>",
           "display_name": "Empty block",
@@ -260,34 +271,9 @@
             "intensity": true,
             "scale": true
           }
-        },
-        "record_problem": null,
-        "modified": 946684802.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/empty",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0
+        }
       },
       {
-        "record": {
-          "id": "<ridge farm id>",
-          "display_name": "Ridge farm",
-          "site": "north orchard",
-          "invariances": {
-            "horizontal_flip": true,
-            "vertical_flip": true,
-            "rotation": 180.0,
-            "color": true,
-            "intensity": true,
-            "scale": true
-          }
-        },
-        "record_problem": null,
         "modified": 946684801.0,
         "tree": {
           "dataset_root": "/scratch/workspace/ridge",
@@ -300,12 +286,11 @@
           "buckets_by_date": { "2026-02-11": [], "2026-03-01": [] },
           "label_problem": null
         },
-        "image_count": 2
-      },
-      {
+        "image_count": 2,
+        "kind": "read",
         "record": {
-          "id": "<valley farm id>",
-          "display_name": "Valley farm",
+          "id": "<ridge farm id>",
+          "display_name": "Ridge farm",
           "site": "north orchard",
           "invariances": {
             "horizontal_flip": true,
@@ -315,8 +300,9 @@
             "intensity": true,
             "scale": true
           }
-        },
-        "record_problem": null,
+        }
+      },
+      {
         "modified": 946684800.0,
         "tree": {
           "dataset_root": "/scratch/workspace/valley",
@@ -338,7 +324,21 @@
           },
           "label_problem": null
         },
-        "image_count": 4
+        "image_count": 4,
+        "kind": "read",
+        "record": {
+          "id": "<valley farm id>",
+          "display_name": "Valley farm",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        }
       }
     ]
   },

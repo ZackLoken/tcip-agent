@@ -56,8 +56,8 @@ def produce() -> dict[str, JsonValue]:
     from tcip_web.routes.audit_gap import AuditGapRefusal
     from tcip_web.routes.sessions import (
         ImageEventPayload,
+        Landed,
         SessionRef,
-        SessionWrite,
     )
     from tests._audit_fixtures import refuse_audit_appends
     from tests._web_fixtures import named_project
@@ -77,8 +77,7 @@ def produce() -> dict[str, JsonValue]:
             started=None,
         )
         landed = answered(client, "image_event", 200, contribution)
-        session = SessionWrite.model_validate(landed).session
-        assert session is not None, landed
+        session = Landed.model_validate(landed)
         end = SessionRef(project_id=project.id, started=session.started)
         answered(client, "close_session", 200, end)
         repeated = answered(client, "image_event", 200, contribution)
@@ -96,8 +95,7 @@ def produce() -> dict[str, JsonValue]:
             refuse_audit_appends(patch)
             gap = answered(client, "image_event", 409, unlogged)
         held = AuditGapRefusal.model_validate(detail_of(gap)).committed
-        held_session = SessionWrite.model_validate(held).session
-        assert held_session is not None, gap
+        held_session = Landed.model_validate(held)
         ended_named = answered(
             client,
             "image_event",

@@ -24,8 +24,10 @@ name-based label is undecodable without it.
 
 from __future__ import annotations
 
+from typing import Annotated, Literal
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tcip_mcp.subject_registry import RegistrySave, RegistrySubjects
 from tcip_web.paths import allowed_path
@@ -33,18 +35,43 @@ from tcip_web.paths import allowed_path
 router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 
 
+class StoredVersion(BaseModel):
+    """A stored subject registry, by the compare-and-set token its bytes are at."""
+
+    kind: Literal["stored"] = "stored"
+    version: str
+
+
+class NoRegistry(BaseModel):
+    """A dataset storing no subject registry."""
+
+    kind: Literal["no_registry"] = "no_registry"
+
+
+type RegistryVersion = Annotated[
+    StoredVersion | NoRegistry, Field(discriminator="kind")
+]
+"""What a save writes over, as a load found it, told apart by its ``kind``."""
+
+
+class StoredRegistry(StoredVersion):
+    """A stored subject registry: its version token and its subjects, sent as the nested mapping."""
+
+    subjects: RegistrySubjects
+
+
 class SubjectsLoad(BaseModel):
     """A dataset's stored subject registry beside the subjects one capture's documents hold.
 
-    ``subjects`` (the registry's subjects, sent as the nested mapping) and ``version`` (its
-    compare-and-set token) are the stored registry's, both ``None`` when none is stored;
-    ``discovered`` and ``unreadable`` are :func:`~tcip_mcp.dataset_layout.capture_subjects` of
-    the capture, read whether or not a registry is stored.
+    ``registry`` is what is stored; ``discovered`` and ``unreadable`` are
+    :func:`~tcip_mcp.dataset_layout.capture_subjects` of the capture, read whether or not a
+    registry is stored.
     """
 
-    subjects: RegistrySubjects | None
+    registry: Annotated[
+        StoredRegistry | NoRegistry, Field(discriminator="kind")
+    ]
     discovered: list[str]
-    version: str | None
     unreadable: list[str]
 
 
@@ -59,20 +86,23 @@ def load_subjects(dataset_root: str, date: str) -> SubjectsLoad:
 
     root = allowed_path(dataset_root)
     discovered, unreadable = capture_subjects(root, date)
-    subjects, token = None, None
     try:
         registry, version = read_versioned_registry(root)
-        subjects, token = registry.subjects, version.token
     except FileNotFoundError:
-        pass
+        return SubjectsLoad(
+            registry=NoRegistry(),
+            discovered=discovered,
+            unreadable=unreadable,
+        )
     except (OSError, RegistryError) as exc:
         raise HTTPException(
             500, f"could not parse the subject registry: {exc}"
         ) from exc
     return SubjectsLoad(
-        subjects=subjects,
+        registry=StoredRegistry(
+            subjects=registry.subjects, version=version.token
+        ),
         discovered=discovered,
-        version=token,
         unreadable=unreadable,
     )
 
@@ -82,9 +112,8 @@ class SaveSubjectsPayload(BaseModel):
 
     subjects: RegistrySubjects
     dataset_root: str
-    # Required: the version load_subjects returned beside the registry this save was built from.
-    # None means the registry was absent at load, asserted as Version.ABSENT, never skipped.
-    version: str | None
+    # What load_subjects found stored beside the registry this save was built from.
+    version: RegistryVersion
     user: str
 
 
@@ -115,8 +144,8 @@ def save_subjects(payload: SaveSubjectsPayload) -> RegistrySave:
     registry = SubjectRegistry(subjects=payload.subjects)
     dataset_root = allowed_path(payload.dataset_root)
     expect = (
-        Version(payload.version)
-        if payload.version is not None
+        Version(payload.version.version)
+        if payload.version.kind == "stored"
         else Version.ABSENT
     )
     try:

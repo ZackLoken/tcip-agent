@@ -4,7 +4,7 @@ import { useEffect } from "react";
 
 import { api } from "@/api/client";
 import { messageOf } from "@/api/http";
-import { pollJob } from "@/hooks/jobPoll";
+import { pollJob, unended } from "@/hooks/jobPoll";
 import { useStore } from "@/store";
 
 /**
@@ -14,9 +14,10 @@ import { useStore } from "@/store";
  * the held job.
  */
 export function useReviewQueuePoll(): void {
-  const running = useStore((s) =>
-    s.annotateUi.reviewQueue?.live ? s.annotateUi.reviewQueue.job_id : null,
-  );
+  const running = useStore((s) => {
+    const held = s.annotateUi.reviewQueue;
+    return held && unended(held.state) ? held.job_id : null;
+  });
 
   useEffect(() => {
     if (running === null) return;
@@ -26,7 +27,7 @@ export function useReviewQueuePoll(): void {
       api.annotate.queueJob,
       (job) => {
         setReviewQueue(job);
-        if (job.error !== null) pushToast(job.error);
+        if (job.state.status === "failed") pushToast(job.state.error);
       },
       (e) => {
         setReviewQueue(null);

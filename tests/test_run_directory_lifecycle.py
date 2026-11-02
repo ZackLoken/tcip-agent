@@ -162,7 +162,8 @@ def test_a_launched_run_completes_and_its_completion_is_its_registration(
     ]
     assert listed.entry.sha256 == checkpoint.sha256
     loaded = load_registered_checkpoint(checkpoint.path, project=tmp_path)
-    assert loaded.producer.experiment_id == run_dir.name
+    assert loaded.entry == listed.entry
+    assert loaded.producer.origin == "run"
 
 
 def test_a_cancel_requested_by_id_ends_the_child_canceled(
@@ -287,9 +288,11 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
     rows = read_rows(observation.metrics_log)[0]
     summary = monitor_training(tmp_path, res.experiment_id)["run"]
     assert summary["state"] == "completed"
-    assert summary["best_metric"] is not None
     assert observation.record.spec.evaluation.selection_metric == "loss"
-    assert summary["best_metric"] == best_selection(rows, False)
+    assert summary["best"] == {
+        "metric": "loss",
+        "value": best_selection(rows, False),
+    }
 
 
 def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
@@ -637,18 +640,18 @@ def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_selection(
     on its launch record, and it reports its config's selection each epoch; its result is the
     best of what it reported, in that metric's direction (``loss``, lower better).
     """
-    from tcip_mcp.experiments import observe, read_run
+    from tcip_mcp.experiments import TrialPoint, observe, read_run
 
     trial_dir, reported = _trial(tmp_path)
 
     record = read_run(trial_dir)
-    assert record.trial_params == ONE_RATE
+    assert record.launched_as == TrialPoint(params=ONE_RATE)
     assert record.resolution.partition.samples
     assert record.resolution.trait_revision is None
     assert record.spec.evaluation.selection_metric == "loss"
     assert observe(trial_dir).state == "completed"
     assert len(reported) == 2
-    assert _trial_row(tmp_path, trial_dir)["best_metric"] == min(reported)
+    assert _trial_row(tmp_path, trial_dir)["best"]["value"] == min(reported)
 
 
 def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_it(
@@ -657,8 +660,7 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
     """A trial whose resolution fails is a directory whose final status names why.
 
     A trial whose sampled point cannot resolve still opens its run directory, and its final
-    status is ``failed`` naming why; the sweep's listing reads it as a row with no best value
-    and no metric name.
+    status is ``failed`` naming why; the sweep's listing reads it as a row with no best value.
     """
     from tcip_mcp.experiments import observe_run
 
@@ -671,12 +673,11 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
     assert final.state == "failed" and final.status_error
     assert reported == []
     row = _trial_row(tmp_path, trial_dir)
-    assert (
-        row["state"],
-        row["status_error"],
-        row["best_metric"],
-        row["best_metric_name"],
-    ) == ("failed", final.status_error, None, None)
+    assert (row["state"], row["status_error"], row["best"]) == (
+        "failed",
+        final.status_error,
+        None,
+    )
     with pytest.raises(ValueError, match="resolved to nothing"):
         observe_run(trial_dir).record.resolution.trait_revision
 
@@ -708,7 +709,7 @@ def test_a_report_only_trial_projects_the_value_it_reported(
 
     assert observe(trial_dir).state == "completed"
     assert reported == [0.25]
-    assert _trial_row(tmp_path, trial_dir)["best_metric"] == 0.25
+    assert _trial_row(tmp_path, trial_dir)["best"]["value"] == 0.25
 
 
 RESOLVED_KEYS = {"data", "geometry", "partition", "trait_revision"}
@@ -775,9 +776,8 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     ctx.report_objective(0.25)
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     assert rows[-1].model_dump()["selection_metric"] == "mae"
-    assert (
-        run_summary(observe(ctx.run_dir), rows, {}).best_metric_name == "mae"
-    )
+    best = run_summary(observe(ctx.run_dir), rows, {}).best
+    assert best is not None and best.metric == "mae"
 
     monkeypatch.setattr(
         subprocess_worker, "run_directory", lambda *a, **k: None
@@ -828,7 +828,7 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     )
     (trial_dir,) = run_dirs(tmp_path)
     trial = observe_run(trial_dir)
-    metric, higher = selection_of(
+    metric, direction = selection_of(
         real_hpo_base_config["evaluation"]["selection_metric"]
     )
 
@@ -842,8 +842,11 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     swept = sweep.trait_revision
     assert swept is not None
     assert trial.record.resolution.trait_revision == swept
-    assert run_summary(trial, [], {}).best_metric_name == metric
-    assert modes == ["max" if higher else "min"]
+    assert (
+        selection_of(trial.record.spec.evaluation.selection_metric)[0]
+        == metric
+    )
+    assert modes == ["max" if direction == "higher" else "min"]
     assert (
         "objective"
         not in read_sweep(

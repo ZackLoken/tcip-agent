@@ -187,15 +187,11 @@ export function AnnotateTab() {
   const saveDisabled = !imgPath || canvas.loaded === null;
 
   const bandsInfo = useImageBands(imgPath);
-  const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
+  const bandChoice = useBandSelection(bandsInfo);
 
-  // Every request for this view (the canvas' own and the prefetcher's warm-up) carries one set
-  // of band params, so the two never warm and read different renders of the same image; held per
-  // selection so its bands keep one identity across renders.
-  const composite = useMemo(
-    () => compositeParams(bandsInfo, bandSelection),
-    [bandsInfo, bandSelection],
-  );
+  // The canvas and the prefetcher carry one set of band params, so neither warms another render
+  // of the image; held per choice so its bands keep one identity across renders.
+  const composite = useMemo(() => compositeParams(bandChoice), [bandChoice]);
 
   const nav = useImageNav();
   const displayPixels = useDisplayPixels();
@@ -315,7 +311,7 @@ export function AnnotateTab() {
         prompt,
       });
       useStore.getState().clearPrompts();
-      if (answer === null) {
+      if (answer.kind === "nothing_proposed") {
         useStore.getState().pushToast(`No proposal for ${sentName}.`);
         return;
       }
@@ -403,7 +399,11 @@ export function AnnotateTab() {
   const [scope, setScope] = useState<StepScope>("all");
   const filters: ItemFilters = {
     confidence:
-      confidenceEntry?.bucket === bucket ? confidenceEntry.value : (operatingPoint?.conf ?? null),
+      confidenceEntry?.bucket === bucket
+        ? confidenceEntry.value
+        : operatingPoint?.kind === "conf_admitted"
+          ? operatingPoint.conf
+          : null,
     match: reviewing ? matchFilter : "all",
   };
   function setFilters(next: ItemFilters) {
@@ -1681,6 +1681,7 @@ export function AnnotateTab() {
           onCancelSave={cancelSave}
           saveDisabled={saveDisabled}
           dirty={canvas.dirty}
+          bandChoice={bandChoice}
           subjectState={null}
           onComplete={(next) => void markComplete(next)}
           proposing={proposing}
@@ -1713,9 +1714,7 @@ export function AnnotateTab() {
         onCancelSave={cancelSave}
         saveDisabled={saveDisabled}
         dirty={canvas.dirty}
-        bandsInfo={bandsInfo}
-        bandSelection={bandSelection}
-        onBandSelectionChange={setBandSelection}
+        bandChoice={bandChoice}
         subjectState={subjectState}
         onComplete={(next) => void markComplete(next)}
         proposing={proposing}

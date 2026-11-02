@@ -22,12 +22,13 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, NonNegativeInt, computed_field
+from pydantic import BaseModel, Field, NonNegativeInt
 
+from tcip_mcp.experiments import FINAL_STATES
 from tcip_mcp.pipelines.band_stats import (
     DEFAULT_STRETCH,
     CompositeStretch,
@@ -187,16 +188,37 @@ _STATS_CACHE_MAX = 64
 only stops a long session over many rasters from growing it without limit."""
 
 
+class SampledStats(BaseModel):
+    """Display bounds read from a seeded window sample of the raster's native pixels.
+
+    ``pixel_fraction`` is the share of the raster's pixels it covered: 1.0 when the budget covered
+    all of them, where the bounds are that raster's own exact bounds.
+    """
+
+    kind: Literal["sampled"] = "sampled"
+    pixel_fraction: float
+    seed: int
+
+
+class OverviewStats(BaseModel):
+    """Display bounds read once off an overview level, at ``overview_size`` (width, height).
+
+    They are narrower than the raster's own and describe display scale only.
+    """
+
+    kind: Literal["overview"] = "overview"
+    overview_size: tuple[int, int]
+
+
+class PlainRaster(BaseModel):
+    """A raster that displays as its own pixels, for which no per-band stats are read."""
+
+    kind: Literal["plain"] = "plain"
+
+
 @dataclass(frozen=True)
 class _RasterStats:
-    """One raster's display bounds.
-
-    ``ranges`` and ``clip_bounds`` are per band, in band order. They come from one of two reads,
-    and exactly one of these describes which: ``pixel_fraction`` is the share of the raster's
-    pixels a seeded window sample covered (1.0 when the budget covered all of them, where the
-    bounds are that raster's own exact bounds), and ``overview_size`` is the ``(width, height)`` a
-    single reduced read of the whole frame was served at. Overview bounds are narrower than the
-    raster's own and describe display scale only.
+    """One raster's display bounds: per band, in band order, and the ``read`` they came from.
 
     ``interpretations`` names what each band holds where the backend knows (a GDAL raster's color
     interpretations: ``red``, ``alpha`` and the rest), and is ``None`` where nothing does, which is
@@ -207,9 +229,7 @@ class _RasterStats:
     num_channels: int
     ranges: list
     clip_bounds: list
-    seed: int | None = None
-    pixel_fraction: float | None = None
-    overview_size: tuple[int, int] | None = None
+    read: SampledStats | OverviewStats
     interpretations: tuple | None = None
 
 
@@ -552,7 +572,7 @@ def _stats_of(raster: RasterSource) -> _RasterStats:
             num_channels=channels,
             ranges=ranges,
             clip_bounds=clips,
-            overview_size=served,
+            read=OverviewStats(overview_size=served),
             interpretations=interpretations,
         )
     sampled = sampled_band_ranges(
@@ -567,8 +587,9 @@ def _stats_of(raster: RasterSource) -> _RasterStats:
         num_channels=channels,
         ranges=list(sampled.ranges),
         clip_bounds=list(sampled.clip_bounds),
-        seed=sampled.seed,
-        pixel_fraction=sampled.pixel_fraction,
+        read=SampledStats(
+            pixel_fraction=sampled.pixel_fraction, seed=sampled.seed
+        ),
         interpretations=interpretations,
     )
 
@@ -838,28 +859,20 @@ class ImageBand(BaseModel):
 class ImageBands(BaseModel):
     """A raster's band count and per-band symbology, with which read produced the stats.
 
-    ``plain`` is whether the raster displays as its own pixels (``raster_source.displays_plain``),
-    and ``default_bands`` names the three bands it composites through by default
+    ``default_bands`` names the three bands it composites through by default
     (``raster_source.display_bands``) and ``default_stretch`` the stretch it does so through
-    (``band_stats.DEFAULT_STRETCH``). ``pixel_fraction`` and ``seed`` are stated for a native
-    sample, ``overview_size`` for an overview read, and none of them for a plain raster, which
-    reports no per-band stats; each one not stated is ``None``.
+    (``band_stats.DEFAULT_STRETCH``). ``read`` is the read the stats came from, or
+    :class:`PlainRaster` for a raster that displays as its own pixels
+    (``raster_source.displays_plain``), which reports no per-band stats.
     """
 
     band_count: int
     bands: list[ImageBand]
-    plain: bool
     default_bands: list[str]
     default_stretch: CompositeStretch = DEFAULT_STRETCH
-    pixel_fraction: float | None = None
-    seed: int | None = None
-    overview_size: tuple[int, int] | None = None
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def sampled(self) -> bool:
-        """Whether the bounds describe part of the raster's native pixels, not all of them."""
-        return self.pixel_fraction is not None and self.pixel_fraction < 1.0
+    read: Annotated[
+        SampledStats | OverviewStats | PlainRaster, Field(discriminator="kind")
+    ]
 
 
 @router.get("/bands")
@@ -875,12 +888,9 @@ def get_bands(path: str = Query(...)) -> ImageBands:
     source's version on disk and the stats under its :func:`_source_identity` and that count,
     so a repeated call for an unchanged raster reads nothing.
 
-    The response says which read produced the stats. A raster whose pixels fit the
-    native-sampling budget, and any raster a backend decodes whole at open, carries
-    ``pixel_fraction`` and ``seed``: a ``pixel_fraction`` of 1.0 is a sample covering every
-    pixel, where the numbers are the raster's own exact bounds. A larger GDAL-served one is read
-    once off an overview level instead and carries ``overview_size``, the ``[width, height]`` it
-    was read at; those bounds describe display scale only.
+    The response's ``read`` says which read produced the stats: a raster whose pixels fit the
+    native-sampling budget, and any raster a backend decodes whole at open, is
+    :class:`SampledStats`; a larger GDAL-served one is :class:`OverviewStats`.
 
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
     from the file, ``None`` where nothing knows.
@@ -896,7 +906,10 @@ def get_bands(path: str = Query(...)) -> ImageBands:
     default_bands = [names[i] for i in raster_source.display_bands(len(names))]
     if plain:
         return ImageBands(
-            band_count=n, bands=[], plain=True, default_bands=default_bands
+            band_count=n,
+            bands=[],
+            default_bands=default_bands,
+            read=PlainRaster(),
         )
 
     def read_stats() -> _RasterStats:
@@ -926,11 +939,8 @@ def get_bands(path: str = Query(...)) -> ImageBands:
     return ImageBands(
         band_count=n,
         bands=bands,
-        plain=plain,
         default_bands=default_bands,
-        pixel_fraction=stats.pixel_fraction,
-        seed=stats.seed,
-        overview_size=stats.overview_size,
+        read=stats.read,
     )
 
 
@@ -970,7 +980,7 @@ def _overview_worker(job: OverviewJob) -> None:
     def record(written: int) -> None:
         job.bytes_written = written
 
-    job.status = "running"
+    job.state = jobstore.Running()
     try:
         build_overviews(job.path, progress_cb=record)
     except Exception as exc:  # noqa: BLE001, the job records what stopped it
@@ -979,10 +989,9 @@ def _overview_worker(job: OverviewJob) -> None:
         except Exception:  # noqa: BLE001, a raster that will not open carries no pyramid
             built = False
         if not built:
-            job.status = "failed"
-            job.error = str(exc)
+            job.state = jobstore.Failed(error=str(exc))
             return
-    job.status = "completed"
+    job.state = jobstore.Completed()
 
 
 @router.post("/overviews")
@@ -995,7 +1004,10 @@ def build_image_overviews(payload: OverviewBuildPayload) -> OverviewJob:
     """
     src = allowed_file(payload.path)
     job, _created = _overview_registry.find_or_launch(
-        lambda existing: existing.path == str(src) and existing.live,
+        lambda existing: (
+            existing.path == str(src)
+            and existing.state.status not in FINAL_STATES
+        ),
         lambda: OverviewJob(
             job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)
         ),

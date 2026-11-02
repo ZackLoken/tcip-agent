@@ -179,7 +179,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
     [registered] = [
         m.entry
         for m in ModelRegistry(str(tmp_path)).list_models()
-        if m.entry.experiment_id == "expBespoke"
+        if (m.entry.origin, m.entry.name) == ("run", "expBespoke")
     ]
     assert registered.sha256 and len(registered.sha256) == 64
 

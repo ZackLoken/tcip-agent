@@ -1,9 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { isCanopySegmentDisclosure } from "@/api/inference";
+import { CANOPY_SEGMENTS, UNVALIDATED } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
-import { DELIVERY_RECORDS } from "@/test/deliveryRecords";
+import { acknowledgmentOf, DELIVERY_RECORDS, disclosureOf } from "@/test/deliveryRecords";
 
 describe("DeliveryEventsPanel bucket findings", () => {
   it("names the assessment behind a validated bucket", () => {
@@ -27,19 +27,20 @@ describe("DeliveryEventsPanel bucket findings", () => {
     const row = screen.getByTestId(`delivery-${record.event_id}`);
 
     for (const bucket of record.buckets) {
+      if (bucket.kind !== UNVALIDATED) throw new Error("the produced bucket was validated");
       expect(
         within(row).getByText(`${bucket.bucket}: not validated (${bucket.reason})`),
       ).toBeInTheDocument();
     }
-    expect(within(row).getByText(record.acknowledgment.acknowledged_by)).toBeInTheDocument();
-    expect(within(row).getByText(record.acknowledgment.reason)).toBeInTheDocument();
+    const acknowledgment = acknowledgmentOf(served);
+    expect(within(row).getByText(acknowledgment.acknowledged_by)).toBeInTheDocument();
+    expect(within(row).getByText(acknowledgment.reason)).toBeInTheDocument();
   });
 
   it("counts the plants a canopy delivery delivered from its recorded population", () => {
     const served = DELIVERY_RECORDS.canopy;
     const record = served.event;
-    const pm = record.plant_mapping;
-    if (!isCanopySegmentDisclosure(pm)) throw new Error("the fixture names no segments");
+    const pm = disclosureOf(served, (d) => (d.kind === CANOPY_SEGMENTS ? d : null));
     render(<DeliveryEventsPanel records={[served]} loadError={null} />);
 
     expect(

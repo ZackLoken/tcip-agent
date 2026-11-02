@@ -383,7 +383,7 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     )
 
 
-Panel = Literal[ActiveTab, "app"]
+type Panel = Literal[ActiveTab, "app"]
 """A GUI panel: one per tab, plus ``"app"`` for steering the GUI itself."""
 
 
@@ -413,7 +413,7 @@ class Banner(BaseModel):
     text: str
 
 
-PanelEvent = Annotated[
+type PanelEvent = Annotated[
     LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner,
     Field(discriminator="event_type"),
 ]
@@ -448,15 +448,33 @@ PanelEventReason = Annotated[
 backend sent it or a sentence naming the failure."""
 
 
-class PanelEventAnswer(BaseModel):
-    """What posting a panel event came to: the backend's URL it went to and why it was not taken.
+class PanelEventTaken(BaseModel):
+    """A panel event the backend accepted (never that a browser showed it), and its URL."""
 
-    ``url`` is ``None`` when no URL was resolved; ``reason`` is ``None`` once the backend accepted
-    the event (never that a browser showed it), else why not.
-    """
+    kind: Literal["taken"] = "taken"
+    url: str
 
-    url: str | None
-    reason: PanelEventReason | None
+
+class PanelEventNotTaken(BaseModel):
+    """A panel event posted to its URL that the backend did not take, and why."""
+
+    kind: Literal["not_taken"] = "not_taken"
+    url: str
+    reason: PanelEventReason
+
+
+class PanelEventNotPosted(BaseModel):
+    """A panel event posted nowhere, since no backend's address resolved, and why."""
+
+    kind: Literal["not_posted"] = "not_posted"
+    reason: str
+
+
+type PanelEventAnswer = Annotated[
+    PanelEventTaken | PanelEventNotTaken | PanelEventNotPosted,
+    Field(discriminator="kind"),
+]
+"""What posting a panel event came to, told apart by its ``kind``."""
 
 
 class NoBackendPortError(LookupError):
@@ -496,7 +514,7 @@ def post_panel_event(
     """POST ``event`` to ``panel`` for the project ``bound`` names, to the backend serving it.
 
     The event is taken only when that project is the one the backend has open. Otherwise the
-    answer's ``reason`` says why not: no port recorded, nothing answering at the recorded port,
+    answer says why not: no port recorded, nothing answering at the recorded port,
     the backend's refusal detail as it sent it (:data:`PanelEventReason`), or the failure itself.
     """
     import httpx
@@ -506,8 +524,7 @@ def post_panel_event(
     if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get(
         "TCIP_ALLOW_PANEL_EVENTS"
     ):
-        return PanelEventAnswer(
-            url=None,
+        return PanelEventNotPosted(
             reason="panel events are not posted under pytest; TCIP_ALLOW_PANEL_EVENTS=1 "
             "posts them",
         )
@@ -517,7 +534,7 @@ def post_panel_event(
     try:
         url = backend_url(bound.workspace, f"/api/events/{panel}")
     except NoBackendPortError as exc:
-        return PanelEventAnswer(url=None, reason=str(exc))
+        return PanelEventNotPosted(reason=str(exc))
     try:
         # The pushing harness and session, as headers, so the backend can say who steered the GUI.
         answer = httpx.post(
@@ -531,19 +548,19 @@ def post_panel_event(
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         # Refused: nothing listens on the recorded port. Timed out: nothing answered in time,
         # which does not show that no backend serves. Any other failure is a failure below.
-        return PanelEventAnswer(
+        return PanelEventNotTaken(
             url=url, reason=f"no backend answered at the recorded port: {exc}"
         )
     except Exception as exc:
         logger.exception("post_panel_event failed")
-        return PanelEventAnswer(url=url, reason=str(exc))
+        return PanelEventNotTaken(url=url, reason=str(exc))
     if answer.is_success:
-        return PanelEventAnswer(url=url, reason=None)
+        return PanelEventTaken(url=url)
     try:
         body = answer.json()
     except ValueError:
         body = answer.text
-    return PanelEventAnswer(
+    return PanelEventNotTaken(
         url=url,
         reason=body.get("detail", body) if isinstance(body, dict) else body,
     )

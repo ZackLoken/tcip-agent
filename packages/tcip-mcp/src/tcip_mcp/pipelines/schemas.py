@@ -281,24 +281,31 @@ _LOWER_IS_BETTER: frozenset[SelectionMetric] = frozenset(
     {"loss", "objective", "mae", "rmse"}
 )
 
-HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
-    metric: metric not in _LOWER_IS_BETTER
+StatedDirection = Literal["higher", "lower"]
+"""Which way a metric's value ranks better, where something states it."""
+
+type Direction = StatedDirection | Literal["unstated"]
+"""Which way a metric's value ranks better: :data:`StatedDirection`, or ``unstated`` where
+nothing states it."""
+
+DIRECTION_BY_METRIC: dict[str, StatedDirection] = {
+    metric: "lower" if metric in _LOWER_IS_BETTER else "higher"
     for metric in get_args(SelectionMetric)
 }
-"""Direction of a better value for each :data:`SelectionMetric`."""
+"""Which way a better value of each :data:`SelectionMetric` ranks."""
 
 VAL_METRIC_PREFIX = "val_"
 """The prefix every validation metric key carries in a run's metrics log and registry entry."""
 
 
-def declared_higher_is_better(metric: str) -> bool | None:
-    """Return whether a higher value of the stamped ``metric`` ranks better, ``None`` if undeclared.
+def declared_direction(metric: str) -> Direction:
+    """Return which way a value of the stamped ``metric`` ranks better, as declared.
 
-    The declaration is :data:`HIGHER_IS_BETTER_BY_METRIC`'s for the name without
-    :data:`VAL_METRIC_PREFIX`.
+    The declaration is :data:`DIRECTION_BY_METRIC`'s for the name without
+    :data:`VAL_METRIC_PREFIX`, ``unstated`` where it names none.
     """
-    return HIGHER_IS_BETTER_BY_METRIC.get(
-        metric.removeprefix(VAL_METRIC_PREFIX)
+    return DIRECTION_BY_METRIC.get(
+        metric.removeprefix(VAL_METRIC_PREFIX), "unstated"
     )
 
 
@@ -315,13 +322,13 @@ CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset(
 criterion: the IoU-convention average precision and counts."""
 
 
-def selection_of(metric: str) -> tuple[str, bool]:
-    """Return ``metric`` and whether a higher value of it ranks better.
+def selection_of(metric: str) -> tuple[str, StatedDirection]:
+    """Return ``metric`` and which way a better value of it ranks.
 
     ``metric`` is a validated config's ``evaluation.selection_metric``; the direction is read off
-    :data:`HIGHER_IS_BETTER_BY_METRIC`.
+    :data:`DIRECTION_BY_METRIC`.
     """
-    return metric, HIGHER_IS_BETTER_BY_METRIC[metric]
+    return metric, DIRECTION_BY_METRIC[metric]
 
 
 class EvaluationSpec(_Stated):

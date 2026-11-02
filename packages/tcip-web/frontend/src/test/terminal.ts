@@ -1,6 +1,8 @@
 import type { terminalApi } from "@/api/terminal";
 import type {
   AuditGapRefusal,
+  EndedAtOnce,
+  HandOffAsked,
   TerminalEnd,
   TerminalHeldFrame,
   TerminalStatus,
@@ -26,7 +28,7 @@ type Launch = Awaited<ReturnType<typeof terminalApi.createSession>>;
 // A JSON import reads each literal as a string, which the literal unions admit only through
 // `unknown`.
 export const TERMINAL_ANSWERS = produced as unknown as {
-  handed_off_at_once: TerminalEnd;
+  handed_off_at_once: EndedAtOnce;
   status: TerminalStatus;
   launch: Launch;
   ended: TerminalEnd;
@@ -34,7 +36,7 @@ export const TERMINAL_ANSWERS = produced as unknown as {
   ended_undelivered: TerminalEnd;
   end_unknown: Refusal<string>;
   hand_off_unknown: Refusal<string>;
-  handed_off: null;
+  handed_off: HandOffAsked;
   end_audit_gap: Refusal<AuditGapRefusal & { committed: TerminalEnd }>;
   end_survived: Refusal<string>;
   held: TerminalHeldFrame[];

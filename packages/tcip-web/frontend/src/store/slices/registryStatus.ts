@@ -2,11 +2,13 @@ import type { StateCreator } from "zustand";
 
 import { setSubjectColorRegistry } from "@/api/subjects";
 import type { AttributeDef } from "@/api/subjects";
-import type {
-  ImageEventPayload,
-  PriorityQueueJob,
-  RegistrySubjects,
-  SessionRef,
+import {
+  type ImageEventPayload,
+  NO_REGISTRY,
+  type PriorityQueueJob,
+  type RegistrySubjects,
+  type RegistryVersion,
+  type SessionRef,
 } from "@/api/types.generated";
 import type { ImageFilter } from "@/lib/imageFilter";
 import type { AppState } from "@/store/appState";
@@ -18,10 +20,10 @@ interface RegistryState {
   subjects: RegistrySubjects;
   /** Set after the first successful load for the current dataset. */
   loaded: boolean;
-  /** The stored registry's compare-and-set token as of the last load or save, or null when
-   *  nothing has been saved yet. Carried back into the next save so a stale save is refused
-   *  instead of silently overwriting a registry this browser never saw. */
-  version: string | null;
+  /** What is stored as of the last load or save, as the backend answered it. Carried back into
+   *  the next save so a stale save is refused instead of silently overwriting a registry this
+   *  browser never saw. */
+  version: RegistryVersion;
   /** The subject names the dataset's labels hold, as the last load discovered them: a starting
    *  point for declaring subjects, never a registry. */
   discovered: string[];
@@ -105,7 +107,11 @@ export interface RegistryStatusSlice {
   recordedSession: RecordedSession | null;
 
   /** Registry helpers. */
-  setRegistry: (subjects: RegistrySubjects, version?: string | null, discovered?: string[]) => void;
+  setRegistry: (
+    subjects: RegistrySubjects,
+    version: RegistryVersion,
+    discovered?: string[],
+  ) => void;
   subjectNames: () => string[];
   subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
 
@@ -228,7 +234,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   set,
   get,
 ) => ({
-  registry: { subjects: {}, loaded: false, version: null, discovered: [] },
+  registry: { subjects: {}, loaded: false, version: { kind: NO_REGISTRY }, discovered: [] },
   annotateUi: {
     visible: true,
     snap: false,
@@ -247,7 +253,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   unconfirmedContributions: [],
   recordedSession: null,
 
-  setRegistry: (subjects, version = null, discovered = []) => {
+  setRegistry: (subjects, version, discovered = []) => {
     setSubjectColorRegistry(Object.keys(subjects));
     set(() => ({ registry: { subjects, loaded: true, version, discovered } }));
   },

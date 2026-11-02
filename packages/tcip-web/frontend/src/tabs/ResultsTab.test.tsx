@@ -3,21 +3,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { reportedExport, resultsApi } from "@/api/inference";
-import type {
-  CountExport,
-  DeliveryEvents,
-  PhenologyAnswer,
-  SavedExport,
+import {
+  ACKNOWLEDGED,
+  CANOPY_SEGMENTS,
+  type CountExport,
+  type DeliveryEvents,
+  type PhenologyAnswer,
+  PLANT_MAPPING,
+  PLANT_REGISTRY,
+  type SavedExport,
+  SHOWN_UNVALIDATED,
+  UNVALIDATED,
 } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 import { mockDatasetTree } from "@/test/datasetTree";
 import {
   ACKNOWLEDGED_COUNT_EXPORT,
+  acknowledgmentOf,
   COUNT_EXPORT,
   CURVES_EXPORT,
   DELIVERY_LISTINGS,
   DELIVERY_RECORDS,
+  disclosureOf,
   RESULTS_ANSWERS,
 } from "@/test/deliveryRecords";
 import { fetchAnswers, thrown } from "@/test/refusals";
@@ -205,9 +213,11 @@ describe("ResultsTab evidence gate", () => {
 
     await waitFor(() => expect(downloadCsv).toHaveBeenCalled());
     expect(downloadCsv.mock.calls[0][0].user).toBe("breeder");
+    const { validation } = MEASURED;
+    if (validation.kind !== SHOWN_UNVALIDATED) throw new Error("the produced measurement cleared");
     expect(downloadCsv.mock.calls[0][0].acknowledgment).toEqual({
       reason: "calibration is not ready yet",
-      result_sha256: MEASURED.unvalidated?.digests.curves,
+      result_sha256: validation.digests.curves,
     });
   });
 
@@ -429,11 +439,13 @@ describe("ResultsTab delivery events (read-only)", () => {
 
   it("renders the acknowledging breeder's name and reason, and each bucket's missing assessment", async () => {
     const record = DELIVERY_RECORDS.acknowledged_mapping.event;
+    const acknowledgment = acknowledgmentOf(DELIVERY_RECORDS.acknowledged_mapping);
     const row = await servedRow(DELIVERY_LISTINGS.acknowledged_mapping);
 
-    expect(within(row).getByText(record.acknowledgment.acknowledged_by)).toBeInTheDocument();
-    expect(within(row).getByText(record.acknowledgment.reason)).toBeInTheDocument();
+    expect(within(row).getByText(acknowledgment.acknowledged_by)).toBeInTheDocument();
+    expect(within(row).getByText(acknowledgment.reason)).toBeInTheDocument();
     for (const bucket of record.buckets) {
+      if (bucket.kind !== UNVALIDATED) throw new Error("the produced bucket was validated");
       expect(
         within(row).getByText(`${bucket.bucket}: not validated (${bucket.reason})`),
       ).toBeInTheDocument();
@@ -461,7 +473,9 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the plant mapping's dates_delivered, images_unattributed and plant_attribution", async () => {
-    const pm = DELIVERY_RECORDS.acknowledged_mapping.event.plant_mapping;
+    const pm = disclosureOf(DELIVERY_RECORDS.acknowledged_mapping, (d) =>
+      d.kind === PLANT_MAPPING ? d : null,
+    );
     const row = await servedRow(DELIVERY_LISTINGS.acknowledged_mapping);
 
     expect(
@@ -474,7 +488,9 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the orthomosaic door's own registry disclosure, not the walked-mapping form", async () => {
-    const pm = DELIVERY_RECORDS.registry.event.plant_mapping;
+    const pm = disclosureOf(DELIVERY_RECORDS.registry, (d) =>
+      d.kind === PLANT_REGISTRY ? d : null,
+    );
     const row = await servedRow(DELIVERY_LISTINGS.registry);
 
     expect(
@@ -492,7 +508,9 @@ describe("ResultsTab delivery events (read-only)", () => {
 
   it("renders the orthomosaic door's own canopy-segment disclosure, narrowed before the registry form", async () => {
     const record = DELIVERY_RECORDS.canopy.event;
-    const pm = record.plant_mapping;
+    const pm = disclosureOf(DELIVERY_RECORDS.canopy, (d) =>
+      d.kind === CANOPY_SEGMENTS ? d : null,
+    );
     const row = await servedRow(DELIVERY_LISTINGS.canopy);
 
     expect(within(row).getByTestId("canopy-disclosure")).toBeInTheDocument();
@@ -716,11 +734,8 @@ describe("ResultsTab count export", () => {
     const panel = await renderCountPanel();
     const acknowledged = downloaded(ACKNOWLEDGED_COUNT_EXPORT);
     vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue(acknowledged);
-    const {
-      saved_path: savedTo,
-      validated,
-      acknowledged_by: acknowledgedBy,
-    } = acknowledged.exported;
+    const { saved_path: savedTo, shipped } = acknowledged.exported;
+    if (shipped.kind !== ACKNOWLEDGED) throw new Error("the produced export validated");
 
     chooseBucket(panel);
     fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
@@ -730,9 +745,10 @@ describe("ResultsTab count export", () => {
     const report = await within(panel).findByText((content) =>
       content.startsWith(`Saved to ${savedTo}.`),
     );
-    expect(validated).toBe(false);
     expect(report.textContent).toContain(" Not validated.");
-    expect(report.textContent).toContain(` Acknowledged by ${acknowledgedBy}.`);
+    expect(report.textContent).toContain(
+      ` Acknowledged by ${shipped.acknowledgment.acknowledged_by}.`,
+    );
   });
 
   it("disables the Export button while a post is in flight", async () => {

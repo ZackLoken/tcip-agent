@@ -149,12 +149,22 @@ def infer(
             if stored is None
             else RasterPassIdentity.model_validate(stored)
         )
+        assessed = (
+            None
+            if recorded is not None or assessment_id is None
+            else read_assessment(project, assessment_id)
+        )
+        if assessed is not None and assessed.kind != "checkpoint":
+            raise ValueError(
+                f"assessment {assessment_id} measured a physical scale, not a checkpoint: "
+                "name the checkpoint's assessment its predictions publish under."
+            )
         restored = (
             recorded.execution
             if recorded is not None
-            else read_assessment(project, assessment_id).execution
-            if assessment_id is not None
             else None
+            if assessed is None
+            else assessed.execution
         )
         p = prepare(
             checkpoint,
@@ -281,7 +291,7 @@ def infer(
         else None,
         "execution": EXECUTION_RECORD.dump_python(p.execution, mode="json"),
         "assessment_id": published.assessment_id,
-        **published.producer.model_dump(),
+        "producer": published.producer.model_dump(),
         "date": published.date,
         "dropped_boxes": published.dropped_boxes,
     }

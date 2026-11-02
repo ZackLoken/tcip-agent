@@ -12,17 +12,20 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from typing import Annotated
 
 import anyio
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter
 
 from tcip_mcp import workspace
 from tcip_mcp.identity import actor
 from tcip_mcp.project_record import (
     CaptureInvariances,
     ProjectRecord,
+    ReadRecord,
     RecordCorrection,
+    UnreadRecord,
     rename_project,
     replace_invariances,
 )
@@ -36,32 +39,50 @@ _WORKSPACE_TURN = threading.Lock()
 project's store while its folder is being moved."""
 
 
-class ProjectSummary(BaseModel):
-    """One workspace project: its record, or why the record will not read, and its data's tree.
+class ProjectFacts(BaseModel):
+    """What a workspace project's directory holds, whether or not its record reads.
 
-    ``record`` is ``None`` beside ``record_problem`` when the record will not read; ``tree`` is the
-    project root's :class:`~tcip_web.routes.dataset.DatasetTree`, its ``dataset_root`` the
-    project's directory, so the pickers never offer a date with nothing there.
+    ``tree`` is the project root's :class:`~tcip_web.routes.dataset.DatasetTree`, its
+    ``dataset_root`` the project's directory, so the pickers never offer a date with nothing
+    there.
     """
 
-    record: ProjectRecord | None
-    record_problem: str | None
     modified: float
     tree: DatasetTree
     image_count: int
 
 
+class ReadProject(ReadRecord, ProjectFacts):
+    """A workspace project whose record read: the record and its directory's facts."""
+
+
+class UnreadProject(UnreadRecord, ProjectFacts):
+    """A workspace project whose record will not read: why, and its directory's facts."""
+
+
+type ProjectSummary = Annotated[
+    ReadProject | UnreadProject, Field(discriminator="kind")
+]
+"""One workspace project as listed, told apart by its record reading's ``kind``."""
+
+_SUMMARY: TypeAdapter[ProjectSummary] = TypeAdapter(ProjectSummary)
+
+
 def _summarize(listed: workspace.ListedProject) -> ProjectSummary:
-    """Summarize the workspace project ``listed`` names."""
+    """Summarize the workspace project ``listed``: its reading beside its directory's facts.
+
+    The directory itself is served once, as the facts' ``tree.dataset_root``.
+    """
     from tcip_mcp.pipelines.image_utils import logical_image_counts
 
-    counts = logical_image_counts(listed.root)
-    return ProjectSummary(
-        record=listed.record,
-        record_problem=listed.record_problem,
-        modified=listed.root.stat().st_mtime,
-        tree=tree_of(listed.root),
-        image_count=sum(counts.values()),
+    root = listed.root
+    return _SUMMARY.validate_python(
+        {
+            **{field: value for field, value in listed if field != "root"},
+            "modified": root.stat().st_mtime,
+            "tree": tree_of(root),
+            "image_count": sum(logical_image_counts(root).values()),
+        }
     )
 
 

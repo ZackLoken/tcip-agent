@@ -1,8 +1,10 @@
-import type {
-  AuditGapRefusal,
-  SessionPlace,
-  SessionsListing,
-  SessionWrite,
+import {
+  type AuditGapRefusal,
+  type Landed,
+  NOTHING_RECORDED,
+  type Repeated,
+  type SessionsListing,
+  type SessionWrite,
 } from "@/api/types.generated";
 import type { Refusal } from "@/test/refusals";
 import produced from "@/test/sessionAnswers.json";
@@ -14,7 +16,7 @@ import produced from "@/test/sessionAnswers.json";
  *  a contribution naming the ended session (`ended_named`) and of another person's naming the
  *  session the unlogged one landed in (`another_named`); the sessions the load route then lists
  *  (`listing`), and its refusal before any project was open (`unopened`). */
-// A JSON import reads the status as a string, which the literal union admits only through
+// A JSON import reads each kind as a string, which the literal union admits only through
 // `unknown`.
 export const SESSION_ANSWERS = produced as unknown as {
   landed: SessionWrite;
@@ -36,8 +38,9 @@ export const SESSION_WRITES = {
   held: SESSION_ANSWERS.audit_gap.body.detail.committed,
 };
 
-/** The session the produced answer `write` landed in; an answer that landed in none throws. */
-export function sessionOf(write: SessionWrite): SessionPlace {
-  if (!write.session) throw new Error("the produced answer landed in no session");
-  return write.session;
+/** The produced answer `write` narrowed to one naming a session; an answer that landed in none
+ *  throws. */
+export function sessionOf(write: SessionWrite): Landed | Repeated {
+  if (write.kind === NOTHING_RECORDED) throw new Error("the produced answer landed in no session");
+  return write;
 }

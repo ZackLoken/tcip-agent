@@ -563,6 +563,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
         ClassScope,
         Sample,
         Selection,
+        WholeSource,
         read_selection,
         write_selection,
     )
@@ -595,6 +596,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
                         else image_label_key(image),
                         group="g",
                         side="train",
+                        extent=WholeSource(),
                         row_key=row_key,
                     ),
                 ),
@@ -766,7 +768,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
     without; the builder records what it was handed each time. Each route draws both sides, and
     the bound route's first-date samples hold no repeat and equal the unbound route's samples
     outside the selection's calibration and holdout locations, compared by source, ground truth,
-    row key, rect, group and member; both train builders hold the selection's class space, and
+    row key, location, group and member; both train builders hold the selection's class space, and
     no builder is handed a directory.
     """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -797,7 +799,8 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
     def handed(*datasets: _RecordingDataset) -> list[tuple]:
         """Return the samples the builders were handed, with multiplicity, sorted.
 
-        Each sample is the tuple of its source, ground truth, row key, rect, group and member.
+        Each sample is the tuple of its source, ground truth, row key, location, group and
+        member.
         """
         seen: list[tuple] = []
         for dataset in datasets:
@@ -807,7 +810,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
                         sample.source,
                         sample.ground_truth,
                         sample.row_key,
-                        sample.rect,
+                        sample.location,
                         sample.group,
                         sample.member,
                     )
@@ -1196,6 +1199,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     from tcip_mcp.pipelines.data.selection import (
         Sample,
         Selection,
+        WholeSource,
         write_selection,
     )
     from tests._producer_fixtures import image_label_key, mark_complete
@@ -1222,6 +1226,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
             ground_truth=image_label_key(frames[stem]),
             group=stem,
             side=side,
+            extent=WholeSource(),
         )
 
     out = tmp_path / "m"

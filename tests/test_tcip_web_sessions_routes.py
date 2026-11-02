@@ -8,13 +8,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 from pydantic_core import to_jsonable_python
 
 import tcip_store
 from tcip_mcp.web_client import annotation_stats_key
 from tcip_web.routes.sessions import (
-    SessionPlace,
+    Landed,
+    NothingEnded,
+    NothingRecorded,
+    OpenSession,
+    Repeated,
     SessionRef,
+    SessionsEnded,
     SessionsListing,
     SessionWrite,
     read_stats,
@@ -77,11 +83,15 @@ def _end(
     )
 
 
+_WRITE: TypeAdapter[SessionWrite] = TypeAdapter(SessionWrite)
+"""A contribution's answer as the route serves it."""
+
+
 def _stamp(resp: httpx.Response) -> datetime:
     """Return the start stamp of the session a contribution's answer says it is recorded in."""
-    session = SessionWrite.model_validate(resp.json()).session
-    assert session is not None, resp.text
-    return session.started
+    written = _WRITE.validate_python(resp.json())
+    assert written.kind != "nothing_recorded", resp.text
+    return written.started
 
 
 def _open_session(client: TestClient, project_id: str) -> datetime:
@@ -133,7 +143,7 @@ def test_throughput_is_derived_from_the_stored_entries(
     assert isinstance(raw_sessions, list)
     (raw_session,) = raw_sessions
     assert isinstance(raw_session, dict)
-    assert set(raw_session) == {"user", "started", "ended", "entries"}
+    assert set(raw_session) == {"user", "started", "state", "entries"}
     (stored,) = read_stats(document).sessions
     assert [e.activity for e in stored.entries] == [
         "new_annotation",
@@ -152,7 +162,7 @@ def test_a_session_is_its_persons_and_records_them_in_the_actor_spelling(
 
     sessions = _load(opened_client)["sessions"]
     assert [s["user"] for s in sessions] == ["user:bob", "user:alice"]
-    assert sessions[1]["ended"] is None
+    assert sessions[1]["state"] == OpenSession().model_dump()
 
 
 def test_a_contribution_naming_no_one_opens_no_session(
@@ -180,20 +190,18 @@ def test_end_marks_the_session_the_contribution_opened_ended_at_a_utc_instant(
     no-op, and the next contribution opens a new one.
     """
     started = _open_session(client, opened.id)
-    assert _end(client, opened.id, started).json() == {
-        "status": "ok",
-        "session": None,
-    }
+    assert (
+        _end(client, opened.id, started).json() == SessionsEnded().model_dump()
+    )
 
     (stored,) = _sessions(opened.root)
     assert stored.started == started
-    assert stored.ended is not None
-    for stamp in (stored.started, stored.ended):
-        assert stamp is not None and stamp.utcoffset() is not None
-    assert _end(client, opened.id, started).json() == {
-        "status": "noop",
-        "session": None,
-    }
+    assert stored.state.kind == "ended"
+    for stamp in (stored.started, stored.state.ended):
+        assert stamp.utcoffset() is not None
+    assert (
+        _end(client, opened.id, started).json() == NothingEnded().model_dump()
+    )
 
     _event(client, opened.id, "IMG_B", 1.0, 0, "review")
     assert len(_load(client)["sessions"]) == 2
@@ -226,12 +234,12 @@ def test_an_end_naming_another_projects_session_is_refused_and_ends_nothing(
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["open_project_id"] == hill.id
     (hill_session,) = _sessions(hill.root)
-    assert (hill_session.started, hill_session.ended) == (
+    assert (hill_session.started, hill_session.state) == (
         hill_started,
-        None,
+        OpenSession(),
     )
     (valley_session,) = _sessions(valley.root)
-    assert valley_session.ended is not None
+    assert valley_session.state.kind == "ended"
     assert [
         line["arguments"] for line in audit_rows(valley.root, "session_ended")
     ] == [{"started": to_jsonable_python(valley_started)}]
@@ -255,7 +263,9 @@ def _assert_departed(project: OpenProject, started: list[datetime]) -> None:
     ``user:bob``.
     """
     sessions = _sessions(project.root)
-    assert {s.started for s in sessions if s.ended is not None} == set(started)
+    assert {s.started for s in sessions if s.state.kind == "ended"} == set(
+        started
+    )
     lines = audit_rows(project.root, "session_ended")
     assert sorted(line["arguments"]["started"] for line in lines) == sorted(
         to_jsonable_python(started)
@@ -448,9 +458,9 @@ def test_a_contribution_naming_an_unended_session_lands_whatever_project_is_open
 
     assert resp.status_code == 200, resp.text
     (session,) = _sessions(valley.root)
-    assert (session.started, session.ended, len(session.entries)) == (
+    assert (session.started, session.state, len(session.entries)) == (
         started,
-        None,
+        OpenSession(),
         2,
     )
 
@@ -514,15 +524,13 @@ def test_a_contribution_committed_without_its_line_answers_the_session_it_opened
 
     assert resp.status_code == 409, resp.text
     (stored,) = _sessions(opened.root)
-    assert SessionWrite.model_validate(
+    assert _WRITE.validate_python(
         resp.json()["detail"]["committed"]
-    ) == SessionWrite(
-        status="ok", session=SessionPlace(started=stored.started, ended=False)
+    ) == Landed(started=stored.started)
+    assert (
+        _end(client, opened.id, stored.started).json()
+        == SessionsEnded().model_dump()
     )
-    assert _end(client, opened.id, stored.started).json() == {
-        "status": "ok",
-        "session": None,
-    }
 
 
 def test_two_sessions_of_one_project_never_share_a_start_stamp(
@@ -552,20 +560,17 @@ def test_two_sessions_of_one_project_never_share_a_start_stamp(
 
     assert alice == frozen
     assert bob == frozen + timedelta(microseconds=1)
-    assert _end(client, opened.id, alice).json() == {
-        "status": "ok",
-        "session": None,
-    }
+    assert (
+        _end(client, opened.id, alice).json() == SessionsEnded().model_dump()
+    )
     bob_session, alice_session = _sessions(opened.root)
-    assert (bob_session.started, bob_session.ended) == (bob, None)
-    assert alice_session.ended is not None
-    assert _end(client, opened.id, bob).json() == {
-        "status": "ok",
-        "session": None,
-    }
+    assert (bob_session.started, bob_session.state) == (bob, OpenSession())
+    assert alice_session.state.kind == "ended"
+    assert _end(client, opened.id, bob).json() == SessionsEnded().model_dump()
     bob_session, alice_session = _sessions(opened.root)
-    assert bob_session.ended is not None and alice_session.ended is not None
-    assert bob_session.ended >= alice_session.ended
+    assert bob_session.state.kind == "ended"
+    assert alice_session.state.kind == "ended"
+    assert bob_session.state.ended >= alice_session.state.ended
 
 
 def test_an_end_naming_a_start_no_session_carries_is_refused_and_ends_nothing(
@@ -580,7 +585,7 @@ def test_an_end_naming_a_start_no_session_carries_is_refused_and_ends_nothing(
     assert resp.status_code == 409, resp.text
     assert to_jsonable_python(carried_by_none) in resp.json()["detail"]
     (stored,) = _sessions(opened.root)
-    assert (stored.started, stored.ended) == (started, None)
+    assert (stored.started, stored.state) == (started, OpenSession())
     assert audit_rows(opened.root, "session_ended") == []
 
 
@@ -588,10 +593,10 @@ def test_a_contribution_with_no_time_and_no_additions_records_nothing(
     client: TestClient,
     opened: OpenProject,
 ) -> None:
-    assert _event(client, opened.id, "IMG_X", 0.0, 0, "review").json() == {
-        "status": "noop",
-        "session": None,
-    }
+    assert (
+        _event(client, opened.id, "IMG_X", 0.0, 0, "review").json()
+        == NothingRecorded().model_dump()
+    )
     assert _load(client) == {"sessions": []}
     assert audit_rows(opened.root, "image_event") == []
 
@@ -602,7 +607,7 @@ def test_a_confirmed_negative_with_no_time_and_no_additions_is_recorded(
 ) -> None:
     resp = _event(client, opened.id, "IMG_X", 0.0, 0, "negative_confirmation")
 
-    assert resp.json()["status"] == "ok", resp.text
+    assert _WRITE.validate_python(resp.json()).kind == "landed", resp.text
     (session,) = _load(client)["sessions"]
     assert [e["activity"] for e in session["entries"]] == [
         "negative_confirmation"
@@ -632,8 +637,8 @@ def test_a_contribution_sent_again_after_its_answer_was_lost_is_recorded_once(
         contribution_id="c1",
     )
 
-    assert SessionWrite.model_validate(again.json()) == SessionWrite(
-        status="noop", session=SessionPlace(started=_stamp(first), ended=False)
+    assert _WRITE.validate_python(again.json()) == Repeated(
+        started=_stamp(first), state=OpenSession()
     )
     (session,) = _load(client)["sessions"]
     assert (session["total_annotations"], session["total_time_seconds"]) == (
@@ -676,11 +681,12 @@ def test_a_repeat_of_an_unnamed_contribution_answers_the_session_it_landed_in_an
         contribution_id="a",
     )
 
-    assert SessionWrite.model_validate(again.json()) == SessionWrite(
-        status="noop", session=SessionPlace(started=learned, ended=True)
-    )
     (session,) = SessionsListing.model_validate(_load(client)).sessions
     assert (session.started, len(session.entries)) == (learned, 2)
+    assert session.state.kind == "ended"
+    assert _WRITE.validate_python(again.json()) == Repeated(
+        started=learned, state=session.state
+    )
 
 
 def test_each_session_write_leaves_one_line_by_the_sessions_person(
@@ -729,17 +735,14 @@ def test_an_end_names_its_own_session_and_not_the_latest(
     )
     assert alice_started != bob_started
 
-    assert _end(client, opened.id, alice_started).json() == {
-        "status": "ok",
-        "session": None,
-    }
+    assert (
+        _end(client, opened.id, alice_started).json()
+        == SessionsEnded().model_dump()
+    )
 
     bob, alice = _sessions(opened.root)
-    assert (alice.started, alice.ended is not None) == (
-        alice_started,
-        True,
-    )
-    assert (bob.started, bob.ended) == (bob_started, None)
+    assert (alice.started, alice.state.kind) == (alice_started, "ended")
+    assert (bob.started, bob.state) == (bob_started, OpenSession())
 
 
 def test_a_contribution_naming_another_project_is_refused_and_records_nothing(

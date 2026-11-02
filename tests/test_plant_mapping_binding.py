@@ -1655,7 +1655,11 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import (
+        IngestManifest,
+        bucket_of,
+        ingest_images,
+    )
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -1679,8 +1683,8 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
         h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     res = ingest_images(dataset_root, source=str(extra_source), actor=None)
-    assert "error" not in res, res
-    assert [f["bucket"] for f in res["files"]] == [DATES[0]]
+    assert isinstance(res, IngestManifest), res
+    assert [bucket_of(f.date) for f in res.files] == [DATES[0]]
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(

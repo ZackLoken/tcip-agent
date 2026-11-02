@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from tcip_annotation.state import Annotation
 from tcip_mcp.dataset_layout import image_dir
 from tcip_web.routes.audit_gap import AuditGapRefusal
+from tcip_web.routes.subjects import NoRegistry, StoredVersion
 from tests._audit_fixtures import (
     AUDIT_ENTRY_KEYS,
     audit_rows,
@@ -60,9 +61,8 @@ def test_a_missing_registry_answers_discovery_never_a_registry(
     )
     assert resp.status_code == 200
     assert resp.json() == {
-        "subjects": None,
+        "registry": NoRegistry().model_dump(),
         "discovered": [],
-        "version": None,
         "unreadable": [],
     }
     found = client.get(
@@ -70,9 +70,8 @@ def test_a_missing_registry_answers_discovery_never_a_registry(
         params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert found == {
-        "subjects": None,
+        "registry": NoRegistry().model_dump(),
         "discovered": ["bud"],
-        "version": None,
         "unreadable": [],
     }
 
@@ -95,7 +94,7 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
                 },
                 "bush": {"description": "one currant bush crown"},
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -106,7 +105,7 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
-    subjects = load["subjects"]
+    subjects = load["registry"]["subjects"]
     assert set(subjects) == {"bud", "bush"}
     assert subjects["bud"]["attributes"]["opening"]["values"] == [
         "closed",
@@ -126,7 +125,7 @@ def test_save_refuses_an_empty_registry(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -150,7 +149,7 @@ def test_save_refuses_dropping_a_declared_subject(
                 "leaf": {"description": "one leaf"},
                 "bush": {"description": "b"},
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -161,7 +160,9 @@ def test_save_refuses_dropping_a_declared_subject(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"bush": {"description": "b"}},
-            "version": first.json()["version"],
+            "version": StoredVersion(
+                version=first.json()["version"]
+            ).model_dump(),
             "user": "tester",
         },
     )
@@ -184,7 +185,7 @@ def test_load_returns_the_version_and_save_round_trips_it(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"leaf": {"description": "one leaf"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -194,7 +195,7 @@ def test_load_returns_the_version_and_save_round_trips_it(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
-    assert load["version"]
+    assert load["registry"]["version"]
 
     grown = client.post(
         "/api/subjects/save",
@@ -204,7 +205,9 @@ def test_load_returns_the_version_and_save_round_trips_it(
                 "leaf": {"description": "one leaf"},
                 "bush": {"description": "one bush"},
             },
-            "version": load["version"],
+            "version": StoredVersion(
+                version=load["registry"]["version"]
+            ).model_dump(),
             "user": "tester",
         },
     )
@@ -221,7 +224,7 @@ def test_save_refuses_a_stale_version(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"leaf": {"description": "one leaf"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -229,6 +232,7 @@ def test_save_refuses_a_stale_version(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
+    stale = StoredVersion(version=stale_load["registry"]["version"])
     client.post(
         "/api/subjects/save",
         json={
@@ -237,7 +241,7 @@ def test_save_refuses_a_stale_version(
                 "leaf": {"description": "one leaf"},
                 "bush": {"description": "one bush"},
             },
-            "version": stale_load["version"],
+            "version": stale.model_dump(),
             "user": "tester",
         },
     )
@@ -251,7 +255,7 @@ def test_save_refuses_a_stale_version(
                 "bush": {"description": "one bush"},
                 "tip": {"description": "one tip"},
             },
-            "version": stale_load["version"],
+            "version": stale.model_dump(),
             "user": "tester",
         },
     )
@@ -285,7 +289,7 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
                 "leaf": {"description": "written by the agent"},
                 "bush": {"description": "written by the browser"},
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -302,7 +306,7 @@ def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"bush": {"description": "first write"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -332,7 +336,7 @@ def test_save_refuses_a_same_values_attribute_type_flip(
                     },
                 }
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -353,7 +357,9 @@ def test_save_refuses_a_same_values_attribute_type_flip(
                     },
                 }
             },
-            "version": first.json()["version"],
+            "version": StoredVersion(
+                version=first.json()["version"]
+            ).model_dump(),
             "user": "tester",
         },
     )
@@ -381,7 +387,7 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
                     },
                 }
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -402,7 +408,9 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
                     },
                 }
             },
-            "version": first.json()["version"],
+            "version": StoredVersion(
+                version=first.json()["version"]
+            ).model_dump(),
             "user": "tester",
         },
     )
@@ -427,7 +435,7 @@ def test_save_refuses_malformed_registry(
                     "attributes": {"opening": {"type": "categorical"}},
                 }
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -447,7 +455,7 @@ def test_registry_holds_multiple_subjects(
                 "bud": {"description": "a bud"},
                 "bush": {"description": "a bush"},
             },
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -457,8 +465,8 @@ def test_registry_holds_multiple_subjects(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
-    assert load["subjects"]["bud"]["description"] == "a bud"
-    assert load["subjects"]["bush"]["description"] == "a bush"
+    assert load["registry"]["subjects"]["bud"]["description"] == "a bud"
+    assert load["registry"]["subjects"]["bush"]["description"] == "a bush"
     assert (tmp_path / "subjects.json").is_file()
 
 
@@ -513,7 +521,7 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"bud": {"description": "a bud"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -523,7 +531,7 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
-    assert set(load["subjects"]) == {"bud"}
+    assert set(load["registry"]["subjects"]) == {"bud"}
     assert load["unreadable"] == ["IMG_B"]
 
 
@@ -559,7 +567,7 @@ def test_save_subjects_confines_dataset_root_to_allowed_roots(
         json={
             "dataset_root": str(outside),
             "subjects": {"bud": {"description": "a bud"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -600,7 +608,7 @@ def test_a_dataset_root_inside_the_workspace_clears_the_confinement_guard(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"bud": {"description": "a bud"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -630,7 +638,7 @@ def test_a_registry_save_leaves_one_library_line_through_either_door(
         json={
             "dataset_root": str(through_route),
             "subjects": subjects,
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -683,7 +691,7 @@ def test_a_registry_save_answers_and_audits_the_location_it_wrote(
         json={
             "dataset_root": str(dataset_root),
             "subjects": {"bud": {"description": "one bud"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -747,7 +755,7 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
     monkeypatch.setattr(tcip_store, "read_blob_versioned", real)
 
     assert "error" not in interleaved[0]
-    assert set(load["subjects"]) == {"bud"}
+    assert set(load["registry"]["subjects"]) == {"bud"}
     stale = client.post(
         "/api/subjects/save",
         json={
@@ -757,7 +765,9 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
                 "bush": {"description": "one bush"},
                 "tip": {"description": "one tip"},
             },
-            "version": load["version"],
+            "version": StoredVersion(
+                version=load["registry"]["version"]
+            ).model_dump(),
             "user": "tester",
         },
     )
@@ -783,7 +793,7 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"bud": {"description": "a bud"}},
-            "version": None,
+            "version": NoRegistry().model_dump(),
             "user": "tester",
         },
     )
@@ -796,7 +806,9 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
         json={
             "dataset_root": str(tmp_path),
             "subjects": {"bud": {"description": "a bud"}},
-            "version": healthy_body["version"],
+            "version": StoredVersion(
+                version=healthy_body["version"]
+            ).model_dump(),
             "user": "tester",
         },
     )

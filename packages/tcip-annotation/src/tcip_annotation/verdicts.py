@@ -24,8 +24,8 @@ from tcip_store import Key
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
-VerdictAction = Literal["accepted", "rejected"]
-VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)
+type VerdictAction = Literal["accepted", "rejected"]
+VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction.__value__)
 
 
 @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))

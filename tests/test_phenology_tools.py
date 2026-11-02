@@ -143,7 +143,7 @@ def test_an_assessed_series_delivers_validated_milestones_under_its_revision(
 
     assert "error" not in res, res
     revision = latest_confirmed("bud_opening", tmp_path)
-    assert res["validated"] is True
+    assert res["shipped"] == {"kind": "validated"}
     assert res["trait_revision"] == revision.number
     assert res["columns"] == phenology_csv_columns(revision.entry)
     assert (

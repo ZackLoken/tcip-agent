@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { api, loadedLabels, type LoadedLabels, type LoadedSave } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
 import { subjectColor } from "@/api/subjects";
-import { type ImageBands } from "@/api/types.generated";
+import { CONF_REFUSED, PLAIN } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
+import type { BandChoice } from "@/lib/bandSelection";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
@@ -35,7 +36,7 @@ import {
   TOOL_SELECTION,
 } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
-import { LABEL_ANSWERS, servedAnnotation } from "@/test/labels";
+import { LABEL_ANSWERS, servedAnnotation, UNSTORED } from "@/test/labels";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
@@ -139,7 +140,7 @@ vi.mock("@/components/Canvas/CanvasStage", () => {
 });
 vi.mock("@/components/AnnotateToolbar", () => ({
   AnnotateToolbar: (props: {
-    bandsInfo?: ImageBands | null;
+    bandChoice: BandChoice;
     subjectState: string | null;
     onComplete: (next: boolean) => void;
     onCancelSave: () => void;
@@ -153,7 +154,8 @@ vi.mock("@/components/AnnotateToolbar", () => ({
   }) => (
     <div
       data-testid="toolbar"
-      data-band-count={props.bandsInfo?.band_count ?? ""}
+      data-band-choice={props.bandChoice.kind}
+      data-band-count={props.bandChoice.kind === "banded" ? props.bandChoice.info.band_count : ""}
       data-subject-state={props.subjectState ?? ""}
       data-proposing={props.proposing}
       data-view-proposals={props.view.proposals}
@@ -645,7 +647,7 @@ describe("AnnotateTab save/load race", () => {
 
 describe("AnnotateTab subject rendering", () => {
   it("renders a box with the subject-derived color, named on selection", async () => {
-    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
     useStore.setState((s) => ({ gui: { ...s.gui, active_subject: POINT_SUBJECT } }));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -667,7 +669,7 @@ describe("AnnotateTab subject rendering", () => {
   });
 
   it("box mode draws an active-subject polygon's read-only derived box (no handles), never a stored box", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     const poly = servedAnnotation({ subject: SUBJECT, rings: TRIANGLE, index: 0 });
     loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, [poly])));
     render(<AnnotateTab />);
@@ -685,7 +687,7 @@ describe("AnnotateTab subject rendering", () => {
   });
 
   it("a tool-authored polygon's derived box draws in the polygon's own line style, unlabeled", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     const [poly] = LOADED.tool_polygon.polygons;
     expect(poly.authorship).toBe("tool");
     loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_polygon));
@@ -702,7 +704,7 @@ describe("AnnotateTab subject rendering", () => {
   });
 
   it("box mode draws a person's editable box solid and a person's polygon's derived box solid too", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -716,7 +718,7 @@ describe("AnnotateTab subject rendering", () => {
   it("point mode draws a placed point as its reticle mark, never a box or a closed outline", async () => {
     // A point asserts a location and no extent: rendering it as a box (or letting it render as a
     // degenerate polygon) would show the annotator an extent the annotation does not claim.
-    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
     useStore.setState((s) => ({
       gui: { ...s.gui, mode: "point" as const, active_subject: POINT_SUBJECT },
     }));
@@ -740,7 +742,7 @@ describe("AnnotateTab subject rendering", () => {
   it("polygon mode draws every ring of an occlusion-split shape, labeled once", async () => {
     // An organ behind a branch loads as one annotation with two disjoint regions. Drawing only
     // the first would show the breeder part of the object and let them confirm it as the whole.
-    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
     useStore.setState((s) => ({
       gui: { ...s.gui, mode: "polygon" as const, active_subject: POINT_SUBJECT },
     }));
@@ -782,7 +784,7 @@ describe("AnnotateTab subject rendering", () => {
 
 describe("AnnotateTab authorship symbology", () => {
   it("a tool's box and an unattributed one draw dotted, a person's and an accepted tool's solid; focus names the tool's", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     const { boxes } = LOADED.authored;
     expect(boxes.map((box) => box.authorship)).toEqual([
       "tool",
@@ -818,7 +820,7 @@ describe("AnnotateTab authorship symbology", () => {
   });
 
   it("the legend states the dotted stroke means proposed", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -833,7 +835,7 @@ describe("AnnotateTab point tool", () => {
   const frame = () => act(async () => void (await new Promise((r) => setTimeout(r, 25))));
 
   async function mountPointMode(points: { x: number; y: number }[] = []) {
-    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
     useStore.setState((s) => ({
       gui: { ...s.gui, mode: "point" as const, active_subject: POINT_SUBJECT },
     }));
@@ -932,7 +934,7 @@ describe("AnnotateTab point tool", () => {
     });
 
     it("a move queued before the hold does nothing when its frame fires", async () => {
-      useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+      useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
       useStore.setState((s) => ({
         gui: { ...s.gui, mode: "polygon" as const, active_subject: POINT_SUBJECT },
       }));
@@ -964,7 +966,7 @@ describe("AnnotateTab point tool", () => {
     });
 
     it("a double-click leaves a freehand stream running", async () => {
-      useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+      useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
       useStore.setState((s) => ({
         gui: { ...s.gui, mode: "polygon" as const, active_subject: POINT_SUBJECT },
       }));
@@ -1104,7 +1106,7 @@ describe("AnnotateTab image states", () => {
 
 describe("AnnotateTab focused item", () => {
   it("hands the focused box to the toolbar, whose subject menu edits its attributes", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1119,7 +1121,7 @@ describe("AnnotateTab focused item", () => {
 
 describe("AnnotateTab legend keyboard access", () => {
   it("opens the legend by keyboard and reaches a subject row on the following Tab", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1138,7 +1140,7 @@ describe("AnnotateTab legend keyboard access", () => {
   });
 
   it("opens the color picker as a labeled dialog with a named hex input", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1258,7 +1260,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
 
 describe("AnnotateTab legend", () => {
   it("lists the subjects until proposals are shown, then the match types", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     const proposalsSpy = withBucket();
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1280,7 +1282,7 @@ describe("AnnotateTab legend", () => {
   });
 
   it("a recolored subject's box stroke and the pushed canvas_meta swatch both follow", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1322,14 +1324,12 @@ describe("AnnotateTab canvas push refused", () => {
 });
 
 describe("AnnotateTab band-composite wiring", () => {
-  it("passes a plain photograph's own bandsInfo down to the toolbar untouched", async () => {
+  it("offers the toolbar no band choice for a plain photograph", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
-    expect(screen.getByTestId("toolbar")).toHaveAttribute(
-      "data-band-count",
-      String(BAND_ANSWERS.plain.band_count),
-    );
+    expect(BAND_ANSWERS.plain.read.kind).toBe(PLAIN);
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-choice", "none");
     // No bands/stretch param for a frame the server displays plain: the canvas URL is unaffected.
     const url = screen.getByTestId("canvas-stage").getAttribute("data-image-url") ?? "";
     expect(url).not.toContain("bands=");
@@ -1781,7 +1781,7 @@ describe("clicks outside the image extent are inert", () => {
 describe("AnnotateTab authoring writes what the annotator meant", () => {
   it("bounds a new point by the image's own height on a taller-than-wide frame", async () => {
     // Only a portrait frame separates the bounds: a y past the width but inside the height.
-    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
     const portrait = RAW_SELECTION.images.findIndex(({ path }) => {
       const { img_width: width, img_height: height } = loadOf(path);
       return height > width;
@@ -1822,7 +1822,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   });
 
   it("commits a drawn box under the subject the drag started on, not the one active at release", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT, SECOND_SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT, SECOND_SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1842,7 +1842,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   });
 
   it("keeps a freshly drawn box exactly at the minimum side", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1861,7 +1861,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   });
 
   it("refuses a freshly drawn box smaller than the minimum, with a toast", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1878,7 +1878,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   });
 
   it("undoes a resize that shrinks a box below the minimum, with a toast", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT));
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1903,7 +1903,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
 
   describe("a save pressed while a box resize is still being dragged", () => {
     async function dragCornerTo(x: number, y: number) {
-      useStore.getState().setRegistry(registryOf(SUBJECT));
+      useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
       render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
       await flush();
@@ -2007,7 +2007,7 @@ describe("AnnotateTab labels show on the focused item only", () => {
     screen.queryAllByTestId("k-text").filter((t) => t.getAttribute("data-text") === name);
 
   function setupSubject(mode: "box" | "polygon" | "point") {
-    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT), UNSTORED);
     useStore.setState((s) => ({ gui: { ...s.gui, mode, active_subject: POINT_SUBJECT } }));
   }
 
@@ -2274,7 +2274,7 @@ describe("AnnotateTab review symbology", () => {
   it("the confidence floor starts at the operating point and the person moves it", async () => {
     await mountReviewing();
     const floor = screen.getByRole("spinbutton", { name: "Confidence floor" });
-    expect(served().operating_point.conf).toBeNull();
+    expect(served().operating_point.kind).toBe(CONF_REFUSED);
     expect(floor).toHaveValue(null);
     // The shapes and the unpaired proposals; a shape with its undecided paired proposal, and the
     // unpaired proposals, await a decision.

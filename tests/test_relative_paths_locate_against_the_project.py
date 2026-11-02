@@ -166,7 +166,7 @@ def _ingest_images(project: Path) -> Path:
 
     from PIL import Image
 
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tests._image_fixtures import capture_exif
 
     raw = project / "more_raw"
@@ -175,7 +175,8 @@ def _ingest_images(project: Path) -> Path:
         raw / "extra.png", exif=capture_exif(datetime.fromisoformat(DATE))
     )
     result = ingest_images(project, source="more_raw", actor=None)
-    assert "error" not in result and result["found"] == 1, result
+    assert isinstance(result, IngestManifest), result
+    assert result.found == 1, result
     return raw
 
 
@@ -1384,6 +1385,7 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
     from tcip_mcp.pipelines.postprocessing.phenology import population
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
     from tests import _trait_fixtures as fx, csv_rows
+    from tests._chain_fixtures import digest_of
     from tests.test_deliver_per_plant_csv import (
         KIND,
         TWO_PLANTS,
@@ -1423,7 +1425,7 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
             project,
             acknowledged_by="user:breeder",
             reason="a look",
-            result_sha256=str(refused.value.result_sha256),
+            result_sha256=digest_of(refused.value),
         )
         cwd = tmp_path / f"{name}_cwd"
         cwd.mkdir()

@@ -21,6 +21,7 @@ from tcip_mcp.dataset_layout import (
     save_label_document,
     verdict_key_of,
 )
+from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
 from tests._producer_fixtures import (
     image_label_key,
@@ -807,7 +808,7 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
     ).json()
 
     assert set(proposals) == {"operating_point", "proposals"}
-    assert set(proposals["operating_point"]) == {"conf", "reason"}
+    assert set(proposals["operating_point"]) == {"kind", "reason"}
     assert set(proposals["proposals"][0]) >= {"index", "paired", "decision"}
     assert "admitted" not in proposals["proposals"][0]
     assert loaded["completion"] == {"bud": "negative"}
@@ -818,7 +819,7 @@ def test_a_staged_bucket_serves_no_operating_point_and_says_why(
 ) -> None:
     """A staged bucket serves no operating point and says why.
 
-    A bucket staged under no assessment serves a null conf and a reason beside its proposals.
+    A bucket staged under no assessment serves a refused conf and a reason beside its proposals.
     """
     from tests._web_fixtures import open_new_project
 
@@ -831,7 +832,7 @@ def test_a_staged_bucket_serves_no_operating_point_and_says_why(
         params={"image_path": str(image), "bucket": bucket},
     ).json()
 
-    assert served["operating_point"]["conf"] is None
+    assert served["operating_point"]["kind"] == "conf_refused"
     assert served["operating_point"]["reason"]
 
 
@@ -1198,7 +1199,7 @@ class DottedProposer:
                     "score": 0.9,
                 }
             ],
-            None,
+            NoPass(),
         )
 
 

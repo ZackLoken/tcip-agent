@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp.agent_identity import RecordedIdentity
 from tcip_mcp.audit import now
+from tcip_mcp.experiments import NoAgentLaunch, UncomparedRun
+from tcip_web.routes.training import TrainingErrorFrame
 from tests._audit_fixtures import audit_rows
 from tests._training_values import fifo_search, sweep_space
 
@@ -83,7 +84,7 @@ def test_a_listed_run_row_carries_what_the_launch_picker_shows(
         "detection",
     )
     assert row["state"] == "running"  # launched, its heartbeat still fresh
-    assert (row["relaunched_from"], row["sweep"]) == (None, None)
+    assert (row["relaunched_from"], row["kind"]) == (None, "standalone")
     assert resp.json()["sweeps"] == []
 
 
@@ -134,9 +135,9 @@ def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(
         "ws://127.0.0.1/api/training/runs/foo-xxx/stream"
     ) as ws:
         msg = ws.receive_json()
-    assert msg["type"] == "status"
-    assert msg["status"] is None
-    assert msg["error"]
+    assert msg == TrainingErrorFrame(
+        experiment_id="foo-xxx", error="Run not found: foo-xxx"
+    ).model_dump(mode="json")
 
 
 def _completed_run_with_rows(project: Path, run_id: str) -> Path:
@@ -373,11 +374,9 @@ def test_compare_route_compares_two_runs_and_names_an_unknown_id(
         "exp-right",
         "completed",
     )
-    assert gone == {
-        "experiment_id": "exp-gone",
-        "error": "Experiment not found: exp-gone",
-    }
-    assert resp.json()["dataset_fingerprints"] == "unread"
+    assert gone == UncomparedRun(
+        experiment_id="exp-gone", error="Experiment not found: exp-gone"
+    ).model_dump(mode="json")
 
 
 def test_the_comparison_and_the_listing_state_one_direction_per_metric(
@@ -401,18 +400,18 @@ def test_the_comparison_and_the_listing_state_one_direction_per_metric(
         "/api/training/compare", json={"experiment_ids": [run.name]}
     )
     assert resp.status_code == 200, resp.text
-    compared = Comparison.model_validate(resp.json()).higher_is_better
+    compared = Comparison.model_validate(resp.json()).directions
     listed = {
-        m.metric: m.higher_is_better
+        m.metric: m.direction
         for m in registered_listing(
             opened_project, experiment_ids=[run.name]
         ).available_metrics
     }
     assert compared == listed
     assert {compared["val_map50"], compared["val_loss"], compared["lr"]} == {
-        True,
-        False,
-        None,
+        "higher",
+        "lower",
+        "unstated",
     }
 
 
@@ -477,7 +476,7 @@ def test_tensorboard_route_launches_over_the_run_s_own_board(
     resp = opened_client.post("/api/training/runs/run-42/tensorboard", json={})
     assert resp.status_code == 200
     serving = running(run_dir)
-    assert serving is not None
+    assert serving.kind == "serving"
     assert resp.json() == serving.model_dump()
     assert tb_launches == [run_dir]
 
@@ -996,7 +995,7 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
         for r in opened_client.get("/api/training/runs").json()["runs"]
         if r["experiment_id"] == minted
     )
-    assert RecordedIdentity.model_validate(row["launch"]) == RecordedIdentity()
+    assert row["launch"] == NoAgentLaunch().model_dump()
 
 
 def _regression_config(tmp_path: Path) -> dict:
@@ -1085,10 +1084,8 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     row = by_id[result.experiment_id]
     # Regression selects on its loss by default; there is no evaluation.selection_metric override
     # in this config.
-    assert row["best_metric_name"] == "loss"
-    assert isinstance(row["best_metric"], (int, float)) and math.isfinite(
-        row["best_metric"]
-    )
+    assert row["best"]["metric"] == "loss"
+    assert math.isfinite(row["best"]["value"])
 
 
 def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
@@ -1110,16 +1107,21 @@ def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
     trial = open_trial(opened, "t0", {"optimizer.head_lr": 0.001})
 
     listing = opened_client.get("/api/training/runs").json()
-    assert [r["experiment_id"] for r in listing["runs"]] == ["run-a"]
+    assert [(r["kind"], r["experiment_id"]) for r in listing["runs"]] == [
+        ("standalone", "run-a")
+    ]
     (sweep,) = listing["sweeps"]
     assert sweep["sweep_id"] == sweep_id
     assert [
-        (t["experiment_id"], t["sweep"], t["trial_params"])
+        (t["kind"], t["experiment_id"], t["sweep_id"], t["params"])
         for t in sweep["trials"]
-    ] == [(trial.name, sweep_id, {"optimizer.head_lr": 0.001})]
+    ] == [("trial", trial.name, sweep_id, {"optimizer.head_lr": 0.001})]
 
     read = opened_client.get(f"/api/training/runs/{trial.name}")
-    assert (read.status_code, read.json()["run"]["sweep"]) == (200, sweep_id)
+    assert (read.status_code, read.json()["run"]["sweep_id"]) == (
+        200,
+        sweep_id,
+    )
 
     canceled = opened_client.post(
         f"/api/training/runs/{trial.name}/cancel", json={"user": "tester"}
@@ -1140,7 +1142,7 @@ def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
     ) as ws:
         frame = ws.receive_json()
     assert frame["type"] == "status"
-    assert (frame["status"]["state"], frame["status"]["sweep"]) == (
+    assert (frame["status"]["state"], frame["status"]["sweep_id"]) == (
         "canceled",
         sweep_id,
     )

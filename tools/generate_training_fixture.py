@@ -246,7 +246,7 @@ def produce() -> dict[str, JsonValue]:
                     client, "training_stream_ws", experiment_id=experiment_id
                 )
             ) as ws:
-                while not sent or sent[-1]["type"] != "status":
+                while not sent or sent[-1]["type"] not in ("status", "error"):
                     sent.append(ws.receive_json())
             return sent
 
@@ -356,6 +356,7 @@ def produce() -> dict[str, JsonValue]:
                 CompareBestPayload(
                     experiment_ids=list(ids),
                     metric=by,
+                    direction="unstated",
                     include_unverified=include_unverified,
                 ),
             )
@@ -376,7 +377,11 @@ def produce() -> dict[str, JsonValue]:
                 client,
                 "compare_best_route",
                 422,
-                CompareBestPayload(experiment_ids=compared, metric=metric),
+                CompareBestPayload(
+                    experiment_ids=compared,
+                    metric=metric,
+                    direction="unstated",
+                ),
             ),
             "absent_metric_refusal": answered(
                 client,
@@ -385,7 +390,7 @@ def produce() -> dict[str, JsonValue]:
                 CompareBestPayload(
                     experiment_ids=compared,
                     metric=ABSENT_METRIC,
-                    higher_is_better=True,
+                    direction="higher",
                 ),
             ),
             "no_logs_refusal": answered(
@@ -404,7 +409,7 @@ def produce() -> dict[str, JsonValue]:
             for choice in SplitChoices.model_validate(
                 served["split_choices"]
             ).selections
-            if choice.reason is None
+            if choice.kind == "read" and choice.check.kind == "admitted"
         )
         with pytest.MonkeyPatch.context() as patch:
             fake_popen(patch, [])

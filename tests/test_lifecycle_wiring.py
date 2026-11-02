@@ -87,7 +87,7 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     assert observe(run_dir).state == "completed", observe(run_dir).final
     entry = _entry(tmp_path, "exp-trainer-source")
     assert entry is not None
-    assert entry.entry.experiment_id == "exp-trainer-source"
+    assert entry.entry.origin == "run"
     assert entry.facts.metrics_source == "trainer"
 
     best = torch.load(run_dir / "model_best.pt", weights_only=False)

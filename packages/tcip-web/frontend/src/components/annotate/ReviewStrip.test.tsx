@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ServedFlag } from "@/api/types.generated";
+import { CONF_ADMITTED, type ServedFlag } from "@/api/types.generated";
 import { ReviewStrip } from "@/components/annotate/ReviewStrip";
 import { itemName, type AnnotationItem, type ReviewItem } from "@/lib/reviewItems";
 import { ANNOTATE_ANSWERS } from "@/test/annotate";
+import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { LABEL_ANSWERS, servedFlag, servedProposal } from "@/test/labels";
 
 afterEach(cleanup);
@@ -57,7 +58,7 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
   render(
     <ReviewStrip
       reviewing
-      operatingPoint={{ conf: 0.42, reason: null }}
+      operatingPoint={RESULTS_ANSWERS.admitted_operating_point}
       filters={{ confidence: 0.42, match: "all" }}
       scope="all"
       canAccept
@@ -168,6 +169,15 @@ describe("ReviewStrip", () => {
     expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Next item" }));
     expect(h.onStep).toHaveBeenCalledWith(1);
+  });
+
+  it("names the operating point the bucket's assessment admits", () => {
+    const admitted = RESULTS_ANSWERS.admitted_operating_point;
+    if (admitted.kind !== CONF_ADMITTED) throw new Error("the produced bucket admits no conf");
+    renderStrip();
+    expect(
+      screen.getByRole("spinbutton", { name: "Confidence floor" }).closest("label"),
+    ).toHaveAttribute("title", `Validated operating point ${admitted.conf.toFixed(2)}`);
   });
 
   it("says that no operating point seeds the confidence floor", () => {

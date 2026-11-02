@@ -3,16 +3,16 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { messageOf, StructuredRefusalError } from "@/api/http";
 import { resultsApi } from "@/api/inference";
-import type {
-  CaptureInvariances,
-  MappingNames,
-  MatchRadius,
-  ServedMapping,
+import {
+  type CaptureInvariances,
+  type MappingNames,
+  type MatchRadius,
+  READ,
+  type ServedMapping,
 } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
-import { openable } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { selectDatasetRoot } from "@/store/slices/gui";
 
@@ -81,7 +81,9 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
         dates: null,
         supersede: supersedeMapping,
         match_radius:
-          statedRadius === "" ? null : { value: statedRadius, rationale: radiusRationale },
+          statedRadius === ""
+            ? null
+            : { source: "stated", value: statedRadius, rationale: radiusRationale },
         user: useStore.getState().user,
       });
       setMapping(built);
@@ -217,7 +219,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
       .list()
       .then((res) => {
         const invariances =
-          res.projects.filter(openable).find((p) => p.record.id === projectId)?.record
+          res.projects.filter((p) => p.kind === READ).find((p) => p.record.id === projectId)?.record
             .invariances ?? null;
         setRecorded(invariances);
         setDraft(invariances);

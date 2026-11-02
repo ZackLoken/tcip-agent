@@ -139,6 +139,7 @@ def published_document(
     from tcip_annotation.json_io import document_payload
     from tcip_mcp.buckets import Document, Proposed, publish, source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.execution import NoPass
 
     return publish(
         project,
@@ -147,7 +148,7 @@ def published_document(
         [Document(str(image), document_payload(annotations, width, height))],
         producer=Proposed(proposed_by="agent:test"),
         scope=ClassScope(),
-        execution=None,
+        execution=NoPass(),
         raster_path=None,
         raster_identity=None,
         assessment_id=None,
@@ -674,12 +675,13 @@ def install_stub_proposer(
     The engine is installed by patching ``proposal.resolve_proposer``.
     """
     from tcip_mcp.pipelines import proposal
+    from tcip_mcp.pipelines.execution import NoPass
 
     class StubProposer:
         def propose(
             self, image_path: str, **params: object
         ) -> proposal.Proposal:
-            return proposal.Proposal(candidates, None)
+            return proposal.Proposal(candidates, NoPass())
 
     monkeypatch.setattr(
         proposal, "resolve_proposer", lambda engine: StubProposer()

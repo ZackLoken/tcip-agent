@@ -183,14 +183,17 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
         **kwargs: object,
     ) -> web_client.PanelEventAnswer:
         pings.append((target, panel, event))
-        return web_client.PanelEventAnswer(url="u", reason=None)
+        return web_client.PanelEventTaken(url="u")
 
     monkeypatch.setattr(web_client, "post_panel_event", silent_hub)
 
     result = capture_live_canvas(bound, refresh=True, crop_to_viewport=False)
     assert "error" not in result, result
     assert pings == [(bound, "app", web_client.CanvasStateRequest())]
-    assert result["refresh_answer"]["reason"] is None
+    assert (
+        result["refresh_answer"]
+        == web_client.PanelEventTaken(url="u").model_dump()
+    )
     assert result["refreshed"] is False
     assert result["state_age_seconds"] > 5
     assert "last known" in result["summary"]
@@ -219,7 +222,7 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
         **kwargs: object,
     ) -> web_client.PanelEventAnswer:
         _push_state(tmp_path, image, received_at=_ago(0))
-        return web_client.PanelEventAnswer(url="u", reason=None)
+        return web_client.PanelEventTaken(url="u")
 
     monkeypatch.setattr(web_client, "post_panel_event", answering_hub)
 

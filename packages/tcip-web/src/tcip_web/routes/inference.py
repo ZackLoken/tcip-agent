@@ -13,11 +13,12 @@ import logging
 import threading
 import uuid
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr
 
+from tcip_mcp.experiments import FINAL_STATES
 from tcip_mcp.identity import actor
 from tcip_mcp.pipelines.execution import Stated
 from tcip_web import jobstore
@@ -81,14 +82,16 @@ class InferenceJobFrame(BaseModel):
 
 
 class MissingJobFrame(BaseModel):
-    """The one frame a stream to a job this process holds no record of sends."""
+    """The one frame a stream to a job this process holds no record of sends, its last."""
 
-    type: Literal["final"]
+    type: Literal["missing"] = "missing"
     error: str
 
 
-InferenceFrame = InferenceJobFrame | MissingJobFrame
-"""Every frame a job's stream sends."""
+type InferenceFrame = Annotated[
+    InferenceJobFrame | MissingJobFrame, Field(discriminator="type")
+]
+"""Every frame a job's stream sends, told apart by its ``type``."""
 
 
 _registry: jobstore.JobRegistry[InferenceJob] = jobstore.JobRegistry()
@@ -104,11 +107,11 @@ def _get(job_id: str) -> InferenceJob | None:
 
 
 def _worker(job: InferenceJob) -> None:
-    # Held through try/except, assigned to job.status only in finally, after the publication is
-    # attempted. "running" (never a terminal read) until a branch below names the real outcome.
-    terminal_status: jobstore.JobStatus = "running"
+    # Held through try/except, assigned to job.state only in finally, after the publication is
+    # attempted. Running (never a final read) until a branch below names the outcome.
+    final: jobstore.JobState[jobstore.Completed] = jobstore.Running()
     try:
-        job.status = "running"
+        job.state = jobstore.Running()
 
         from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE
         from tcip_mcp.tools.inference_tools import infer
@@ -133,20 +136,19 @@ def _worker(job: InferenceJob) -> None:
             actor=job.actor,
         )
         # The publication's own result names the error a failed pass met.
-        job.error = result.get("error")
-        terminal_status = (
-            "failed"
-            if job.error is not None
-            else "canceled"
+        error = result.get("error")
+        final = (
+            jobstore.Failed(error=error)
+            if error is not None
+            else jobstore.Canceled()
             if job.cancel_event.is_set()
-            else "completed"
+            else jobstore.Completed()
         )
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
-        terminal_status = "failed"
-        job.error = str(exc)
+        final = jobstore.Failed(error=str(exc))
     finally:
-        job.status = terminal_status
+        job.state = final
 
 
 # ── Request/response ───────────────────────────────────────────────────
@@ -203,7 +205,7 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     job, created = _registry.find_or_launch(
         lambda j: (
             j.project == str(project)
-            and j.live
+            and j.state.status not in FINAL_STATES
             and j.bucket == payload.bucket
             and canonical_path(j.dataset_root) == canonical_path(dataset_root)
         ),
@@ -280,7 +282,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
     try:
         last_done = -1
         while (job := _get(job_id)) is not None:
-            ended = not job.live
+            ended = job.state.status in FINAL_STATES
             if job.done != last_done:
                 last_done = job.done
                 await websocket.send_json(
@@ -297,9 +299,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                 break
             await asyncio.sleep(0.5)
         else:
-            # Typed the same as a run's own terminal frame, so the client stops reconnecting
-            # instead of retrying forever against a job that will never exist.
-            missing = MissingJobFrame(type="final", error="job not found")
+            missing = MissingJobFrame(error="job not found")
             await websocket.send_json(missing.model_dump(mode="json"))
     except WebSocketDisconnect:
         pass

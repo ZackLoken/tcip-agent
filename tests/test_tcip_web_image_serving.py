@@ -19,7 +19,10 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_mcp.dataset_layout import image_dir, image_root
+from tcip_mcp.experiments import FINAL_STATES
+from tcip_web.jobstore import Completed, Failed, Running
 from tcip_web.routes import images as images_route
+from tcip_web.routes.images import OverviewStats, PlainRaster, SampledStats
 from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
@@ -307,14 +310,14 @@ def test_a_view_of_an_ingested_raster_reads_its_cells_or_one_display_read(
         derive_serving_tile_size,
         reference_cells,
     )
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
 
     source = tmp_path / "source"
     source.mkdir()
     _wide_raster(source / "strip_01.tif")
     ingested = ingest_images(tmp_path / "proj", str(source), actor=None)
-    assert "error" not in ingested, ingested
-    (image,) = (Path(f["dest"]) for f in ingested["files"])
+    assert isinstance(ingested, IngestManifest), ingested
+    (image,) = (Path(f.dest) for f in ingested.files)
 
     def view(x1: int) -> dict:
         resp = client.get(
@@ -770,7 +773,8 @@ def test_region_statistics_do_not_depend_on_the_display_that_asked(
     large = client.get("/api/images", params=region(262_144))
     assert _served(small).tolist() == _served(large).tolist()
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
-    assert body["sampled"] is True
+    assert body["read"]["kind"] == "sampled"
+    assert body["read"]["pixel_fraction"] < 1.0
     bounds = [(b["min"], b["max"]) for b in body["bands"][:3]]
     arr = np.load(str(path))
     _renders_as(small, _composite(arr[:64, :64], "minmax", bounds))
@@ -1497,9 +1501,9 @@ def test_get_bands_reports_exact_bounds_when_the_sample_covered_every_pixel(
     assert resp.status_code == 200
     body = resp.json()
     assert body["band_count"] == 4
-    assert body["sampled"] is False
-    assert body["pixel_fraction"] == 1.0
-    assert body["seed"] == 0
+    assert (
+        body["read"] == SampledStats(pixel_fraction=1.0, seed=0).model_dump()
+    )
     assert [b["min"] for b in body["bands"]] == [
         float(arr[:, :, i].min()) for i in range(4)
     ]
@@ -1526,9 +1530,9 @@ def test_get_bands_says_so_when_it_read_only_part_of_the_raster(
         str(path), np.random.default_rng(3).integers(0, 1000, size=(24, 40, 4))
     )
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
-    assert body["sampled"] is True
-    assert 0.0 < body["pixel_fraction"] < 1.0
-    assert body["seed"] == 0
+    read = SampledStats.model_validate(body["read"])
+    assert 0.0 < read.pixel_fraction < 1.0
+    assert read.seed == 0
 
 
 def test_get_bands_never_loads_a_tiff_through_load_image(
@@ -1581,7 +1585,10 @@ def test_cold_band_stats_open_the_raster_once(
         bands=np.random.default_rng(3).integers(0, 1000, size=(24, 40, 4)),
     )
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
-    assert body["band_count"] == 4 and body["pixel_fraction"] == 1.0
+    assert body["band_count"] == 4
+    assert (
+        body["read"] == SampledStats(pixel_fraction=1.0, seed=0).model_dump()
+    )
     assert len(opened) == 1
 
 
@@ -1858,9 +1865,9 @@ def test_get_bands_reads_an_oversized_rasters_stats_off_its_overviews(
 
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body["band_count"] == 4
-    assert body["sampled"] is False
-    assert body["overview_size"] == [1024, 13]
-    assert body["pixel_fraction"] is None and body["seed"] is None
+    assert OverviewStats.model_validate(body["read"]) == OverviewStats(
+        overview_size=(1024, 13)
+    )
     assert all(0 <= b["min"] <= b["max"] <= 255 for b in body["bands"])
     assert all(b["max"] > 0 for b in body["bands"]), (
         "the native pixels, zeroed, were read"
@@ -1904,9 +1911,9 @@ def test_a_raster_within_the_sampling_budget_keeps_reading_native_pixels(
     path = tmp_path / "capture.tif"
     arr = _multiband(path)
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
-    assert body["sampled"] is False
-    assert body["pixel_fraction"] == 1.0 and body["seed"] == 0
-    assert body["overview_size"] is None
+    assert (
+        body["read"] == SampledStats(pixel_fraction=1.0, seed=0).model_dump()
+    )
     assert [b["max"] for b in body["bands"]] == [
         float(arr[:, :, i].max()) for i in range(4)
     ]
@@ -1934,7 +1941,7 @@ def test_a_region_of_an_oversized_raster_stretches_by_its_overview_bounds(
         },
     )
     stats = _cached_stats(path)
-    assert stats.overview_size == (1024, 13)
+    assert stats.read == OverviewStats(overview_size=(1024, 13))
     bounds = [(r.minimum, r.maximum) for r in stats.ranges[:3]]
     _renders_as(resp, _composite(arr[:, :256], "minmax", bounds))
 
@@ -1983,13 +1990,9 @@ def test_get_bands_keeps_the_three_band_early_return(
     assert body == {
         "band_count": 3,
         "bands": [],
-        "plain": True,
         "default_bands": ["0", "1", "2"],
         "default_stretch": DEFAULT_STRETCH,
-        "pixel_fraction": None,
-        "seed": None,
-        "overview_size": None,
-        "sampled": False,
+        "read": PlainRaster().model_dump(),
     }
 
 
@@ -2004,7 +2007,8 @@ def _await_job(
         body = client.get(
             "/api/images/overviews/status", params={"job_id": job_id}
         ).json()
-        if not body["live"]:
+        state = images_route.OverviewJob.model_validate(body).state
+        if state.status in FINAL_STATES:
             return body
         time.sleep(0.05)
     raise AssertionError(
@@ -2072,7 +2076,7 @@ def test_the_overview_job_makes_that_same_request_servable(
     started = client.post("/api/images/overviews", json={"path": str(path)})
     assert started.status_code == 200
     job = _await_job(client, started.json()["job_id"])
-    assert job["status"] == "completed", job
+    assert job["state"] == Completed().model_dump(), job
 
     from tcip_mcp.pipelines.overviews import overview_sidecar, sidecar_valid
 
@@ -2090,7 +2094,7 @@ def test_a_build_request_joins_the_one_already_running_for_that_raster(
     path = tmp_path / "wide.tif"
     _wide_raster(path)
     running = images_route.OverviewJob(
-        job_id="ovr-running", path=str(path), status="running"
+        job_id="ovr-running", path=str(path), state=Running()
     )
     images_route._overview_registry.launch(running, lambda _job: None)
     try:
@@ -2098,7 +2102,7 @@ def test_a_build_request_joins_the_one_already_running_for_that_raster(
             "/api/images/overviews", json={"path": str(path)}
         ).json()
         assert joined["job_id"] == "ovr-running"
-        assert joined["status"] == "running"
+        assert joined["state"] == Running().model_dump()
     finally:
         images_route._overview_registry.jobs.pop(running.job_id, None)
 
@@ -2109,15 +2113,14 @@ def test_a_build_on_an_unreadable_raster_reaches_a_terminal_failure(
 ) -> None:
     """A build that cannot open its raster ends as a recorded failure.
 
-    The job's status reads failed, and it carries an error.
+    The job holds the failed state, which carries an error.
     """
     path = tmp_path / "broken.tif"
     path.write_bytes(b"this is not a raster")
     started = client.post("/api/images/overviews", json={"path": str(path)})
     assert started.status_code == 200
     job = _await_job(client, started.json()["job_id"], timeout=30.0)
-    assert job["status"] == "failed"
-    assert job["error"]
+    assert Failed.model_validate(job["state"]).error
 
 
 def test_an_overview_job_id_that_does_not_exist_is_a_404(
@@ -2358,4 +2361,4 @@ def test_the_image_route_and_the_vision_tools_display_a_raster_alike(
     described = client.get(
         "/api/images/bands", params={"path": str(path)}
     ).json()
-    assert described["plain"] is plain
+    assert (described["read"]["kind"] == "plain") is plain

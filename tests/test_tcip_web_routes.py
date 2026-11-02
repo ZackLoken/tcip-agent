@@ -16,8 +16,10 @@ import tcip_store
 from tcip_annotation.json_io import document_payload, read_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import image_dir, image_root, parse_image_path
+from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
+from tcip_web.jobstore import Completed
 from tcip_web.paths import safe_join
 from tcip_web.routes.annotate import VersionConflictRefusal
 from tcip_web.routes.inference import BucketExistsRefusal
@@ -1184,7 +1186,7 @@ class _PromptedEngine:
                     "score": 0.7,
                 },
             ],
-            None,
+            NoPass(),
         )
 
 
@@ -1511,7 +1513,7 @@ class _PromptPlacedEngine:
                     "score": 0.9,
                 }
             ],
-            None,
+            NoPass(),
         )
 
 
@@ -1591,7 +1593,7 @@ def test_an_engine_proposing_nothing_answers_no_bucket(
 
     class Empty:
         def propose(self, image_path: str, **params: JsonValue) -> Proposal:
-            return Proposal([], None)
+            return Proposal([], NoPass())
 
     register_proposal_engine(PromptableSegmenter.name, Empty())
     resp = _propose(
@@ -1599,7 +1601,7 @@ def test_an_engine_proposing_nothing_answers_no_bucket(
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() is None
+    assert resp.json()["kind"] == "nothing_proposed"
     assert buckets_under(dataset_root) == []
 
 
@@ -1646,15 +1648,17 @@ def _held_worker(
 ) -> threading.Event:
     """Replace the inference worker with one that holds its job running; return the release.
 
-    The job's status reads ``running`` until the returned event is set or five seconds pass,
-    then ``completed``.
+    The job holds :class:`~tcip_web.jobstore.Running` until the returned event is set or five
+    seconds pass, then :class:`~tcip_web.jobstore.Completed`.
     """
+    from tcip_web.jobstore import Running
+
     event = threading.Event()
 
     def held(job: InferenceJob) -> None:
-        job.status = "running"
+        job.state = Running()
         event.wait(timeout=5)
-        job.status = "completed"
+        job.state = Completed()
 
     monkeypatch.setattr(inference_routes, "_worker", held)
     return event
@@ -1711,8 +1715,9 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
 
     assert resp.status_code == 200, resp.text
     job = ended(inference_routes._registry, resp.json()["job_id"])
-    assert job.status == "failed"
-    assert "a bucket is published once" in job.error
+    failed = job.state
+    assert failed.status == "failed", failed
+    assert "a bucket is published once" in failed.error
     assert (
         tcip_store.read_versioned(
             bucket_key(dataset_root, launch.bucket)
@@ -1798,7 +1803,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     assert (refused.job_id, refused.bucket) == (job_id, first.json()["bucket"])
 
     event.set()
-    assert ended(inference_routes._registry, job_id).status == "completed"
+    assert ended(inference_routes._registry, job_id).state == Completed()
 
     third = opened_client.post(
         "/api/inference/launch",
@@ -1860,7 +1865,7 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     assert refused.job_id == job_id
 
     event.set()
-    assert ended(inference_routes._registry, job_id).status == "completed"
+    assert ended(inference_routes._registry, job_id).state == Completed()
 
 
 def test_launches_naming_one_bucket_over_two_captures_publish_one_bucket_each(
