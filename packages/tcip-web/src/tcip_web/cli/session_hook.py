@@ -1,8 +1,9 @@
 """Report an agent harness's session start to the agent terminal and print what its agent is told.
 
 The harness hands the hook its ``SessionStart`` event as JSON on stdin: Claude Code's and Codex's
-name the conversation ``session_id`` and how the session started ``source``, and Antigravity's,
-whose hook fires for a new conversation only, name it ``conversationId``. The report goes to the
+name the conversation ``session_id``, how the session started ``source`` and the conversation's
+record ``transcript_path``, and Antigravity's, whose hook fires for a new conversation only, name
+them ``conversationId`` and ``transcriptPath``. The report goes to the
 session start route the argument names or, with none, to that of the terminal session
 ``TCIP_TERMINAL_SESSION`` names on the backend serving the workspace ``TCIP_WORKSPACE`` names. The
 orientation the route answers is printed in the shape that harness reads from a hook's stdout,
@@ -30,6 +31,7 @@ class ClaudeOrCodexStart(BaseModel):
 
     conversation: str = Field(alias="session_id")
     source: SessionStartSource
+    transcript_path: str | None
 
     def output(self, text: str) -> dict:
         """Return ``text`` as the ``additionalContext`` either harness gives its agent."""
@@ -45,6 +47,7 @@ class AntigravityStart(BaseModel):
     """The part of Antigravity's ``SessionStart`` hook input this command reads."""
 
     conversation: str = Field(alias="conversationId")
+    transcript_path: str = Field(alias="transcriptPath")
 
     @property
     def source(self) -> Literal["startup"]:
@@ -111,7 +114,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             workspace_from_environment(), os.environ[TERMINAL_SESSION_ENV]
         )
     report = SessionStartReport(
-        conversation=start.conversation, source=start.source
+        conversation=start.conversation,
+        source=start.source,
+        transcript_path=start.transcript_path,
     )
     answer = httpx.post(url, json=report.model_dump(), timeout=None)
     answer.raise_for_status()

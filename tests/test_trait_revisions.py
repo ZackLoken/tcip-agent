@@ -11,6 +11,7 @@ confirmed revision until it is confirmed itself; the delivery event names the re
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -491,8 +492,12 @@ def test_the_vocabulary_is_read_whole_or_the_read_raises(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tcip_mcp import knowledge
+
     monkeypatch.setattr(
-        traits, "crops_yml_path", lambda: tmp_path / "missing.yml"
+        knowledge,
+        "CROPS",
+        dataclasses.replace(knowledge.CROPS, path=tmp_path / "missing.yml"),
     )
 
     with pytest.raises(OSError):

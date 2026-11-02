@@ -169,11 +169,13 @@ class TerminalEnded(TerminalEnd):
 class SessionStartReport(BaseModel):
     """A session start as its hook reported it: the harness's conversation and how it started.
 
-    The conversation is the one the harness declared it is in.
+    The conversation is the one the harness declared it is in; ``transcript_path`` is the file
+    the harness named as its record of that conversation, ``None`` when its hook names none.
     """
 
     conversation: str = Field(min_length=1)
     source: pty_host.SessionStartSource
+    transcript_path: str | None
 
 
 class SessionStartReported(SessionStartReport):
@@ -276,8 +278,8 @@ class TerminalSession:
 
         The launch resumes what :func:`launch_resumes` answers. Returns what its preparation
         took, or why it started no agent (a row that cannot launch here, a log that will not
-        read, a session hook its arguments cannot spell, a failed preparation, spawn or start
-        line).
+        read, a session hook its arguments cannot spell, a preparation refused or failing on the
+        filesystem, a failed spawn or start line).
         """
         project = store.opened
         command = pty_host.launch_command(provider)
@@ -287,31 +289,26 @@ class TerminalSession:
         try:
             resumed = launch_resumes(provider, project, command.override)
             argv = pty_host.render_argv(command.argv, project, env, resumed)
-        except ValueError as exc:
-            return pty_host.NotStarted(why=str(exc))
-        prepared = (
-            pty_host.Prepared(steps=[])
-            if command.override
-            else pty_host.prepare_launch(argv[0], provider, project, self.id)
-        )
-        if prepared.kind == "not_started":
-            return prepared
-        program = pty_host.launched_program(argv, command.override)
-        launched = LaunchedProgram(
-            provider=provider.id,
-            prepared=prepared.steps,
-            confinement=None if command.override else provider.confinement,
-            resumed=resumed,
-            **program,
-        )
-        try:
+            prepared = pty_host.Prepared(
+                steps=[]
+                if command.override
+                else provider.prepare(
+                    provider.files, argv[0], project, self.id
+                )
+            )
+            program = pty_host.launched_program(argv, command.override)
+            launched = LaunchedProgram(
+                provider=provider.id,
+                prepared=prepared.steps,
+                confinement=None if command.override else provider.confinement,
+                resumed=resumed,
+                **program,
+            )
             pty = pty_host.spawn_pty(
                 argv, str(store.workspace), rows, cols, env
             )
-        except OSError as exc:
-            return pty_host.NotStarted(
-                why=f"could not start the agent terminal: {exc}"
-            )
+        except (ValueError, OSError) as exc:
+            return pty_host.NotStarted(why=str(exc))
         self._pty = pty
         self.launched = launched
         pty_host.start_writer(pty, self._inputs, name=f"term-{self.id}-input")
@@ -739,15 +736,15 @@ class RecordedEnd(TerminalEnded):
 class RecordedSession(BaseModel):
     """A terminal session as the lines it left in its launch's project's log record it.
 
-    ``conversation`` is the one its newest ``agent_terminal_reported`` line names, ``None`` when
-    its hook reported none; ``end`` is its end line, ``None`` when none was written; and
+    ``report`` is the one its newest ``agent_terminal_reported`` line records, ``None`` when its
+    hook reported none; ``end`` is its end line, ``None`` when none was written; and
     ``last_line_at`` is the instant of the newest line it left, among its own start, report and
     end lines and every line its agent's MCP server stamped with its id: the one instant the
     session was last seen in use.
     """
 
     session_id: str
-    conversation: str | None
+    report: SessionStartReport | None
     end: RecordedEnd | None
     last_line_at: AwareDatetime
 
@@ -797,7 +794,7 @@ def recorded_session(
         *ended,
     ]
     own = [ln for ln, r in read if r.session_id == session]
-    reported = [r.conversation for _, r in reports if r.session_id == session]
+    reported = [r for _, r in reports if r.session_id == session]
     ends = [
         RecordedEnd(**r.model_dump(), actor=ln.actor)
         for ln, r in ended
@@ -805,7 +802,7 @@ def recorded_session(
     ]
     return RecordedSession(
         session_id=session,
-        conversation=reported[-1] if reported else None,
+        report=reported[-1] if reported else None,
         end=ends[-1] if ends else None,
         last_line_at=max(
             e.timestamp for e in [*own, *stamped_with(entries, session)]
@@ -848,11 +845,12 @@ def launch_resumes(
             and end.hand_off == "not_asked"
         ):
             why = f"{last} was ended by {end.actor}"
-        elif session.conversation is None:
+        elif session.report is None:
             why = f"{last} never reported a conversation through its hook"
         elif now() - session.last_line_at <= resume.cache_lifetime:
             return pty_host.Resumed(
-                conversation=session.conversation, session=session.session_id
+                conversation=session.report.conversation,
+                session=session.session_id,
             )
         else:
             at = session.last_line_at.isoformat(timespec="minutes")

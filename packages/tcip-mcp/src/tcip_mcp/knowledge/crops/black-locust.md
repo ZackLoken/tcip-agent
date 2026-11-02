@@ -41,8 +41,8 @@ Exact program germplasm and mating-system specifics are not asserted here; see
 
 ## Trait authority
 
-crops.yml is the trait authority (10 black-locust traits). Verify every trait
-there; never assert one it does not list. This skill partitions those traits by how
+crops.yml is the trait authority (10 black-locust traits), served whole by
+`serve_domain_knowledge(name='crops')`. Verify every trait there; never assert one it does not list. This skill partitions those traits by how
 they can (or cannot) be measured; it does not reproduce the catalog.
 
 ## Field-imageable vs lab / destructive

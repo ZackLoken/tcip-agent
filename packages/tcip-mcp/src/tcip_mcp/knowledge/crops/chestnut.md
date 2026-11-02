@@ -30,8 +30,8 @@ governs how the floral traits must be imaged:
 
 ## Trait authority
 
-`crops.yml` is the trait authority (21 chestnut traits). Verify every trait there; never
-assert one it does not list. This skill does not reproduce the catalog.
+`crops.yml` is the trait authority (21 chestnut traits), served whole by
+`serve_domain_knowledge(name='crops')`. Verify every trait there; never assert one it does not list. This skill does not reproduce the catalog.
 
 ## Field-imageable vs lab / destructive
 

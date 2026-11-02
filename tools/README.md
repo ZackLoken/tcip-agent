@@ -44,11 +44,13 @@ commands a breeder or an operator runs against a project are documented in `READ
   serve for scenes it makes in a scratch session (`fixture_session.py`), the fixtures the frontend
   tests read; its module docstring names the scenes. Run after changing what those routes serve;
   `tests/test_generated_frontend_fixtures.py` holds each file to what a regeneration serves.
-- `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
-  `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
-  canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after adding,
-  renaming, or re-describing a document; `tests/test_harness_discovery_generated.py` fails when a
-  checked-in generated file is stale.
+- `generate_harness_discovery.py` - writes the repository's `.claude/skills/<name>/SKILL.md` and
+  `.agents/skills/<name>/SKILL.md` files and the operating contract's block in `AGENTS.md` through
+  `tcip_mcp.knowledge.harness_files`, the writer every terminal launch runs in the workspace, and
+  the Claude row's `Edit` denials, from each provider row's harness files and the store's state
+  directory, and its `WebFetch` grants. Run after adding, renaming, or re-describing a document,
+  changing the operating contract or a row's harness files;
+  `tests/test_harness_discovery_generated.py` fails when a checked-in generated file is stale.
 - `verify_skill_tools.py` - guardrail holding every tool name in agent-facing prose to the MCP tool
   registry: a fabrication check over every table whose header's first column is "Tool", and an
   orphan check for a registered tool no surface names anywhere.

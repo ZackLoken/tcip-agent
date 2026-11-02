@@ -10,8 +10,9 @@ Who it's for: plant breeders, not CV engineers. They know their crops and traits
 PyTorch or make CV decisions. The platform supplies what the agent cannot otherwise know (the
 primitives and their interfaces, the trait definitions, the scientific rails, the data in hand) and
 leaves the method to the agent's own reasoning. There are two users and two surfaces: the agent's
-is the tool, knowledge and code surface it reasons through (see `CLAUDE.md`); the breeder's is the
-GUI, the only surface they work through.
+is the tool, knowledge and code surface it reasons through, under the operating contract
+(`packages/tcip-mcp/src/tcip_mcp/knowledge/operating-contract.md`); the breeder's is the GUI, the
+only surface they work through.
 
 Scope today: 2D imagery, RGB and N-channel (GeoTIFF, NPZ, grayscale, and multispectral captures
 stored one file per band), in two capture shapes: per-plant photos from a phone, DSLR or ground rig,
@@ -71,9 +72,9 @@ root, `<root>/.tcip/store.db`; imagery stays files). `tcip-store` depends on not
   delivery, project memory (`report_friction`, `write_retrospective`, `load_project_memory`), and
   steering the GUI (`push_panel_event`, `focus_human_attention`, `capture_live_canvas`,
   `view_gui_state`).
-- Domain knowledge: the documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`, served to
-  every harness as generated skills (`.claude/skills/`, `.agents/skills/`, `AGENTS.md`) and through
-  `serve_domain_knowledge`.
+- Domain knowledge: the documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`, served
+  through `serve_domain_knowledge` and written by every terminal launch into the workspace as the
+  skills its harness reads, beside the agent's operating contract in its instruction file.
 - One build path: the agent writes its own `nn.Module` and `train(ctx)` loop over the platform's
   building blocks (`build_detector`, heads, necks, losses, derivations); see the `pipeline-design`
   and `toolkit-inventory` skills.

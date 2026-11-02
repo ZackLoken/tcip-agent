@@ -31,8 +31,9 @@ How a crossing's day is read between the two neighboring capture dates is the tr
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower elongation/receptivity call.
 
-> Which crossing the majority date means. `crops.yml` is the immutable authority ("Date when
-> most catkins have elongated"). The crossing `catkin_elongation_date` is computed at is the
+> Which crossing the majority date means. `crops.yml`, served whole by
+> `serve_domain_knowledge(name='crops')`, is the immutable authority ("Date when most catkins
+> have elongated"). The crossing `catkin_elongation_date` is computed at is the
 > trait entry's `majority_milestone`, and a disagreement over which crossing the majority date
 > means is corrected in the entry itself, not in this file; how an entry is revised, confirmed and
 > bound to a delivery is the `delivery` skill's meaning door. `positive_onset_date` (first date any elongation appears)

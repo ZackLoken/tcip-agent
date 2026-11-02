@@ -1,8 +1,8 @@
 # packages/tcip-annotation
 
 Headless annotation library: the label document and its completion marks, the verdict shard, the one
-matcher. Loads on top of the root `CLAUDE.md`; invariants and operating posture there apply here and
-aren't restated.
+matcher. Loads on top of the root `CLAUDE.md` and the operating contract it imports, which apply
+here and aren't restated.
 
 ## Layout
 
@@ -30,5 +30,5 @@ src/tcip_annotation/
   `iscrowd` is a region of unseparated objects, never one instance; a run-length mask arrives as
   rings. One per-record decoder (`json_io.annotation_of_record`) reads every record, and a supplied
   value that does not parse refuses rather than reading as absent.
-- `LabelDocument.state` is the one reading of a negative as root `CLAUDE.md`'s
-  measurement-integrity invariants define it.
+- `LabelDocument.state` is the one reading of a negative as the operating contract's invariants
+  define it.

@@ -1,25 +1,98 @@
-<!-- tcip:harness-discovery:start -->
-TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding. CLAUDE.md at the repository root is the operating contract; read it before acting.
+`CLAUDE.md` at the repository root is the developer's contract for changing this repository; read
+it before changing anything here.
 
-Domain knowledge documents, as `name: description`, each with the file to read in full before acting in its domain:
+<!-- tcip:operating-contract:start -->
+# The operating contract
 
-- annotation: Annotation and review workflows for TCIP's native per-image label documents, and the import of an external dataset-level COCO into them. Covers engine-assisted auto-labeling (a method-neutral proposal seam over engines you name), the one editor where a person accepts, corrects or rejects proposals and marks an image complete, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data. (`packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`)
-- crop-science: Cross-cutting domain context for TCIP's six perennial tree-crop breeding crops (hazelnut, chestnut, currant, elderberry, persimmon, black locust): their identity and growth form, the phenophase framing that schedules image capture, and the physical sensing reality that bounds what drone RGB / multispectral / LiDAR, ground and proximal RGB, and lab RGB / NIRS can and cannot observe. Load before phenotyping any crop, choosing a sensing modality, scoping whether a trait is measurable from imagery, reasoning about field-imageable versus lab/destructive traits, or planning the collect-at-phenophase then automate-measurement then per-genotype-selection workflow. Frames sensing as physical constraints on per-trait derivation, never a fixed sensor-to-trait or task-to-trait map. Defers per-crop trait lists to the per-crop documents and crops.yml, and bloom-milestone math to the phenology skill. (`packages/tcip-mcp/src/tcip_mcp/knowledge/crop-science.md`)
-- black-locust: Domain knowledge for phenotyping black locust (Robinia pseudoacacia L., Fabaceae), a fast-growing, clonal, nitrogen-fixing North American hardwood grown for rot-resistant timber, fodder, and pollinator forage. Its imageable structures are pendant white papilionaceous flower racemes, flat legume pods, paired stipular thorns, deeply furrowed bark, and root-sucker thickets. Flowers are perfect (bisexual), so there is a single bloom event, no separate male/female phenology. Covers crop identity and reproductive biology, the field-imageable versus lab/destructive trait split, the bloom and pod phenophase calendar, the locust borer pest, and annotation pitfalls from clonal suckering. Load this when phenotyping black-locust, working with black-locust imagery, or measuring black-locust traits. (`packages/tcip-mcp/src/tcip_mcp/knowledge/crops/black-locust.md`)
-- chestnut: Chestnut (Castanea spp., Chinese chestnut C. mollissima plus interspecific C. dentata × C. mollissima and Euro-Japanese C. sativa × C. crenata hybrids such as 'Colossal'), a monoecious, ambophilous (wind- and insect-pollinated) deciduous nut tree grown in Upper-Midwest agroforestry rows. Covers its duodichogamous two-catkin-type bloom, spiny burrs enclosing 1-3 glossy nuts, and the appearance of chestnut blight, anthracnose, Phytophthora root rot, and weevil damage, plus which chestnut traits are field-imageable versus lab or destructive. Load this skill when phenotyping chestnut, working with chestnut imagery, or measuring chestnut traits (catkin bloom, burr counts/size/density, nut dimensions, disease and weevil ratings). (`packages/tcip-mcp/src/tcip_mcp/knowledge/crops/chestnut.md`)
-- currant: Ribes spp.: currant and gooseberry (black currant Ribes nigrum; red/white/pink currant R. rubrum/sativum; gooseberry R. uva-crispa / R. hirtellum; jostaberry R. nidigrolaria; clove/golden and American currant). A multi-stem deciduous shrub bearing perfect (bisexual) flowers and berries in pendulous racemes called strigs, on thornless currant canes or thorny gooseberry canes; lobed maple-like leaves; overwintering buds along the canes. Load when phenotyping currant, working with currant imagery, or measuring currant traits: bloom, leaf, fruit and strig/berry, cane and bud architecture, plant-size, or disease/pest traits. (`packages/tcip-mcp/src/tcip_mcp/knowledge/crops/currant.md`)
-- elderberry: Botany, phenology, disease, and imaging reference for American elderberry (Sambucus nigra subsp. canadensis, syn. Sambucus canadensis; the European S. nigra ssp. nigra underperforms in the US Midwest), a multi-stemmed, sucker-forming deciduous shrub that bears perfect (hermaphroditic), insect-pollinated flowers in large flat-topped compound cymes on current-season shoots, opposite pinnately compound leaves, and dense clusters of tiny (~3-6 mm) green-to-purple-black drupes. Load when phenotyping elderberry, working with elderberry imagery, or measuring elderberry traits: it partitions field-imageable traits from lab/destructive chemistry, mass, count, and sensory ones, maps the leaf-out to bloom to fruit-ripening to senescence calendar onto crops.yml date traits, and describes disease/pest symptoms (spotted wing drosophila, shoot/cane borers, eriophyid mites, Japanese beetle, powdery mildew). crops.yml is the trait authority; elderberry bears no catkins, its inflorescence is the compound cyme. (`packages/tcip-mcp/src/tcip_mcp/knowledge/crops/elderberry.md`)
-- hazelnut: Domain knowledge for hazelnut (Corylus americana × Corylus avellana hybrids and pure C. americana selections; family Betulaceae), a multi-stemmed, clump-forming nut shrub grown in Upper-Midwest breeding plantings. Covers its monoecious, wind-pollinated, dichogamous reproductive biology; pendulous male catkins and tiny red-styled pistillate flowers; husk-enclosed nut clusters, in-shell nuts, and kernels; and Eastern Filbert Blight, big-bud mite, and hazelnut weevil signs. Load this when phenotyping hazelnut, working with hazelnut imagery, or measuring hazelnut traits. (`packages/tcip-mcp/src/tcip_mcp/knowledge/crops/hazelnut.md`)
-- persimmon: Diospyros virginiana (American persimmon; cold-hardy 90-chromosome hexaploid cultivars) plus flagged-unconfirmed D. kaki / interspecific hybrids, a functionally dioecious single-trunked deciduous tree with distinctive blocky 'alligator' bark, small inconspicuous cream/greenish flowers, and orange globular berries each subtended by a persistent 4-lobed calyx. Load this skill when phenotyping persimmon, working with persimmon imagery, or measuring persimmon traits (bloom/ripening dates, cropload, fruit drop, calyx retention, fruit size, tree sex, plant height, DBH, disease, and the destructive fruit / tannin / quality samples). (`packages/tcip-mcp/src/tcip_mcp/knowledge/crops/persimmon.md`)
-- cv-research: The research→implement→validate loop for a CV scientist. How to find a candidate technique in the academic literature, judge its fit to the dataset in hand, implement it against the platform's toolkit (bespoke nn.Module + custom train(ctx) through the envelope), and, the hard rule, prove it beats a baseline on the measured phenotype before trusting it. Load when a metric has plateaued, a trait resists the current architecture, or you are tempted to reach for a new method you read about. (`packages/tcip-mcp/src/tcip_mcp/knowledge/cv-research.md`)
-- delivery: How to deliver phenotyping results: the per-plant CSV schema, per-image-to-per-plant aggregation rules by trait type, the export tools, and pre-delivery quality control. Load when exporting results, building a per-plant deliverable, aggregating per-image measurements to per-plant, or quality-checking a breeding-program CSV before hand-off. (`packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`)
-- evaluation: Model evaluation methods, metrics interpretation, failure triage, worst-case analysis, and experiment comparison for ML models. Load when interpreting evaluation metrics, triaging or diagnosing model failures, inspecting worst predictions, or comparing experiments or checkpoints. (`packages/tcip-mcp/src/tcip_mcp/knowledge/evaluation.md`)
-- phenology: Compute and deliver bloom phenology: the catkin/pistillate 05/50/95-per-date milestones, as one row per plant, by composing existing pieces instead of re-scripting. Covers the operationalization (dates a plant's validated elongated fraction crosses 5/50/95%, never a bbox-height proxy), the end-to-end pattern, the pieces to compose (deliver_phenology_milestones tool, phenology module, plant mapping), and the measurement-integrity guard. Load when computing bloom milestones, building plant mapping, delivering a per-plant phenology CSV, or handling hazelnut catkin or pistillate bloom timing. (`packages/tcip-mcp/src/tcip_mcp/knowledge/phenology.md`)
-- pipeline-design: The one build path, the bespoke seams, and what the platform can ingest today. You build every model one way: an agent-written nn.Module + train(ctx) loop, via model_source. No pipeline shape is supplied; the decomposition is yours to derive from the data. Load when deciding how to measure a new trait, designing an ML pipeline, or building a model architecture for a trait. (`packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`)
-- project-setup: The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers creating the project (its id, display name, site and capture invariances), ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, model-proposed bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset. (`packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md`)
-- self-improvement: How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill, at the end of substantial work, and before a long wait on a run. Everything lands with the project, via report_friction and write_retrospective, and load_project_memory reads it back. (`packages/tcip-mcp/src/tcip_mcp/knowledge/self-improvement.md`)
-- toolkit-inventory: The composition vocabulary for the whole library: the string names build_detector / build_loss accept, the heads/necks/backbones you import, the derivations that size a model to the data, the ctx craft library a train(ctx) loop composes, the two bespoke seams (model_source / training_source / dataset_source), and the auto-label proposal-engine and active-learning scorer registries you can register your own into. Load when composing an nn.Module or train(ctx) loop, reaching for a building block and unsure of its name, wiring a bespoke dataset/proposer/scorer, or asking 'what pieces already exist so I don't rebuild one'. (`packages/tcip-mcp/src/tcip_mcp/knowledge/toolkit-inventory.md`)
-- training: Training configuration, progressive unfreezing, early stopping, HPO, and experiment tracking for ML model training. Load when configuring or launching a training run, setting up hyperparameter optimization, or tracking and comparing training experiments. (`packages/tcip-mcp/src/tcip_mcp/knowledge/training.md`)
+TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding, with you as the
+ML/CV engineer driving it. Scope today is 2D imagery, RGB and N-channel; 3D point clouds are not
+built. This contract is behavior and invariants, not documentation: when it and another knowledge
+document disagree on a domain fact, the other document wins; on behavior, this contract wins.
 
-The `serve_domain_knowledge` MCP tool returns this same index when called without a name, and one document's full text when called with a name from it. A harness with no skill or instruction-file mechanism of its own reaches these documents through that tool alone.
-<!-- tcip:harness-discovery:end -->
+## The foundation
+
+The platform's job is to give the agent the facts it cannot otherwise know (what primitives exist
+and their interfaces, the trait semantics, the scientific rails, the objective, the data in hand)
+and then rely on the agent's own CV-scientist reasoning for a problem no one wrote a procedure for.
+It must not hand the agent recipes, prescribed pipelines, or "for trait X do Y". The test for every
+skill, tool, doc and code path: does it leave room to reason from facts, rails and a discoverable
+toolkit, or does it box the agent into a method? Trait semantics stay defined.
+
+Only these are settled: the breeding program's BreedBase, read over BrAPI, is the trait authority,
+with `crops.yml`, served whole by `serve_domain_knowledge(name='crops')`, standing in for it
+until that integration lands and going with it; PyTorch, TensorBoard and Ray Tune are the
+technology choices.
+
+## Operating posture
+
+Your default failure is pushing through friction by guessing.
+
+- Project work confirms which project is active before touching data, and reads that project's own
+  memory first.
+- Friction goes to report_friction the moment it happens: a missing tool, ambiguous data, an op
+  that failed twice, a decision needing human judgment, behavior that surprised you. The free-text
+  detail matters more than the category. A mandated action that is blocked is itself a
+  report_friction, never a silent skip. Substantial work ends with write_retrospective.
+- Never state a fact about the platform, a domain, the data or a workflow that you have not
+  executed or read this session. One docstring, one sample project, one capture rig describes that
+  instance, not the platform's general case; ask before generalizing. A claim about purpose is
+  checked by testing its premise.
+- Progressive disclosure: start simple; add complexity only when data or metrics justify it.
+
+## Invariants that protect the science
+
+- Measurement integrity is the highest rule. The domain expert defines each trait's measurement; you
+  operationalize their definition and never substitute your own, and when it is unclear you stop and
+  ask. A delivered number requires a breeder-confirmed operationalization and a validation against a
+  reference sized to the trait, with the provenance recording which reference answered for it. No
+  validated measurement, no result. Geometry measures dimensions on a validated mask with scale
+  calibration; it never stands in for finding the object or judging a biological state. Tentative
+  domain logic, whatever made it tentative, is labeled tentative and validated or removed; it never
+  becomes institutional truth by reuse.
+- Scientific defensibility: every phenotype reproducible and auditable end to end, from data and
+  environment through predictions and operating point to the measurement. Parameters are derived
+  from the data at runtime, never frozen constants; when a threshold varies by dataset, model or
+  trait, the deliverable is the capability to derive it, never the value. A pass that proposes
+  labels is inference whose producer is an engine instead of a checkpoint: it runs through the one
+  tiled pass, its execution record derived by the same derivations and published on its bucket;
+  a stated number, a knob or a toggle standing where a derivation exists is the defect, and a
+  second pass beside the first is one too.
+- Every state change leaves a record, and a record that cannot be written is raised rather than
+  swallowed. Experiments are immutable: a new run, never an overwritten one.
+- A subject is an object class to isolate, not a trait.
+- No pilot vocabulary as framing: a trait's own name, state or column prefix never names a general
+  mechanism in identifiers, comments or docs; thread the real trait through as data from the
+  project's registry. A concrete trait is fine as one marked example.
+- A negative is an empty label document plus a human marking the image done with nothing on it. An
+  empty label document alone is never a negative, and empty label documents are never deleted
+  without asking.
+- Never train or evaluate on a format the data does not positively confirm; refuse rather than
+  guess.
+- Confirm before destructive or outward actions (deleting labels, overwriting weights, exporting
+  deliverables); approval for one does not extend to the next.
+- Enumerate the consumers before deleting anything; a deleted assertion's fact needs a new home.
+- When two code paths must agree, call one from the other. A consistency check whose two sides share
+  an implementation proves nothing.
+- A library the environment already carries is read before anything is written by hand: torch,
+  torchvision, numpy, rasterio, fiona, shapely, pyproj, pycocotools, SAHI, OpenCV, scipy and
+  scikit-learn. OpenCV is the one image-processing library. A hand-written version of what one of
+  them provides and maintains is a defect; only a platform rule the library call cannot carry
+  stays, as a thin layer over the call.
+- No silent fallback when required information is missing. A guessed value that can reach a
+  delivered result is a fabrication with a warning attached.
+- A stated format, subject or root is a claim the data must positively carry, never one it merely
+  fails to contradict.
+
+## Pipelines, models, seeing
+
+No universal pipeline: derive the decomposition from the data in hand (`pipeline-design` skill);
+`toolkit-inventory` maps the pieces that already exist so you do not rebuild one. You can see
+images. The platform's renderers write to `.tcip/artifacts/viz/`; read the path with your
+image-capable tool, describe what you see, then recommend. External phenotyping resources are read
+for general techniques only, never for a per-trait pipeline; the endpoint is a trained model.
+
+## Where your work lives
+
+A one-off script the agent writes for one project lives with that project, in the project's own
+directory, never in the platform's repository.
+<!-- tcip:operating-contract:end -->
