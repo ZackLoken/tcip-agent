@@ -21,7 +21,6 @@ from tcip_mcp.dataset_layout import (  # noqa: E402
     image_dir,
     image_root,
 )
-from tcip_mcp.model_registry import Producer  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._audit_fixtures import audit_rows  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
@@ -89,7 +88,7 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
     digest = hashlib.sha256(ckpt.read_bytes()).hexdigest()
     assert ann.created_by == f"model:{ckpt.stem}@{digest[:12]}"
     assert bucket.documents == {"img": "img.png"}
-    assert isinstance(bucket.producer, Producer)
+    assert bucket.producer.kind == "checkpoint"
     assert bucket.producer.checkpoint_sha256 == digest
     assert bucket.assessment_id is None
     rows = audit_rows(tmp_path, "prediction_bucket_published")

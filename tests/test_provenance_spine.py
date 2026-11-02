@@ -49,9 +49,10 @@ def test_the_producer_of_a_completed_runs_checkpoint_is_that_run(
 
     ckpt = registered_checkpoint(tmp_path, experiment_id="expR")
 
-    producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
-    assert len(producer.checkpoint_sha256) == 64
-    assert producer.experiment_id == "expR"
+    loaded = load_registered_checkpoint(ckpt, project=tmp_path)
+    assert (loaded.entry.origin, loaded.entry.name) == ("run", "expR")
+    assert len(loaded.producer.checkpoint_sha256) == 64
+    assert loaded.producer.origin == "run"
 
 
 def test_the_producer_of_a_foreign_checkpoint_names_no_run(
@@ -60,7 +61,7 @@ def test_the_producer_of_a_foreign_checkpoint_names_no_run(
     """A foreign checkpoint's producer names its digest and no run.
 
     A checkpoint a run of the project wrote beside its deliverable, whose digest no completion
-    names, registered in explicit mode, loads with ``experiment_id`` null.
+    names, registered in explicit mode, loads with a foreign origin.
     """
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -70,7 +71,7 @@ def test_the_producer_of_a_foreign_checkpoint_names_no_run(
         foreign_checkpoint(tmp_path), project=tmp_path
     ).producer
     assert producer.checkpoint_sha256
-    assert producer.experiment_id is None
+    assert producer.origin == "foreign"
 
 
 def test_a_payloads_own_experiment_id_names_no_producer(
@@ -96,7 +97,7 @@ def test_a_payloads_own_experiment_id_names_no_producer(
 
     loaded = load_registered_checkpoint(ckpt, project=tmp_path)
     assert loaded.payload["experiment_id"] == "expStamped"
-    assert loaded.producer.experiment_id is None
+    assert loaded.producer.origin == "foreign"
     assert loaded.producer.checkpoint_sha256
 
 

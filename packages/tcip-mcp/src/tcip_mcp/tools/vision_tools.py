@@ -957,7 +957,7 @@ def capture_live_canvas(
     ping: PanelEventAnswer | None = None
     if refresh:
         ping = post_panel_event(bound, "app", CanvasStateRequest())
-        if ping.reason is None:
+        if ping.kind == "taken":
             for _ in range(12):  # ~2.4s for the GUI's flush to land
                 _time.sleep(0.2)
                 cur = read_canvas_meta(str(project))

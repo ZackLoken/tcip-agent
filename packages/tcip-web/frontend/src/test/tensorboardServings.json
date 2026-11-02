@@ -1,4 +1,14 @@
 {
-  "train-x": { "url": "/api/training/runs/train-x/tensorboard/", "port": 0 },
-  "train-y": { "url": "/api/training/runs/train-y/tensorboard/", "port": 0 }
+  "train-x": { "kind": "serving", "url": "/api/training/runs/train-x/tensorboard/", "port": 0 },
+  "train-y": { "kind": "serving", "url": "/api/training/runs/train-y/tensorboard/", "port": 0 },
+  "train-portless": {
+    "kind": "failed",
+    "error": "no port could be bound on 127.0.0.1",
+    "output": null
+  },
+  "train-dying": {
+    "kind": "failed",
+    "error": "tensorboard exited during startup with code 3",
+    "output": "tensorboard is not installed"
+  }
 }

@@ -27,14 +27,14 @@ def _ingested_bucket(tmp_path: Path) -> tuple[Path, Path]:
 
     Returns the project and its undated capture.
     """
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
 
     source = tmp_path / "source"
     write_image(source / "shoot_001.jpg", (16, 16))
 
     project = tmp_path / "proj"
     result = ingest_images(project, str(source), actor=None)
-    assert "error" not in result, result
+    assert isinstance(result, IngestManifest), result
     return project, image_dir(project, UNDATED_BUCKET)
 
 
@@ -47,7 +47,7 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> tuple[Path, Path]:
 
     Returns the project and its undated capture.
     """
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tests._producer_fixtures import BRIGHT, painted_frame
 
     source = tmp_path / "source"
@@ -59,7 +59,7 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> tuple[Path, Path]:
 
     project = tmp_path / "proj"
     result = ingest_images(project, str(source), actor=None)
-    assert "error" not in result, result
+    assert isinstance(result, IngestManifest), result
     return project, image_dir(project, UNDATED_BUCKET)
 
 

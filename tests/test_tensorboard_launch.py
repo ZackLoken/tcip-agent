@@ -14,40 +14,15 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from tests._tensorboard_parent import listening_argv
+from tests._tensorboard_parent import DyingChild, listening_argv
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from subprocess import _FILE
-    from typing import NoReturn, TypedDict, Unpack
+    from typing import NoReturn, Unpack
 
     import pytest
 
-    class _PopenStreams(TypedDict, total=False):
-        """The stream keywords ``launch_tensorboard`` hands ``Popen``."""
-
-        stdout: _FILE
-        stderr: _FILE
-
-
-class DyingChild(subprocess.Popen):
-    """A real child that writes a missing-install message and exits with status 3.
-
-    It runs in place of the command it was handed, and construction waits for its exit.
-    """
-
-    def __init__(
-        self, cmd: list[str], **kwargs: Unpack[_PopenStreams]
-    ) -> None:
-        super().__init__(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.stderr.write('tensorboard is not installed\\n'); sys.exit(3)",
-            ],
-            **kwargs,
-        )
-        self.wait(timeout=30)
+    from tests._tensorboard_parent import PopenStreams
 
 
 def _port_of(cmd: list[str]) -> int:
@@ -58,9 +33,7 @@ def _port_of(cmd: list[str]) -> int:
 class LivingChild(subprocess.Popen):
     """A real child accepting on the command's port for thirty seconds, in place of the command."""
 
-    def __init__(
-        self, cmd: list[str], **kwargs: Unpack[_PopenStreams]
-    ) -> None:
+    def __init__(self, cmd: list[str], **kwargs: Unpack[PopenStreams]) -> None:
         super().__init__(listening_argv(_port_of(cmd), seconds=30), **kwargs)
 
 
@@ -73,11 +46,11 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(
 
     info = tb.launch_tensorboard(tmp_path)
 
-    assert isinstance(info, tb.TensorboardFailure)
+    assert info.kind == "failed", info
     assert "exited during startup" in info.error
     assert info.output is not None
     assert "tensorboard is not installed" in info.output
-    assert tb.running(tmp_path) is None
+    assert tb.running(tmp_path).kind == "not_serving"
 
 
 def test_a_launch_that_takes_no_port_answers_its_failure(
@@ -94,9 +67,9 @@ def test_a_launch_that_takes_no_port_answers_its_failure(
 
     info = tb.launch_tensorboard(tmp_path)
 
-    assert isinstance(info, tb.TensorboardFailure)
+    assert info.kind == "failed", info
     assert "no port could be bound" in info.error
-    assert tb.running(tmp_path) is None
+    assert tb.running(tmp_path).kind == "not_serving"
 
 
 def _never_confirms_kill_popen_class(spawned: list[subprocess.Popen]) -> type:
@@ -157,7 +130,7 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
 
     try:
         info = tb.launch_tensorboard(tmp_path)
-        assert isinstance(info, tb.TensorboardFailure)
+        assert info.kind == "failed", info
         assert "tie assignment failed" in info.error
         assert "kill unconfirmed" in info.error
         assert str(spawned[0].pid) in info.error
@@ -192,7 +165,7 @@ def test_stop_logs_a_kill_that_never_confirms(
     try:
         run = tmp_path / "unconfirmed-run"
         info = tb.launch_tensorboard(run)
-        assert isinstance(info, tb.TensorboardServing)
+        assert info.kind == "serving", info
         with caplog.at_level(logging.WARNING, logger=tb.logger.name):
             result = tb.stop_tensorboard(tb._board_key(run))
         assert result["status"] == "kill_unconfirmed"
@@ -229,7 +202,7 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(
 
     try:
         info = tb.launch_tensorboard(tmp_path / "sweep-unconfirmed-run")
-        assert isinstance(info, tb.TensorboardServing)
+        assert info.kind == "serving", info
         with caplog.at_level(logging.WARNING, logger=tb.logger.name):
             tb._stop_all_tracked()
         assert any(
@@ -255,12 +228,12 @@ def test_launch_serves_the_board_path_for_a_process_that_stays_up(
 
     info = tb.launch_tensorboard(tmp_path)
     try:
-        assert isinstance(info, tb.TensorboardServing)
+        assert info.kind == "serving", info
         assert info.url == f"/api/training/runs/{tmp_path.name}/tensorboard/"
         assert tb.running(tmp_path) == info
     finally:
         tb.stop_tensorboard(tb._board_key(tmp_path))
-    assert tb.running(tmp_path) is None
+    assert tb.running(tmp_path).kind == "not_serving"
 
 
 def test_launch_answers_its_url_only_once_the_board_accepts_a_connection(
@@ -282,7 +255,7 @@ def test_launch_answers_its_url_only_once_the_board_accepts_a_connection(
 
     info = tb.launch_tensorboard(tmp_path)
     try:
-        assert isinstance(info, tb.TensorboardServing)
+        assert info.kind == "serving", info
         socket.create_connection((LOOPBACK_HOST, info.port), timeout=1).close()
     finally:
         tb.stop_tensorboard(tb._board_key(tmp_path))
@@ -315,7 +288,7 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
         assert (
             tb.stop_tensorboard(str(board_of(other)))["status"] == "stopped"
         ) is one_directory
-        assert (tb.running(launched) is None) is one_directory
+        assert (tb.running(launched).kind == "not_serving") is one_directory
     finally:
         tb.stop_tensorboard(str(board_of(launched)))
         tb.stop_tensorboard(str(board_of(other)))

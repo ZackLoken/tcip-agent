@@ -30,12 +30,14 @@ def test_two_runs_each_produce_only_their_own_weights(tmp_path: Path) -> None:
 
     assert first is not None and second is not None
     assert first.sha256 != second.sha256
-    assert load_registered_checkpoint(
-        first.path, project=tmp_path
-    ).experiment_id == ("exp-rail11-base")
-    assert load_registered_checkpoint(
-        second.path, project=tmp_path
-    ).experiment_id == ("exp-rail11-next")
+    for checkpoint, run in (
+        (first, "exp-rail11-base"),
+        (second, "exp-rail11-next"),
+    ):
+        entry = load_registered_checkpoint(
+            checkpoint.path, project=tmp_path
+        ).entry
+        assert (entry.origin, entry.name) == ("run", run)
 
 
 def test_a_tag_naming_a_run_never_makes_that_run_a_producer(
@@ -71,10 +73,8 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(
         actor=None,
     )
 
-    assert (
-        load_registered_checkpoint(forged, project=tmp_path).experiment_id
-        is None
-    )
+    entry = load_registered_checkpoint(forged, project=tmp_path).entry
+    assert (entry.origin, entry.name) == ("foreign", "exp-rail1-forged")
 
 
 def test_a_replacements_registry_event_names_the_superseded_entry(

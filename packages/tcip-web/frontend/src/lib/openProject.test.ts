@@ -92,7 +92,11 @@ describe("a switch this page starts", () => {
     const { started } = sessionOf(SESSION_WRITES.first);
     useStore.setState({
       openProject: openedAs(VALLEY).project,
-      recordedSession: { project_id: VALLEY.record.id, started, user: useStore.getState().user },
+      recordedSession: {
+        project_id: VALLEY.record.id,
+        started,
+        user: useStore.getState().user,
+      },
     });
     useStore.getState().startImageSessionTracking("a.jpg", Date.now() - 2000);
 

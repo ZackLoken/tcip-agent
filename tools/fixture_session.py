@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from starlette.testclient import httpx
 
     from tcip_web.jobstore import Job, JobRegistry
+    from tcip_web.routes.subjects import RegistryVersion
     from tcip_web.state import OpenProject
 
 
@@ -316,6 +317,13 @@ def normalized(
 WAIT_S = 60.0
 """How long a scene waits on a route's background worker: for it to end, to pause at a
 :class:`Gate`, or to be stepped on. A sample bound, far above a scratch session's worker time."""
+
+
+def registry_base(loaded: JsonValue) -> RegistryVersion:
+    """Return what a save writes over, as the subjects load answer ``loaded`` found it."""
+    from tcip_web.routes.subjects import SubjectsLoad
+
+    return SubjectsLoad.model_validate(loaded).registry
 
 
 def ended[J: Job](registry: JobRegistry[J], job_id: str) -> J:

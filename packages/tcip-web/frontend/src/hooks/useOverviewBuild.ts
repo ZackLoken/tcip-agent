@@ -67,17 +67,17 @@ export function useOverviewBuild(
       setState((s) => ({ ...s, building: false, error: messageOf(e) }));
 
     const onRead = (job: OverviewJob) => {
-      if (!job.live) {
-        setState((s) =>
-          job.status === "completed"
-            ? {
-                building: false,
-                bytesWritten: job.bytes_written,
-                error: null,
-                reloadToken: s.reloadToken + 1,
-              }
-            : { ...s, building: false, error: job.error ?? `build ${job.status}` },
-        );
+      const ended = job.state;
+      if (ended.status === "completed") {
+        setState((s) => ({
+          building: false,
+          bytesWritten: job.bytes_written,
+          error: null,
+          reloadToken: s.reloadToken + 1,
+        }));
+      } else if (ended.status === "failed" || ended.status === "canceled") {
+        const error = ended.status === "failed" ? ended.error : `build ${ended.status}`;
+        setState((s) => ({ ...s, building: false, error }));
       } else if (job.bytes_written !== lastWritten) {
         lastWritten = job.bytes_written;
         lastMoved = Date.now();

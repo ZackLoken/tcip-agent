@@ -399,10 +399,10 @@ def samples_over(
     """Return the admitted records ``assignment`` names as explicit samples, sorted by member.
 
     ``assignment`` maps each member to the side it landed on and ``group_of`` gives its group
-    key; a record ``assignment`` does not name has no sample. Each sample carries the source,
-    the ground truth and its digest the admission resolved for that member.
+    key; a record ``assignment`` does not name has no sample. Each sample is its whole source and
+    carries the source, the ground truth and its digest the admission resolved for that member.
     """
-    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.selection import Sample, WholeSource
 
     return [
         Sample(
@@ -412,6 +412,7 @@ def samples_over(
             row_key=record.row_key,
             group=group_of(record.member),
             side=assignment[record.member],
+            extent=WholeSource(),
             ground_truth_digest=record.ground_truth_digest,
             read=record.read,
             stored=record.stored,

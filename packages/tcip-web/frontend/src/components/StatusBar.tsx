@@ -54,9 +54,6 @@ export function StatusBar() {
     return () => window.clearTimeout(id);
   }, [agentActivity]);
 
-  const event = agentActivity?.event;
-  const written = event?.event_type === PANEL_EVENT_LABELS_WRITTEN ? event.name : null;
-
   return (
     <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[12px] text-tcip-muted shrink-0">
       {activeTab === "annotate" && (
@@ -87,7 +84,8 @@ export function StatusBar() {
       {showAgent && agentActivity && (
         <span className="text-tcip-accent">
           {`${agentActivity.client ?? "Process"}: ${agentActivity.event.event_type.replaceAll("_", " ")}`}
-          {written ? ` on ${written}` : ""}
+          {agentActivity.event.event_type === PANEL_EVENT_LABELS_WRITTEN &&
+            ` on ${agentActivity.event.name}`}
         </span>
       )}
       {/* Project breadcrumb, lower-right: project (recent) · date (switch) · Switch Project (all). */}

@@ -514,7 +514,7 @@ def test_a_completed_bespoke_runs_entry_carries_its_metrics_and_digest(
     [listed] = [
         m
         for m in ModelRegistry(str(tmp_path)).list_models()
-        if m.entry.experiment_id == "expB"
+        if (m.entry.origin, m.entry.name) == ("run", "expB")
     ]
     assert listed.facts.metrics["val_loss"] == pytest.approx(0.3)
     assert listed.entry.sha256 and len(listed.entry.sha256) == 64

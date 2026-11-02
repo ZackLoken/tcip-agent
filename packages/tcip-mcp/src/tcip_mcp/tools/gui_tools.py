@@ -36,9 +36,8 @@ def push_panel_event(
 
     Sends an HTTP POST to the running FastAPI server (see :mod:`tcip_mcp.web_client`); the backend
     broadcasts to any connected browsers via WebSocket. The answer is
-    :class:`~tcip_mcp.web_client.PanelEventAnswer`: ``reason`` is ``None`` once the backend took
-    it, otherwise says why not (the backend's refusal naming the other project it has open, none
-    open, or no backend running).
+    :data:`~tcip_mcp.web_client.PanelEventAnswer`: that the backend took it, or why not (the
+    backend's refusal naming the other project it has open, none open, or no backend running).
 
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like
@@ -72,9 +71,9 @@ def focus_human_attention(
 
     It lands on ``image_index``, else on the first frame holding ``subject``: in the bucket's
     document for it when a bucket is named, in its label document otherwise. The result is the
-    event channel's answer (:func:`~tcip_mcp.web_client.post_panel_event`), its ``reason``
-    included, with the frame landed on added: a backend with another project open, or none
-    running, answers with a ``reason`` rather than raising. An
+    event channel's answer (:func:`~tcip_mcp.web_client.post_panel_event`) with the frame
+    landed on added: a backend with another project open, or none running, answers why it did
+    not take the focus rather than raising. An
     image elsewhere on the date whose document will not read is named by file name in the result's
     ``unreadable``; only the landed-on frame's own unreadable document refuses, naming that
     document, and an ``image_index`` outside the date's images or a ``date`` that is not one path

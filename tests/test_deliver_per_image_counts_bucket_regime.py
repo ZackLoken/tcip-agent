@@ -137,7 +137,7 @@ def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(
     res = _deliver(tmp_path, chain.root, chain.bucket)
 
     assert "error" not in res, res
-    assert res["validated"] is True
+    assert res["shipped"] == {"kind": "validated"}
     assert res["producer"] == chain.assessment["producer"]
     rows = csv_rows(res["csv_path"])
     assert len(rows) == res["image_count"] == len(_images(chain.images_dir))

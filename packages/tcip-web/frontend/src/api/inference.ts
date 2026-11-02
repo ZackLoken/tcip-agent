@@ -5,11 +5,9 @@ import { ROUTES } from "@/api/routes";
 import {
   type Assessments,
   type BuildMappingPayload,
-  type CanopySegmentDisclosure,
   type ConfirmedRevision,
   type ConfirmRevisionPayload,
   type CountExport,
-  type DeliveryEventRecord,
   type DeliveryEvents,
   EXPORT_HEADER,
   type ExportCountCsvPayload,
@@ -23,8 +21,6 @@ import {
   type PersonPayload,
   type PhenologyAnswer,
   type PhenologyPayload,
-  type PlantMappingDisclosure,
-  type PlantRegistryDisclosure,
   type RegisteredModels,
   type SavedExport,
   type ServedMapping,
@@ -45,7 +41,8 @@ export const inferenceApi = {
 /**
  * Open a live progress stream for an inference job, auto-reconnecting with capped
  * backoff if the socket drops mid-run. The server sends a single ``final`` frame at a
- * terminal state and closes; once seen we stop reconnecting.
+ * terminal state, or a ``missing`` frame for a job it holds no record of, and closes; once
+ * either is seen we stop reconnecting.
  */
 export function openInferenceStream(
   jobId: string,
@@ -53,27 +50,10 @@ export function openInferenceStream(
 ): () => void {
   const socket = createReconnectingSocket({
     url: wsUrl(ROUTES.socketInferenceJobsByJobIdStream(jobId)),
-    ...jsonFrameHandlers<InferenceFrame>(onMessage, (frame) => frame.type === "final"),
+    ...jsonFrameHandlers<InferenceFrame>(onMessage, (frame) => frame.type !== "progress"),
   });
   socket.start();
   return () => socket.stop();
-}
-
-export type PlantMappingUnion = NonNullable<DeliveryEventRecord["plant_mapping"]>;
-
-/** Whether `pm` is the canopy-segment disclosure, narrowed first. */
-export function isCanopySegmentDisclosure(pm: PlantMappingUnion): pm is CanopySegmentDisclosure {
-  return "canopy_segments" in pm;
-}
-
-/** Whether `pm` is the whole-raster registry disclosure, narrowed after the canopy shape. */
-export function isPlantRegistryDisclosure(pm: PlantMappingUnion): pm is PlantRegistryDisclosure {
-  return !isCanopySegmentDisclosure(pm) && "plant_registry" in pm;
-}
-
-/** Whether `pm` is a walked mapping's disclosure, narrowed last. */
-export function isPlantMappingDisclosure(pm: PlantMappingUnion): pm is PlantMappingDisclosure {
-  return "name" in pm && "record_sha256" in pm;
 }
 
 export const resultsApi = {

@@ -2,9 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
-import type { OpenAnswer } from "@/api/types.generated";
+import type { OpenAnswer, ReadProject } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
-import { type OpenableProject, openWithDefaults } from "@/lib/openProject";
+import { openWithDefaults } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import {
@@ -41,7 +41,7 @@ const [{ name: LATER }] = VALLEY.tree.captures;
 const SELECT_ANSWER = SUBJECT_SELECT_ANSWER;
 
 /** Open the listed project `p` on the produced capture of photographs, or on none. */
-function openOn(p: OpenableProject, captured = true) {
+function openOn(p: ReadProject, captured = true) {
   useStore.setState((st) => ({
     gui: { ...st.gui, dataset: captured ? selected({ subject: SUBJECT }) : null },
     openProject: openedAs(p).project,
@@ -61,7 +61,7 @@ beforeEach(() => {
 });
 
 /** Hold the listed projects `projects` as the recent ones, newest first. */
-function recent(...projects: OpenableProject[]) {
+function recent(...projects: ReadProject[]) {
   localStorage.setItem("tcip.recent_projects", JSON.stringify(projects.map((p) => p.record.id)));
 }
 
@@ -190,7 +190,10 @@ describe("switching date", () => {
     fireEvent.click(screen.getByTitle("Switch date"));
     fireEvent.click(await screen.findByText(LATER));
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
-    expect(api.projects.open).toHaveBeenCalledWith({ id: VALLEY.record.id, user: "grower" });
+    expect(api.projects.open).toHaveBeenCalledWith({
+      id: VALLEY.record.id,
+      user: "grower",
+    });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0].date).toBe(LATER);
   });
 

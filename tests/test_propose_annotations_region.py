@@ -16,6 +16,7 @@ from PIL import Image
 
 from tcip_annotation.state import RING_MIN_POINTS
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
 from tests._producer_fixtures import install_stub_proposer, write_image
 
@@ -52,7 +53,7 @@ class PatchProposer:
                     ],
                 }
             ],
-            None,
+            NoPass(),
         )
 
 
@@ -424,7 +425,7 @@ class TestRegionFrameIsTheResolvedImageSources:
                             "rings": [[(1, 0), (3, 0), (3, 1), (1, 1)]],
                         }
                     ],
-                    None,
+                    NoPass(),
                 )
 
         monkeypatch.setattr(

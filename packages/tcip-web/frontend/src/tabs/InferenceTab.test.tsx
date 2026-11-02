@@ -51,7 +51,13 @@ function setupDataset() {
 
 /** The watched job panel's counts line of `job`. */
 function countsOf(job: InferenceJob): string {
-  return `${job.status}, ${job.done} of ${job.total}`;
+  return `${job.state.status}, ${job.done} of ${job.total}`;
+}
+
+/** The error the produced `job` failed on; a job in any other state throws. */
+function errorOf(job: InferenceJob): string {
+  if (job.state.status !== "failed") throw new Error("the produced job did not fail");
+  return job.state.error;
 }
 
 /** Answer the dataset tree with the produced photographs' dataset, or with one holding no
@@ -328,7 +334,7 @@ describe("InferenceTab job table", () => {
     render(<InferenceTab />);
     await screen.findByText(FAILED_JOB.job_id);
     watch(FAILED_JOB.job_id);
-    expect(await screen.findByText(String(FAILED_JOB.error))).toBeInTheDocument();
+    expect(await screen.findByText(errorOf(FAILED_JOB))).toBeInTheDocument();
   });
 
   /** Render the tab listing `listing`, watch the job `jobId` names and return its frame handler. */
@@ -354,11 +360,11 @@ describe("InferenceTab job table", () => {
   it("carries a final frame's error into the watched job panel", async () => {
     const failing = FAILING_FINAL.job;
     const onFrame = await watching(FAILING_STARTED, failing.job_id);
-    expect(screen.queryByText(String(failing.error))).not.toBeInTheDocument();
+    expect(screen.queryByText(errorOf(failing))).not.toBeInTheDocument();
 
     act(() => onFrame(FAILING_FINAL));
 
-    expect(await screen.findByText(String(failing.error))).toBeInTheDocument();
+    expect(await screen.findByText(errorOf(failing))).toBeInTheDocument();
   });
 
   it("shows the frame's error alone once the poll no longer lists the watched job", async () => {

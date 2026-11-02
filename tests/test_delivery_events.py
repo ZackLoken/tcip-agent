@@ -126,16 +126,13 @@ def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket
     ) == ("bud_opening", shipped_under.number, shipped_under.entry_sha256)
     assert record.delivery_kind == STATE_CROSSING_DATES
     assert record.output_path == str(out_csv)
-    assert record.validated is True and record.acknowledgment is None
+    assert record.shipped.kind == "validated"
     assert record.producer.model_dump() == series.assessment["producer"]
     assert {b.bucket for b in record.buckets} == set(series.buckets.values())
     assert {b.dataset_root for b in record.buckets} == {str(series.root)}
     for finding in record.buckets:
-        assert (finding.assessment_id, finding.validated, finding.reason) == (
-            series.assessment["assessment_id"],
-            True,
-            None,
-        )
+        assert finding.kind == "validated", finding
+        assert finding.assessment_id == series.assessment["assessment_id"]
     assert record.population == ["PLANT_A", "PLANT_B"]
     assert (
         record.plant_mapping is not None
@@ -274,18 +271,13 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(
 ) -> None:
     """The ``plant_mapping`` union resolves each disclosure shape and refuses a hybrid.
 
-    Each disclosure its own producer records resolves to its own model, and a hybrid combining
-    keys from two shapes is refused.
+    The disclosures the three producers record each validate, answering three distinct kinds,
+    and a hybrid combining keys from two shapes is refused.
     """
     from pydantic import TypeAdapter, ValidationError
 
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        CanopySegmentDisclosure,
-        PlantMapping,
-        PlantMappingDisclosure,
-        PlantRegistryDisclosure,
-    )
+    from tcip_mcp.pipelines.delivery_events_schema import PlantMapping
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_mapping_disclosure,
     )
@@ -351,14 +343,13 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(
         ),
     )
 
-    union = TypeAdapter(PlantMapping | None)
+    union: TypeAdapter[PlantMapping] = TypeAdapter(PlantMapping)
 
-    def _resolved(pm: dict) -> object:
+    def _resolved(pm: object) -> PlantMapping:
         return union.validate_python(pm)
 
-    assert isinstance(_resolved(mapping), PlantMappingDisclosure)
-    assert isinstance(_resolved(registry), PlantRegistryDisclosure)
-    assert isinstance(_resolved(canopy), CanopySegmentDisclosure)
+    produced: list[object] = [mapping, registry, canopy]
+    assert len({_resolved(pm).kind for pm in produced}) == len(produced)
 
     hybrid = {**registry, "canopy_segments": canopy["canopy_segments"]}
     with pytest.raises(ValidationError):
@@ -409,9 +400,6 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
     its cited record loads under, the mapping's own name while no rebuild has moved past it.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        PlantMappingDisclosure,
-    )
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
@@ -424,7 +412,8 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
 
     assert resp.status_code == 200
     (record,) = resp.json()["records"]
-    assert isinstance(recorded.plant_mapping, PlantMappingDisclosure)
+    assert recorded.plant_mapping is not None
+    assert recorded.plant_mapping.kind == "plant_mapping"
     assert record == {
         "event": recorded.model_dump(mode="json"),
         "resolved_key": recorded.plant_mapping.name,

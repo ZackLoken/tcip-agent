@@ -34,7 +34,7 @@ from sahi.models.base import DetectionModel
 from tcip_annotation import Polygon, bbox_of
 from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.text import Text
-from tcip_mcp.pipelines.execution import cross_tile_merge_of
+from tcip_mcp.pipelines.execution import NoPass, cross_tile_merge_of
 from tcip_mcp.pipelines.model_build import placement
 
 if TYPE_CHECKING:
@@ -313,7 +313,8 @@ class PromptableSegmenter:
     def propose(self, image_path: str, **params: JsonValue) -> Proposal:
         """Return a candidate per mask the model answers for each prompt, best first per prompt.
 
-        The proposal carries no execution record: a prompt window is no tiled pass.
+        The proposal is :class:`~tcip_mcp.pipelines.execution.NoPass`'s: a prompt window is no
+        tiled pass.
 
         ``params`` is :class:`SegmenterParams`, refused as that model refuses it. Each prompt runs
         on its :func:`prompt_window` at the processor's own ``longest_edge``, prompts sharing a
@@ -401,7 +402,7 @@ class PromptableSegmenter:
                 )
                 if candidate is not None:
                     candidates.append(shifted_candidate(candidate, window[:2]))
-        return Proposal(candidates, None)
+        return Proposal(candidates, NoPass())
 
 
 class PhraseDetectionModel(DetectionModel):
@@ -538,9 +539,9 @@ def detected_proposal(
     """Return the box candidates ``detector`` answers over ``pixels``, through the tiled pass.
 
     The frame runs whole first (``slicing.sliced_predictions``, one slice of the frame): a frame
-    within ``model_edge`` that pass finds nothing on is answered by it, with no execution record,
-    and any other frame's lattice is :func:`whole_frame_geometry`'s from it and the stated
-    ``tile_size`` and ``overlap``, whose refusals propagate. The record is
+    within ``model_edge`` that pass finds nothing on is answered by it as no pass, and any other
+    frame's lattice is :func:`whole_frame_geometry`'s from it and the stated ``tile_size`` and
+    ``overlap``, whose refusals propagate. The record is
     ``execution.proposal_execution``'s. A lattice whose edge reaches the frame's longer side is
     the frame itself, answered by the whole-frame pass; otherwise its slices
     (``slicing.slice_lattice``) run through the same pass and merge by
@@ -564,7 +565,7 @@ def detected_proposal(
         detector, read, [(0, (0, 0, width, height))], (height, width), 1
     )
     if not whole and max(height, width) <= model_edge:
-        return Proposal([], None)
+        return Proposal([], NoPass())
     edge, lattice_overlap, sources = whole_frame_geometry(
         whole,
         (height, width),

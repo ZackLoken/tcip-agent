@@ -1,11 +1,13 @@
 import type { api } from "@/api/client";
-import type {
-  OpenAnswer,
-  ProjectNotOpenRefusal,
-  ProjectRemoval,
-  RecordCorrection,
+import {
+  type OpenAnswer,
+  type ProjectNotOpenRefusal,
+  type ProjectRemoval,
+  READ,
+  type ReadProject,
+  type RecordCorrection,
+  UNREAD,
 } from "@/api/types.generated";
-import { openable, type OpenableProject } from "@/lib/openProject";
 import fixtures from "@/test/projectFixtures.json";
 import type { Refusal } from "@/test/refusals";
 
@@ -35,7 +37,7 @@ export const PROJECT_FIXTURES = fixtures as unknown as {
   renamed: RecordCorrection;
 };
 
-const OPENABLE = PROJECT_FIXTURES.picker.projects.filter(openable);
+const OPENABLE = PROJECT_FIXTURES.picker.projects.filter((p) => p.kind === READ);
 
 /** The picker listing's project whose record names it `name`. */
 const named = (name: string) => OPENABLE.find((p) => p.record.display_name === name)!;
@@ -47,13 +49,14 @@ export const PICKER = {
   valley: named("Valley farm"),
   ridge: named("Ridge farm"),
   empty: named("Empty block"),
-  stray: PROJECT_FIXTURES.picker.projects.find((p) => p.record === null)!,
+  stray: PROJECT_FIXTURES.picker.projects.find((p) => p.kind === UNREAD)!,
 };
 
 /** The produced open answer of the listed project `p`; a project the generator opened no answer
  *  of throws. */
-export function openedAs(p: OpenableProject): OpenAnswer {
-  const found = PROJECT_FIXTURES.opened.find((answer) => answer.project.id === p.record.id);
-  if (!found) throw new Error(`the generator opened no answer of ${p.record.display_name}`);
+export function openedAs(p: ReadProject): OpenAnswer {
+  const { record } = p;
+  const found = PROJECT_FIXTURES.opened.find((answer) => answer.project.id === record.id);
+  if (!found) throw new Error(`the generator opened no answer of ${record.display_name}`);
   return found;
 }

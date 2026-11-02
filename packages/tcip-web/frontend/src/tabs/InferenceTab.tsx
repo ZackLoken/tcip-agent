@@ -18,6 +18,7 @@ import {
 } from "@/api/types.generated";
 import { ModelPicker } from "@/components/ModelPicker";
 import { TabHeading } from "@/components/TabHeading";
+import { unended } from "@/hooks/jobPoll";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
 
@@ -71,14 +72,20 @@ function RefusedLaunchEntry({
 }
 
 function statusBadgeClass(job: InferenceJob): string {
-  if (job.live) return "bg-tcip-fn/20 text-tcip-fn";
-  return job.status === "completed" ? "bg-tcip-tp/20 text-tcip-tp" : "bg-tcip-fp/20 tcip-problem";
+  if (unended(job.state)) return "bg-tcip-fn/20 text-tcip-fn";
+  return job.state.status === "completed"
+    ? "bg-tcip-tp/20 text-tcip-tp"
+    : "bg-tcip-fp/20 tcip-problem";
 }
 
 /** The assessments among `assessments` that judged `model`'s checkpoint. */
 function assessmentsOf(assessments: AssessmentSummary[], model: Listed | null) {
   return model
-    ? assessments.filter((a) => a.assessment.producer?.checkpoint_sha256 === model.entry.sha256)
+    ? assessments.filter(
+        (a) =>
+          a.assessment.kind === "checkpoint" &&
+          a.assessment.producer.checkpoint_sha256 === model.entry.sha256,
+      )
     : [];
 }
 
@@ -113,6 +120,8 @@ export function InferenceTab() {
   // Each job's one record by its id: the listed jobs', each launched or watched since, and the
   // watched one's once a poll delisted it.
   const [jobs, setJobs] = useState<Record<string, InferenceJob>>({});
+  // What each watched job's stream said once the backend held no record of it, by its id.
+  const [gone, setGone] = useState<Record<string, string>>({});
   // The watched job the last poll did not list: it shows its last error alone rather than a status
   // line frozen on a job that is gone; null while the watched job is listed.
   const [delisted, setDelisted] = useState<string | null>(null);
@@ -220,10 +229,11 @@ export function InferenceTab() {
     if (!activeJobId) return;
     streamRef.current?.();
     streamRef.current = openInferenceStream(activeJobId, (frame) => {
-      setJobs((prev) => ({
-        ...prev,
-        [activeJobId]: "job" in frame ? frame.job : { ...prev[activeJobId], error: frame.error },
-      }));
+      if (frame.type === "missing") {
+        setGone((prev) => ({ ...prev, [activeJobId]: frame.error }));
+      } else {
+        setJobs((prev) => ({ ...prev, [activeJobId]: frame.job }));
+      }
     });
     return () => streamRef.current?.();
   }, [activeJobId]);
@@ -341,7 +351,7 @@ export function InferenceTab() {
   /** A job's state as the row reads it: the backend's, or "canceling" while a cancel it has
    *  not yet honored is requested. */
   function shownStatus(j: InferenceJob): string {
-    return j.live && cancelRequested.has(j.job_id) ? "canceling" : j.status;
+    return unended(j.state) && cancelRequested.has(j.job_id) ? "canceling" : j.state.status;
   }
 
   return (
@@ -554,7 +564,7 @@ export function InferenceTab() {
                       <button className="tcip-btn" onClick={() => setActiveJobId(j.job_id)}>
                         Watch
                       </button>
-                      {j.live && !cancelRequested.has(j.job_id) && (
+                      {unended(j.state) && !cancelRequested.has(j.job_id) && (
                         <button className="tcip-btn" onClick={() => void onCancel(j.job_id)}>
                           Cancel
                         </button>
@@ -579,10 +589,15 @@ export function InferenceTab() {
             )}
             {activeJob.job_id !== delisted && (
               <div className="mt-1 tabular-nums">
-                {activeJob.status}, {activeJob.done} of {activeJob.total}
+                {activeJob.state.status}, {activeJob.done} of {activeJob.total}
               </div>
             )}
-            {activeJob.error && <div className="tcip-problem mt-1">{activeJob.error}</div>}
+            {activeJob.state.status === "failed" && (
+              <div className="tcip-problem mt-1">{activeJob.state.error}</div>
+            )}
+            {gone[activeJob.job_id] && (
+              <div className="tcip-problem mt-1">{gone[activeJob.job_id]}</div>
+            )}
           </div>
         )}
       </div>

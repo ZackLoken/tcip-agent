@@ -1,4 +1,12 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
 
@@ -7,14 +15,16 @@ import { resultsApi } from "@/api/inference";
 import { subjectsApi } from "@/api/subjects";
 import type { ImageBands, ScorerEntry } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
-import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
+import { useBandSelection } from "@/hooks/useBandSelection";
+import { NO_BAND_CHOICE, type BandChoice } from "@/lib/bandSelection";
+import { adoptLoad } from "@/lib/registrySave";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
 import { ANNOTATE_ANSWERS, registryOf, SECOND_SUBJECT } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
 import { REGISTERED_MODELS } from "@/test/deliveryRecords";
-import { LABEL_ANSWERS, SERVED_ATTRIBUTES } from "@/test/labels";
+import { LABEL_ANSWERS, SERVED_ATTRIBUTES, storedOf, tokenOf, UNSTORED } from "@/test/labels";
 import { QUEUE_ANSWERS } from "@/test/queue";
 import { thrown } from "@/test/refusals";
 import { openTestProject, SELECTED_SUBJECT, selected } from "@/test/store";
@@ -22,10 +32,10 @@ import { openTestProject, SELECTED_SUBJECT, selected } from "@/test/store";
 const initialStoreState = useStore.getState();
 
 const { registry_saved: REGISTRY_SAVED, registry_loaded: REGISTRY_LOADED } = LABEL_ANSWERS;
-const LOADED_VERSION = REGISTRY_LOADED.version;
+const LOADED = storedOf(REGISTRY_LOADED);
 
 /** The subjects the load route served, and the one subject they declare, by name. */
-const SERVED = REGISTRY_LOADED.subjects ?? {};
+const SERVED = LOADED.subjects;
 const [SERVED_NAME] = Object.keys(SERVED);
 
 /** The subject menu's entry of the served subject, and the pill naming it or nothing. */
@@ -43,9 +53,13 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/** The band choice `useBandSelection` answers for `bandsInfo`. */
+function bandChoiceOf(bandsInfo: ImageBands | null): BandChoice {
+  return renderHook(() => useBandSelection(bandsInfo)).result.current;
+}
+
 function renderToolbar(
-  bandsInfo?: ImageBands | null,
-  bandSelection?: BandSelection | null,
+  bandChoice: BandChoice = NO_BAND_CHOICE,
   extra?: {
     subjectState?: SubjectState | null;
     onComplete?: (next: boolean) => void;
@@ -69,9 +83,7 @@ function renderToolbar(
       onCancelSave={extra?.onCancelSave ?? (() => {})}
       saveDisabled={false}
       dirty={false}
-      bandsInfo={bandsInfo}
-      bandSelection={bandSelection}
-      onBandSelectionChange={() => {}}
+      bandChoice={bandChoice}
       subjectState={extra?.subjectState ?? null}
       onComplete={extra?.onComplete ?? (() => {})}
       proposing={extra?.proposing ?? false}
@@ -93,7 +105,7 @@ const PLAIN = BAND_ANSWERS.plain;
 describe("AnnotateToolbar save state", () => {
   it("shows a save in flight, and the button then cancels it rather than saving again", () => {
     const onCancelSave = vi.fn();
-    renderToolbar(null, null, { onCancelSave });
+    renderToolbar(NO_BAND_CHOICE, { onCancelSave });
     const save = () => screen.getByRole("button", { name: /^Saved$|^Saving$/ });
     expect(save()).toHaveTextContent("Saved");
     act(() => void useStore.getState().holdForSave("x"));
@@ -117,7 +129,7 @@ describe("AnnotateToolbar engine prompt", () => {
 
   it("sends the phrase alone, with no threshold, tiling or merge control", () => {
     const onPhrase = vi.fn();
-    renderToolbar(null, null, { onPhrase });
+    renderToolbar(NO_BAND_CHOICE, { onPhrase });
     fireEvent.click(promptToggle());
     fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
       target: { value: "open bud" },
@@ -131,7 +143,7 @@ describe("AnnotateToolbar engine prompt", () => {
 
   it("counts the held prompts on Propose and sends them together once asked", () => {
     const onPropose = vi.fn();
-    renderToolbar(null, null, { onPropose });
+    renderToolbar(NO_BAND_CHOICE, { onPropose });
     fireEvent.click(promptToggle());
     expect(screen.getByRole("button", { name: "Propose" })).toBeDisabled();
     act(() => {
@@ -158,7 +170,7 @@ describe("AnnotateToolbar engine prompt", () => {
 
   it("while a prompt is in flight, says so and refuses another send", () => {
     const onPhrase = vi.fn();
-    renderToolbar(null, null, { onPhrase, proposing: true });
+    renderToolbar(NO_BAND_CHOICE, { onPhrase, proposing: true });
     fireEvent.click(promptToggle());
     fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
       target: { value: "open bud" },
@@ -230,7 +242,7 @@ describe("AnnotateToolbar draw mode", () => {
 
   it("the View menu toggles labels, proposals and predictions, the last only with a bucket", () => {
     const onView = vi.fn();
-    renderToolbar(null, null, { onView });
+    renderToolbar(NO_BAND_CHOICE, { onView });
     fireEvent.click(screen.getByRole("button", { name: "View" }));
     const items = screen.getByRole("menu").querySelectorAll("button");
     expect(Array.from(items, (item) => item.textContent)).toEqual([
@@ -246,7 +258,7 @@ describe("AnnotateToolbar draw mode", () => {
     expect(onView).toHaveBeenCalledWith({ proposals: false, predictions: true });
 
     cleanup();
-    renderToolbar(null, null, { onView, predictionsAvailable: true });
+    renderToolbar(NO_BAND_CHOICE, { onView, predictionsAvailable: true });
     fireEvent.click(screen.getByRole("button", { name: "View" }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Predictions" }));
     expect(onView).toHaveBeenLastCalledWith({ proposals: true, predictions: false });
@@ -329,7 +341,7 @@ describe("AnnotateToolbar subject authoring", () => {
   it("registers a typed name with its surrounding whitespace stripped and its description", async () => {
     // An untrimmed registry key would open a second subject that reads as the first.
     seedDataset();
-    act(() => useStore.getState().setRegistry(SERVED));
+    act(() => useStore.getState().setRegistry(SERVED, UNSTORED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
     answerPrompt("  husk  ", "one husk");
     renderToolbar();
@@ -348,7 +360,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
   it("adds nothing when the description prompt is dismissed", async () => {
     seedDataset();
-    act(() => useStore.getState().setRegistry(SERVED));
+    act(() => useStore.getState().setRegistry(SERVED, UNSTORED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
     answerPrompt("husk", null);
     renderToolbar();
@@ -363,7 +375,7 @@ describe("AnnotateToolbar subject authoring", () => {
   it("selects an existing subject rather than resetting its attribute definitions", async () => {
     seedDataset();
     const both = { ...SERVED, ...registryOf(SECOND_SUBJECT) };
-    act(() => useStore.getState().setRegistry(both));
+    act(() => useStore.getState().setRegistry(both, UNSTORED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
     answerPrompt(SERVED_NAME);
     renderToolbar();
@@ -378,7 +390,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
   it("adds nothing when the prompt is dismissed or answered with only whitespace", async () => {
     seedDataset();
-    act(() => useStore.getState().setRegistry(SERVED));
+    act(() => useStore.getState().setRegistry(SERVED, UNSTORED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
     const promptSpy = answerPrompt(null);
     renderToolbar();
@@ -398,7 +410,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
   it("posts the loaded registry version and stores the version the save returns", async () => {
     seedDataset();
-    act(() => useStore.getState().setRegistry(SERVED, LOADED_VERSION));
+    act(() => adoptLoad(REGISTRY_LOADED));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
     answerPrompt("husk", "one husk");
     renderToolbar();
@@ -406,13 +418,13 @@ describe("AnnotateToolbar subject authoring", () => {
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
-    expect(saveSpy.mock.calls[0][0].version).toBe(LOADED_VERSION);
-    expect(useStore.getState().registry.version).toBe(REGISTRY_SAVED.version);
+    expect(tokenOf(saveSpy.mock.calls[0][0].version)).toBe(LOADED.version);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(REGISTRY_SAVED.version);
   });
 
   it("reloads the registry from the server when the save is refused", async () => {
     seedDataset();
-    act(() => useStore.getState().setRegistry(SERVED, LOADED_VERSION));
+    act(() => adoptLoad(REGISTRY_LOADED));
     vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(LABEL_ANSWERS.registry_stale));
     vi.spyOn(subjectsApi, "load").mockResolvedValue(REGISTRY_LOADED);
     answerPrompt("husk", "one husk");
@@ -422,14 +434,14 @@ describe("AnnotateToolbar subject authoring", () => {
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     // The refused optimistic add is discarded in favor of what the server actually holds.
-    expect(useStore.getState().registry.subjects).toEqual(REGISTRY_LOADED.subjects);
-    expect(useStore.getState().registry.version).toBe(REGISTRY_LOADED.version);
+    expect(useStore.getState().registry.subjects).toEqual(LOADED.subjects);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
   });
 
   it("reverts the optimistically set active subject when the save is refused", async () => {
     seedDataset();
     act(() => {
-      useStore.getState().setRegistry(SERVED, LOADED_VERSION);
+      adoptLoad(REGISTRY_LOADED);
       useStore.getState().setActiveSubject(SERVED_NAME);
     });
     vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(LABEL_ANSWERS.registry_stale));
@@ -449,7 +461,7 @@ describe("AnnotateToolbar subject authoring", () => {
   it("adopts the committed registry and keeps the active subject when the save's audit line is lost", async () => {
     seedDataset();
     act(() => {
-      useStore.getState().setRegistry(SERVED, LOADED_VERSION);
+      adoptLoad(REGISTRY_LOADED);
       useStore.getState().setActiveSubject(SERVED_NAME);
     });
     const gap = LABEL_ANSWERS.registry_audit_gap;
@@ -464,7 +476,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // The committed body is adopted as though the save had answered 200, and the optimistic
     // active subject is kept rather than reverted (unlike an ordinary refusal above).
-    expect(useStore.getState().registry.version).toBe(gap.body.detail.committed.version);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(gap.body.detail.committed.version);
     expect(useStore.getState().gui.active_subject).toBe("husk");
   });
 });
@@ -472,7 +484,7 @@ describe("AnnotateToolbar subject authoring", () => {
 describe("AnnotateToolbar subject menu attributes", () => {
   it("holds the active subject's attributes under the subject list, absent with no subject", () => {
     openTestProject(selected({ count: 0 }));
-    act(() => useStore.getState().setRegistry(SERVED));
+    act(() => useStore.getState().setRegistry(SERVED, UNSTORED));
     renderToolbar();
     fireEvent.click(screen.getByRole("button", { name: /select subject/ }));
     expect(screen.queryByTestId("subject-attributes")).toBeNull();
@@ -488,7 +500,7 @@ describe("AnnotateToolbar subject menu attributes", () => {
     const [[declared, { values }]] = Object.entries(SERVED_ATTRIBUTES);
     openTestProject(selected({ count: 0 }));
     act(() => {
-      useStore.getState().setRegistry(SERVED);
+      useStore.getState().setRegistry(SERVED, UNSTORED);
       useStore.getState().setActiveSubject(SERVED_NAME);
       useStore
         .getState()
@@ -502,7 +514,7 @@ describe("AnnotateToolbar subject menu attributes", () => {
       reviewing: false,
       flags: canvas.flags,
     });
-    renderToolbar(null, null, { focused });
+    renderToolbar(NO_BAND_CHOICE, { focused });
     fireEvent.click(screen.getByRole("button", { name: SERVED_PILL }));
     fireEvent.change(screen.getByRole("combobox", { name: declared }), {
       target: { value: values[0] },
@@ -513,18 +525,18 @@ describe("AnnotateToolbar subject menu attributes", () => {
 
 describe("AnnotateToolbar band picker (progressive disclosure)", () => {
   it("is absent with no bandsInfo at all (a project with no channel-count fact yet)", () => {
-    renderToolbar(null, null);
+    renderToolbar(bandChoiceOf(null));
     expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
   });
 
   it("is hidden for a frame the server displays plain", () => {
-    renderToolbar(PLAIN, defaultBandSelection(PLAIN));
+    renderToolbar(bandChoiceOf(PLAIN));
     expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Band")).not.toBeInTheDocument();
   });
 
   it("is shown for a >3-band (multispectral) dataset", () => {
-    renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS));
+    renderToolbar(bandChoiceOf(FOUR_BANDS));
     expect(screen.getByLabelText("R band")).toBeInTheDocument();
     expect(screen.getByLabelText("G band")).toBeInTheDocument();
     expect(screen.getByLabelText("B band")).toBeInTheDocument();
@@ -581,7 +593,8 @@ describe("AnnotateToolbar image filter", () => {
 describe("AnnotateToolbar review queue", () => {
   const { completed: COMPLETED, failed: FAILED, launched: LAUNCHED } = QUEUE_ANSWERS;
   const [MODEL] = REGISTERED_MODELS.models;
-  const RANKED = COMPLETED.ranked!;
+  const [RANKED] = [COMPLETED.state].flatMap((s) => (s.status === "completed" ? [s.ranked] : []));
+  const [FAILED_ERROR] = [FAILED.state].flatMap((s) => (s.status === "failed" ? [s.error] : []));
   const QUEUE_SELECTION = QUEUE_ANSWERS.selection.selection;
   const imagesSelect = () => screen.getByRole("combobox", { name: "Images" });
   const at = () => useStore.getState().gui.dataset?.current_image_index;
@@ -639,9 +652,10 @@ describe("AnnotateToolbar review queue", () => {
       rationale: RANKED.rationale,
     });
 
-    await waitFor(() => expect(useStore.getState().annotateUi.reviewQueue?.ranked).toBeTruthy(), {
-      timeout: 5000,
-    });
+    await waitFor(
+      () => expect(useStore.getState().annotateUi.reviewQueue?.state).toEqual(COMPLETED.state),
+      { timeout: 5000 },
+    );
     const names = QUEUE_SELECTION.images.map((image) => image.name);
     const walked: string[] = [];
     const position = screen.getByRole("textbox", { name: "Image position" });
@@ -729,7 +743,9 @@ describe("AnnotateToolbar review queue", () => {
     act(() => openTestProject(later));
     await waitFor(() => expect(api.annotate.queueJob).toHaveBeenCalled(), { timeout: 5000 });
     act(() => complete());
-    await waitFor(() => expect(useStore.getState().annotateUi.reviewQueue?.ranked).toBeTruthy());
+    await waitFor(() =>
+      expect(useStore.getState().annotateUi.reviewQueue?.state).toEqual(COMPLETED.state),
+    );
 
     expect(imagesSelect()).toHaveValue("all");
     expect(screen.getByRole("textbox", { name: "Image position" })).toHaveValue("1");
@@ -742,7 +758,7 @@ describe("AnnotateToolbar review queue", () => {
     renderToolbar();
 
     await waitFor(
-      () => expect(useStore.getState().toasts.map((t) => t.message)).toContain(FAILED.error),
+      () => expect(useStore.getState().toasts.map((t) => t.message)).toContain(FAILED_ERROR),
       { timeout: 5000 },
     );
     expect(useStore.getState().annotateUi.imageFilter).toBe("all");
@@ -771,21 +787,21 @@ describe("AnnotateToolbar review queue", () => {
 describe("AnnotateToolbar Complete toggle", () => {
   it("reads checked from the served state, with or without annotations", () => {
     seedSubject(SELECTED_SUBJECT);
-    renderToolbar(null, null, { subjectState: "negative" });
+    renderToolbar(NO_BAND_CHOICE, { subjectState: "negative" });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeChecked();
     cleanup();
-    renderToolbar(null, null, { subjectState: "partial" });
+    renderToolbar(NO_BAND_CHOICE, { subjectState: "partial" });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).not.toBeChecked();
   });
 
   it("asks the tab to mark or withdraw, and is disabled until the document loads", () => {
     seedSubject(SELECTED_SUBJECT);
     const onComplete = vi.fn();
-    renderToolbar(null, null, { subjectState: "partial", onComplete });
+    renderToolbar(NO_BAND_CHOICE, { subjectState: "partial", onComplete });
     fireEvent.click(screen.getByRole("checkbox", { name: /Complete/ }));
     expect(onComplete).toHaveBeenCalledWith(true);
     cleanup();
-    renderToolbar(null, null, { subjectState: null, onComplete });
+    renderToolbar(NO_BAND_CHOICE, { subjectState: null, onComplete });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeDisabled();
   });
 });

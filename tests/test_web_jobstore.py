@@ -8,7 +8,15 @@ import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.execution import Stated
-from tcip_web.jobstore import JobStatus, ProjectJob
+from tcip_web.jobstore import (
+    Canceled,
+    Completed,
+    Failed,
+    JobState,
+    Pending,
+    ProjectJob,
+    Running,
+)
 from tests._producer_fixtures import write_image
 from tests._training_values import RATIONALE
 
@@ -24,12 +32,12 @@ STATED = Stated(
 
 
 def _job(
-    status: JobStatus, root: str = "root-a", job_id: str = ""
+    state: JobState[Completed], root: str = "root-a", job_id: str = ""
 ) -> ProjectJob:
-    """Return a job of ``root`` holding ``status`` under ``job_id``, over a capture of ``root``."""
+    """Return a job of ``root`` holding ``state`` under ``job_id``, over a capture of ``root``."""
     return ProjectJob(
         job_id=job_id,
-        status=status,
+        state=state,
         project=root,
         checkpoint_path="model.pt",
         images_dir=str(image_dir(root, "2026-01-01")),
@@ -39,8 +47,8 @@ def _job(
 def test_evict_terminal_caps_and_keeps_running() -> None:
     from tcip_web.jobstore import evict_terminal
 
-    jobs = {f"done{i}": _job("completed") for i in range(5)}
-    jobs["live"] = _job("running")
+    jobs = {f"done{i}": _job(Completed()) for i in range(5)}
+    jobs["live"] = _job(Running())
     evict_terminal(jobs, max_jobs=3)
 
     assert len(jobs) == 3
@@ -58,8 +66,8 @@ def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belon
     """
     from tcip_web.jobstore import evict_terminal
 
-    jobs = {f"a{i}": _job("completed", "root-a") for i in range(5)}
-    jobs["b_done"] = _job("completed", "root-b")
+    jobs = {f"a{i}": _job(Completed(), "root-a") for i in range(5)}
+    jobs["b_done"] = _job(Completed(), "root-b")
     evict_terminal(jobs, max_jobs=3)
 
     assert "b_done" in jobs
@@ -76,14 +84,32 @@ def test_evict_terminal_bounds_the_whole_dict_across_roots() -> None:
 
     jobs: dict[str, ProjectJob] = {}
     for i in range(7):
-        jobs[f"a{i}"] = _job("completed", "root-a")
+        jobs[f"a{i}"] = _job(Completed(), "root-a")
         evict_terminal(jobs, max_jobs=5)
     for i in range(7):
-        jobs[f"b{i}"] = _job("completed", "root-b")
+        jobs[f"b{i}"] = _job(Completed(), "root-b")
         evict_terminal(jobs, max_jobs=5)
 
     assert len(jobs) <= 5
     assert not any(j.project == "root-a" for j in jobs.values())
+
+
+def test_a_jobs_final_states_are_the_final_states_a_run_names() -> None:
+    """The final variants' status literals are exactly ``experiments.FinalState``'s members."""
+    from typing import get_args
+
+    from pydantic import BaseModel
+
+    from tcip_mcp.experiments import FINAL_STATES
+
+    def literal(variant: type[BaseModel]) -> str:
+        (status,) = get_args(variant.model_fields["status"].annotation)
+        return status
+
+    assert {literal(v) for v in (Completed, Canceled, Failed)} == set(
+        FINAL_STATES
+    )
+    assert not {literal(v) for v in (Pending, Running)} & set(FINAL_STATES)
 
 
 def test_job_registry_answers_snapshots_and_hands_the_live_job_to_its_worker() -> (
@@ -100,7 +126,7 @@ def test_job_registry_answers_snapshots_and_hands_the_live_job_to_its_worker() -
 
     registry: JobRegistry[ProjectJob] = JobRegistry()
     worked: list[ProjectJob] = []
-    job = _job("pending", "root-a", "j1")
+    job = _job(Pending(), "root-a", "j1")
     launched = registry.launch(job, worked.append)
     assert job.thread is not None
     job.thread.join(timeout=10)
@@ -114,21 +140,24 @@ def test_job_registry_answers_snapshots_and_hands_the_live_job_to_its_worker() -
 
     found, created = registry.find_or_launch(
         lambda j: j.job_id == "j1",
-        lambda: _job("pending", "root-a", "j2"),
+        lambda: _job(Pending(), "root-a", "j2"),
         worked.append,
     )
     assert (found, created) == (job, False)
     made, created = registry.find_or_launch(
         lambda j: j.job_id == "j3",
-        lambda: _job("pending", "root-b", "j3"),
+        lambda: _job(Pending(), "root-b", "j3"),
         lambda _job: None,
     )
     j3 = registry.get("j3")
     assert created is True and j3 is not None
     assert j3.model_dump() == made.model_dump()
 
-    signaled = registry.signal("j1", lambda live: setattr(live, "error", "x"))
-    assert job.error == "x" and signaled == job and signaled is not job
+    signaled = registry.signal(
+        "j1", lambda live: setattr(live, "state", Failed(error="x"))
+    )
+    assert job.state == Failed(error="x")
+    assert signaled == job and signaled is not job
     assert registry.signal("missing", worked.append) is None
 
 
@@ -178,7 +207,7 @@ def test_inference_cancel_endpoint_and_worker(
     assert "missing" in cancel_miss.value.detail
 
     _worker(job)  # honors the pre-set cancel
-    assert job.status == "canceled"
+    assert job.state == Canceled()
     assert job.done == 0
 
 
@@ -263,7 +292,7 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
         open_new_project(tmp_path / "other")
 
         assert get_priority_queue_job(job_id).model_dump(mode="json") == held
-        assert held["ranked"]["queue"]
+        assert held["state"]["ranked"]["queue"]
 
         with pytest.raises(HTTPException) as miss:
             get_priority_queue_job("pq-never-launched")

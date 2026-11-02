@@ -1,36 +1,47 @@
-import type {
-  Acknowledgment,
-  Assessments,
-  AuditGapRefusal,
-  CanopySegmentDisclosure,
-  DeliveryEventRecord,
-  DeliveryEvents,
-  DeliveryRefusal,
-  MappingNames,
-  OperationalizationRefusal,
-  PhenologyAnswer,
-  PlantMappingDisclosure,
-  PlantRegistryDisclosure,
-  RegisteredModels,
-  SavedExport,
-  ServedDeliveryEvent,
-  ServedMapping,
+import {
+  ACKNOWLEDGED,
+  type Acknowledgment,
+  type Assessments,
+  type AuditGapRefusal,
+  type DeliveryEventRecord,
+  type DeliveryEvents,
+  type DeliveryRefusal,
+  type MappingNames,
+  type OperatingPoint,
+  type OperationalizationRefusal,
+  type PhenologyAnswer,
+  type PlantMapping,
+  type RegisteredModels,
+  type SavedExport,
+  type ServedDeliveryEvent,
+  type ServedMapping,
 } from "@/api/types.generated";
 import produced from "@/test/deliveryEvents.json";
 import type { Refusal } from "@/test/refusals";
 
-/** A served delivery event whose stored event's disclosure is `D`, its event `E` beside that. */
-type Disclosed<D, E = unknown> = Omit<ServedDeliveryEvent, "event"> & {
-  event: Omit<DeliveryEventRecord, "plant_mapping"> & { plant_mapping: D } & E;
-};
-
 /** Each scene's one served delivery event, by fixture name. */
-interface Records {
-  validated: Disclosed<null>;
-  acknowledged_mapping: Disclosed<PlantMappingDisclosure, { acknowledgment: Acknowledgment }>;
-  archived_mapping: Disclosed<PlantMappingDisclosure>;
-  registry: Disclosed<PlantRegistryDisclosure>;
-  canopy: Disclosed<CanopySegmentDisclosure>;
+type Records = Record<
+  "validated" | "acknowledged_mapping" | "archived_mapping" | "registry" | "canopy",
+  ServedDeliveryEvent
+>;
+
+/** The disclosure of `served`'s event as `select` narrows it on its `kind`; an event disclosing
+ *  none, or one `select` answers null for, throws. */
+export function disclosureOf<D extends PlantMapping>(
+  served: ServedDeliveryEvent,
+  select: (pm: PlantMapping) => D | null,
+): D {
+  const pm = served.event.plant_mapping;
+  const selected = pm === null ? null : select(pm);
+  if (selected === null) throw new Error("the produced event discloses another mapping");
+  return selected;
+}
+
+/** The acknowledgment `served`'s event shipped under; an event shipped under none throws. */
+export function acknowledgmentOf(served: ServedDeliveryEvent): Acknowledgment {
+  const { shipped } = served.event;
+  if (shipped.kind !== ACKNOWLEDGED) throw new Error("the produced event shipped unacknowledged");
+  return shipped.acknowledgment;
 }
 
 /**
@@ -86,7 +97,9 @@ export const FAILED_ASSESSMENTS = produced.failed_assessments as unknown as Asse
 export const REGISTERED_MODELS = produced.registered_models as unknown as RegisteredModels;
 
 /** The results routes' answers the generator received, each refusal with its status: the count
- *  project's mapping names, none; the count export's and the curves export's refusals once the
+ *  project's mapping names, none; the operating point the proposals route served beside its
+ *  validated bucket's proposals, the conf the bucket's assessment admits; the count export's and
+ *  the curves export's refusals once the
  *  delivery's line failed, the count project's listing refused once a delivery record was
  *  damaged, the phenology project's measurement refused by the delivery gate, shown unvalidated
  *  and refused for naming no stored mapping, the refusal of a mapping built while its line failed, of a rebuild of a
@@ -102,6 +115,7 @@ export const REGISTERED_MODELS = produced.registered_models as unknown as Regist
 // `unknown`.
 export const RESULTS_ANSWERS = produced.answers as unknown as {
   no_mapping_names: MappingNames;
+  admitted_operating_point: OperatingPoint;
   count_export_audit_gap: Refusal<AuditGapRefusal & { committed: SavedExport }>;
   unreadable_deliveries: Refusal<string>;
   unknown_mapping: Refusal<string>;

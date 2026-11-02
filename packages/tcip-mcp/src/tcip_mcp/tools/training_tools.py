@@ -10,13 +10,19 @@ import sys
 import threading
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple, cast
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, Field, JsonValue
 
 from tcip_mcp import experiments
 from tcip_mcp.audit import append_or_raise, audit_line, audited, now
-from tcip_mcp.experiments import SWEEP_FILE, SweepGroup, TrainingDetail
+from tcip_mcp.experiments import (
+    SWEEP_FILE,
+    RunDetail,
+    SweepDetail,
+    SweepGroup,
+    TrainingDetail,
+)
 from tcip_mcp.pipelines.data.split_construction import (
     ResolvedRun,
     data_dir_issues,
@@ -37,7 +43,11 @@ from tcip_mcp.pipelines.training.hpo import (
     available_schedulers,
     available_search_algs,
 )
-from tcip_mcp.pipelines.training.tensorboard_manager import TensorboardLaunch
+from tcip_mcp.pipelines.training.tensorboard_manager import (
+    TensorboardLaunch,
+    TensorboardNotServing,
+    TensorboardState,
+)
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import StoreError, canonical_path
@@ -455,7 +465,7 @@ def open_run(
     resume_from: str | None = None,
     max_wall_clock_seconds: float | None = None,
     model_contract: LaunchContract | None = None,
-    trial_params: dict[str, JsonValue] | None = None,
+    launched_as: experiments.LaunchedAs,
 ) -> None:
     """Open the run directory ``run_dir`` with its ``run.json``, created at ``created``.
 
@@ -467,8 +477,9 @@ def open_run(
     (``split_construction.dataset_identity``), the run's source snapshot its admission took
     (``sources``, ``model_build.snapshot_model_source``'s record and copies, the copies laid out
     in the directory), the run it was relaunched from and the checkpoint it resumes from, its wall
-    clock, the model contract preflight proved, and an HPO trial's sampled point. Refuses an
-    existing directory (``experiments.RunDirectoryExistsError``).
+    clock, the model contract preflight proved, and whether it was ``launched_as`` a run of its
+    own or an HPO trial at its sampled point. Refuses an existing directory
+    (``experiments.RunDirectoryExistsError``).
     """
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.model_build import capture_env
@@ -491,7 +502,7 @@ def open_run(
             resume_from=resume_from,
             max_wall_clock_seconds=max_wall_clock_seconds,
             model_contract=model_contract,
-            trial_params=trial_params,
+            launched_as=launched_as,
         ),
         sources.copies,
     )
@@ -505,6 +516,7 @@ class RunLaunched(BaseModel):
     preflight's warnings.
     """
 
+    kind: Literal["run"] = "run"
     experiment_id: str
     output_dir: str
     tensorboard: TensorboardLaunch
@@ -516,12 +528,15 @@ class RunLaunched(BaseModel):
 class SweepLaunched(BaseModel):
     """A sweep :func:`launch_sweep` relaunched: its minted id and its base preflight's warnings."""
 
+    kind: Literal["sweep"] = "sweep"
     sweep_id: str
     warnings: list[str]
 
 
-Launched = RunLaunched | SweepLaunched
-"""What a launch door answers for a run or a sweep it started."""
+type Launched = Annotated[
+    RunLaunched | SweepLaunched, Field(discriminator="kind")
+]
+"""What a launch door answers for a run or a sweep it started, told apart by its ``kind``."""
 
 
 @tool()
@@ -629,6 +644,7 @@ def launch_training(
             resume_from=resume,
             max_wall_clock_seconds=max_wall_clock_seconds,
             model_contract=model_contract_record,
+            launched_as=experiments.Standalone(),
         )
     except (StoreError, ValueError, OSError) as exc:
         return {"error": f"launch_training: {exc}"}
@@ -719,15 +735,14 @@ def _watch_wall_clock(proc: subprocess.Popen, timeout_seconds: float) -> None:
 def training_detail(project: Path, directory: Path) -> TrainingDetail:
     """Return the run, trial or sweep ``directory`` of ``project`` as its ``TrainingDetail``.
 
-    Its ``tensorboard`` is the TensorBoard this process runs over the directory's board
+    Its ``tensorboard`` is whether this process runs a TensorBoard over the directory's board
     (``tensorboard_manager.running``).
     """
     from tcip_mcp.pipelines.training.tensorboard_manager import running
 
     serving = running(directory)
     if (directory / SWEEP_FILE).is_file():
-        return TrainingDetail(
-            run=None,
+        return SweepDetail(
             tensorboard=serving,
             sweep=experiments.read_sweep(
                 experiments.observe_sweep(directory),
@@ -735,8 +750,7 @@ def training_detail(project: Path, directory: Path) -> TrainingDetail:
             ),
         )
     run = experiments.observe_run(directory)
-    return TrainingDetail(
-        sweep=None,
+    return RunDetail(
         tensorboard=serving,
         run=experiments.run_summary(
             run,
@@ -750,8 +764,9 @@ def training_detail(project: Path, directory: Path) -> TrainingDetail:
 def monitor_training(project: Path, experiment_id: str) -> dict:
     """Check a training run, a sweep's trial included, or a hyperparameter sweep, by its id.
 
-    Answers :func:`training_detail`'s ``{"run", "sweep", "tensorboard"}`` for the directory
-    :func:`experiments.named_directory` finds. An id naming neither answers ``{"error": ...}``.
+    Answers :func:`training_detail`'s run or sweep detail, told apart by its ``kind``, for the
+    directory :func:`experiments.named_directory` finds. An id naming neither answers
+    ``{"error": ...}``.
 
     Args:
         experiment_id: The run's id from launch_training, a trial's id from its sweep, or a
@@ -766,41 +781,76 @@ def monitor_training(project: Path, experiment_id: str) -> dict:
     return training_detail(project, directory).model_dump(mode="json")
 
 
-class AsRecordedChoice(BaseModel):
-    """A relaunch on the data section the run's launch stated: its case, its line and its check.
+class Admitted(BaseModel):
+    """A relaunch choice its compatibility check admits."""
 
-    ``reason`` says why the relaunch is refused, ``None`` when it is admitted.
-    """
+    kind: Literal["admitted"] = "admitted"
+
+
+class Blocked(BaseModel):
+    """A relaunch choice its compatibility check refuses, and why."""
+
+    kind: Literal["blocked"] = "blocked"
+    reason: str
+
+
+type ChoiceCheck = Annotated[Admitted | Blocked, Field(discriminator="kind")]
+"""What a relaunch choice's compatibility check found, told apart by its ``kind``."""
+
+
+def _checked(reasons: list[str]) -> ChoiceCheck:
+    """Return the check that refuses for ``reasons`` joined, or admits when there are none."""
+    return Blocked(reason="; ".join(reasons)) if reasons else Admitted()
+
+
+class AsRecordedChoice(BaseModel):
+    """A relaunch on the data section the run's launch stated: its case, its line and its check."""
 
     case: Literal["bound", "drawn"]
     line: str
-    reason: str | None
+    check: ChoiceCheck
 
 
-class SelectionChoice(BaseModel):
-    """A selection directory a relaunch can bind instead, with its check and its sides' counts.
+class _Offered(BaseModel):
+    """A selection directory a relaunch can bind instead.
 
-    ``reason`` says why binding it is refused, ``None`` when it is admitted; ``seed`` and
-    ``group_by`` are the selection's, and ``replaced_split_keys`` every recorded ``data.split`` key
-    other than ``selection_dir`` choosing it drops. A directory whose selection will not read is
-    offered refused with zero counts.
+    ``replaced_split_keys`` is every recorded ``data.split`` key other than ``selection_dir``
+    choosing it drops.
     """
 
     selection_dir: str
-    reason: str | None
-    seed: int | None
-    group_by: str | None
+    replaced_split_keys: list[str]
+
+
+class SelectionChoice(_Offered):
+    """An offered selection that read: its check, its seed and grouping, and its sides' counts."""
+
+    kind: Literal["read"] = "read"
+    check: ChoiceCheck
+    seed: int
+    group_by: str
     train: int
     val: int
     calibration: int
-    replaced_split_keys: list[str]
+
+
+class UnreadSelectionChoice(_Offered):
+    """An offered selection directory whose selection will not read, and why it will not."""
+
+    kind: Literal["unread"] = "unread"
+    reason: str
 
 
 class SplitChoices(BaseModel):
     """Every data choice a relaunch of a run can take: as recorded, or a selection instead."""
 
     as_recorded: AsRecordedChoice
-    selections: list[SelectionChoice]
+    selections: list[
+        Annotated[
+            SelectionChoice | UnreadSelectionChoice,
+            Field(discriminator="kind"),
+        ]
+    ]
 
 
 def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
@@ -849,44 +899,37 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     )
 
     own_selection = None
+    case: Literal["bound", "drawn"]
     if isinstance(split, BoundSplit):
-        as_recorded = AsRecordedChoice(
-            case="bound",
-            line="on the partition it bound",
-            reason=None,
-        )
+        case, line = "bound", "on the partition it bound"
         own_selection, own_error = read_selection_checked(
             split.selection_dir, project=project
         )
-        if own_selection is None:
-            as_recorded.reason = own_error or (
-                f"no selection recorded under {split.selection_dir}; run draw_splits first."
-            )
-        else:
-            own_issues = selection_compatibility(data, split, own_selection)
-            if own_issues:
-                as_recorded.reason = "; ".join(own_issues)
-    elif own.record.resolved is None:
-        as_recorded = AsRecordedChoice(
-            case="drawn",
-            line="resolved to nothing at its launch",
-            reason=own.status_error
-            or "the run resolved to no partition at its launch",
+        reasons = (
+            [
+                own_error
+                or f"no selection recorded under {split.selection_dir}; run draw_splits "
+                "first."
+            ]
+            if own_selection is None
+            else selection_compatibility(data, split, own_selection)
         )
+    elif own.record.resolved is None:
+        case, line = "drawn", "resolved to nothing at its launch"
+        reasons = [
+            own.status_error
+            or "the run resolved to no partition at its launch"
+        ]
     else:
         seed = own.record.resolved.partition.seed
-        as_recorded = AsRecordedChoice(
-            case="drawn",
-            line=f"draws its split again with seed {seed} over the labels as they are now",
-            reason=None,
-        )
+        case = "drawn"
+        line = f"draws its split again with seed {seed} over the labels as they are now"
+        reasons = []
 
     dir_issues = data_dir_issues(data)
-    if dir_issues:
-        combined_reason = list(dir_issues)
-        if as_recorded.reason:
-            combined_reason.insert(0, as_recorded.reason)
-        as_recorded.reason = "; ".join(combined_reason)
+    as_recorded = AsRecordedChoice(
+        case=case, line=line, check=_checked([*reasons, *dir_issues])
+    )
 
     # A bound config names no locations, so its own selection's first sample source anchors the
     # sibling search the way an unbound config's images_dir does.
@@ -931,7 +974,7 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
                 seen.add(sub_norm)
                 candidate_dirs.append(str(sub))
 
-    selections: list[SelectionChoice] = []
+    selections: list[SelectionChoice | UnreadSelectionChoice] = []
     for candidate_dir in candidate_dirs:
         selection, error_text = read_selection_checked(
             candidate_dir, project=project
@@ -940,14 +983,9 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
             if error_text is None:
                 continue  # nothing recorded there; not a real candidate
             selections.append(
-                SelectionChoice(
+                UnreadSelectionChoice(
                     selection_dir=candidate_dir,
                     reason=error_text,
-                    seed=None,
-                    group_by=None,
-                    train=0,
-                    val=0,
-                    calibration=0,
                     replaced_split_keys=replaced_split_keys,
                 )
             )
@@ -960,7 +998,7 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         selections.append(
             SelectionChoice(
                 selection_dir=candidate_dir,
-                reason="; ".join(issues) if issues else None,
+                check=_checked(issues),
                 seed=selection.seed,
                 group_by=selection.group_by,
                 train=counts["train"],
@@ -1097,8 +1135,8 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     The directory lies beneath the sweep, named ``<sweep id>_<trial_id>``. The sweep's recorded
     base config with ``point`` applied is admitted (:func:`_admitted`) and, when it stands,
     resolved against its project through ``split_construction.resolve_run`` at the sweep's own
-    trait revision, and the directory opened (:func:`open_run`) with ``point`` as its
-    ``trial_params``: an admission issue or a resolution that fails is the trial's final status
+    trait revision, and the directory opened (:func:`open_run`) as a trial sampled at
+    ``point``: an admission issue or a resolution that fails is the trial's final status
     ``failed`` naming why. A config the schema
     refuses, or whose sources cannot be staged, raises ``ValueError`` naming every issue before
     any directory is opened.
@@ -1125,7 +1163,12 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
             status_error = str(exc)
     open_run(
-        trial_dir, spec, sources, resolved, created=now(), trial_params=point
+        trial_dir,
+        spec,
+        sources,
+        resolved,
+        created=now(),
+        launched_as=experiments.TrialPoint(params=point),
     )
     if status_error is not None:
         experiments.write_final_status(
@@ -1205,7 +1248,7 @@ def run_hyperparameter_search(
     run directory per trial, ``<sweep_id>_<ray trial id>``, a run like any other; Ray's own
     experiment store (also the TensorBoard logdir); and its final status, written once when the
     sweep ends. An existing directory refuses by name. The result, as ``monitor_training``'s at any
-    time, is a ``TrainingDetail`` whose ``sweep`` is the sweep's group: its trial rows and what
+    time, is a ``SweepDetail`` whose ``sweep`` is the sweep's group: its trial rows and what
     they amount to (``experiments.sweep_outcome``), beside the ``warnings`` its base preflight gave.
 
     Refuses (``{"error": ..., "issues": [...]}``, nothing minted): a ``param_space`` that is
@@ -1295,20 +1338,19 @@ def run_hyperparameter_search(
     if isinstance(opened, dict):
         return opened
     group = run_sweep(opened.directory)
-    serving = None
+    serving: TensorboardState = TensorboardNotServing()
     if auto_tensorboard and group.state == "completed":
         from tcip_mcp.pipelines.training.tensorboard_manager import (
-            TensorboardServing,
             launch_tensorboard,
         )
 
         launched = launch_tensorboard(opened.directory)
-        if isinstance(launched, TensorboardServing):
+        if launched.kind == "serving":
             serving = launched
     return {
-        **TrainingDetail(
-            run=None, sweep=group, tensorboard=serving
-        ).model_dump(mode="json"),
+        **SweepDetail(sweep=group, tensorboard=serving).model_dump(
+            mode="json"
+        ),
         "warnings": opened.warnings,
     }
 
@@ -1590,7 +1632,9 @@ def run_sweep(directory: Path) -> SweepGroup:
             objective_fn=objective_fn,
             param_space=search_param_space,
             metric="objective",
-            mode="max" if experiments.sweep_selection(given)[1] else "min",
+            mode="max"
+            if experiments.sweep_selection(given)[1] == "higher"
+            else "min",
             num_samples=given.n_trials,
             search_alg=given.search_alg,
             scheduler=given.scheduler,

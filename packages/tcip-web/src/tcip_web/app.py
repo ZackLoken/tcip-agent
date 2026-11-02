@@ -32,7 +32,6 @@ from tcip_mcp.buckets import NotABucketError
 from tcip_mcp.identity import NoActorError
 from tcip_mcp.web_client import (
     ActiveTab,
-    AnnotateFocus,
     GuiState,
     Panel,
     PanelPost,
@@ -281,7 +280,7 @@ async def post_panel_event(
     project = _gui_store.admit(posted.project_id)
     focus = posted.event
     # The browser applies a focus event locally and never syncs it back, so the snapshot moves here.
-    if isinstance(focus, AnnotateFocus):
+    if focus.event_type == "annotate_focus":
         await _gui_store.mutate(
             lambda _held: {
                 "active_tab": "annotate",

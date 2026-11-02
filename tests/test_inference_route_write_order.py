@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from tcip_web.routes.inference import InferenceJob
 
 from tcip_mcp.pipelines.execution import Stated
+from tcip_web.jobstore import Canceled, Completed, Failed
 from tests._audit_fixtures import audit_rows
 from tests._predictor_fixtures import StubPredictor, install
 from tests._training_values import RATIONALE
@@ -128,7 +129,7 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
         stated=STATED,
     )
     _worker(job)
-    assert job.status == "completed", job.error
+    assert job.state == Completed(), job.state
     mcp = run_inference(
         tmp_path,
         ckpt,
@@ -179,7 +180,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
     monkeypatch.setattr(export, "encode_predictions", failing_second_document)
 
     job = _launch_through_the_route(client, dataset, "gui", ckpt, tile=False)
-    assert job.status == "failed" and job.error == "disk full"
+    assert job.state == Failed(error="disk full")
 
     with pytest.raises(OSError, match="disk full"):
         run_inference(
@@ -229,8 +230,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
         actor=None,
     )
 
-    assert job.status == "failed"
-    assert job.error == mcp["error"]
+    assert job.state == Failed(error=mcp["error"])
     assert "has no tile_size" in mcp["error"]
     assert _documents(dataset, job.bucket) == []
     assert not _published(dataset, job.bucket)
@@ -286,12 +286,7 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
 
     _worker(job)
 
-    assert (job.status, job.done, job.total, job.error) == (
-        "canceled",
-        1,
-        2,
-        None,
-    )
+    assert (job.state, job.done, job.total) == (Canceled(), 1, 2)
     assert _documents(dataset, job.bucket) == ["a"]
     assert _record(dataset, job.bucket)["documents"] == {"a": "a.jpg"}
     assert [(r["tool"], r["status"]) for r in audit_rows(dataset)] == [
@@ -312,7 +307,6 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.model_registry import Producer
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -341,9 +335,8 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     )
     _worker(job)
 
-    assert job.status == "completed"
+    assert job.state == Completed()
     assert job.done == 2 and job.total == 2
-    assert job.error is None
     bucket = read_bucket(tmp_path, job.bucket)
     for stem in ("a", "b"):
         (annotation,) = json_io.read_predictions(
@@ -354,7 +347,7 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     record = _record(tmp_path, job.bucket)
     assert record["execution"]["conf"] == pytest.approx(0.25)
     assert record["execution"]["sources"]["conf"] == "explicit"
-    assert isinstance(bucket.producer, Producer)
+    assert bucket.producer.kind == "checkpoint"
     assert bucket.producer.checkpoint_sha256
     assert record["assessment_id"] is None
     assert record["documents"] == {"a": "a.jpg", "b": "b.jpg"}
@@ -367,8 +360,10 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
     """A GUI run and an MCP run leave the same publication lines.
 
     Each run leaves the publication's one line and nothing else in its dataset's log, and each
-    bucket's record names the run that produced its checkpoint.
+    bucket's record names its run's checkpoint as its producer.
     """
+    import hashlib
+
     pytest.importorskip("fastapi")
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir
@@ -408,8 +403,13 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
             assert "error" not in result, result
         rows[door] = audit_rows(dataset)[before:]
         producer = read_bucket(dataset, bucket).producer
-        assert isinstance(producer, Producer)
-        assert producer.experiment_id == Path(ckpt).parent.name
+        assert producer == Producer(
+            kind="checkpoint",
+            checkpoint_sha256=hashlib.sha256(
+                Path(ckpt).read_bytes()
+            ).hexdigest(),
+            origin="run",
+        )
 
     def shape(records: list[dict]) -> list[tuple]:
         return [(r["tool"], sorted(r["arguments"])) for r in records]

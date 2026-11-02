@@ -31,7 +31,7 @@ def _contribute(
     }
     resp = client.post("/api/sessions/image_event", json=body)
     assert resp.status_code == 200, resp.text
-    return {**body, "started": resp.json()["session"]["started"]}
+    return {**body, "started": resp.json()["started"]}
 
 
 def test_the_record_the_session_routes_write_reads_back_through_its_model_unchanged(
@@ -56,7 +56,7 @@ def test_the_record_the_session_routes_write_reads_back_through_its_model_unchan
         ("user:bob", bob["started"]),
         ("user:alice", alice["started"]),
     ]
-    assert [s.ended is None for s in stats.sessions] == [True, False]
+    assert [s.state.kind for s in stats.sessions] == ["open", "ended"]
     assert [s.entries for s in stats.sessions] == [
         [ImageEntry.model_validate(bob)],
         [ImageEntry.model_validate(alice)],

@@ -7,11 +7,12 @@ The output shapes of the tools that push are part of the subject.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, get_args
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
+from typing_inspection.introspection import get_literal_values
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.web_client import (
@@ -22,6 +23,9 @@ from tcip_mcp.web_client import (
     PanelEvent,
     PanelPost,
 )
+
+PANELS = tuple(get_literal_values(Panel.__value__))
+"""Every GUI panel, as the vocabulary states them."""
 
 if TYPE_CHECKING:
     from starlette.testclient import httpx
@@ -86,9 +90,7 @@ class TestPostPanelEventRoute:
 
         resp = _post(opened_client, "bogus", Banner(text="x"), project_id)
         assert resp.status_code == 422
-        assert all(
-            store.retained_events(panel) == [] for panel in get_args(Panel)
-        )
+        assert all(store.retained_events(panel) == [] for panel in PANELS)
 
     def test_an_event_of_no_panel_event_type_is_refused_and_retained_nowhere(
         self, opened_client: TestClient, project_id: str
@@ -118,7 +120,7 @@ class TestPostPanelEventRoute:
     def test_all_valid_panels(
         self, opened_client: TestClient, project_id: str
     ) -> None:
-        for panel in get_args(Panel):
+        for panel in PANELS:
             resp = _post(opened_client, panel, Banner(text="ok"), project_id)
             assert resp.status_code == 200, f"panel {panel} should be valid"
 
@@ -391,10 +393,13 @@ class TestPostPanelEventRoute:
         """
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
-        from tcip_mcp.web_client import PanelEventAnswer, ProjectNotOpenRefusal
+        from tcip_mcp.web_client import (
+            PanelEventNotTaken,
+            ProjectNotOpenRefusal,
+        )
         from tests._web_fixtures import bound_to
 
-        refusal = PanelEventAnswer(
+        refusal = PanelEventNotTaken(
             url="u",
             reason=ProjectNotOpenRefusal(
                 message="the backend does not have this project open",
@@ -426,7 +431,7 @@ class TestPostPanelEventRoute:
         """The event ``focus_human_attention`` posts sets the advisory state it names."""
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
-        from tcip_mcp.web_client import PanelEventAnswer
+        from tcip_mcp.web_client import PanelEventAnswer, PanelEventTaken
         from tests._web_fixtures import bound_to
 
         posted: dict = {}
@@ -435,7 +440,7 @@ class TestPostPanelEventRoute:
             target: BoundProject, panel: Panel, event: PanelEvent
         ) -> PanelEventAnswer:
             posted.update(project_id=target.id, panel=panel, event=event)
-            return PanelEventAnswer(url="u", reason=None)
+            return PanelEventTaken(url="u")
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
         res = focus_human_attention(
@@ -473,7 +478,7 @@ class TestPushPanelDataTool:
 
         monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
         result = push_panel_event(bound, "training", Banner(text="epoch 1"))
-        assert result.reason
+        assert result.kind == "not_posted" and result.reason
 
     def test_the_server_refuses_a_name_outside_the_panels_and_admits_each_panel(
         self, bound: BoundProject
@@ -491,16 +496,17 @@ class TestPushPanelDataTool:
             for t in asyncio.run(client_server(bound).list_tools())
             if t.name == "push_panel_event"
         ]
-        assert listed.input_schema["properties"]["panel"]["enum"] == list(
-            get_args(Panel)
-        )
+        assert listed.input_schema["properties"]["panel"] == {
+            "$ref": "#/$defs/Panel"
+        }
+        assert listed.input_schema["$defs"]["Panel"]["enum"] == list(PANELS)
         arguments = {"event": Banner(text="test").model_dump()}
         refused = called_through_the_server(
             "push_panel_event", {**arguments, "panel": "bogus"}, bound=bound
         )
         assert isinstance(refused, str)
         assert "panel" in refused
-        for panel in get_args(Panel):
+        for panel in PANELS:
             admitted = called_through_the_server(
                 "push_panel_event", {**arguments, "panel": panel}, bound=bound
             )
@@ -795,10 +801,8 @@ def test_post_panel_event_suppressed_under_pytest(
 
     monkeypatch.delenv("TCIP_ALLOW_PANEL_EVENTS", raising=False)
     res = post_panel_event(bound, "annotate", _focus(mode="box"))
-    assert res.url is None
-    assert (
-        isinstance(res.reason, str) and "TCIP_ALLOW_PANEL_EVENTS" in res.reason
-    )
+    assert res.kind == "not_posted"
+    assert "TCIP_ALLOW_PANEL_EVENTS" in res.reason
 
 
 def test_post_panel_event_opt_in_bypasses_suppression(
@@ -809,6 +813,7 @@ def test_post_panel_event_opt_in_bypasses_suppression(
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     record_backend_port(bound.workspace, 1)  # nothing listens on port 1
     res = post_panel_event(bound, "annotate", _focus(mode="box"))
+    assert res.kind == "not_taken", res
     assert isinstance(res.reason, str) and "no backend answered" in res.reason
 
 
@@ -834,6 +839,7 @@ def test_post_panel_event_answers_a_malformed_answer_as_an_error(
         res = post_panel_event(bound, "annotate", _focus(mode="box"))
         thread.join(timeout=10)
 
+    assert res.kind == "not_taken", res
     assert isinstance(res.reason, str)
     assert "no backend answered" not in res.reason
 
@@ -888,7 +894,7 @@ def test_post_panel_event_reads_a_detail_as_the_not_open_refusal_only_by_its_kin
         res = post_panel_event(bound, "annotate", _focus(mode="box"))
         thread.join(timeout=10)
 
-    assert res.reason == detail
+    assert res.kind == "not_taken" and res.reason == detail
 
 
 def test_post_panel_event_answers_the_delivery_and_the_backends_refusals(
@@ -896,9 +902,9 @@ def test_post_panel_event_answers_the_delivery_and_the_backends_refusals(
 ) -> None:
     """``post_panel_event`` answers a served backend's delivery and its refusals.
 
-    Against a served backend it answers no reason; for another project than the open one, with
-    the backend's structured refusal naming the open one; and after the project is closed, with
-    the backend's own none-open refusal.
+    Against a served backend it answers that it was taken; for another project than the open
+    one, with the backend's structured refusal naming the open one; and after the project is
+    closed, with the backend's own none-open refusal.
     """
     import asyncio
 
@@ -916,13 +922,15 @@ def test_post_panel_event_answers_the_delivery_and_the_backends_refusals(
     note = Banner(text="a note")
     with served(app, bound.workspace):
         res = post_panel_event(bound, "app", note)
-        assert res.reason is None
+        assert res.kind == "taken", res
 
         elsewhere = post_panel_event(other, "app", note)
+        assert elsewhere.kind == "not_taken", elsewhere
         assert isinstance(elsewhere.reason, ProjectNotOpenRefusal)
         assert elsewhere.reason.open_project_id == opened.id
 
         asyncio.run(store.close_project(opened.id))
         refused = post_panel_event(bound, "app", note)
+        assert refused.kind == "not_taken", refused
         assert isinstance(refused.reason, str)
         assert "no project is open" in refused.reason

@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.model_registry import Producer  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tests._training_values import (  # noqa: E402
@@ -169,8 +168,9 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(
         stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
     )
     _worker(job)
-    assert job.status == "failed"
-    assert "register_model" in job.error
+    failed = job.state
+    assert failed.status == "failed", failed
+    assert "register_model" in failed.error
     assert not _published(tmp_path, "out")
     assert job.done == 0
 
@@ -267,9 +267,9 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
             rationale=RATIONALE,
         ),
     )
-    assert job.status == "failed"
-    assert "register_model" in job.error
-    assert job.ranked is None
+    failed = job.state
+    assert failed.status == "failed", failed
+    assert "register_model" in failed.error
 
 
 def test_review_priority_route_worker_completes_the_job_with_a_registered_checkpoint(
@@ -314,9 +314,9 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
             rationale=RATIONALE,
         ),
     )
-    assert job.status == "completed", job.error
-    assert job.ranked is not None
-    assert job.ranked.queue == []
+    completed = job.state
+    assert completed.status == "completed", completed
+    assert completed.ranked.queue == []
 
 
 # Rail 2: a registered checkpoint whose bytes are replaced (in place, or by rename) after
@@ -376,8 +376,10 @@ def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_o
         tmp_path, name="entry-untagged", checkpoint_path=str(copy), actor=None
     )
 
-    assert owner.entry.experiment_id == "expA"
-    assert [e.experiment_id for e in registered_entries(tmp_path)] == ["expA"]
+    assert (owner.entry.origin, owner.entry.name) == ("run", "expA")
+    assert [(e.origin, e.name) for e in registered_entries(tmp_path)] == [
+        ("run", "expA")
+    ]
 
 
 def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_owner(
@@ -412,7 +414,7 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
         checkpoint_path=elsewhere.path,
         actor=None,
     )
-    assert registered.entry.experiment_id is None
+    assert registered.entry.origin == "foreign"
 
     run = observe(
         finished_run(tmp_path, experiment_id="expA", seed=7, data=data)
@@ -420,9 +422,9 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
     assert run is not None and run.sha256 == elsewhere.sha256
 
     (entry,) = registered_entries(tmp_path)
-    assert entry.experiment_id == "expA"
+    assert (entry.origin, entry.name) == ("run", "expA")
     loaded = load_registered_checkpoint(elsewhere.path, project=tmp_path)
-    assert loaded.experiment_id == "expA"
+    assert loaded.entry == entry
 
 
 def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
@@ -447,13 +449,13 @@ def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
     )
 
     (entry,) = [
-        e for e in registered_entries(tmp_path) if e.experiment_id is None
+        e for e in registered_entries(tmp_path) if e.origin == "foreign"
     ]
     assert entry.name == "second-name"
     for path in (ckpt, str(copy)):
         loaded = load_registered_checkpoint(path, project=tmp_path)
         assert loaded.entry.name == "second-name"
-        assert loaded.experiment_id is None
+        assert loaded.entry.origin == "foreign"
 
 
 # Rail 5: an unregistered checkpoint is refused without being unpickled.
@@ -507,9 +509,9 @@ def test_run_inference_admits_a_registered_checkpoint_and_records_its_digest(
 
     assert "error" not in r, r
     digest = hashlib.sha256(Path(ckpt).read_bytes()).hexdigest()
-    assert r["checkpoint_sha256"] == digest
+    assert r["producer"]["checkpoint_sha256"] == digest
     bucket = read_bucket(tmp_path, "preds")
-    assert isinstance(bucket.producer, Producer)
+    assert bucket.producer.kind == "checkpoint"
     assert bucket.producer.checkpoint_sha256 == digest
     assert bucket.assessment_id is None
 
@@ -525,7 +527,8 @@ def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(
 
     assert "error" not in r, r
     assert (
-        r["checkpoint_sha256"] == hashlib.sha256(copy.read_bytes()).hexdigest()
+        r["producer"]["checkpoint_sha256"]
+        == hashlib.sha256(copy.read_bytes()).hexdigest()
     )
 
 
@@ -543,11 +546,13 @@ def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_di
 
     r = _infer(tmp_path, second)
     assert "error" not in r, r
-    assert (
-        r["checkpoint_sha256"]
-        == hashlib.sha256(Path(second).read_bytes()).hexdigest()
-    )
-    assert r["experiment_id"] is None
+    assert r["producer"] == {
+        "kind": "checkpoint",
+        "checkpoint_sha256": hashlib.sha256(
+            Path(second).read_bytes()
+        ).hexdigest(),
+        "origin": "foreign",
+    }
 
 
 # Rail 7: a checkpoint a completed envelope run registered by completing runs with no further
@@ -562,11 +567,13 @@ def test_a_completed_runs_weights_run_through_run_inference_with_no_further_step
     r = _infer(tmp_path, ckpt)
 
     assert "error" not in r, r
-    assert (
-        r["checkpoint_sha256"]
-        == hashlib.sha256(Path(ckpt).read_bytes()).hexdigest()
-    )
-    assert r["experiment_id"] == "exp-rail7"
+    assert r["producer"] == {
+        "kind": "checkpoint",
+        "checkpoint_sha256": hashlib.sha256(
+            Path(ckpt).read_bytes()
+        ).hexdigest(),
+        "origin": "run",
+    }
 
 
 # Rail 10: register_model and load_registered_checkpoint agree on one file's digest.
@@ -653,7 +660,7 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     assert (
         "error" not in good and "error" not in stale and "error" not in undated
     )
-    assert good["checkpoint_sha256"] == reg.entry.sha256
+    assert good["producer"]["checkpoint_sha256"] == reg.entry.sha256
     for bucket, digest in (
         ("stale/2026-01-01", "a" * 64),
         ("undated-model", "b" * 64),

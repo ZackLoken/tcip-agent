@@ -35,13 +35,9 @@
         "interpretation": null
       }
     ],
-    "plain": false,
     "default_bands": ["0", "1", "2"],
     "default_stretch": "minmax",
-    "pixel_fraction": 0.8858131487889274,
-    "seed": 0,
-    "overview_size": null,
-    "sampled": true
+    "read": { "kind": "sampled", "pixel_fraction": 0.8858131487889274, "seed": 0 }
   },
   "four_spectral": {
     "band_count": 4,
@@ -79,13 +75,9 @@
         "interpretation": null
       }
     ],
-    "plain": false,
     "default_bands": ["Blue", "Green", "Red"],
     "default_stretch": "minmax",
-    "pixel_fraction": 1.0,
-    "seed": 0,
-    "overview_size": null,
-    "sampled": false
+    "read": { "kind": "sampled", "pixel_fraction": 1.0, "seed": 0 }
   },
   "three_unlabeled": {
     "band_count": 3,
@@ -115,24 +107,16 @@
         "interpretation": null
       }
     ],
-    "plain": false,
     "default_bands": ["Red", "Green", "Blue"],
     "default_stretch": "minmax",
-    "pixel_fraction": 1.0,
-    "seed": 0,
-    "overview_size": null,
-    "sampled": false
+    "read": { "kind": "sampled", "pixel_fraction": 1.0, "seed": 0 }
   },
   "rgba": {
     "band_count": 4,
     "bands": [],
-    "plain": true,
     "default_bands": ["0", "1", "2"],
     "default_stretch": "minmax",
-    "pixel_fraction": null,
-    "seed": null,
-    "overview_size": null,
-    "sampled": false
+    "read": { "kind": "plain" }
   },
   "deep_rgba": {
     "band_count": 4,
@@ -170,24 +154,16 @@
         "interpretation": "alpha"
       }
     ],
-    "plain": false,
     "default_bands": ["0", "1", "2"],
     "default_stretch": "minmax",
-    "pixel_fraction": 1.0,
-    "seed": 0,
-    "overview_size": null,
-    "sampled": false
+    "read": { "kind": "sampled", "pixel_fraction": 1.0, "seed": 0 }
   },
   "plain": {
     "band_count": 3,
     "bands": [],
-    "plain": true,
     "default_bands": ["0", "1", "2"],
     "default_stretch": "minmax",
-    "pixel_fraction": null,
-    "seed": null,
-    "overview_size": null,
-    "sampled": false
+    "read": { "kind": "plain" }
   },
   "single": {
     "band_count": 1,
@@ -201,12 +177,8 @@
         "interpretation": null
       }
     ],
-    "plain": false,
     "default_bands": ["NIR", "NIR", "NIR"],
     "default_stretch": "minmax",
-    "pixel_fraction": 1.0,
-    "seed": 0,
-    "overview_size": null,
-    "sampled": false
+    "read": { "kind": "sampled", "pixel_fraction": 1.0, "seed": 0 }
   }
 }

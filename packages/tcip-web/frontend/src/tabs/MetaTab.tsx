@@ -132,12 +132,18 @@ export function MetaTab() {
       >
         {reports === null ? null : reports.entries.length > 0 ? (
           <div className="flex flex-col gap-2">
-            {reports.entries.map(({ id, record }) => {
+            {reports.entries.map((entry) => {
+              const { id } = entry;
               // A report that will not read shows its id and the reason in place of its fields.
               const [category, stated, text, context] =
-                "reason" in record
-                  ? ([UNSET_GLYPH, id, record.reason, {}] as const)
-                  : ([record.category, record.timestamp, record.detail, record.context] as const);
+                entry.kind === "unread"
+                  ? ([UNSET_GLYPH, id, entry.reason, {}] as const)
+                  : ([
+                      entry.record.category,
+                      entry.record.timestamp,
+                      entry.record.detail,
+                      entry.record.context,
+                    ] as const);
               return (
                 <div
                   key={id}
@@ -178,12 +184,13 @@ export function MetaTab() {
       >
         {retros === null ? null : retros.entries.length > 0 ? (
           <div className="flex flex-col gap-3">
-            {retros.entries.map(({ id, record }) => {
+            {retros.entries.map((entry) => {
+              const { id } = entry;
               // Each section is headed by its field's own name; one that will not read shows why.
               const [title, stated, sections] =
-                "reason" in record
-                  ? ([id, "", { reason: record.reason }] as const)
-                  : headedSections(record);
+                entry.kind === "unread"
+                  ? ([id, "", { reason: entry.reason }] as const)
+                  : headedSections(entry.record);
               return (
                 <div
                   key={id}

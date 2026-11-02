@@ -57,8 +57,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
 
     Beside a dated directory under ``images/``, a hidden one adds no date to either.
     """
-    from tcip_mcp.project_record import record_or_problem
-    from tcip_mcp.workspace import ListedProject
+    from tcip_mcp.workspace import listed_project
     from tcip_web.routes.projects import _summarize
     from tests._producer_fixtures import registry_of, registry_over
 
@@ -70,7 +69,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     tree = client.get(
         "/api/dataset/tree", params={"dataset_root": str(root)}
     ).json()
-    picker = _summarize(ListedProject(root, *record_or_problem(root)))
+    picker = _summarize(listed_project(root))
 
     assert [c["name"] for c in tree["captures"]] == ["2026-03-02"]
     assert picker.tree.model_dump(mode="json") == tree
@@ -142,8 +141,7 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     date equal the tree's.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.project_record import record_or_problem
-    from tcip_mcp.workspace import ListedProject
+    from tcip_mcp.workspace import listed_project
     from tcip_web.routes.projects import _summarize
     from tests._chain_fixtures import DATE, unassessed_bucket
 
@@ -153,7 +151,7 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     tree = client.get(
         "/api/dataset/tree", params={"dataset_root": str(root)}
     ).json()
-    picker = _summarize(ListedProject(root, *record_or_problem(root)))
+    picker = _summarize(listed_project(root))
 
     assert tree["buckets_by_date"][DATE] == [bucket.name]
     assert picker.tree.model_dump(mode="json") == tree

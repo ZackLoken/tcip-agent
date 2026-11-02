@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from queue import Queue, ShutDown
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 
 import psutil
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.project_paths import repo_root_from_here
@@ -143,13 +143,28 @@ class Provider:
         """The :class:`Resume` among the row's arguments, ``None`` for a row never resumed."""
         return next((a for a in self.args if isinstance(a, Resume)), None)
 
-    @property
-    def unavailable_reason(self) -> str:
-        """Why this row cannot launch when its executable is not on ``PATH``."""
-        return (
-            f"{self.name} is not available: no `{self.executable}` executable is on PATH. "
-            "Install it and sign in to enable the agent terminal."
-        )
+
+class Launchable(BaseModel):
+    """A provider row that launches here: its id and its name."""
+
+    kind: Literal["launchable"] = "launchable"
+    id: str
+    name: str
+
+
+class Unlaunchable(BaseModel):
+    """A provider row that cannot launch here: its id, its name and why, in words for a person."""
+
+    kind: Literal["unlaunchable"] = "unlaunchable"
+    id: str
+    name: str
+    why: str
+
+
+type ProviderStatus = Annotated[
+    Launchable | Unlaunchable, Field(discriminator="kind")
+]
+"""Whether a provider row launches here, told apart by its ``kind``."""
 
 
 @dataclass(frozen=True)
@@ -509,22 +524,51 @@ def _override_argv() -> list[str] | None:
     return shlex.split(override)
 
 
-def resolve_terminal_command(
-    provider: Provider,
-) -> tuple[list[str | Resume], bool] | None:
-    """Return the command that launches ``provider`` and whether it is the override.
+class Command(NamedTuple):
+    """A provider row's launch command, and whether it is the ``TCIP_TERMINAL_CMD`` override."""
 
-    The override is ``TCIP_TERMINAL_CMD``'s argv when one is set; else the command is the row's
-    executable resolved on ``PATH`` followed by its arguments with their placeholders unrendered.
-    ``None`` when the executable is not on ``PATH``.
+    argv: list[str | Resume]
+    override: bool
+    kind: Literal["command"] = "command"
+
+
+def launch_command(provider: Provider) -> Command | Unlaunchable:
+    """Return the command ``provider`` launches with here, or why it cannot launch here.
+
+    The command is ``TCIP_TERMINAL_CMD``'s argv when one is set, the override; else the row's
+    executable resolved on ``PATH`` followed by its arguments with their placeholders
+    unrendered. A row cannot launch, the reason in words for a person, with no PTY backend, or
+    with no override and the executable not on ``PATH``.
     """
+    if os.name == "nt":
+        try:
+            import winpty  # noqa: F401
+        except ImportError:
+            return Unlaunchable(
+                id=provider.id,
+                name=provider.name,
+                why="pywinpty is not installed (pip install pywinpty)",
+            )
     override = _override_argv()
     if override is not None:
-        return [*override], True
+        return Command([*override], override=True)
     executable = shutil.which(provider.executable)
     if executable is None:
-        return None
-    return [executable, *provider.args], False
+        return Unlaunchable(
+            id=provider.id,
+            name=provider.name,
+            why=f"{provider.name} is not available: no `{provider.executable}` executable "
+            "is on PATH. Install it and sign in to enable the agent terminal.",
+        )
+    return Command([executable, *provider.args], override=False)
+
+
+def provider_status(provider: Provider) -> ProviderStatus:
+    """Return whether ``provider`` launches here (:func:`launch_command`), or why not."""
+    command = launch_command(provider)
+    if command.kind == "unlaunchable":
+        return command
+    return Launchable(id=provider.id, name=provider.name)
 
 
 def _write_launch_file(name: str, body: dict) -> Path:
@@ -584,7 +628,7 @@ def render_argv(
 
     def rendered(arg: str | Resume) -> list[str]:
         if isinstance(arg, Resume):
-            if isinstance(resumed, NotResumed):
+            if resumed.kind == "not_resumed":
                 return []
             return [arg.argument, resumed.conversation]
         return values[arg]() if arg in values else [arg]
@@ -592,23 +636,38 @@ def render_argv(
     return [part for arg in argv for part in rendered(arg)]
 
 
+class Prepared(BaseModel):
+    """A launch made ready to spawn: the steps its row's preparation took, empty for none."""
+
+    kind: Literal["prepared"] = "prepared"
+    steps: list[str]
+
+
+class NotStarted(BaseModel):
+    """A launch that started no agent, and why, in words for a person."""
+
+    kind: Literal["not_started"] = "not_started"
+    why: str
+
+
 def prepare_launch(
     executable: str,
     provider: Provider,
     project: OpenProject | None,
     session: str,
-) -> list[str] | str:
+) -> Prepared | NotStarted:
     """Run ``provider.prepare`` with the resolved ``executable``, ``project`` and ``session``.
 
-    Returns the steps it took (empty for a row with no preparation), or the reason it failed,
-    prefixed with the row's name.
+    Returns the steps it took, or why it failed, prefixed with the row's name.
     """
     if provider.prepare is None:
-        return []
+        return Prepared(steps=[])
     try:
-        return provider.prepare(executable, project, session)
+        return Prepared(steps=provider.prepare(executable, project, session))
     except PreparationFailedError as exc:
-        return f"{provider.name}'s launch preparation failed: {exc}"
+        return NotStarted(
+            why=f"{provider.name}'s launch preparation failed: {exc}"
+        )
 
 
 _PRIVATE_MODE = re.compile(r"\x1b\[\?([0-9;]*)([hl])")
@@ -708,12 +767,31 @@ def orientation_tools() -> tuple[Callable[..., Any], ...]:
     )
 
 
+class Told(BaseModel):
+    """What the agent of a session start is told."""
+
+    kind: Literal["told"] = "told"
+    text: str
+
+
+class NothingTold(BaseModel):
+    """A session start whose agent is told nothing: a resume."""
+
+    kind: Literal["nothing_told"] = "nothing_told"
+
+
+type SessionOrientation = Annotated[
+    Told | NothingTold, Field(discriminator="kind")
+]
+"""What a session start's agent is told, told apart by its ``kind``."""
+
+
 def orientation(
     project: OpenProject | None, source: SessionStartSource
-) -> str | None:
+) -> SessionOrientation:
     """Return what the agent of a session for ``project`` started by ``source`` is told.
 
-    It is ``None`` for a ``resume``; otherwise the parts read from :func:`orientation_tools`
+    It is nothing for a ``resume``; otherwise the parts read from :func:`orientation_tools`
     that the start calls for, fit by :func:`_fitted`.
     """
     from tcip_mcp.knowledge import list_documents
@@ -721,7 +799,7 @@ def orientation(
     from tcip_mcp.tools.project_tools import initialize_project
 
     if source == "resume":
-        return None
+        return NothingTold()
     overview, diagnose, memory, serve = orientation_tools()
     served_by = serve.__name__
     knowledge = _whole(
@@ -739,7 +817,7 @@ def orientation(
             f"{memory.__name__}. An existing project is worked on by opening it "
             "in the GUI, then ending this agent from the rail and starting another."
         )
-        return _fitted([_whole(no_project, no_project), knowledge])
+        return Told(text=_fitted([_whole(no_project, no_project), knowledge]))
     parts = [_memory_part(kind, project.root, memory) for kind in MemoryKind]
     if source != "compact":
         found = diagnose(project.root)["findings"]
@@ -762,7 +840,7 @@ def orientation(
                 f"{counted}.",
             ),
         ]
-    return _fitted([*parts, knowledge])
+    return Told(text=_fitted([*parts, knowledge]))
 
 
 def _memory_part(
@@ -868,23 +946,6 @@ def prewarm() -> None:
     threading.Thread(
         target=_prewarm_blocking, name="terminal-prewarm", daemon=True
     ).start()
-
-
-def launch_problem(provider: Provider) -> str | None:
-    """Return why ``provider`` cannot launch here, or ``None`` when it can.
-
-    The reasons are no PTY backend, or its executable is not on ``PATH``.
-    """
-    if os.name == "nt":
-        try:
-            import winpty  # noqa: F401
-        except ImportError:
-            return "pywinpty is not installed (pip install pywinpty)"
-    return (
-        provider.unavailable_reason
-        if resolve_terminal_command(provider) is None
-        else None
-    )
 
 
 # ── PTY backends ────────────────────────────────────────────────────────

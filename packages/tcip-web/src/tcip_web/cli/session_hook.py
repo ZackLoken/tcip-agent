@@ -96,8 +96,10 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     start = _START.validate_json(sys.stdin.read())
 
     import httpx
+    from pydantic import TypeAdapter
 
-    from tcip_web.routes.terminal import SessionOrientation, SessionStartReport
+    from tcip_web.routes.terminal import SessionStartReport
+    from tcip_web.terminal import SessionOrientation
 
     if url is None:
         from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
@@ -113,7 +115,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     )
     answer = httpx.post(url, json=report.model_dump(), timeout=None)
     answer.raise_for_status()
-    text = SessionOrientation.model_validate_json(answer.text).text
-    if text is not None:
-        print(json.dumps(start.output(text)))
+    told: SessionOrientation = TypeAdapter(SessionOrientation).validate_json(
+        answer.text
+    )
+    if told.kind == "told":
+        print(json.dumps(start.output(told.text)))
     return 0

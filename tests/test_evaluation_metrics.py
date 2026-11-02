@@ -874,7 +874,7 @@ def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission() -
     assert weights.model_dump() == SCORE_WEIGHTS
 
 
-# HIGHER_IS_BETTER_BY_METRIC held against what evaluate()/governing_counts really return.
+# DIRECTION_BY_METRIC held against what evaluate()/governing_counts really return.
 
 
 def _detection_batch(
@@ -897,10 +897,10 @@ def _detection_batch(
 
 
 @_with_bud_trait
-def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
+def test_direction_by_metric_matches_evaluate_and_governing_counts(
     tmp_path: Path,
 ) -> None:
-    """``HIGHER_IS_BETTER_BY_METRIC`` matches the ranking keys the two metric producers return.
+    """``DIRECTION_BY_METRIC`` matches the ranking keys the two metric producers return.
 
     Over each synthesizable task's ``evaluate`` and one ``governing_counts`` call, each declared
     key is returned, and each returned key outside ``not_a_ranking`` and the not-finite suffix
@@ -908,7 +908,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.pipelines.model_contract import _SYNTHESIZABLE_TASKS
-    from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
+    from tcip_mcp.pipelines.schemas import DIRECTION_BY_METRIC
     from tcip_mcp.pipelines.training.evaluation import (
         evaluate,
         governing_counts,
@@ -1040,7 +1040,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
     ranking_returned = {
         k for k in returned if not k.endswith(NOT_FINITE_SUFFIX)
     }
-    declared = set(HIGHER_IS_BETTER_BY_METRIC)
+    declared = set(DIRECTION_BY_METRIC)
 
     undeclared = (ranking_returned - not_a_ranking) - declared
     assert not undeclared, (
@@ -1077,8 +1077,9 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
     common_fields = {
         "model_path",
         "task",
+        "kind",
         "checkpoint_sha256",
-        "experiment_id",
+        "origin",
         "iou_threshold",
         "execution",
         "eval_regime",

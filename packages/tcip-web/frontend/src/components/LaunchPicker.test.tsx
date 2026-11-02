@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ADMITTED, BLOCKED, type ChoiceCheck, READ, UNREAD } from "@/api/types.generated";
 import { LaunchPicker, NO_OTHER_PARTITION, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { thrown } from "@/test/refusals";
 import { MOVED_SPLIT_CHOICES, SPLIT_CHOICES, TRAINING_REFUSALS } from "@/test/training";
@@ -10,12 +11,21 @@ afterEach(cleanup);
 /** The issue the produced refusal of a relaunch names. */
 const [ISSUE] = TRAINING_REFUSALS.refused_relaunch.body.detail.issues;
 
-/** The produced partition offered disabled, its record unreadable, and the one offered enabled. */
-const DISABLED = SPLIT_CHOICES.selections.find((choice) => choice.reason !== null)!;
-const ENABLED = SPLIT_CHOICES.selections.find((choice) => choice.reason === null)!;
+/** The produced partition offered disabled, its record unreadable, and the one offered enabled,
+ * read and admitted by its check. */
+const [DISABLED] = SPLIT_CHOICES.selections.flatMap((c) => (c.kind === UNREAD ? [c] : []));
+const [ENABLED] = SPLIT_CHOICES.selections.flatMap((c) =>
+  c.kind === READ && c.check.kind === ADMITTED ? [c] : [],
+);
+
+/** The reason a produced check refuses for; an admitting check throws. */
+function reasonOf(check: ChoiceCheck): string {
+  if (check.kind !== BLOCKED) throw new Error("the produced choice is admitted");
+  return check.reason;
+}
 
 /** The disabled partition's reason as the page shows it, its whitespace collapsed. */
-const DISABLED_REASON = String(DISABLED.reason).replace(/\s+/g, " ").trim();
+const DISABLED_REASON = DISABLED.reason.replace(/\s+/g, " ").trim();
 
 /** The radio of the partition under `dir` itself, never of one in a directory beneath it. */
 function radioOf(dir: string): HTMLElement {
@@ -135,7 +145,7 @@ describe("LaunchPicker", () => {
   });
 
   it("disables Start while the checked As recorded choice is disabled, showing its reason once, in the status region", () => {
-    const reason = String(MOVED_SPLIT_CHOICES.as_recorded.reason);
+    const reason = reasonOf(MOVED_SPLIT_CHOICES.as_recorded.check);
     renderRow({ data: MOVED_SPLIT_CHOICES });
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
     expect(screen.getAllByText(reason)).toHaveLength(1);
@@ -143,7 +153,7 @@ describe("LaunchPicker", () => {
   });
 
   it("shows a disabled candidate's own inline reason once it is no longer the checked choice, not duplicated into the status region", () => {
-    expect(SPLIT_CHOICES.as_recorded.reason).toBeNull();
+    expect(SPLIT_CHOICES.as_recorded.check.kind).toBe(ADMITTED);
     renderRow({ data: SPLIT_CHOICES });
     // As recorded (the default checked choice) is enabled, so Start is not blocked and no
     // status region renders; the untouched, disabled candidate still names its own reason once.

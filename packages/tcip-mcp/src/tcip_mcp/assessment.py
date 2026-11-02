@@ -13,14 +13,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from functools import partial
 from operator import methodcaller
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
+    Field,
     JsonValue,
     PositiveFloat,
     TypeAdapter,
@@ -34,6 +36,7 @@ from tcip_mcp.pipelines.data.selection import (
     GroundTruth,
     Sample,
     Side,
+    SourceRegion,
     ground_truth_record,
 )
 from tcip_mcp.pipelines.execution import (
@@ -61,6 +64,7 @@ from tcip_mcp.traits import (
 from tcip_store import Key
 
 if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.data.datasets import DocumentDataset
     from tcip_mcp.pipelines.data.selection import ClassScope, Selection
     from tcip_mcp.pipelines.execution import Pass, Preparation
@@ -112,39 +116,11 @@ class ReferenceSample:
 
 
 @dataclass(frozen=True)
-class Reference:
-    """What an assessment measured.
+class _Reference:
+    """What an assessment measured: each retained ground-truth file and every sample."""
 
-    It holds the selection it came from, or the mosaic's ``raster_identity``, the identity id
-    the samples' dataset root recorded when it was measured (``None`` for a root that recorded
-    none), each retained ground-truth file and every sample.
-    """
-
-    selection_dir: str | None
-    raster_identity: RasterIdentity | None
-    dataset_id: str | None
     ground_truth: list[RetainedFile]
     samples: list[ReferenceSample]
-
-    def covers(
-        self,
-        *,
-        dataset_id: str | None,
-        date: str | None,
-        raster_identity: RasterIdentity | None,
-    ) -> bool:
-        """Return whether this reference spans a capture.
-
-        For a raster it is the same mosaic; for per-image predictions, the recorded
-        ``dataset_id`` and the capture of one of its samples' sources
-        (:func:`~tcip_mcp.dataset_layout.image_capture`).
-        """
-        from tcip_mcp.dataset_layout import image_capture
-
-        if raster_identity is not None:
-            return self.raster_identity == raster_identity
-        dates = {image_capture(s.sample.source)[1] for s in self.samples}
-        return dataset_id == self.dataset_id and date in dates
 
     def moved(self, run_dir: Path) -> list[str]:
         """Return what of this reference no longer digests as recorded.
@@ -183,28 +159,65 @@ class Reference:
 
 
 @dataclass(frozen=True)
-class Assessment:
+class SelectionReference(_Reference):
+    """A reference drawn from the selection at ``selection_dir``.
+
+    ``dataset_id`` is the identity id the samples' dataset root recorded when it was measured,
+    ``None`` for a root that recorded none.
+    """
+
+    selection_dir: str
+    dataset_id: str | None
+    kind: Literal["selection"] = "selection"
+
+    def covers(self, bucket: Bucket) -> bool:
+        """Return whether this reference spans ``bucket``'s capture of per-image predictions.
+
+        That is a bucket over no raster whose ``dataset_id`` is the one recorded and whose date
+        is one of its samples' sources' (:func:`~tcip_mcp.dataset_layout.image_capture`).
+        """
+        from tcip_mcp.dataset_layout import image_capture
+
+        dates = {image_capture(s.sample.source)[1] for s in self.samples}
+        return (
+            bucket.raster_identity is None
+            and bucket.dataset_id == self.dataset_id
+            and bucket.date in dates
+        )
+
+
+@dataclass(frozen=True)
+class RasterReference(_Reference):
+    """A reference held out as the reserved regions of the mosaic ``raster_identity`` names."""
+
+    raster_identity: RasterIdentity
+    kind: Literal["raster"] = "raster"
+
+    def covers(self, bucket: Bucket) -> bool:
+        """Return whether this reference spans ``bucket``'s capture: the same mosaic."""
+        return self.raster_identity == bucket.raster_identity
+
+
+type Reference = Annotated[
+    SelectionReference | RasterReference, Field(discriminator="kind")
+]
+"""What an assessment measured, told apart by its ``kind``."""
+
+
+@dataclass(frozen=True)
+class _Assessment:
     """One finished assessment, as its ``assessment.json`` states it.
 
-    ``delivery_kind``, ``producer`` (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`),
-    ``execution`` and ``rationale`` are ``None`` for a physical-scale assessment. ``disjointness``
-    and ``criterion`` are the evidence the failures were read from, ``scale`` the scale a
-    physical-scale assessment derived. ``revision`` is the trait revision it was judged under,
-    ``rationale`` why the assessment states the test settings it does, and ``recorded_at`` the
-    instant it was written.
+    ``revision`` is the trait revision it was judged under, ``disjointness`` and ``criterion``
+    the evidence the failures were read from, and ``recorded_at`` the instant it was written.
     """
 
     assessment_id: str
     recorded_at: AwareDatetime
-    delivery_kind: str | None
     revision: TraitRevisionRef
-    producer: Producer | None
-    execution: Execution | None
-    rationale: str | None
     reference: Reference
     disjointness: dict[str, JsonValue]
     criterion: dict[str, JsonValue]
-    scale: dict[str, JsonValue] | None
     failures: list[str]
     __pydantic_config__ = ConfigDict(
         ser_json_inf_nan="constants", extra="forbid"
@@ -216,7 +229,37 @@ class Assessment:
         return not self.failures
 
 
-ASSESSMENT_RECORD = TypeAdapter(Assessment)
+@dataclass(frozen=True)
+class CheckpointAssessment(_Assessment):
+    """An assessment of one checkpoint's numbers at one delivered kind.
+
+    ``producer`` is the checkpoint's
+    (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`), ``execution`` the record of
+    the pass it ran under, and ``rationale`` why the assessment states the test settings it does.
+    """
+
+    delivery_kind: str
+    producer: Producer
+    execution: Execution
+    rationale: str
+    kind: Literal["checkpoint"] = "checkpoint"
+
+
+@dataclass(frozen=True)
+class ScaleAssessment(_Assessment):
+    """An assessment of a physical scale: the ``scale`` it derived."""
+
+    scale: dict[str, JsonValue]
+    kind: Literal["physical_scale"] = "physical_scale"
+
+
+type Assessment = Annotated[
+    CheckpointAssessment | ScaleAssessment, Field(discriminator="kind")
+]
+"""One finished assessment, told apart by its ``kind``."""
+
+
+ASSESSMENT_RECORD: TypeAdapter[Assessment] = TypeAdapter(Assessment)
 """The assessment record's validation and its JSON form."""
 
 
@@ -282,20 +325,13 @@ def _finish(
     project: Path,
     run_dir: Path,
     revision: TraitRevision,
+    measured: Callable[..., CheckpointAssessment | ScaleAssessment],
     *,
-    delivery_kind: str | None,
-    producer: Producer | None,
-    execution: Execution | None,
-    rationale: str | None,
-    reference: Reference,
-    disjointness: dict[str, Any],
-    criterion: dict[str, Any],
-    scale: dict[str, Any] | None,
-    failures: list[str],
     actor: str | None,
 ) -> Assessment:
     """Write the assessment judged under ``revision`` as the run's ``assessment.json`` once.
 
+    ``measured`` builds the assessment from its id, the instant it is recorded and the revision.
     Then its one audit line, ``assessment_recorded`` by ``actor``, is written; returns it as read
     back.
     """
@@ -304,27 +340,14 @@ def _finish(
 
     line = audit_line(
         "assessment_recorded",
-        {
-            "assessment_id": run_dir.name,
-            "trait": revision.entry.name,
-            "delivery_kind": delivery_kind,
-        },
+        {"assessment_id": run_dir.name, "trait": revision.entry.name},
         actor,
         "ok",
     )
-    assessment = Assessment(
+    assessment = measured(
         assessment_id=run_dir.name,
         recorded_at=line.timestamp,
-        delivery_kind=delivery_kind,
         revision=revision.ref,
-        producer=producer,
-        execution=execution,
-        rationale=rationale,
-        reference=reference,
-        disjointness=disjointness,
-        criterion=criterion,
-        scale=scale,
-        failures=failures,
     )
     write_once(
         run_dir / ASSESSMENT_FILE,
@@ -403,30 +426,35 @@ def _retained(
     return list(files.values()), measured
 
 
-def _reference(
-    selection_dir: str | None,
-    raster_identity: RasterIdentity | None,
+def _reference_samples(
+    samples: list[Sample], digest_of: dict[str, str]
+) -> list[ReferenceSample]:
+    """Return each of ``samples`` beside its source digest (``digest_of``)."""
+    return [
+        ReferenceSample(sample=s, source_digest=digest_of[s.location])
+        for s in samples
+    ]
+
+
+def _selection_reference(
+    selection_dir: str,
     samples: list[Sample],
     digest_of: dict[str, str],
     retained: list[RetainedFile],
-) -> Reference:
-    """Return what an assessment measured.
+) -> SelectionReference:
+    """Return what an assessment measured of the selection at ``selection_dir``.
 
-    It holds where the reference came from, the identity id the one dataset root of its samples
-    records as it is measured (:func:`~tcip_mcp.dataset_layout.dataset_id_of` the root of its
-    first sample), every retained file, and each sample beside its source digest (``digest_of``).
+    It holds the identity id the one dataset root of its samples records as it is measured
+    (:func:`~tcip_mcp.dataset_layout.dataset_id_of` the root of its first sample), every retained
+    file, and each sample beside its source digest (:func:`_reference_samples`).
     """
     from tcip_mcp.dataset_layout import dataset_id_of, image_capture
 
-    return Reference(
+    return SelectionReference(
         selection_dir=selection_dir,
-        raster_identity=raster_identity,
         dataset_id=dataset_id_of(image_capture(samples[0].source)[0]),
         ground_truth=retained,
-        samples=[
-            ReferenceSample(sample=s, source_digest=digest_of[s.location])
-            for s in samples
-        ],
+        samples=_reference_samples(samples, digest_of),
     )
 
 
@@ -526,65 +554,48 @@ def _admit_reference(samples: list[Sample], scope: ClassScope) -> list[Sample]:
     return admitted
 
 
-def _run_sides(
-    project: Path, experiment_id: str | None
-) -> dict[str, list[Sample]] | None:
-    """Return the producing run's ``train`` and ``val`` samples, or ``None``.
-
-    ``None`` when no run of ``project`` produced the checkpoint, so no training membership is
-    known.
-    """
-    if experiment_id is None:
-        return None
-    from tcip_mcp.experiments import run_resolution
-
-    run = run_resolution(experiment_id, project=project).partition.samples
-    return {
-        side: [s for s in run if s.side == side] for side in ("train", "val")
-    }
-
-
 def _disjointness(
+    digest_of: dict[str, str], cal: list[Sample], hold: list[Sample]
+) -> tuple[dict[str, Any], list[str]]:
+    """Return ``(evidence, failures)`` of whether the reference's two sides are disjoint.
+
+    They are when its calibration and holdout sides share no source digest (``digest_of``).
+    """
+    shared = sorted(
+        {digest_of[s.location] for s in cal}
+        & {digest_of[s.location] for s in hold}
+    )
+    return (
+        {"holdout_shares_calibration": shared},
+        ["holdout_shares_calibration_image"] if shared else [],
+    )
+
+
+def _held_out(
     digest_of: dict[str, str],
     cal: list[Sample],
     hold: list[Sample],
-    run: dict[str, list[Sample]] | None,
+    run: list[Sample],
 ) -> tuple[dict[str, Any], list[str]]:
-    """Return ``(evidence, failures)`` of whether the reference is held out.
+    """Return ``(evidence, failures)`` of whether the reference is held out of ``run``.
 
-    It is held out when its calibration and holdout sides share no source digest (``digest_of``),
-    and neither shares a group key or a source digest with any of the producing ``run``'s sides.
-    ``run`` ``None`` is a run whose membership is unknown, a failure of its own, and ``{}`` a
-    reference no model is measured against.
+    It is when its sides are disjoint (:func:`_disjointness`) and neither shares a group key or a
+    source digest with the ``train`` or ``val`` side of ``run``, the producing run's samples.
     """
     from tcip_mcp.pipelines.data.selection import source_digests
 
-    evidence: dict[str, Any] = {
-        "holdout_shares_calibration": sorted(
-            {digest_of[s.location] for s in cal}
-            & {digest_of[s.location] for s in hold}
-        )
-    }
-    failures = (
-        ["holdout_shares_calibration_image"]
-        if evidence["holdout_shares_calibration"]
-        else []
-    )
-    if run is None:
-        evidence["training"] = None
-        return evidence, [*failures, "training_membership_unknown"]
+    evidence, failures = _disjointness(digest_of, cal, hold)
     groups = {s.group for s in cal + hold}
     digests = {digest_of[s.location] for s in cal + hold}
     for side, name, failure in (
         ("train", "training", "reference_shares_training"),
         ("val", "selection", "reference_shares_selection"),
     ):
-        if side not in run:
-            continue
+        members = [s for s in run if s.side == side]
         shared = {
-            "groups": sorted(groups & {s.group for s in run[side]}),
+            "groups": sorted(groups & {s.group for s in members}),
             "source_digests": sorted(
-                digests & set(source_digests(run[side]).values())
+                digests & set(source_digests(members).values())
             ),
         }
         evidence[name] = shared
@@ -656,12 +667,19 @@ def assess(
     cal, hold = admitted[: len(cal)], admitted[len(cal) :]
     reads = _reference_reads(cal + hold)
     digest_of = source_digests(cal + hold)
-    disjointness, failures = _disjointness(
-        digest_of,
-        cal,
-        hold,
-        _run_sides(project, prep.checkpoint.experiment_id),
-    )
+    entry = prep.checkpoint.entry
+    if entry.origin == "foreign":
+        disjointness, failures = _disjointness(digest_of, cal, hold)
+        failures.append("training_membership_unknown")
+    else:
+        from tcip_mcp.experiments import run_resolution
+
+        disjointness, failures = _held_out(
+            digest_of,
+            cal,
+            hold,
+            run_resolution(entry.name, project=project).partition.samples,
+        )
     run_dir = _open_run(project)
     retained, measured = _retained(run_dir, cal + hold, reads)
     m_cal, m_hold = measured[: len(cal)], measured[len(cal) :]
@@ -685,17 +703,19 @@ def assess(
         project,
         run_dir,
         revision,
-        delivery_kind=delivery_kind,
-        producer=p.checkpoint.producer,
-        execution=p.execution,
-        rationale=rationale,
-        reference=_reference(
-            str(selection_dir), None, cal + hold, digest_of, retained
+        partial(
+            CheckpointAssessment,
+            delivery_kind=delivery_kind,
+            producer=p.checkpoint.producer,
+            execution=p.execution,
+            rationale=rationale,
+            reference=_selection_reference(
+                str(selection_dir), cal + hold, digest_of, retained
+            ),
+            disjointness=disjointness,
+            criterion=criterion,
+            failures=[*failures, *criterion_failures],
         ),
-        disjointness=disjointness,
-        criterion=criterion,
-        scale=None,
-        failures=[*failures, *criterion_failures],
         actor=actor,
     )
 
@@ -1056,12 +1076,13 @@ def assess_reserved_regions(
         device=device,
         tile_batch_size=tile_batch_size,
     )
-    experiment_id = prep.checkpoint.experiment_id
-    if experiment_id is None:
+    entry = prep.checkpoint.entry
+    if entry.origin == "foreign":
         raise AssessmentRefusedError(
             "no run of this project produced this checkpoint, so no mosaic's "
             "reserved regions are known to have been held out from it."
         )
+    experiment_id = entry.name
     resolved = run_resolution(experiment_id, project=project)
     spatial = blocks.reserved_spatial_regions(resolved.partition.spatial)
     if spatial is None:
@@ -1164,7 +1185,7 @@ def assess_reserved_regions(
             ground_truth=mosaic.ground_truth,
             group=name,
             side=side,
-            rect=rect,
+            extent=SourceRegion(rect=rect),
             image=source,
         )
         for side, side_bands in bands.items()
@@ -1216,45 +1237,44 @@ def assess_reserved_regions(
         equivalence_z=equivalence_z,
         dispersion_quantile=dispersion_quantile,
     )
-    disjointness, disjoint_failures = _disjointness(
+    disjointness, disjoint_failures = _held_out(
         digest_of,
         [s for s in samples if s.side == "calibration"],
         [s for s in samples if s.side == "holdout"],
-        _run_sides(project, experiment_id),
+        resolved.partition.samples,
     )
+    count: dict[str, Any] = {
+        **evidence,
+        "block_scale_px": buffer_px,
+        "block_scale_source": scale_source,
+        "k_cal": k_cal,
+        "k_test": k_test,
+        "band_gt_counts": band_counts,
+        "density_uniformity_flags": sorted(
+            f
+            for counts in band_counts.values()
+            for f in blocks.density_uniformity_flags(counts)
+        ),
+    }
     return _finish(
         project,
         run_dir,
         revision,
-        delivery_kind=delivery_kind,
-        producer=p.checkpoint.producer,
-        execution=p.execution,
-        rationale=rationale,
-        reference=_reference(
-            None,
-            spatial.raster_content_identity,
-            samples,
-            digest_of,
-            retained,
+        partial(
+            CheckpointAssessment,
+            delivery_kind=delivery_kind,
+            producer=p.checkpoint.producer,
+            execution=p.execution,
+            rationale=rationale,
+            reference=RasterReference(
+                raster_identity=spatial.raster_content_identity,
+                ground_truth=retained,
+                samples=_reference_samples(samples, digest_of),
+            ),
+            disjointness=disjointness,
+            criterion={"count": count},
+            failures=[*disjoint_failures, *failures],
         ),
-        disjointness=disjointness,
-        criterion={
-            "count": {
-                **evidence,
-                "block_scale_px": buffer_px,
-                "block_scale_source": scale_source,
-                "k_cal": k_cal,
-                "k_test": k_test,
-                "band_gt_counts": band_counts,
-                "density_uniformity_flags": sorted(
-                    f
-                    for counts in band_counts.values()
-                    for f in blocks.density_uniformity_flags(counts)
-                ),
-            }
-        },
-        scale=None,
-        failures=[*disjoint_failures, *failures],
         actor=actor,
     )
 
@@ -1310,7 +1330,7 @@ def _band_records(
             ground_truth="",
             group=name,
             side=side,
-            rect=inner,
+            extent=SourceRegion(rect=inner),
         ).location
         result = p.predictor.predict_sliced(
             _RegionView(reader, Rect(hx0, hy0, hx1, hy1)),
@@ -1438,7 +1458,7 @@ def assess_physical_scale(
     cal, hold = admitted[: len(cal)], admitted[len(cal) :]
     reads = _reference_reads(cal + hold, (reference_csv,))
     digest_of = source_digests(cal + hold)
-    disjointness, failures = _disjointness(digest_of, cal, hold, {})
+    disjointness, failures = _disjointness(digest_of, cal, hold)
     run_dir = _open_run(project)
     retained, measured = _retained(run_dir, cal + hold, reads)
     rows = _read_reference_csv(reads[reference_csv].value, reference_csv)
@@ -1511,20 +1531,19 @@ def assess_physical_scale(
         project,
         run_dir,
         revision,
-        delivery_kind=None,
-        producer=None,
-        execution=None,
-        rationale=None,
-        reference=_reference(
-            str(selection_dir), None, cal + hold, digest_of, retained
+        partial(
+            ScaleAssessment,
+            reference=_selection_reference(
+                str(selection_dir), cal + hold, digest_of, retained
+            ),
+            disjointness=disjointness,
+            criterion={"scale": evidence},
+            scale={
+                "unit": unit,
+                "value": value,
+                "reference_subject": reference_subject,
+            },
+            failures=failures,
         ),
-        disjointness=disjointness,
-        criterion={"scale": evidence},
-        scale={
-            "unit": unit,
-            "value": value,
-            "reference_subject": reference_subject,
-        },
-        failures=failures,
         actor=actor,
     )

@@ -1,10 +1,10 @@
 {
-  "handed_off_at_once": { "undelivered": ["never given"] },
+  "handed_off_at_once": { "kind": "ended", "end": { "undelivered": ["never given"] } },
   "status": {
     "providers": [
-      { "id": "claude", "name": "Claude Code", "unavailable_reason": null },
-      { "id": "antigravity", "name": "Antigravity", "unavailable_reason": null },
-      { "id": "codex", "name": "Codex", "unavailable_reason": null }
+      { "kind": "launchable", "id": "claude", "name": "Claude Code" },
+      { "kind": "launchable", "id": "antigravity", "name": "Antigravity" },
+      { "kind": "launchable", "id": "codex", "name": "Codex" }
     ]
   },
   "launch": {
@@ -42,7 +42,7 @@
     "status": 404,
     "body": { "detail": "no such terminal session: <session 1>" }
   },
-  "handed_off": null,
+  "handed_off": { "kind": "hand_off_asked" },
   "end_audit_gap": {
     "status": 409,
     "body": {
@@ -119,31 +119,35 @@
   },
   "status_mixed": {
     "providers": [
-      { "id": "claude", "name": "Claude Code", "unavailable_reason": null },
-      { "id": "antigravity", "name": "Antigravity", "unavailable_reason": null },
+      { "kind": "launchable", "id": "claude", "name": "Claude Code" },
+      { "kind": "launchable", "id": "antigravity", "name": "Antigravity" },
       {
+        "kind": "unlaunchable",
         "id": "codex",
         "name": "Codex",
-        "unavailable_reason": "Codex is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+        "why": "Codex is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
       }
     ]
   },
   "status_absent": {
     "providers": [
       {
+        "kind": "unlaunchable",
         "id": "claude",
         "name": "Claude Code",
-        "unavailable_reason": "Claude Code is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+        "why": "Claude Code is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
       },
       {
+        "kind": "unlaunchable",
         "id": "antigravity",
         "name": "Antigravity",
-        "unavailable_reason": "Antigravity is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+        "why": "Antigravity is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
       },
       {
+        "kind": "unlaunchable",
         "id": "codex",
         "name": "Codex",
-        "unavailable_reason": "Codex is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+        "why": "Codex is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
       }
     ]
   }

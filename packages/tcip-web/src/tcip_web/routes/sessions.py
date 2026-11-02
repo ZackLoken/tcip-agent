@@ -11,7 +11,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Annotated, Literal, get_args
 
 from fastapi import APIRouter, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field, JsonValue
@@ -39,12 +39,31 @@ class ImageEntry(BaseModel):
     activity: Activity
 
 
+class OpenSession(BaseModel):
+    """A session no end has marked."""
+
+    kind: Literal["open"] = "open"
+
+
+class EndedSession(BaseModel):
+    """A session an end marked, at the instant its ``session_ended`` line stamps."""
+
+    kind: Literal["ended"] = "ended"
+    ended: AwareDatetime
+
+
+type SessionState = Annotated[
+    OpenSession | EndedSession, Field(discriminator="kind")
+]
+"""Whether a session is open or ended, told apart by its ``kind``."""
+
+
 class Session(BaseModel):
-    """One session as recorded: its person, its start and end stamps, and its contributions."""
+    """One session as recorded: its person, its start stamp, its state and its contributions."""
 
     user: str
     started: AwareDatetime
-    ended: AwareDatetime | None
+    state: SessionState
     entries: list[ImageEntry]
 
 
@@ -100,27 +119,53 @@ class SessionRef(BaseModel):
     started: AwareDatetime
 
 
-class SessionPlace(BaseModel):
-    """The session a contribution is recorded in: its start stamp and whether it had ended.
+class Landed(BaseModel):
+    """A contribution recorded now, in the unended session whose start stamp is ``started``."""
 
-    Whether it had ended is as of the answer; it may be ended afterwards.
-    """
-
+    kind: Literal["landed"] = "landed"
     started: AwareDatetime
-    ended: bool
 
 
-class SessionWrite(BaseModel):
-    """What a session write answers: its status and the session the contribution is in.
+class Repeated(BaseModel):
+    """A contribution the record already held, and the session it first landed in.
 
-    The status is ``ok`` when it touched a session and ``noop`` when it touched none.
-    ``session`` is the session the contribution is recorded in, whether it landed now or is a
-    repeat of one recorded before; ``None`` for a contribution with nothing to record and for
-    every end answer.
+    ``started`` is that session's start stamp, and ``state`` its state as of the answer; it may
+    be ended afterwards.
     """
 
-    status: Literal["ok", "noop"]
-    session: SessionPlace | None
+    kind: Literal["repeated"] = "repeated"
+    started: AwareDatetime
+    state: SessionState
+
+
+class NothingRecorded(BaseModel):
+    """A contribution with no time, no annotations and no confirmed negative, recorded nowhere."""
+
+    kind: Literal["nothing_recorded"] = "nothing_recorded"
+
+
+type SessionWrite = Annotated[
+    Landed | Repeated | NothingRecorded, Field(discriminator="kind")
+]
+"""What a contribution's write answers, told apart by its ``kind``."""
+
+
+class SessionsEnded(BaseModel):
+    """An end that marked a session ended."""
+
+    kind: Literal["sessions_ended"] = "sessions_ended"
+
+
+class NothingEnded(BaseModel):
+    """An end of a session already ended, which marked nothing."""
+
+    kind: Literal["nothing_ended"] = "nothing_ended"
+
+
+type SessionEnd = Annotated[
+    SessionsEnded | NothingEnded, Field(discriminator="kind")
+]
+"""What an end answers, told apart by its ``kind``."""
 
 
 class SessionSummary(Session):
@@ -149,9 +194,9 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
     unended, checked inside the record's transaction. One naming none lands in the open project
     (:meth:`~tcip_web.state.StateStore.admitted`), in the latest session when it is the
     person's and unended, else in a new one. A contribution whose ``contribution_id`` the record
-    already holds is a repeat: it lands nowhere, leaves no line, and answers ``noop`` with the
-    session it first landed in, ended or not. A contribution with no time, no annotations and
-    no confirmed negative records nothing and answers ``noop`` with no session. Answers 404 for
+    already holds is a repeat: it lands nowhere, leaves no line, and answers :class:`Repeated`
+    with the session it first landed in, ended or not. A contribution with no time, no
+    annotations and no confirmed negative answers :class:`NothingRecorded`. Answers 404 for
     a ``project_id`` no workspace project holds, 409 for a named session that is not the
     person's unended session, for a ``project_id`` that is not the open project's when no
     session is named, and when the line cannot follow the write.
@@ -168,7 +213,7 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
         or payload.annotations_added
         or payload.activity == "negative_confirmation"
     ):
-        return SessionWrite(status="noop", session=None)
+        return NothingRecorded()
 
     def land(root: Path) -> tuple[Path, SessionWrite]:
         return root, _land(root, payload.started, entry, person)
@@ -179,7 +224,7 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
         root, written = await asyncio.to_thread(
             land, workspace_project(payload.project_id)[0]
         )
-    if written.status == "ok":
+    if written.kind == "landed":
         await asyncio.to_thread(
             _answering,
             written,
@@ -198,7 +243,7 @@ def _land(
     The session is the one ``started`` names, refused (409 naming why) unless it is
     ``person``'s and unended; with ``started`` ``None``, the latest session when it is
     ``person``'s and unended, else a new one. An entry whose ``contribution_id`` a session
-    already holds is not appended: the answer is ``noop`` with that session.
+    already holds is not appended: the answer is :class:`Repeated` with that session.
     """
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
@@ -209,16 +254,11 @@ def _land(
                 e.contribution_id == entry.contribution_id
                 for e in held.entries
             ):
-                return SessionWrite(
-                    status="noop",
-                    session=SessionPlace(
-                        started=held.started, ended=held.ended is not None
-                    ),
-                )
+                return Repeated(started=held.started, state=held.state)
         if started is None:
             if (
                 not sessions
-                or sessions[0].ended is not None
+                or sessions[0].state.kind == "ended"
                 or sessions[0].user != person
             ):
                 sessions.insert(
@@ -226,7 +266,7 @@ def _land(
                     Session(
                         user=person,
                         started=_session_start(sessions),
-                        ended=None,
+                        state=OpenSession(),
                         entries=[],
                     ),
                 )
@@ -235,14 +275,14 @@ def _land(
             named = next((s for s in sessions if s.started == started), None)
             if (
                 named is None
-                or named.ended is not None
+                or named.state.kind == "ended"
                 or named.user != person
             ):
                 why = (
                     "carries no session started then"
                     if named is None
                     else "ended that session"
-                    if named.ended is not None
+                    if named.state.kind == "ended"
                     else "holds that session for another person"
                 )
                 raise HTTPException(
@@ -253,19 +293,16 @@ def _land(
             session = named
         session.entries.append(entry)
         txn.write(key, stats.model_dump(mode="json"))
-    return SessionWrite(
-        status="ok",
-        session=SessionPlace(started=session.started, ended=False),
-    )
+    return Landed(started=session.started)
 
 
 @router.post("/end")
-def close_session(payload: SessionRef) -> SessionWrite:
+def close_session(payload: SessionRef) -> SessionEnd:
     """Mark the session ``payload`` names as ended (:func:`end_sessions`).
 
-    Answers ``ok``, or ``noop`` for a session already ended, and no session either way. Answers
-    409 for a ``project_id`` that is not the open project's, for a ``started`` no session of
-    that project carries, and when the line cannot follow the write.
+    Answers :class:`SessionsEnded`, or :class:`NothingEnded` for a session already ended.
+    Answers 409 for a ``project_id`` that is not the open project's, for a ``started`` no
+    session of that project carries, and when the line cannot follow the write.
     """
     from tcip_web.state import store
 
@@ -274,7 +311,7 @@ def close_session(payload: SessionRef) -> SessionWrite:
         ended = end_sessions(project.root, payload.started)
     except LookupError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    written = SessionWrite(status="ok" if ended else "noop", session=None)
+    written = SessionsEnded() if ended else NothingEnded()
     _answering(written, lambda: record_ended(project.root, ended))
     return written
 
@@ -299,14 +336,14 @@ def end_sessions(
                 f"{to_jsonable_python(started)}"
             )
         lines = []
-        for session in (s for s in named if s.ended is None):
+        for session in (s for s in named if s.state.kind == "open"):
             line = audit.audit_line(
                 "session_ended",
                 {"started": session.started},
                 session.user,
                 "ok",
             )
-            session.ended = line.timestamp
+            session.state = EndedSession(ended=line.timestamp)
             lines.append(line)
         if lines:
             txn.write(key, stats.model_dump(mode="json"))
@@ -322,7 +359,9 @@ def record_ended(root: Path, lines: list[audit.AuditLine]) -> None:
         audit.append_or_raise(line, scope=root)
 
 
-def _answering(written: SessionWrite, record: Callable[[], None]) -> None:
+def _answering(
+    written: SessionWrite | SessionEnd, record: Callable[[], None]
+) -> None:
     """Run ``record`` for a session write already made.
 
     A line that cannot be appended is raised as the 409 carrying ``written``, the answer the

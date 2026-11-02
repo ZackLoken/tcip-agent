@@ -104,13 +104,13 @@ def keep_held(ws: WebSocketTestSession, held: list[int]) -> None:
     from fastapi import WebSocketDisconnect
     from pydantic import TypeAdapter
 
-    from tcip_web.routes.terminal import TerminalHeldFrame, TerminalServedFrame
+    from tcip_web.routes.terminal import TerminalServedFrame
 
     frames: TypeAdapter[TerminalServedFrame] = TypeAdapter(TerminalServedFrame)
     with suppress(WebSocketDisconnect, EndOfStream, ClosedResourceError):
         while True:
             frame = frames.validate_json(ws.receive_text())
-            if isinstance(frame, TerminalHeldFrame):
+            if frame.type == "held":
                 held.append(frame.count)
 
 
@@ -193,18 +193,22 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.app import app
     from tcip_web.routes import terminal as terminal_routes
-    from tcip_web.routes.terminal import RecordedSession, TerminalSession
+    from tcip_web.routes.terminal import (
+        RecordedSession,
+        TerminalSession,
+        TerminalStatus,
+    )
     from tcip_web.state import store
     from tcip_web.terminal import Resumed
 
-    status = client.get("/api/terminal/status").json()
+    status = TerminalStatus.model_validate(
+        client.get("/api/terminal/status").json()
+    )
     print(f"[1] status: {status}")
-    reasons = {
-        row["id"]: row["unavailable_reason"] for row in status["providers"]
-    }
-    if provider not in reasons or reasons[provider] is not None:
+    rows = {row.id: row for row in status.providers}
+    if provider not in rows or rows[provider].kind != "launchable":
         print(
-            f"FAIL: provider {provider!r} cannot launch here: {reasons.get(provider, reasons)}"
+            f"FAIL: provider {provider!r} cannot launch here: {rows.get(provider, rows)}"
         )
         return 1
 

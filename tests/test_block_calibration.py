@@ -450,6 +450,7 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path) -> None:
     finding, the mosaic's raster width and the producing run.
     """
     from tcip_mcp.assessment import read_assessment
+    from tcip_mcp.model_registry import registered_entries
 
     exp = _attested(tmp_path)
 
@@ -478,7 +479,16 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path) -> None:
     }
     assert "reference_shares_training" not in record["failures"]
     assert record["reference"]["raster_identity"]["width"] == WIDTH
-    assert record["producer"]["experiment_id"] == exp["experiment_id"]
+    (produced,) = [
+        e
+        for e in registered_entries(tmp_path)
+        if e.name == exp["experiment_id"]
+    ]
+    assert record["producer"] == {
+        "kind": "checkpoint",
+        "checkpoint_sha256": produced.sha256,
+        "origin": "run",
+    }
 
 
 def test_a_run_with_no_reserved_region_refuses_naming_the_remedy(
@@ -655,8 +665,8 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
     from tcip_mcp.assessment import read_assessment
 
     counts = record["criterion"]["count"]["band_gt_counts"]
-    rects = {
-        s.sample.member: s.sample.rect
+    extents = {
+        s.sample.member: s.sample.extent
         for s in read_assessment(
             exp["project"], record["assessment_id"]
         ).reference.samples
@@ -667,8 +677,9 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
     def counted(side: str) -> list:
         out = []
         for name, n in counts[side].items():
-            rect = rects[name]
-            assert rect is not None, name
+            extent = extents[name]
+            assert extent.kind == "region", name
+            rect = extent.rect
             out.append(
                 objects_over(
                     [[0.0, 0.0, 1.0, 1.0]] * n,
@@ -916,7 +927,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(
         json_det_targets,
         registry_scope,
     )
-    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.selection import Sample, SourceRegion
 
     class _OneDetection:
         def predict_sliced(
@@ -970,7 +981,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(
         ground_truth=label,
         group="a",
         side="holdout",
-        rect=(0, 0, 200, 200),
+        extent=SourceRegion(rect=(0, 0, 200, 200)),
     )
 
     records = _band_records(

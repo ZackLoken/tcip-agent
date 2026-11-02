@@ -145,7 +145,7 @@ def test_a_category_or_kind_outside_its_vocabulary_is_refused_at_the_mcp_door(
     details = [
         entry.record.detail
         for entry in memory_entries(FrictionReport, str(project))
-        if isinstance(entry.record, FrictionReport)
+        if entry.kind == "read"
     ]
     assert details == ["admitted"]
     assert [
@@ -169,7 +169,7 @@ def test_a_stored_report_whose_category_is_outside_the_vocabulary_reads_as_unrea
 
     (entry,) = load_project_memory(tmp_path, MemoryKind.reports)["entries"]
     assert entry["id"] == written["id"]
-    assert "category" in entry["record"]["reason"]
+    assert "category" in entry["reason"]
 
 
 def test_two_reports_in_one_instant_under_one_category_land_under_ids_naming_neither(
@@ -291,7 +291,7 @@ def test_concurrent_retrospectives_under_one_name_both_survive(
     tasks = {
         entry.record.task
         for entry in memory_entries(Retrospective, str(tmp_path))
-        if isinstance(entry.record, Retrospective)
+        if entry.kind == "read"
     }
     assert tasks == {"pass 0", "pass 1"}
 
@@ -414,7 +414,7 @@ def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading
     )
 
     (entry,) = load_project_memory(tmp_path, MemoryKind.reports)["entries"]
-    assert "category" in entry["record"]["reason"]
+    assert "category" in entry["reason"]
 
 
 def test_a_report_that_is_not_a_json_object_will_not_decode(
@@ -477,7 +477,7 @@ def test_a_retrospective_that_will_not_read_sorts_after_every_dated_one_by_id(
         "aaa-unreadable",
         "zzz-unreadable",
     ]
-    assert "Retrospective" in entries[1]["record"]["reason"]
+    assert "Retrospective" in entries[1]["reason"]
 
 
 def test_load_reports_filters_by_category(tmp_path: Path) -> None:
@@ -658,5 +658,5 @@ def test_record_distillation_pass_never_touches_reports_or_retrospectives(
 
     after = memory_entries(FrictionReport, str(tmp_path))
     assert after == before
-    report = after[0].record
-    assert isinstance(report, FrictionReport) and report.detail == "a"
+    (entry, *_) = after
+    assert entry.kind == "read" and entry.record.detail == "a"

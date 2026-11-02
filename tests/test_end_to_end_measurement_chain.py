@@ -214,13 +214,19 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.experiments import run_rows
+    from tcip_mcp.model_registry import registered_entries
 
     chain = run_the_chain(tmp_path, experiment_id="exp-chain-publish")
 
     record = read_assessment(tmp_path, chain.assessment["assessment_id"])
     assert record.passed is True and record.failures == []
-    assert record.producer is not None
-    assert record.producer.experiment_id == "exp-chain-publish"
+    assert record.kind == "checkpoint"
+    (produced,) = registered_entries(tmp_path)
+    assert (produced.origin, produced.name) == ("run", "exp-chain-publish")
+    assert (
+        record.producer.checkpoint_sha256,
+        record.producer.origin,
+    ) == (produced.sha256, "run")
     disjointness = record.disjointness
     assert disjointness["holdout_shares_calibration"] == [], disjointness
     for side in ("training", "selection"):
@@ -271,7 +277,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
     )
 
     assert "error" not in delivered, delivered
-    assert delivered["validated"] is True
+    assert delivered["shipped"] == {"kind": "validated"}
     rows = csv_rows(out_csv)
     assert len(rows) == len(STEMS), len(rows)
     for row in rows:

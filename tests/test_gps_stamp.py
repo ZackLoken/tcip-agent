@@ -53,8 +53,8 @@ def test_a_latitude_with_no_longitude_is_unattributed_never_measured_at_longitud
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        MatchRadius,
         PlantRecord,
+        StatedRadius,
         assign_plants,
         read_image_stamp,
     )
@@ -77,9 +77,7 @@ def test_a_latitude_with_no_longitude_is_unattributed_never_measured_at_longitud
     (assignment,) = assign_plants(
         [stamp],
         [plant],
-        radius=MatchRadius(
-            value=1.0, source="stated", rationale="a generous radius"
-        ),
+        radius=StatedRadius(value=1.0, rationale="a generous radius"),
     )
     assert assignment.source == "unmapped"
     assert assignment.plant_id is None and assignment.distance_m is None

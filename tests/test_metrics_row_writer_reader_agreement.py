@@ -26,12 +26,12 @@ if TYPE_CHECKING:
 
 
 def _drain(ws: WebSocketTestSession) -> list[dict]:
-    """Return the frames the stream sends, through the terminal status frame."""
+    """Return the frames the stream sends, through the status or error frame that ends it."""
     frames = []
     while True:
         msg = ws.receive_json()
         frames.append(msg)
-        if msg["type"] == "status":
+        if msg["type"] in {"status", "error"}:
             break
     return frames
 
@@ -180,14 +180,16 @@ def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(
 ) -> None:
     """A stream for an id no run directory holds serves no metric frame.
 
-    Its last frame is a status frame carrying no status and an error.
+    Its one frame is the error frame naming the id.
     """
+    from tcip_web.routes.training import TrainingErrorFrame
+
     with client.websocket_connect(
         "ws://127.0.0.1/api/training/runs/never-launched/stream",
     ) as ws:
         frames = _drain(ws)
 
-    assert [f for f in frames if f["type"] == "metric"] == []
-    assert frames[-1]["type"] == "status"
-    assert frames[-1]["status"] is None
-    assert frames[-1]["error"]
+    (frame,) = frames
+    refused = TrainingErrorFrame.model_validate(frame)
+    assert refused.experiment_id == "never-launched"
+    assert "never-launched" in refused.error

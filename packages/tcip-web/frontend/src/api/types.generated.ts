@@ -3,33 +3,169 @@
  * models and constants. Do not edit by hand.
  */
 
+export const ACKNOWLEDGEABLE = "acknowledgeable";
+
+export const ADMITTED = "admitted";
+
+export const AGENT = "agent";
+
 export const PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus";
 
 export const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
 
 export const PANEL_EVENT_BANNER = "banner";
 
+export const BLOCKED = "blocked";
+
 export const BUCKET_EXISTS = "bucket_exists";
+
+export const CANOPY_SEGMENTS = "canopy_segments";
+
+export const BOX = "box";
+
+export const POINT = "point";
+
+export const POLYGON = "polygon";
+
+export const POLYLINE = "polyline";
 
 export const PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request";
 
+export const CHECKPOINT = "checkpoint";
+
+export const COMPARED = "compared";
+
+export const CONF_ADMITTED = "conf_admitted";
+
+export const CONF_REFUSED = "conf_refused";
+
+export const CONFIRMED = "confirmed";
+
 export const DELIVERY = "delivery";
+
+export const ENDED = "ended";
+
+export const PASS = "pass";
+
+export const FINITE_BEST = "finite_best";
+
+export const HAND_OFF_ASKED = "hand_off_asked";
 
 export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
 
+export const LANDED = "landed";
+
+export const LAUNCHABLE = "launchable";
+
+export const NO_AGENT = "no_agent";
+
+export const NO_BEST = "no_best";
+
+export const NO_LAUNCH_LINE = "no_launch_line";
+
 export const NO_LOGS = "no_logs";
+
+export const NO_REGISTRY = "no_registry";
+
+export const NON_FINITE_BEST = "non_finite_best";
 
 export const NOT_RESUMED = "not_resumed";
 
+export const NOTHING_ENDED = "nothing_ended";
+
+export const NOTHING_PROPOSED = "nothing_proposed";
+
+export const NOTHING_RECORDED = "nothing_recorded";
+
+export const NOTHING_TOLD = "nothing_told";
+
+export const OPEN = "open";
+
 export const OPERATIONALIZATION = "operationalization";
 
+export const ORTHOMOSAIC_PLANT_COUNTS = "orthomosaic_plant_counts";
+
+export const OVERVIEW = "overview";
+
+export const PER_IMAGE_COUNT = "per_image_count";
+
+export const CLEARED = "cleared";
+
+export const SHOWN_UNVALIDATED = "shown_unvalidated";
+
+export const PLAIN = "plain";
+
+export const PLANT_MAPPING = "plant_mapping";
+
+export const PLANT_REGISTRY = "plant_registry";
+
 export const PROJECT_NOT_OPEN = "project_not_open";
+
+export const PROPOSED = "proposed";
+
+export const RANKING = "ranking";
+
+export const RASTER = "raster";
+
+export const READ = "read";
+
+export const LISTING = "listing";
+
+export const REPEATED = "repeated";
 
 export const RESUMED = "resumed";
 
 export const REVISION_MOVED = "revision_moved";
 
+export const RUN = "run";
+
+export const SAMPLED = "sampled";
+
+export const PHYSICAL_SCALE = "physical_scale";
+
+export const SELECTION = "selection";
+
+export const SESSIONS_ENDED = "sessions_ended";
+
+export const ACKNOWLEDGED = "acknowledged";
+
+export const VALIDATED = "validated";
+
+export const REGION = "region";
+
+export const STAGED = "staged";
+
+export const STANDALONE = "standalone";
+
+export const STORED = "stored";
+
+export const SWEEP = "sweep";
+
+export const FAILED = "failed";
+
+export const NOT_SERVING = "not_serving";
+
+export const SERVING = "serving";
+
+export const TOLD = "told";
+
+export const TRIAL = "trial";
+
+export const UNACKNOWLEDGEABLE = "unacknowledgeable";
+
+export const UNCOMPARED = "uncompared";
+
+export const UNLAUNCHABLE = "unlaunchable";
+
+export const UNREAD = "unread";
+
+export const UNVALIDATED = "unvalidated";
+
 export const VERSION_CONFLICT = "version_conflict";
+
+export const WHOLE = "whole";
+
+export const WITHDRAWN = "withdrawn";
 
 export const RENDER_CACHE_VERSION = 7;
 
@@ -56,6 +192,8 @@ export const TAB_NAMES = ["setup", "annotate", "training", "inference", "results
 
 export const COMPOSITE_STRETCHES = ["minmax", "percent_clip"] as const;
 
+export const FINAL_STATES = ["completed", "failed", "canceled"] as const;
+
 export const TERMINAL_STATES = ["canceled", "completed", "failed", "interrupted"] as const;
 
 export const METRICS_ROW_STAMPS = ["epoch", "timestamp", "step"] as const;
@@ -70,32 +208,6 @@ export const CROSS_TILE_MERGE_DESCRIPTIONS: Record<string, string> = {
   greedynmm:
     "Join two matching boxes from neighboring tiles into one box taking both outlines, the surer box joining only boxes that match it directly",
 };
-
-export type CompositeStretch = "minmax" | "percent_clip";
-
-export type JobStatus = "pending" | "running" | "completed" | "failed" | "canceled";
-
-export type Panel = "setup" | "annotate" | "training" | "inference" | "results" | "meta" | "app";
-
-export type Projection = "curves" | "milestones";
-
-export type StretchMode = "minmax" | "percent_clip" | "none";
-
-export type SubjectState = "complete" | "negative" | "partial" | "unannotated";
-
-export type VerdictAction = "accepted" | "rejected";
-
-export type TerminalFrame = TerminalInputFrame | TerminalResizeFrame;
-
-export type TerminalServedFrame = TerminalOutputFrame | TerminalHeldFrame;
-
-export type PanelEvent = LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
-
-export type InferenceFrame = InferenceJobFrame | MissingJobFrame;
-
-export type TensorboardLaunch = TensorboardServing | TensorboardFailure;
-
-export type Launched = RunLaunched | SweepLaunched;
 
 export interface DatasetTree {
   dataset_root: string;
@@ -191,9 +303,9 @@ export interface EndSessionRequest {
   user: string;
 }
 
-export interface SessionOrientation {
-  text: string | null;
-}
+export type HandOffAnswer = HandOffAsked | EndedAtOnce;
+
+export type SessionOrientation = Told | NothingTold;
 
 export interface SessionStartReport {
   conversation: string;
@@ -211,22 +323,16 @@ export interface ViewReads {
 export interface ImageBands {
   band_count: number;
   bands: ImageBand[];
-  plain: boolean;
   default_bands: string[];
-  default_stretch: "minmax" | "percent_clip";
-  pixel_fraction: number | null;
-  seed: number | null;
-  overview_size: [number, number] | null;
-  sampled: boolean;
+  default_stretch: CompositeStretch;
+  read: SampledStats | OverviewStats | PlainRaster;
 }
 
 export interface OverviewJob {
   job_id: string;
-  status: "pending" | "running" | "completed" | "failed" | "canceled";
-  error: string | null;
+  state: JobState_Completed_;
   path: string;
   bytes_written: number;
-  live: boolean;
 }
 
 export interface OverviewBuildPayload {
@@ -238,7 +344,7 @@ export interface LabelDocumentAnswer {
   img_width: number;
   img_height: number;
   annotations: ServedAnnotation[];
-  completion: Record<string, "complete" | "negative" | "partial" | "unannotated">;
+  completion: Record<string, SubjectState>;
   flags: ServedFlag[];
   base_mtime: string;
   name: string;
@@ -267,15 +373,10 @@ export interface ImageStagings {
 }
 
 export interface ImageStates {
-  states: Record<string, "complete" | "negative" | "partial" | "unannotated">;
+  states: Record<string, SubjectState>;
 }
 
-export interface Staged {
-  image_path: string;
-  bucket: string;
-  summary: string;
-  proposal_count: number;
-}
+export type ProposeAnswer = Staged | NothingProposed;
 
 export interface ProposePayload {
   image_path: string;
@@ -300,14 +401,11 @@ export interface ScorerCatalog {
 
 export interface PriorityQueueJob {
   job_id: string;
-  status: "pending" | "running" | "completed" | "failed" | "canceled";
-  error: string | null;
+  state: JobState_QueueRanked_;
   project: string;
   checkpoint_path: string;
   images_dir: string;
   subject: string | null;
-  ranked: ReviewQueue | null;
-  live: boolean;
   dataset_root: string;
   capture: string;
 }
@@ -321,22 +419,10 @@ export interface LaunchPriorityQueuePayload {
 
 export interface SplitChoices {
   as_recorded: AsRecordedChoice;
-  selections: SelectionChoice[];
+  selections: (SelectionChoice | UnreadSelectionChoice)[];
 }
 
-export interface RunLaunched {
-  experiment_id: string;
-  output_dir: string;
-  tensorboard: TensorboardServing | TensorboardFailure;
-  pid: number;
-  overfit_check: Record<string, unknown> | null;
-  warnings: string[];
-}
-
-export interface SweepLaunched {
-  sweep_id: string;
-  warnings: string[];
-}
+export type Launched = RunLaunched | SweepLaunched;
 
 export interface RelaunchPayload {
   relaunched_from: string;
@@ -345,25 +431,13 @@ export interface RelaunchPayload {
 }
 
 export interface TrainingListing {
-  runs: RunRow[];
+  runs: StandaloneRun[];
   sweeps: SweepGroup[];
 }
 
-export interface TrainingDetail {
-  run: RunRow | null;
-  sweep: SweepGroup | null;
-  tensorboard: TensorboardServing | null;
-}
+export type TrainingDetail = RunDetail | SweepDetail;
 
-export interface TensorboardServing {
-  url: string;
-  port: number;
-}
-
-export interface TensorboardFailure {
-  error: string;
-  output: string | null;
-}
+export type TensorboardLaunch = TensorboardServing | TensorboardFailure;
 
 export type EmptyBodyPayload = Record<string, never>;
 
@@ -372,9 +446,8 @@ export interface PersonPayload {
 }
 
 export interface Comparison {
-  experiments: (ComparedRun | UncomparedRun)[];
-  dataset_fingerprints: "same" | "different" | "unread" | "unset";
-  higher_is_better: Record<string, boolean | null>;
+  experiments: ComparedEntry[];
+  directions: Record<string, Direction>;
 }
 
 export interface ExperimentComparePayload {
@@ -384,8 +457,9 @@ export interface ExperimentComparePayload {
 export interface Ranking {
   entry: RegistryEntry;
   facts: CheckpointFacts;
+  kind: "ranking";
   metric: string;
-  higher_is_better: boolean;
+  direction: "higher" | "lower";
   direction_source: "stated" | "declared";
   unregistered: string[];
   skipped: Skipped[];
@@ -394,14 +468,13 @@ export interface Ranking {
 export interface CompareBestPayload {
   experiment_ids: string[];
   metric: string;
-  higher_is_better: boolean | null;
+  direction: Direction;
   include_unverified: boolean;
 }
 
 export interface InferenceJob {
   job_id: string;
-  status: "pending" | "running" | "completed" | "failed" | "canceled";
-  error: string | null;
+  state: JobState_Completed_;
   project: string;
   checkpoint_path: string;
   images_dir: string;
@@ -411,7 +484,6 @@ export interface InferenceJob {
   assessment_id: string | null;
   total: number;
   done: number;
-  live: boolean;
   dataset_root: string;
   capture: string;
 }
@@ -460,7 +532,7 @@ export interface PhenologyAnswer {
   revision: TraitRevisionRef;
   curves: CurveRow[];
   milestones: MilestoneRow[];
-  unvalidated: PhenologyRefusal | null;
+  validation: PhenologyValidation;
   positive_class_assessed: boolean;
   plant_mapping: PlantMappingDisclosure;
 }
@@ -480,7 +552,7 @@ export interface ExportCsvPayload {
   buckets: string[];
   trait: string;
   plants: string[];
-  payload: "curves" | "milestones";
+  payload: Projection;
   user: string;
   acknowledgment: AcknowledgmentPayload | null;
 }
@@ -503,7 +575,7 @@ export interface TraitsListing {
 }
 
 export interface ConfirmedRevision {
-  revision: ServedRevision;
+  revision: TraitRevision;
   audit_warning: string | null;
 }
 
@@ -520,14 +592,14 @@ export interface Assessments {
 }
 
 export interface RegisteredModels {
+  kind: "listing";
   models: Listed[];
   available_metrics: AvailableMetric[];
 }
 
 export interface SubjectsLoad {
-  subjects: RegistrySubjects | null;
+  registry: StoredRegistry | NoRegistry;
   discovered: string[];
-  version: string | null;
   unreadable: string[];
 }
 
@@ -540,14 +612,11 @@ export interface RegistrySave {
 export interface SaveSubjectsPayload {
   subjects: RegistrySubjects;
   dataset_root: string;
-  version: string | null;
+  version: RegistryVersion;
   user: string;
 }
 
-export interface SessionWrite {
-  status: "ok" | "noop";
-  session: SessionPlace | null;
-}
+export type SessionWrite = Landed | Repeated | NothingRecorded;
 
 export interface ImageEventPayload {
   contribution_id: string;
@@ -559,6 +628,8 @@ export interface ImageEventPayload {
   project_id: string;
   started: string | null;
 }
+
+export type SessionEnd = SessionsEnded | NothingEnded;
 
 export interface SessionRef {
   project_id: string;
@@ -607,7 +678,7 @@ export interface ActiveTabPayload {
 }
 
 export interface PanelPost {
-  event: LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
+  event: PanelEvent;
   project_id: string;
 }
 
@@ -624,7 +695,7 @@ export interface OperationalizationRefusal {
 export interface DeliveryRefusal {
   kind: "delivery";
   message: string;
-  result_sha256: string | null;
+  shipping: Shipping;
 }
 
 export interface RevisionMovedRefusal {
@@ -663,86 +734,42 @@ export interface SavedExport {
 
 export interface CountExport {
   saved_path: string;
-  validated: boolean;
-  acknowledged_by: string | null;
+  shipped: Shipped;
   filename: string;
 }
 
-export interface TrainingRowFrame {
-  type: "metric" | "batch";
-  experiment_id: string;
-  row: MetricsRow;
-}
+export type TrainingFrame = TrainingRowFrame | TrainingStatusFrame | TrainingErrorFrame;
 
-export interface TrainingStatusFrame {
-  type: "status";
-  experiment_id: string;
-  status: RunRow | null;
-  error: string | null;
-}
+export type TerminalFrame = TerminalInputFrame | TerminalResizeFrame;
 
-export interface TerminalInputFrame {
-  type: "input";
-  data: string;
-}
+export type TerminalServedFrame = TerminalOutputFrame | TerminalHeldFrame;
 
-export interface TerminalResizeFrame {
-  type: "resize";
-  rows: number;
-  cols: number;
-}
+export type InferenceFrame = InferenceJobFrame | MissingJobFrame;
 
-export interface TerminalOutputFrame {
-  type: "output";
-  data: string;
-}
-
-export interface TerminalHeldFrame {
-  type: "held";
-  count: number;
-}
-
-export interface InferenceJobFrame {
-  type: "progress" | "final";
-  job: InferenceJob;
-}
-
-export interface MissingJobFrame {
-  type: "final";
-  error: string;
-}
-
-export interface AnnotateFocus {
-  dataset_root: string;
-  subject: string;
-  date: string;
-  bucket: string | null;
-  event_type: "annotate_focus";
-  image_index: number;
-  mode: "box" | "polygon" | "point";
-  proposal: ProposalTarget | null;
-}
-
-export interface LabelsWritten {
-  event_type: "labels_written";
-  image_path: string;
-  name: string;
-}
-
-export interface CanvasStateRequest {
-  event_type: "canvas_state_request";
-}
-
-export interface Banner {
-  event_type: "banner";
-  text: string;
-}
+export type PanelEvent = LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
 
 export interface PanelEnvelope {
-  panel: "setup" | "annotate" | "training" | "inference" | "results" | "meta" | "app";
-  event: LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
+  panel: Panel;
+  event: PanelEvent;
   event_id: string;
   identity: RecordedIdentity;
+}
+
+export type CompositeStretch = "minmax" | "percent_clip";
+
+export type Panel = "setup" | "annotate" | "training" | "inference" | "results" | "meta" | "app";
+
+export type Projection = "curves" | "milestones";
+
+export type StretchMode = "minmax" | "percent_clip" | "none";
+
+export type SubjectState = "complete" | "negative" | "partial" | "unannotated";
+
+export type VerdictAction = "accepted" | "rejected";
+
+export interface Acknowledgeable {
+  kind: "acknowledgeable";
+  result_sha256: string;
 }
 
 export interface Acknowledgment {
@@ -758,6 +785,29 @@ export interface AcknowledgmentPayload {
   result_sha256: string;
 }
 
+export interface Admitted {
+  kind: "admitted";
+}
+
+export interface AgentLaunch {
+  agent_client_name: string;
+  agent_client_version: string;
+  agent_session: string;
+  terminal_session: string | null;
+  kind: "agent";
+}
+
+export interface AnnotateFocus {
+  dataset_root: string;
+  subject: string;
+  date: string;
+  bucket: string | null;
+  event_type: "annotate_focus";
+  image_index: number;
+  mode: "box" | "polygon" | "point";
+  proposal: ProposalTarget | null;
+}
+
 export interface AnnotationPayload {
   subject: string;
   bbox: unknown;
@@ -771,23 +821,10 @@ export interface AnnotationPayload {
 export interface AsRecordedChoice {
   case: "bound" | "drawn";
   line: string;
-  reason: string | null;
+  check: ChoiceCheck;
 }
 
-export interface Assessment {
-  assessment_id: string;
-  recorded_at: string;
-  delivery_kind: string | null;
-  revision: TraitRevisionRef;
-  producer: Producer | null;
-  execution: Execution | null;
-  rationale: string | null;
-  reference: Reference;
-  disjointness: Record<string, unknown>;
-  criterion: Record<string, unknown>;
-  scale: Record<string, unknown> | null;
-  failures: string[];
-}
+export type Assessment = CheckpointAssessment | ScaleAssessment;
 
 export interface AssessmentSummary {
   assessment: Assessment;
@@ -799,18 +836,28 @@ export type Authorship = "person" | "tool_accepted" | "tool" | "unattributed";
 export interface AvailableMetric {
   metric: string;
   role: "comparability_only" | "unlabeled";
-  higher_is_better: boolean | null;
+  direction: Direction;
   sources: MetricsSource[];
 }
 
-export interface BucketFinding {
-  dataset_root: string;
-  bucket: string;
-  date: string | null;
-  assessment_id: string | null;
-  validated: boolean;
-  reason: string | null;
+export interface Banner {
+  event_type: "banner";
+  text: string;
 }
+
+export interface Blocked {
+  kind: "blocked";
+  reason: string;
+}
+
+export interface BoundColumn {
+  case: "bound";
+  selection_dir: string;
+  seed: number;
+  redraw: boolean;
+}
+
+export type BucketFinding = ValidatedBucket | UnvalidatedBucket;
 
 export type ByName_Attribute_ = Record<
   string,
@@ -822,7 +869,12 @@ export type ByName_Subject__MinLen_min_length_1_ = Record<
   { description: string; attributes?: ByName_Attribute_ }
 >;
 
+export interface Canceled {
+  status: "canceled";
+}
+
 export interface CanopySegmentDisclosure {
+  kind: "canopy_segments";
   plant_registry: PlantRegistryReference;
   raster_identity: RasterIdentity;
   canopy_segments: CanopySegmentsDocument;
@@ -898,6 +950,10 @@ export interface CanvasPolyline {
   vertices: boolean;
 }
 
+export interface CanvasStateRequest {
+  event_type: "canvas_state_request";
+}
+
 export interface CanvasUnderStroke {
   color: string;
   opacity: number;
@@ -923,12 +979,32 @@ export interface CaptureInvariances {
   scale: boolean;
 }
 
+export interface CheckpointAssessment {
+  assessment_id: string;
+  recorded_at: string;
+  revision: TraitRevisionRef;
+  reference: Reference;
+  disjointness: Record<string, unknown>;
+  criterion: Record<string, unknown>;
+  failures: string[];
+  delivery_kind: string;
+  producer: Producer;
+  execution: Execution;
+  rationale: string;
+  kind: "checkpoint";
+}
+
 export interface CheckpointFacts {
   metrics: Record<string, unknown>;
   metrics_source: MetricsSource | null;
 }
 
+export type ChoiceCheck = Admitted | Blocked;
+
+export type ComparedEntry = ComparedRun | UncomparedRun;
+
 export interface ComparedRun {
+  kind: "compared";
   run: RunRow;
   n_epochs: number;
   last_logged_metrics: MetricsRow | null;
@@ -938,6 +1014,26 @@ export interface ComparedRun {
   subject: string | null;
   dataset_id: string | null;
   dataset_fingerprint: string | null;
+}
+
+export interface Completed {
+  status: "completed";
+}
+
+export interface ConfAdmitted {
+  kind: "conf_admitted";
+  conf: number;
+}
+
+export interface ConfRefused {
+  kind: "conf_refused";
+  reason: string;
+}
+
+export interface Confirmed {
+  kind: "confirmed";
+  confirmed_by: string;
+  confirmed_at: string;
 }
 
 export interface Crossing {
@@ -969,7 +1065,7 @@ export interface DateCounts {
 
 export interface Decisions {
   bucket: string;
-  verdicts: Record<string, "accepted" | "rejected">;
+  verdicts: Record<string, VerdictAction>;
 }
 
 export interface DeliveryEventRecord {
@@ -984,12 +1080,18 @@ export interface DeliveryEventRecord {
   producer: Producer;
   buckets: BucketFinding[];
   scale_assessment_id: string | null;
-  validated: boolean;
-  acknowledgment: Acknowledgment | null;
+  shipped: Shipped;
   population: string[];
-  plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
+  plant_mapping: PlantMapping | null;
   produced_at: string;
 }
+
+export interface DerivedRadius {
+  source: "h_pos_err";
+  value: number;
+}
+
+export type Direction = "higher" | "lower" | "unstated";
 
 export interface DrawGroup {
   point: Record<string, unknown>;
@@ -1009,7 +1111,23 @@ export interface DrawSpread {
   seeds_complete: (number | null)[];
 }
 
+export interface DrawnColumn {
+  case: "drawn";
+  seed: number;
+}
+
+export interface EndedAtOnce {
+  kind: "ended";
+  end: TerminalEnd;
+}
+
+export interface EndedSession {
+  kind: "ended";
+  ended: string;
+}
+
 export interface Execution {
+  kind: "pass";
   conf: number | null;
   density: number | null;
   masks: boolean;
@@ -1022,6 +1140,22 @@ export interface Execution {
   sahi_version: string | null;
   rationale: string | null;
   sources: Record<string, string>;
+}
+
+export type Extent = WholeSource | SourceRegion;
+
+export interface Failed {
+  status: "failed";
+  error: string;
+}
+
+export interface FiniteBest {
+  best_params: Record<string, unknown>;
+  best_value_spread: DrawSpread | null;
+  split_sensitivity: DrawGroup[] | null;
+  best_at_range_end: Record<string, "low" | "high">;
+  kind: "finite_best";
+  best_value: number;
 }
 
 export interface FlagRequest {
@@ -1054,6 +1188,10 @@ export interface Gestures {
   resolve: Record<string, string>;
 }
 
+export interface HandOffAsked {
+  kind: "hand_off_asked";
+}
+
 export interface ImageBand {
   name: string;
   wavelength_nm: number | null;
@@ -1071,10 +1209,36 @@ export interface ImageEntry {
   activity: "new_annotation" | "review" | "negative_confirmation";
 }
 
+export interface InferenceJobFrame {
+  type: "progress" | "final";
+  job: InferenceJob;
+}
+
+export type JobState_Completed_ = Pending | Running | Completed | Canceled | Failed;
+
+export type JobState_QueueRanked_ = Pending | Running | QueueRanked | Canceled | Failed;
+
 export interface Key {
   store: string;
   root: string;
   parts: string[];
+}
+
+export interface LabelsWritten {
+  event_type: "labels_written";
+  image_path: string;
+  name: string;
+}
+
+export interface Landed {
+  kind: "landed";
+  started: string;
+}
+
+export interface Launchable {
+  kind: "launchable";
+  id: string;
+  name: string;
 }
 
 export interface LaunchedProgram {
@@ -1096,26 +1260,16 @@ export interface MaskCut {
   vertex_spacing: number;
 }
 
-export interface MatchRadius {
-  value: number;
-  source: "h_pos_err" | "stated";
-  rationale: string | null;
-}
+export type MatchRadius = DerivedRadius | StatedRadius;
 
 export interface MatchTolerance {
   value: number;
   source: "grid_pitch" | "stated" | "stated_capped";
 }
 
-export interface MemoryEntry_FrictionReport_ {
-  id: string;
-  record: FrictionReport | Unreadable;
-}
+export type MemoryEntry_FrictionReport_ = ReadEntry_FrictionReport_ | UnreadEntry;
 
-export interface MemoryEntry_Retrospective_ {
-  id: string;
-  record: Retrospective | Unreadable;
-}
+export type MemoryEntry_Retrospective_ = ReadEntry_Retrospective_ | UnreadEntry;
 
 export interface MetricsRow {
   epoch: number;
@@ -1137,15 +1291,68 @@ export interface MilestoneRow {
   complete: boolean;
 }
 
+export interface MissingJobFrame {
+  type: "missing";
+  error: string;
+}
+
+export interface NoAgentLaunch {
+  kind: "no_agent";
+}
+
+export interface NoBest {
+  kind: "no_best";
+  split_sensitivity: DrawGroup[] | null;
+}
+
+export interface NoLaunchLine {
+  kind: "no_launch_line";
+}
+
+export interface NoRegistry {
+  kind: "no_registry";
+}
+
+export interface NoSplitColumn {
+  case: "none";
+}
+
+export interface NonFiniteBest {
+  best_params: Record<string, unknown>;
+  best_value_spread: DrawSpread | null;
+  split_sensitivity: DrawGroup[] | null;
+  best_at_range_end: Record<string, "low" | "high">;
+  kind: "non_finite_best";
+  best_value_state: string;
+}
+
 export interface NotResumed {
   kind: "not_resumed";
   why: string;
 }
 
-export interface OperatingPoint {
-  conf: number | null;
-  reason: string | null;
+export interface NothingEnded {
+  kind: "nothing_ended";
 }
+
+export interface NothingProposed {
+  kind: "nothing_proposed";
+  why: string;
+}
+
+export interface NothingRecorded {
+  kind: "nothing_recorded";
+}
+
+export interface NothingTold {
+  kind: "nothing_told";
+}
+
+export interface OpenSession {
+  kind: "open";
+}
+
+export type OperatingPoint = ConfAdmitted | ConfRefused;
 
 export interface Operationalization {
   statement: string;
@@ -1154,6 +1361,8 @@ export interface Operationalization {
   delivered_phenotypes: string[];
   delivered_value_keys: string[];
 }
+
+export type Origin = "run" | "foreign";
 
 export interface OrthomosaicPlantCountsDelivery {
   kind: "orthomosaic_plant_counts";
@@ -1168,6 +1377,15 @@ export interface OrthomosaicPlantCountsDelivery {
   position_error_m: number | null;
 }
 
+export interface OverviewStats {
+  kind: "overview";
+  overview_size: [number, number];
+}
+
+export interface Pending {
+  status: "pending";
+}
+
 export interface PerImageCountDelivery {
   kind: "per_image_count";
   dataset_root: string;
@@ -1175,12 +1393,27 @@ export interface PerImageCountDelivery {
   trait: string;
 }
 
+export interface PhenologyCleared {
+  kind: "cleared";
+}
+
 export interface PhenologyRefusal {
+  kind: "shown_unvalidated";
   message: string;
   digests: ProjectionDigests;
 }
 
+export type PhenologyValidation = PhenologyCleared | PhenologyRefusal;
+
+export interface PlainRaster {
+  kind: "plain";
+}
+
+export type PlantMapping =
+  PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure;
+
 export interface PlantMappingDisclosure {
+  kind: "plant_mapping";
   name: string;
   dataset_id: string;
   dataset_root: string;
@@ -1196,6 +1429,7 @@ export interface PlantMappingDisclosure {
 }
 
 export interface PlantRegistryDisclosure {
+  kind: "plant_registry";
   plant_registry: PlantRegistryReference;
   raster_identity: RasterIdentity;
   nn_tolerance_m: MatchTolerance;
@@ -1220,8 +1454,9 @@ export interface PositiveState {
 }
 
 export interface Producer {
+  kind: "checkpoint";
   checkpoint_sha256: string;
-  experiment_id: string | null;
+  origin: Origin;
 }
 
 export interface ProjectRecord {
@@ -1231,13 +1466,7 @@ export interface ProjectRecord {
   invariances: CaptureInvariances;
 }
 
-export interface ProjectSummary {
-  record: ProjectRecord | null;
-  record_problem: string | null;
-  modified: number;
-  tree: DatasetTree;
-  image_count: number;
-}
+export type ProjectSummary = ReadProject | UnreadProject;
 
 export interface ProjectionDigests {
   curves: string;
@@ -1249,16 +1478,21 @@ export interface ProposalTarget {
   index: number;
 }
 
-export interface ProviderStatus {
-  id: string;
-  name: string;
-  unavailable_reason: string | null;
+export interface Proposed {
+  kind: "proposed";
 }
+
+export type ProviderStatus = Launchable | Unlaunchable;
 
 export interface QueueEntry {
   image: string;
   score: number;
   reference_member: boolean | null;
+}
+
+export interface QueueRanked {
+  status: "completed";
+  ranked: ReviewQueue;
 }
 
 export interface RasterIdentity {
@@ -1275,6 +1509,33 @@ export interface RasterIdentity {
   geotransform: Record<string, unknown> | null;
 }
 
+export interface RasterReference {
+  ground_truth: RetainedFile[];
+  samples: ReferenceSample[];
+  raster_identity: RasterIdentity;
+  kind: "raster";
+}
+
+export interface ReadEntry_FrictionReport_ {
+  kind: "read";
+  id: string;
+  record: FrictionReport;
+}
+
+export interface ReadEntry_Retrospective_ {
+  kind: "read";
+  id: string;
+  record: Retrospective;
+}
+
+export interface ReadProject {
+  modified: number;
+  tree: DatasetTree;
+  image_count: number;
+  kind: "read";
+  record: ProjectRecord;
+}
+
 export interface RecordedIdentity {
   agent_client_name: string | null;
   agent_client_version: string | null;
@@ -1282,13 +1543,7 @@ export interface RecordedIdentity {
   terminal_session: string | null;
 }
 
-export interface Reference {
-  selection_dir: string | null;
-  raster_identity: RasterIdentity | null;
-  dataset_id: string | null;
-  ground_truth: RetainedFile[];
-  samples: ReferenceSample[];
-}
+export type Reference = SelectionReference | RasterReference;
 
 export interface ReferenceSample {
   sample: Sample;
@@ -1302,10 +1557,18 @@ export interface RegistryEntry {
   registered_at: string;
   metrics: Record<string, unknown>;
   tags: string[];
-  experiment_id: string | null;
+  origin: Origin;
 }
 
 export type RegistrySubjects = ByName_Subject__MinLen_min_length_1_;
+
+export type RegistryVersion = StoredVersion | NoRegistry;
+
+export interface Repeated {
+  kind: "repeated";
+  started: string;
+  state: SessionState;
+}
 
 export interface Resolution {
   by: string;
@@ -1348,23 +1611,33 @@ export interface ReviewQueue {
   queue: QueueEntry[];
 }
 
-export interface RunRow {
+export interface RunBest {
+  metric: string;
+  value: number;
+}
+
+export interface RunDetail {
+  kind: "run";
+  run: RunRow;
+  tensorboard: TensorboardState;
+}
+
+export type RunLaunch = NoLaunchLine | NoAgentLaunch | AgentLaunch;
+
+export interface RunLaunched {
+  kind: "run";
   experiment_id: string;
-  state: string;
-  created: string;
-  relaunched_from: string | null;
-  sweep: string | null;
-  trial_params: Record<string, unknown> | null;
-  builder: string;
-  task: string;
-  images_dir: string | null;
-  current_epoch: number | null;
-  best_metric: number | null;
-  best_metric_name: string | null;
   output_dir: string;
-  status_error: string | null;
-  heartbeat: string;
-  launch: RecordedIdentity | null;
+  tensorboard: TensorboardLaunch;
+  pid: number;
+  overfit_check: Record<string, unknown> | null;
+  warnings: string[];
+}
+
+export type RunRow = StandaloneRun | TrialRun;
+
+export interface Running {
+  status: "running";
 }
 
 export interface Sample {
@@ -1373,9 +1646,27 @@ export interface Sample {
   ground_truth: StoredLabelKey | string;
   group: string;
   side: "train" | "val" | "calibration" | "holdout";
-  rect?: [number, number, number, number] | null;
+  extent: Extent;
   row_key?: string | null;
   ground_truth_digest?: string | null;
+}
+
+export interface SampledStats {
+  kind: "sampled";
+  pixel_fraction: number;
+  seed: number;
+}
+
+export interface ScaleAssessment {
+  assessment_id: string;
+  recorded_at: string;
+  revision: TraitRevisionRef;
+  reference: Reference;
+  disjointness: Record<string, unknown>;
+  criterion: Record<string, unknown>;
+  failures: string[];
+  scale: Record<string, unknown>;
+  kind: "physical_scale";
 }
 
 export interface ScorerEntry {
@@ -1401,13 +1692,22 @@ export interface SegmenterPrompt {
 
 export interface SelectionChoice {
   selection_dir: string;
-  reason: string | null;
-  seed: number | null;
-  group_by: string | null;
+  replaced_split_keys: string[];
+  kind: "read";
+  check: ChoiceCheck;
+  seed: number;
+  group_by: string;
   train: number;
   val: number;
   calibration: number;
-  replaced_split_keys: string[];
+}
+
+export interface SelectionReference {
+  ground_truth: RetainedFile[];
+  samples: ReferenceSample[];
+  selection_dir: string;
+  dataset_id: string | null;
+  kind: "selection";
 }
 
 export interface ServedAnnotation {
@@ -1454,28 +1754,14 @@ export interface ServedProposal {
   accepted_at: string | null;
   index: number;
   paired: number | null;
-  decision: "accepted" | "rejected" | null;
+  decision: VerdictAction | null;
   authorship: Authorship;
-}
-
-export interface ServedRevision {
-  number: number;
-  entry: TraitEntry;
-  entry_sha256: string;
-  rationale: string;
-  relayed_note: string;
-  proposed_at: string;
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  withdrawn_by: string | null;
-  withdrawn_at: string | null;
-  confirmed: boolean;
 }
 
 export interface ServedTrait {
   trait: string;
-  revisions: ServedRevision[];
-  latest_confirmed: ServedRevision | null;
+  revisions: TraitRevision[];
+  latest_confirmed: TraitRevision | null;
 }
 
 export interface ServingCell {
@@ -1491,15 +1777,12 @@ export interface ServingCell {
   ny1: number;
 }
 
-export interface SessionPlace {
-  started: string;
-  ended: boolean;
-}
+export type SessionState = OpenSession | EndedSession;
 
 export interface SessionSummary {
   user: string;
   started: string;
-  ended: string | null;
+  state: SessionState;
   entries: ImageEntry[];
   images_annotated: number;
   total_annotations: number;
@@ -1508,17 +1791,63 @@ export interface SessionSummary {
   avg_seconds_per_annotation: number | null;
 }
 
+export interface SessionsEnded {
+  kind: "sessions_ended";
+}
+
+export type Shipped = ShippedValidated | ShippedAcknowledged;
+
+export interface ShippedAcknowledged {
+  kind: "acknowledged";
+  acknowledgment: Acknowledgment;
+}
+
+export interface ShippedValidated {
+  kind: "validated";
+}
+
+export type Shipping = Acknowledgeable | Unacknowledgeable;
+
 export interface Skipped {
   name: string;
   unverified: boolean;
   unstamped: boolean;
 }
 
-export interface SplitColumn {
-  case: "bound" | "drawn" | "spatial" | "none";
-  selection_dir: string | null;
-  seed: number | null;
-  redraw: boolean | null;
+export interface SourceRegion {
+  kind: "region";
+  rect: [number, number, number, number];
+}
+
+export interface SpatialColumn {
+  case: "spatial";
+}
+
+export type SplitColumn = BoundColumn | DrawnColumn | WholeColumn | SpatialColumn | NoSplitColumn;
+
+export interface Staged {
+  kind: "staged";
+  image_path: string;
+  bucket: string;
+  summary: string;
+  proposal_count: number;
+}
+
+export interface StandaloneRun {
+  experiment_id: string;
+  state: string;
+  created: string;
+  relaunched_from: string | null;
+  builder: string;
+  task: string;
+  images_dir: string | null;
+  current_epoch: number | null;
+  best: RunBest | null;
+  output_dir: string;
+  status_error: string | null;
+  heartbeat: string;
+  launch: RunLaunch;
+  kind: "standalone";
 }
 
 export interface Stated {
@@ -1534,6 +1863,7 @@ export interface Stated {
 }
 
 export interface StatedRadius {
+  source: "stated";
   value: number;
   rationale: string;
 }
@@ -1544,6 +1874,23 @@ export interface StoredLabelKey {
   stem: string;
 }
 
+export interface StoredRegistry {
+  kind: "stored";
+  version: string;
+  subjects: RegistrySubjects;
+}
+
+export interface StoredVersion {
+  kind: "stored";
+  version: string;
+}
+
+export interface SweepDetail {
+  kind: "sweep";
+  sweep: SweepGroup;
+  tensorboard: TensorboardState;
+}
+
 export interface SweepGroup {
   sweep_id: string;
   state: string;
@@ -1551,7 +1898,7 @@ export interface SweepGroup {
   input: SweepInput;
   cancel_requested: boolean;
   heartbeat: string;
-  trials: RunRow[];
+  trials: TrialRun[];
   outcome: SweepOutcome;
   selection_metric: string;
 }
@@ -1571,13 +1918,74 @@ export interface SweepInput {
   trial_budget: number | null;
 }
 
-export interface SweepOutcome {
-  best_params: Record<string, unknown> | null;
-  best_value: number | null;
-  best_value_state: string | null;
-  best_value_spread: DrawSpread | null;
-  split_sensitivity: DrawGroup[] | null;
-  best_at_range_end: Record<string, "low" | "high">;
+export interface SweepLaunched {
+  kind: "sweep";
+  sweep_id: string;
+  warnings: string[];
+}
+
+export type SweepOutcome = NoBest | FiniteBest | NonFiniteBest;
+
+export interface TensorboardFailure {
+  kind: "failed";
+  error: string;
+  output: string | null;
+}
+
+export interface TensorboardNotServing {
+  kind: "not_serving";
+}
+
+export interface TensorboardServing {
+  kind: "serving";
+  url: string;
+  port: number;
+}
+
+export type TensorboardState = TensorboardServing | TensorboardNotServing;
+
+export interface TerminalHeldFrame {
+  type: "held";
+  count: number;
+}
+
+export interface TerminalInputFrame {
+  type: "input";
+  data: string;
+}
+
+export interface TerminalOutputFrame {
+  type: "output";
+  data: string;
+}
+
+export interface TerminalResizeFrame {
+  type: "resize";
+  rows: number;
+  cols: number;
+}
+
+export interface Told {
+  kind: "told";
+  text: string;
+}
+
+export interface TrainingErrorFrame {
+  type: "error";
+  experiment_id: string;
+  error: string;
+}
+
+export interface TrainingRowFrame {
+  type: "metric" | "batch";
+  experiment_id: string;
+  row: MetricsRow;
+}
+
+export interface TrainingStatusFrame {
+  type: "status";
+  experiment_id: string;
+  status: RunRow;
 }
 
 export interface TraitEntry {
@@ -1609,18 +2017,76 @@ export interface TraitEntry {
   operationalizations: Record<string, Operationalization>;
 }
 
+export interface TraitRevision {
+  number: number;
+  entry: TraitEntry;
+  entry_sha256: string;
+  rationale: string;
+  relayed_note: string;
+  proposed_at: string;
+  state: Proposed | Confirmed | Withdrawn;
+}
+
 export interface TraitRevisionRef {
   trait: string;
   trait_revision: number;
   trait_revision_sha256: string;
 }
 
+export interface TrialRun {
+  experiment_id: string;
+  state: string;
+  created: string;
+  relaunched_from: string | null;
+  builder: string;
+  task: string;
+  images_dir: string | null;
+  current_epoch: number | null;
+  best: RunBest | null;
+  output_dir: string;
+  status_error: string | null;
+  heartbeat: string;
+  launch: RunLaunch;
+  kind: "trial";
+  sweep_id: string;
+  params: Record<string, unknown>;
+}
+
+export interface Unacknowledgeable {
+  kind: "unacknowledgeable";
+}
+
 export interface UncomparedRun {
+  kind: "uncompared";
   experiment_id: string;
   error: string;
 }
 
-export interface Unreadable {
+export interface Unlaunchable {
+  kind: "unlaunchable";
+  id: string;
+  name: string;
+  why: string;
+}
+
+export interface UnreadEntry {
+  kind: "unread";
+  id: string;
+  reason: string;
+}
+
+export interface UnreadProject {
+  modified: number;
+  tree: DatasetTree;
+  image_count: number;
+  kind: "unread";
+  problem: string;
+}
+
+export interface UnreadSelectionChoice {
+  selection_dir: string;
+  replaced_split_keys: string[];
+  kind: "unread";
   reason: string;
 }
 
@@ -1629,12 +2095,45 @@ export interface UnreadableTrait {
   reason: string;
 }
 
+export interface UnvalidatedBucket {
+  kind: "unvalidated";
+  dataset_root: string;
+  bucket: string;
+  date: string | null;
+  assessment_id: string | null;
+  reason: string;
+}
+
+export interface ValidatedBucket {
+  kind: "validated";
+  dataset_root: string;
+  bucket: string;
+  date: string | null;
+  assessment_id: string;
+}
+
 export interface Viewport {
   x: number;
   y: number;
   w: number;
   h: number;
   scale: number;
+}
+
+export interface WholeColumn {
+  case: "whole";
+}
+
+export interface WholeSource {
+  kind: "whole";
+}
+
+export interface Withdrawn {
+  kind: "withdrawn";
+  confirmed_by: string;
+  confirmed_at: string;
+  withdrawn_by: string;
+  withdrawn_at: string;
 }
 
 export interface StateSnapshotMessage {

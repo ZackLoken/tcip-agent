@@ -97,7 +97,7 @@
   },
   "single_proposals": {
     "operating_point": {
-      "conf": null,
+      "kind": "conf_refused",
       "reason": "no assessment answers for bucket '<single bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
     },
     "proposals": [
@@ -199,7 +199,7 @@
   },
   "review_proposals": {
     "operating_point": {
-      "conf": null,
+      "kind": "conf_refused",
       "reason": "no assessment answers for bucket '<review bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
     },
     "proposals": [
@@ -361,7 +361,7 @@
   },
   "shaped_proposals": {
     "operating_point": {
-      "conf": null,
+      "kind": "conf_refused",
       "reason": "no assessment answers for bucket '<shaped bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
     },
     "proposals": [
@@ -1342,6 +1342,7 @@
   },
   "no_stagings": { "buckets": [] },
   "staged": {
+    "kind": "staged",
     "image_path": "<staged render>",
     "bucket": "<staged bucket>",
     "summary": "Staged 2 proposal(s) from 2 'sam' candidates as predictions (created_by='sam') for review, not ground truth.",
@@ -1350,7 +1351,7 @@
   "stagings": { "buckets": ["<staged bucket>"] },
   "staged_proposals": {
     "operating_point": {
-      "conf": null,
+      "kind": "conf_refused",
       "reason": "no assessment answers for bucket '<staged bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
     },
     "proposals": [
@@ -1411,20 +1412,26 @@
     ]
   },
   "found_other": { "boxes": [[200.0, 200.0, 260.0, 260.0]] },
-  "nothing_proposed": null,
+  "nothing_proposed": {
+    "kind": "nothing_proposed",
+    "why": "the segmenter proposed no candidate for these prompts."
+  },
   "found_none": { "boxes": [] },
   "engine_refusal": {
     "status": 400,
     "body": { "detail": "a sample refusal the stub engine raises as it loads" }
   },
   "registry": {
-    "subjects": {
-      "subject_a": { "description": "one subject_a" },
-      "tip": { "description": "one tip" },
-      "subject_b": { "description": "one subject_b" }
+    "registry": {
+      "kind": "stored",
+      "version": "592ca4b51983d876cb4de912ad0f84ba5f510c5897628d97efb722f937a6cee9",
+      "subjects": {
+        "subject_a": { "description": "one subject_a" },
+        "tip": { "description": "one tip" },
+        "subject_b": { "description": "one subject_b" }
+      }
     },
     "discovered": ["subject_a"],
-    "version": "592ca4b51983d876cb4de912ad0f84ba5f510c5897628d97efb722f937a6cee9",
     "unreadable": []
   },
   "tool_two": {

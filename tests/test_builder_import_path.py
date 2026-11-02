@@ -539,7 +539,7 @@ def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run
     )
     checkpoint = Path(foreign_checkpoint(source))
     loaded = load_registered_checkpoint(checkpoint, project=source)
-    assert loaded.experiment_id is None
+    assert loaded.entry.origin == "foreign"
     GenericPredictor(loaded, device="cpu")
 
     archive = tmp_path / "source.zip"
@@ -815,6 +815,7 @@ def test_the_admissions_import_reads_the_files_its_run_holds(
         sources,
         resolve_run(spec, sources.layout, project=project).record,
         created=now(),
+        launched_as=experiments.Standalone(),
     )
 
     def laid_out(root: Path) -> dict:

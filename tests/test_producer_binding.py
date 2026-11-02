@@ -53,13 +53,12 @@ def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(
     The assessment measured one execution record; a bucket stating another, under the same
     assessment id, was not produced by what the assessment measured.
     """
+    from tcip_mcp.pipelines.delivery_events_schema import ShippedValidated
+
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-execution")
-    assert (
-        _deliver(tmp_path, chain.root, chain.bucket, tmp_path / "before.csv")[
-            "validated"
-        ]
-        is True
-    )
+    assert _deliver(
+        tmp_path, chain.root, chain.bucket, tmp_path / "before.csv"
+    )["shipped"] == ShippedValidated().model_dump(mode="json")
 
     _edit_record(
         chain.root,

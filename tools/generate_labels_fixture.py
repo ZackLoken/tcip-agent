@@ -14,8 +14,9 @@ append fails. The answers are written, normalized by the label document's stamps
 staged bucket and the flag's id read under the scene's names for them
 (``fixture_session.normalized``), to :data:`GENERATED_PATH`, keyed ``saved``, ``loaded``,
 ``proposals``, ``resolved``, ``version_conflict``, the stale save's refusal,
-``registry_saved``, the first registry save, ``registry_stale``, the refusal of it repeated over
-its stale version, ``registry_audit_gap``, the second's refusal, and
+``registry_unstored``, the load before any registry is stored, ``registry_bare``, the load once
+its subject is declared, ``registry_saved``, the first registry save, ``registry_stale``, the
+refusal of it repeated over its stale version, ``registry_audit_gap``, the second's refusal, and
 ``registry_loaded``, the registry the load route then serves; each refusal is kept with its
 status.
 
@@ -35,6 +36,7 @@ from tools.fixture_session import (
     answered,
     normalized,
     opened,
+    registry_base,
     scratch_session,
     write_fixture,
 )
@@ -146,18 +148,20 @@ def _registry_saves(
 ) -> dict[str, JsonValue]:
     """Grow ``dataset_root``'s subject registry through the subjects save route.
 
-    :data:`SUBJECT` is declared with no attribute first, and the load route then serves it
-    (``registry_bare``). A save gives it one attribute over the version that load answers; the
-    same save over that version again is refused, the version having moved; the next adds a value
-    while every audit append fails (``tests._audit_fixtures.refuse_audit_appends``); the load
-    route then serves what was saved. Returns, besides the bare load, the attribute's save
+    The load route first serves the dataset storing none (``registry_unstored``). :data:`SUBJECT`
+    is declared over it with no attribute, and the load route then serves it (``registry_bare``).
+    A save gives it one attribute over the version that load answers; the same save over that
+    version again is refused, the version having moved; the next, over the version the load route
+    then answers, adds a value while every audit append fails
+    (``tests._audit_fixtures.refuse_audit_appends``); the load route then serves what was saved.
+    Returns, besides the two loads before the attribute, the attribute's save
     (``registry_saved``), the stale save's refusal (``registry_stale``), the next save's refusal
     (``registry_audit_gap``) and the last load (``registry_loaded``); a route refusing what it
     should admit, or admitting what it should refuse, raises.
     """
     from tcip_annotation.state import Attribute
-    from tcip_mcp.subject_registry import RegistrySave, Subject
-    from tcip_web.routes.subjects import SaveSubjectsPayload, SubjectsLoad
+    from tcip_mcp.subject_registry import Subject
+    from tcip_web.routes.subjects import RegistryVersion, SaveSubjectsPayload
     from tests._audit_fixtures import refuse_audit_appends
 
     def load() -> JsonValue:
@@ -168,7 +172,9 @@ def _registry_saves(
             params={"dataset_root": dataset_root, "date": CAPTURE},
         )
 
-    def grown(values: list[str], version: str | None) -> SaveSubjectsPayload:
+    def grown(
+        values: list[str], version: RegistryVersion
+    ) -> SaveSubjectsPayload:
         return SaveSubjectsPayload(
             subjects=(
                 Subject(
@@ -190,16 +196,12 @@ def _registry_saves(
             user=ACTOR,
         )
 
-    answered(
-        client,
-        "save_subjects",
-        200,
-        grown([], SubjectsLoad.model_validate(load()).version),
-    )
+    unstored = load()
+    answered(client, "save_subjects", 200, grown([], registry_base(unstored)))
     bare = load()
-    first = SubjectsLoad.model_validate(bare).version
+    first = registry_base(bare)
     saved = answered(client, "save_subjects", 200, grown(["closed"], first))
-    second = RegistrySave.model_validate(saved).version
+    second = registry_base(load())
     stale = answered(client, "save_subjects", 409, grown(["closed"], first))
     with pytest.MonkeyPatch.context() as patch:
         refuse_audit_appends(patch)
@@ -207,6 +209,7 @@ def _registry_saves(
             client, "save_subjects", 409, grown(["closed", "open"], second)
         )
     return {
+        "registry_unstored": unstored,
         "registry_bare": bare,
         "registry_saved": saved,
         "registry_stale": stale,

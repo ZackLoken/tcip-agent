@@ -4,6 +4,7 @@ import type {
   ImageStagings,
   ImageStates,
   LabelDocumentAnswer,
+  NothingProposed,
   RegistrySubjects,
   SavedLabels,
   SelectAnswer,
@@ -14,6 +15,7 @@ import type {
 } from "@/api/types.generated";
 import type { DatasetSelection } from "@/store/types";
 import produced from "@/test/annotateAnswers.json";
+import { storedOf } from "@/test/labels";
 import type { Refusal } from "@/test/refusals";
 
 /** What `tools/generate_annotate_fixture.py` received from the annotate routes over the open
@@ -78,7 +80,7 @@ export const ANNOTATE_ANSWERS = produced as unknown as {
   found: FindAnswer;
   found_other: FindAnswer;
   found_none: FindAnswer;
-  nothing_proposed: null;
+  nothing_proposed: NothingProposed;
   engine_refusal: Refusal<string>;
   registry: SubjectsLoad;
   imported: SelectAnswer;
@@ -98,7 +100,7 @@ export const TOOL_SELECTION: DatasetSelection = (() => {
 })();
 
 /** The subjects the produced registry declares, by name. */
-const DECLARED = ANNOTATE_ANSWERS.registry.subjects ?? {};
+const DECLARED = storedOf(ANNOTATE_ANSWERS.registry).subjects;
 
 /** The produced registry's subjects `names` name, each as served; a name it declares no subject
  *  of throws. */

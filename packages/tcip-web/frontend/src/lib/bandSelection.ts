@@ -7,6 +7,21 @@ export interface BandSelection {
   stretch: CompositeStretch;
 }
 
+/** The band choice an image offers: over a raster read with bands, its metadata, the selection
+ *  held for its band set and the setter that records another; none for an image whose metadata
+ *  is not in or that displays as its own pixels (the server's plain read). */
+export type BandChoice =
+  | {
+      kind: "banded";
+      info: ImageBands;
+      selection: BandSelection;
+      choose: (next: BandSelection) => void;
+    }
+  | { kind: "none" };
+
+/** The band choice of an image offering none. */
+export const NO_BAND_CHOICE: BandChoice = { kind: "none" };
+
 /** The band-set signature a selection is held per: the image's band names, in declared order,
  *  joined. Two images share a selection only when they share this exact signature. */
 export function bandSetSignature(bands: ImageBand[]): string {
@@ -24,29 +39,21 @@ function selectionMatchesBands(bandsInfo: ImageBands, selection: BandSelection):
 /** The three band names an image request composites, in display order. */
 export type CompositeBands = readonly [string, string, string];
 
-/** The `bands`/`stretch` an image request carries for the current selection, or neither when the
- *  frame displays as its own pixels (the server's `plain`) or the selection names bands this
- *  metadata doesn't actually carry.
- *
- *  One expression of that, shared by everything that requests an image for the same view: the
- *  canvas and the prefetcher would otherwise warm and read two different renders of one image. */
-export function compositeParams(
-  bandsInfo: ImageBands | null,
-  selection: BandSelection | null,
-): { bands?: CompositeBands; stretch?: CompositeStretch } {
-  if (!bandsInfo || !selection || bandsInfo.plain) return {};
-  if (!selectionMatchesBands(bandsInfo, selection)) return {};
-  return { bands: [selection.r, selection.g, selection.b], stretch: selection.stretch };
+/** The `bands`/`stretch` an image request carries for `choice`'s selection, or neither when the
+ *  image offers no band choice or the selection names bands its metadata doesn't carry. */
+export function compositeParams(choice: BandChoice): {
+  bands?: CompositeBands;
+  stretch?: CompositeStretch;
+} {
+  if (choice.kind === "none" || !selectionMatchesBands(choice.info, choice.selection)) return {};
+  const { r, g, b, stretch } = choice.selection;
+  return { bands: [r, g, b], stretch };
 }
 
-/** Whether a band picker may show for this frame and selection: exactly when the frame's image
- *  request carries a composite (`compositeParams`), so the picker never shows for stale metadata
- *  mid-switch. */
-export function showsBandPicker(
-  bandsInfo: ImageBands | null,
-  selection: BandSelection | null,
-): boolean {
-  return compositeParams(bandsInfo, selection).bands !== undefined;
+/** Whether a band picker may show for `choice`: exactly when the image request carries a
+ *  composite (`compositeParams`), so the picker never shows for stale metadata mid-switch. */
+export function showsBandPicker(choice: BandChoice): boolean {
+  return compositeParams(choice).bands !== undefined;
 }
 
 /** The server's default bands (`default_bands`) as the initial R/G/B assignment, at its default

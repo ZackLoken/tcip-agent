@@ -13,9 +13,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NamedTuple
 
-from pydantic import BaseModel, StringConstraints, TypeAdapter, computed_field
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    computed_field,
+)
 
 import tcip_store
+from tcip_mcp.project_record import (
+    ReadRecord,
+    UnreadRecord,
+    record_or_problem,
+)
 
 if TYPE_CHECKING:
     from tcip_mcp.project_record import ProjectRecord
@@ -84,25 +95,39 @@ def project_dirs(workspace: Path) -> list[Path]:
     )
 
 
-class ListedProject(NamedTuple):
-    """A workspace project: its directory, and its record or why the record will not read."""
+class ListedRead(ReadRecord):
+    """A workspace project whose record read: its directory and its record."""
 
     root: Path
-    record: ProjectRecord | None
-    record_problem: str | None
+
+
+class ListedUnread(UnreadRecord):
+    """A workspace project whose record will not read: its directory and why."""
+
+    root: Path
+
+
+type ListedProject = Annotated[
+    ListedRead | ListedUnread, Field(discriminator="kind")
+]
+"""A workspace project as listed, told apart by its record reading's ``kind``."""
+
+_LISTED: TypeAdapter[ListedProject] = TypeAdapter(ListedProject)
+
+
+def listed_project(project: Path) -> ListedProject:
+    """Return the workspace project ``project`` with its record or why not.
+
+    The record is read by :func:`tcip_mcp.project_record.record_or_problem`.
+    """
+    return _LISTED.validate_python(
+        {**dict(record_or_problem(project)), "root": project}
+    )
 
 
 def project_records(workspace: Path) -> list[ListedProject]:
-    """Return every workspace project (:func:`project_dirs`) with its record or why not.
-
-    Each is read by :func:`tcip_mcp.project_record.record_or_problem`.
-    """
-    from tcip_mcp.project_record import record_or_problem
-
-    return [
-        ListedProject(project, *record_or_problem(project))
-        for project in project_dirs(workspace)
-    ]
+    """Return every workspace project (:func:`project_dirs`) as :func:`listed_project` lists it."""
+    return [listed_project(project) for project in project_dirs(workspace)]
 
 
 def project_by_id(
@@ -116,11 +141,11 @@ def project_by_id(
     """
     found: list[tuple[Path, ProjectRecord]] = []
     unreadable: list[str] = []
-    for project, record, problem in records:
-        if record is None:
-            unreadable.append(f"{project}: {problem}")
-        elif record.id == project_id:
-            found.append((project, record))
+    for entry in records:
+        if entry.kind == "unread":
+            unreadable.append(f"{entry.root}: {entry.problem}")
+        elif entry.record.id == project_id:
+            found.append((entry.root, entry.record))
     if not found:
         detail = (
             f"; these projects' records would not read: {'; '.join(unreadable)}"

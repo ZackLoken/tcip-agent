@@ -34,7 +34,7 @@ from tcip_mcp.pipelines.model_build import (
     METRICS_KEY,
     SNAPSHOT_KEY,
 )
-from tcip_mcp.pipelines.schemas import TrainGeometry
+from tcip_mcp.pipelines.schemas import StatedDirection, TrainGeometry
 from tcip_mcp.registry_paths import (
     checkpoint_registry_path_for,
     is_external_form,
@@ -67,14 +67,18 @@ def registry_index_key(project_path: str | Path) -> Key:
     return Key(MODEL_REGISTRY_STORE, str(project_path), _INDEX_PARTS)
 
 
+type Origin = Literal["run", "foreign"]
+"""Where a registered checkpoint came from: a completed run's final status, or outside."""
+
+
 class RegistryEntry(BaseModel):
     """One checkpoint a project can load, under the name and tags it was registered with.
 
+    ``name`` is the run's id for a run's own entry and the registered name for a foreign one.
     ``checkpoint_path`` is as stored (:func:`~tcip_mcp.registry_paths.checkpoint_registry_path_for`)
     and ``sha256`` the digest of its bytes. ``metrics`` are the ones its registration asserted: a
     caller's for a foreign checkpoint, none for a run's own entry, whose metrics its checkpoint
-    carries (:func:`entry_facts`). ``experiment_id`` is the run whose final status names it,
-    ``None`` for a foreign checkpoint.
+    carries (:func:`entry_facts`).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -85,7 +89,7 @@ class RegistryEntry(BaseModel):
     registered_at: AwareDatetime
     metrics: FiniteJsonObject
     tags: list[str]
-    experiment_id: str | None
+    origin: Origin
 
 
 class RegistryIndex(BaseModel):
@@ -181,8 +185,8 @@ def run_entry(
 ) -> RegistryEntry | None:
     """Return the registry entry a completed training run's final status stands for.
 
-    The entry is named by the run's id and carries it as ``experiment_id``; ``None`` for a run
-    that has not completed.
+    The entry is named by the run's id, its origin ``"run"``; ``None`` for a run that has not
+    completed.
     """
     checkpoint = observation.checkpoint
     if checkpoint is None:
@@ -197,7 +201,7 @@ def run_entry(
         registered_at=observation.final.ended,
         metrics={},
         tags=[],
-        experiment_id=observation.directory.name,
+        origin="run",
     )
 
 
@@ -271,7 +275,7 @@ def entry_facts(entry: RegistryEntry, project: Path) -> CheckpointFacts:
         payload=checkpoint_payload(entry.checkpoint_path, entry.sha256),
     )
     source: MetricsSource
-    if entry.experiment_id is None:
+    if entry.origin == "foreign":
         metrics, source = entry.metrics, "caller"
     else:
         metrics = checkpoint_metrics(checkpoint.payload)
@@ -321,15 +325,16 @@ class CheckpointStamp(BaseModel):
 
 
 class Producer(BaseModel):
-    """The checkpoint and the run behind a model's predictions.
+    """The checkpoint behind a model's predictions, and where it came from.
 
     It is what :attr:`VerifiedCheckpoint.producer` states.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    kind: Literal["checkpoint"]
     checkpoint_sha256: str
-    experiment_id: str | None
+    origin: Origin
 
 
 @dataclass(frozen=True)
@@ -353,15 +358,12 @@ class VerifiedCheckpoint:
         return self.entry.sha256
 
     @property
-    def experiment_id(self) -> str | None:
-        """The run whose final status names this checkpoint, ``None`` for a foreign one."""
-        return self.entry.experiment_id
-
-    @property
     def producer(self) -> Producer:
-        """The checkpoint's producer identity: its sha256 and the run behind it."""
+        """The checkpoint's producer identity: its sha256 and its entry's origin."""
         return Producer(
-            checkpoint_sha256=self.sha256, experiment_id=self.experiment_id
+            kind="checkpoint",
+            checkpoint_sha256=self.sha256,
+            origin=self.entry.origin,
         )
 
     @cached_property
@@ -696,7 +698,7 @@ class ModelRegistry:
             registered_at=now(),
             metrics={} if metrics is None else metrics,
             tags=tags or [],
-            experiment_id=None,
+            origin="foreign",
         )
         key = registry_index_key(self._project_path)
         with tcip_store.transaction(key) as txn:
@@ -764,12 +766,12 @@ def best_model(
     models: list[Listed],
     metric_key: str,
     *,
-    higher_is_better: bool,
+    direction: StatedDirection,
     include_unverified: bool = False,
 ) -> tuple[Listed | None, list[Skipped]]:
     """Return the one of ``models`` with the best finite ``metric_key`` value, and those left out.
 
-    ``models`` are :meth:`ModelRegistry.list_models`'s entries; best is in the stated direction,
+    ``models`` are :meth:`ModelRegistry.list_models`'s entries; best is in ``direction``,
     the first of equals, and ``None`` when no entry is ranked. An entry not :func:`verified` is
     left out unless ``include_unverified``, and one not :func:`stamped` with ``metric_key`` is
     left out always; each is answered as its :class:`Skipped` carrying every fact that held, in
@@ -790,7 +792,7 @@ def best_model(
             )
         else:
             scored.append((value, m))
-    best = (max if higher_is_better else min)(
+    best = (max if direction == "higher" else min)(
         scored, key=lambda s: s[0], default=None
     )
     return (None if best is None else best[1]), skipped

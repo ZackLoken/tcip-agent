@@ -29,18 +29,18 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
-    from tcip_mcp.pipelines.execution import Execution
+    from tcip_mcp.pipelines.execution import ProposalExecution
 
 
 class Proposal(NamedTuple):
     """What one ``propose`` call answers.
 
-    ``candidates`` are its candidate shapes in the neutral schema, and ``execution`` the record
-    of the inference pass that produced them, ``None`` for a proposal no such pass made.
+    ``candidates`` are its candidate shapes in the neutral schema, and ``execution`` what
+    produced them (:data:`~tcip_mcp.pipelines.execution.ProposalExecution`).
     """
 
     candidates: list[dict]
-    execution: Execution | None
+    execution: ProposalExecution
 
 
 @runtime_checkable

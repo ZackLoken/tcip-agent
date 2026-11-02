@@ -11,7 +11,9 @@ superseding rebuild archives the mapping it cites. The count project's checkpoin
 again at :data:`UNMET_CONF`, which fails, a second checkpoint is registered beside it, and its
 bucket is exported through ``POST /api/results/export_count_csv``. The results routes' answers are
 recorded beside them, under ``answers``, each refusal with its status: the count project's
-mapping names, none, ``no_mapping_names``; the count export repeated while every audit append
+mapping names, none, ``no_mapping_names``; the operating point the proposals route serves beside
+its validated bucket's proposals for its first image, the conf its assessment admits,
+``admitted_operating_point``; the count export repeated while every audit append
 fails (``tests._audit_fixtures.refuse_audit_appends``), ``count_export_audit_gap``; its listing
 once its first delivery's record is damaged (``tests._record_damage_fixtures.damage_record``),
 ``unreadable_deliveries``; the phenology project's measurement refused by the delivery gate,
@@ -174,9 +176,6 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.delivery import DeliveryRefusal, delivery_event_key
     from tcip_mcp.identity import actor
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        PlantMappingDisclosure,
-    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         StatedRadius,
         archived_mapping_name,
@@ -185,6 +184,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
+    from tcip_web.routes.annotate import ServedProposals
     from tcip_web.routes.results import (
         EXPORT_HEADER,
         AcknowledgmentPayload,
@@ -270,7 +270,8 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         That is the export header the door sent, the file it sent and the open project's delivery
         events once it has, the export's own the latest; any answer but 200 raises. The export's
         event id is read as ``<export N>`` in every place it is named, and the acknowledgment it
-        shipped under, if any, as ``<export N acknowledgment>``.
+        shipped under, if any, as ``<export N acknowledgment>`` and its result digest as
+        ``<export N digest>``.
         """
         response = responded(client, route, 200, body, headers=BROWSER)
         events = answered(client, "list_delivery_events", 200)
@@ -278,10 +279,12 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         name = f"<export {len(exports)}"
         exports.append(latest.event_id)
         minted[latest.event_id] = f"{name}>"
-        if latest.acknowledgment is not None:
-            minted[latest.acknowledgment.acknowledgment_id] = (
+        if latest.shipped.kind == "acknowledged":
+            acknowledgment = latest.shipped.acknowledgment
+            minted[acknowledgment.acknowledgment_id] = (
                 f"{name} acknowledgment>"
             )
+            minted[acknowledgment.result_sha256] = f"{name} digest>"
         return {
             "headers": {EXPORT_HEADER: response.headers[EXPORT_HEADER]},
             "file": response.text,
@@ -311,6 +314,15 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     )
     out["validated"] = served(project, "validated")
     answers["no_mapping_names"] = answered(client, "list_plant_mappings", 200)
+    first_image, *_ = sorted(chain.images_dir.glob("*.png"))
+    answers["admitted_operating_point"] = ServedProposals.model_validate(
+        answered(
+            client,
+            "load_proposals",
+            200,
+            params={"image_path": str(first_image), "bucket": chain.bucket},
+        )
+    ).operating_point.model_dump(mode="json")
     unmet = assess(
         root, chain.checkpoint_path, chain.selection_dir, conf=UNMET_CONF
     )
@@ -395,7 +407,9 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         out["archived_mapping"]
     ).records
     disclosure = archived.event.plant_mapping
-    assert isinstance(disclosure, PlantMappingDisclosure), disclosure
+    assert disclosure is not None and disclosure.kind == "plant_mapping", (
+        disclosure
+    )
     measured = PhenologyPayload(
         mapping_name="valley",
         dataset_root=str(dataset_root),
@@ -417,8 +431,8 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         measured.model_copy(update={"mapping_name": "absent"}),
         404,
     )
-    unvalidated = PhenologyAnswer.model_validate(phenology).unvalidated
-    assert unvalidated is not None, phenology
+    unvalidated = PhenologyAnswer.model_validate(phenology).validation
+    assert unvalidated.kind == "shown_unvalidated", phenology
     curves_export = ExportCsvPayload(
         **measured.model_dump(exclude={"show_unvalidated"}),
         payload="curves",
@@ -606,13 +620,14 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     refusal = DeliveryRefusal.model_validate(
         detail_of(answers["count_delivery_refusal"])
     )
-    assert refusal.result_sha256 is not None, refusal
+    shipping = refusal.shipping
+    assert shipping.kind == "acknowledgeable", refusal
     acknowledged_export = exported(
         plant_counts.model_copy(
             update={
                 "acknowledgment": AcknowledgmentPayload(
                     reason="the assessment is not run yet",
-                    result_sha256=refusal.result_sha256,
+                    result_sha256=shipping.result_sha256,
                 )
             }
         )

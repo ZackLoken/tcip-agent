@@ -286,12 +286,13 @@ def test_list_reports_the_record_across_four_project_states(
 
     A project with a record, one with ``.tcip`` and nothing else, one whose record is
     undecodable, and one whose record decodes to something else: all four list, each with its
-    record or the ``record_problem`` naming why it is absent. The recordless one gets no database
+    record or the problem naming why it is absent. The recordless one gets no database
     published under it by the listing.
     """
     import tcip_store
     from tcip_mcp.project_record import project_record_key
     from tcip_store.file_backend import database_file
+    from tcip_web.routes.projects import ReadProject, UnreadProject
     from tests._record_damage_fixtures import damage_record
     from tests._web_fixtures import INVARIANCES
 
@@ -316,28 +317,23 @@ def test_list_reports_the_record_across_four_project_states(
         str(p.resolve()) for p in (recorded, recordless, undecodable, invalid)
     }
 
-    good = by_path[str(recorded.resolve())]
-    assert good["record_problem"] is None
-    assert (good["record"]["display_name"], good["record"]["site"]) == (
+    good = ReadProject.model_validate(by_path[str(recorded.resolve())]).record
+    assert (good.display_name, good.site) == (
         "currant_bud_recorded",
         "north orchard",
     )
-    assert len(good["record"]["id"]) == 12
-    assert good["record"]["invariances"] == INVARIANCES.model_dump()
+    assert len(good.id) == 12
+    assert good.invariances == INVARIANCES
 
-    missing = by_path[str(recordless.resolve())]
-    assert missing["record"] is None
-    assert "initialize_project" in missing["record_problem"]
+    def problem(project: Path) -> str:
+        return UnreadProject.model_validate(
+            by_path[str(project.resolve())]
+        ).problem
+
+    assert "initialize_project" in problem(recordless)
     assert not database_file(str(recordless)).is_file()
-
-    assert (
-        "does not decode"
-        in by_path[str(undecodable.resolve())]["record_problem"]
-    )
-    assert (
-        "is not a project record"
-        in (by_path[str(invalid.resolve())]["record_problem"])
-    )
+    assert "does not decode" in problem(undecodable)
+    assert "is not a project record" in problem(invalid)
 
 
 def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
@@ -399,7 +395,8 @@ def test_correcting_the_invariances_answers_the_typed_correction_and_the_record_
     assert answer["record"]["id"] == answer["previous"]["id"] == made.id
     written = body["invariances"]
     assert read_record(made.root).invariances.model_dump() == written
-    assert _listed(client)["valley_block"]["record"]["invariances"] == written
+    listed = _listed(client)["valley_block"]["record"]
+    assert listed["invariances"] == written
     (line,) = audit_rows(made.root, "project_record_corrected")
     assert line["actor"] == actor("tester")
 

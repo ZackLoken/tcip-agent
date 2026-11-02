@@ -5,8 +5,10 @@ import { messageOf, StructuredRefusalError } from "@/api/http";
 import { trainingApi } from "@/api/training";
 import {
   NOT_FINITE_SUFFIX,
+  type ComparedEntry,
   type ComparedRun,
   type Comparison,
+  type Direction,
   type MetricsRow,
   type Skipped,
   type SplitColumn,
@@ -36,51 +38,54 @@ function cellText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** One id's column of a comparison: its run read, or the reason it could not be. */
-type CompareEntry = Comparison["experiments"][number];
-
-/** Whether the comparison read `entry`'s run. */
-function isRead(entry: CompareEntry): entry is ComparedRun {
-  return "run" in entry;
-}
-
 /** The experiment id a comparison entry answers for. */
-function entryId(entry: CompareEntry): string {
-  return isRead(entry) ? entry.run.experiment_id : entry.experiment_id;
+function entryId(entry: ComparedEntry): string {
+  return entry.kind === "compared" ? entry.run.experiment_id : entry.experiment_id;
 }
 
-/** A marked run's column: absent from the answer, unread with the reason, or read. */
-type Column = MarkedRun &
-  ({ kind: "absent" } | { kind: "unread"; error: string } | { kind: "read"; exp: ComparedRun });
+/** The entries of `experiments` whose run the comparison read. */
+function readRuns(experiments: ComparedEntry[]): ComparedRun[] {
+  return experiments.flatMap((e) => (e.kind === "compared" ? [e] : []));
+}
+
+/** A marked run's column: its entry as the comparison answered it, or absent from the answer. */
+type Column = MarkedRun & { entry: ComparedEntry | { kind: "absent" } };
 
 /** A column's cell: the absence wording, the unrecorded wording for a run the comparison could
  * not read, or `of` its read run. */
-function cell(column: Column, of: (exp: ComparedRun) => ReactNode): ReactNode {
-  if (column.kind === "absent") return NOT_IN_ANSWER;
-  return column.kind === "unread" ? UNRECORDED : of(column.exp);
+function cell({ entry }: Column, of: (exp: ComparedRun) => ReactNode): ReactNode {
+  if (entry.kind === "absent") return NOT_IN_ANSWER;
+  return entry.kind === "uncompared" ? UNRECORDED : of(entry);
 }
 
 function splitLine(split: SplitColumn): string {
-  if (split.case === "bound") {
-    return `bound to ${split.selection_dir}${split.seed != null ? ` (seed ${split.seed})` : ""}`;
+  switch (split.case) {
+    case "bound":
+      return `bound to ${split.selection_dir} (seed ${split.seed})`;
+    case "drawn":
+      return `drawn again (seed ${split.seed})`;
+    case "whole":
+      return "every member, no split drawn";
+    case "spatial":
+      return "a within-image spatial split";
+    case "none":
+      return "no split record";
   }
-  if (split.case === "drawn") return `drawn again (seed ${split.seed ?? UNRECORDED})`;
-  if (split.case === "spatial") return "a within-image spatial split";
-  return "no split record";
 }
 
-/** What a comparison says of its runs' source images, naming the runs that left it unknown. */
-function fingerprintNote({ dataset_fingerprints: match, experiments }: Comparison): string {
-  if (match === "same") return "same source images";
-  if (match === "different") return "not the same source images";
-  if (match === "unread") {
-    return `not comparable: ${experiments
-      .filter((e) => !isRead(e))
-      .map(entryId)
-      .join(", ")} could not be read`;
+/** What a comparison says of its runs' source images, naming the runs that left it unknown:
+ * runs it could not read, then read runs whose records carry no fingerprint. */
+function fingerprintNote({ experiments }: Comparison): string {
+  const unread = experiments.filter((e) => e.kind === "uncompared");
+  if (unread.length) return `not comparable: ${unread.map(entryId).join(", ")} could not be read`;
+  const read = readRuns(experiments);
+  const unset = read.filter((e) => e.dataset_fingerprint === null);
+  if (unset.length) {
+    return `not comparable: ${unset.map(entryId).join(", ")} carry no fingerprint`;
   }
-  const unset = experiments.filter(isRead).filter((e) => e.dataset_fingerprint === null);
-  return `not comparable: ${unset.map(entryId).join(", ")} carry no fingerprint`;
+  return new Set(read.map((e) => e.dataset_fingerprint)).size === 1
+    ? "same source images"
+    : "not the same source images";
 }
 
 /** What the ranking says of a checkpoint it left out ranking by `metric`: every fact it carries. */
@@ -92,8 +97,8 @@ function skippedText(skipped: Skipped, metric: string): string {
   return `${skipped.name}: not ranked: ${facts.filter(Boolean).join("; ")}`;
 }
 
-function loggedMetricKeys(experiments: CompareEntry[]): string[] {
-  return unionMetricKeys(experiments.filter(isRead).map((exp) => exp.last_logged_metrics)).sort();
+function loggedMetricKeys(experiments: ComparedEntry[]): string[] {
+  return unionMetricKeys(readRuns(experiments).map((exp) => exp.last_logged_metrics)).sort();
 }
 
 function loggedMetricCell(row: MetricsRow | null, key: string): string {
@@ -110,7 +115,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   const [compareError, setCompareError] = useState<string | null>(null);
 
   const [rankMetric, setRankMetric] = useState("");
-  const [rankDirection, setRankDirection] = useState<boolean | null>(null);
+  const [rankDirection, setRankDirection] = useState<Direction>("unstated");
   const [includeUnverified, setIncludeUnverified] = useState(false);
   const [needsUnverifiedOption, setNeedsUnverifiedOption] = useState(false);
   const [rankResult, setRankResult] = useState<Awaited<
@@ -152,44 +157,39 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   }, [markedKey]);
 
   const byExperimentId = useMemo(() => {
-    const map = new Map<string, CompareEntry>();
+    const map = new Map<string, ComparedEntry>();
     (result?.experiments ?? []).forEach((e) => map.set(entryId(e), e));
     return map;
   }, [result]);
 
-  const columns = marked.map((m): Column => {
-    const entry = byExperimentId.get(m.experimentId);
-    if (entry === undefined) return { ...m, kind: "absent" };
-    return isRead(entry)
-      ? { ...m, kind: "read", exp: entry }
-      : { ...m, kind: "unread", error: entry.error };
-  });
-  const registries = columns.map((c) => (c.kind === "read" ? c.exp.registry : []));
+  const columns = marked.map((m): Column => ({
+    ...m,
+    entry: byExperimentId.get(m.experimentId) ?? { kind: "absent" },
+  }));
+  const registries = columns.map(({ entry }) => (entry.kind === "compared" ? entry.registry : []));
 
   const metricRows = loggedMetricKeys(result?.experiments ?? []);
-  const rankMetricOptions = Object.keys(result?.higher_is_better ?? {});
+  const directions = result?.directions ?? {};
+  const rankMetricOptions = Object.keys(directions);
 
-  const allColumnsLoaded = columns.length > 0 && columns.every((c) => c.kind !== "absent");
+  const allColumnsLoaded = columns.length > 0 && columns.every((c) => c.entry.kind !== "absent");
   const noMarkedCheckpoint = allColumnsLoaded && registries.every((r) => r.length === 0);
 
-  function hasDeclaredDirection(metric: string): boolean {
-    return (result?.higher_is_better[metric] ?? null) !== null;
-  }
-  const declaredMetricOptions = rankMetricOptions.filter(hasDeclaredDirection);
-  const undeclaredMetricOptions = rankMetricOptions.filter((k) => !hasDeclaredDirection(k));
+  const declaredMetricOptions = rankMetricOptions.filter((k) => directions[k] !== "unstated");
+  const undeclaredMetricOptions = rankMetricOptions.filter((k) => directions[k] === "unstated");
   // Read off the comparison's own directions, as soon as the breeder picks a metric.
-  const needsDirection = rankMetric !== "" && !hasDeclaredDirection(rankMetric);
+  const needsDirection = rankMetric !== "" && directions[rankMetric] === "unstated";
   const rankDisabledReason = noMarkedCheckpoint
     ? NO_MARKED_CHECKPOINT
     : !rankMetric
       ? "choose a metric before ranking"
-      : needsDirection && rankDirection === null
+      : needsDirection && rankDirection === "unstated"
         ? "choose a ranking direction before ranking"
         : null;
 
   function onRankMetricChange(metric: string) {
     setRankMetric(metric);
-    setRankDirection(null);
+    setRankDirection("unstated");
     setIncludeUnverified(false);
     setNeedsUnverifiedOption(false);
     setRankResult(null);
@@ -197,8 +197,8 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   }
 
   // Choosing a direction answers the pending refusal, so it clears it.
-  function onChooseDirection(higherIsBetter: boolean) {
-    setRankDirection(higherIsBetter);
+  function onChooseDirection(direction: Direction) {
+    setRankDirection(direction);
     setRankError(null);
   }
 
@@ -208,7 +208,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
       const res = await trainingApi.compareBest({
         experiment_ids: marked.map((m) => m.experimentId),
         metric: rankMetric,
-        higher_is_better: needsDirection ? rankDirection : null,
+        direction: needsDirection ? rankDirection : "unstated",
         include_unverified: includeUnverified,
       });
       setRankResult(res);
@@ -246,12 +246,12 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
             </tr>
           </thead>
           <tbody>
-            {columns.some((c) => c.kind === "unread") && (
+            {columns.some((c) => c.entry.kind === "uncompared") && (
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Read error</th>
-                {columns.map((c) => (
-                  <td key={c.experimentId} className="px-2 py-1 tcip-problem">
-                    {c.kind === "unread" && c.error}
+                {columns.map(({ experimentId, entry }) => (
+                  <td key={experimentId} className="px-2 py-1 tcip-problem">
+                    {entry.kind === "uncompared" && entry.error}
                   </td>
                 ))}
               </tr>
@@ -367,7 +367,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <th className="tcip-th">Entries</th>
               {columns.map((c, i) => (
                 <td key={c.experimentId} className="px-2 py-1 align-top">
-                  {c.kind === "absent" ? (
+                  {c.entry.kind === "absent" ? (
                     <span className="text-tcip-muted">{NOT_IN_ANSWER}</span>
                   ) : registries[i].length > 0 ? (
                     <ul className="space-y-1">
@@ -437,21 +437,21 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
             >
               <button
                 type="button"
-                aria-pressed={rankDirection === true}
+                aria-pressed={rankDirection === "higher"}
                 className={`px-2 py-1 text-[13px] transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
-                  rankDirection === true ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
+                  rankDirection === "higher" ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
                 }`}
-                onClick={() => onChooseDirection(true)}
+                onClick={() => onChooseDirection("higher")}
               >
                 higher is better
               </button>
               <button
                 type="button"
-                aria-pressed={rankDirection === false}
+                aria-pressed={rankDirection === "lower"}
                 className={`px-2 py-1 text-[13px] border-l border-tcip-border transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
-                  rankDirection === false ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
+                  rankDirection === "lower" ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
                 }`}
-                onClick={() => onChooseDirection(false)}
+                onClick={() => onChooseDirection("lower")}
               >
                 lower is better
               </button>
@@ -485,10 +485,6 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
         {rankResult && (
           <div role="status" className="mt-2 text-[13px]">
             <span className="font-mono">{rankResult.entry.name}</span>
-            {rankResult.entry.experiment_id !== null &&
-              rankResult.entry.experiment_id !== rankResult.entry.name && (
-                <span className="text-tcip-muted"> ({rankResult.entry.experiment_id})</span>
-              )}
             <span className="text-tcip-muted">
               {" "}
               / {rankResult.metric}: {cellText(rankResult.facts.metrics[rankResult.metric])}
@@ -504,9 +500,9 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
         )}
       </div>
 
-      {result.experiments.filter(isRead).some((e) => e.rows_after_end) && (
+      {readRuns(result.experiments).some((e) => e.rows_after_end) && (
         <div className="tcip-panel p-2 text-[13px] text-tcip-muted">
-          {result.experiments.filter(isRead).map((e) =>
+          {readRuns(result.experiments).map((e) =>
             e.rows_after_end ? (
               <div key={e.run.experiment_id}>
                 <span className="font-mono">{e.run.experiment_id}</span>:{" "}

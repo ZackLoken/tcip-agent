@@ -41,14 +41,16 @@ def test_a_run_id_carrying_a_path_names_no_run_on_the_training_stream(
 
     The stream looks the id up by name among the project's run directories, which no path names.
     """
-    from tcip_web.routes.training import TrainingStatusFrame
+    from pydantic import TypeAdapter
+
+    from tcip_web.routes.training import TrainingErrorFrame, TrainingFrame
 
     with client.websocket_connect(
         "ws://127.0.0.1/api/training/runs/a\\b/stream"
     ) as ws:
-        frame = TrainingStatusFrame.model_validate(ws.receive_json())
-    assert frame == TrainingStatusFrame(
-        experiment_id="a\\b", status=None, error="Run not found: a\\b"
+        frame = TypeAdapter(TrainingFrame).validate_python(ws.receive_json())
+    assert frame == TrainingErrorFrame(
+        experiment_id="a\\b", error="Run not found: a\\b"
     )
 
 

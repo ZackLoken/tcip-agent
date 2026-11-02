@@ -413,7 +413,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     )
     _worker(job)
 
-    assert job.status == "completed", job.error
+    assert job.state.status == "completed", job.state
     assert job.done == 1 and job.total == 1
     assert (
         len(seen) == 1

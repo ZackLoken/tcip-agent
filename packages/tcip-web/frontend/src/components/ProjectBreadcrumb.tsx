@@ -11,14 +11,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
 import { messageOf } from "@/api/http";
-import type { ProjectsListing } from "@/api/types.generated";
-import {
-  choiceForDate,
-  openable,
-  type OpenableProject,
-  openWithDefaults,
-  startOpen,
-} from "@/lib/openProject";
+import { type ProjectsListing, READ, type ReadProject } from "@/api/types.generated";
+import { choiceForDate, openWithDefaults, startOpen } from "@/lib/openProject";
 import { loadRecentProjectIds } from "@/lib/recentProjects";
 import { useStore } from "@/store";
 import type { DatasetSelection, TabName } from "@/store/types";
@@ -74,14 +68,14 @@ export function ProjectBreadcrumb() {
     if (!DATASET_TABS.has(activeTab)) setActiveTab("annotate");
   }
 
-  async function openRecent(project: OpenableProject) {
+  async function openRecent(project: ReadProject) {
     setMenu(null);
     // The one opening transition saves the outgoing UI state and restores this project's saved
     // position/filters, and reports its own failure.
     await openWithDefaults(project);
   }
 
-  async function switchDate(newDate: string, current: OpenableProject, selected: DatasetSelection) {
+  async function switchDate(newDate: string, current: ReadProject, selected: DatasetSelection) {
     setMenu(null);
     if (newDate === selected.date) return;
     const { subject, bucket } = choiceForDate(current.tree, newDate, selected.subject);
@@ -92,12 +86,12 @@ export function ProjectBreadcrumb() {
     return <span>no project open</span>;
   }
 
-  const readable = listing?.projects.filter(openable) ?? [];
+  const readable = listing?.projects.filter((p) => p.kind === READ) ?? [];
   const current = readable.find((p) => p.record.id === openProject.id) ?? null;
   // Every recent project still in the listing, named by it, the open one marked as current and
   // inert (hiding it would read as broken in a one-project workspace).
-  const isCurrent = (r: OpenableProject) => r.record.id === openProject.id;
-  let recent: OpenableProject[] = [];
+  const isCurrent = (r: ReadProject) => r.record.id === openProject.id;
+  let recent: ReadProject[] = [];
   let recentProblem: string | null = null;
   try {
     recent = loadRecentProjectIds().flatMap((id) => {

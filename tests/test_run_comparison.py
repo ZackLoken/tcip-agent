@@ -1,8 +1,8 @@
 """Side-by-side run comparison in the backend.
 
-Covers compare_experiments' task, subject, status_error, split and registry columns,
-dataset_fingerprints beside an error entry, the experiment_ids filter on best-model ranking,
-and the /api/training/compare/best route.
+Covers compare_experiments' task, subject, status_error, split and registry columns, each
+run's dataset fingerprint beside an uncompared entry, the experiment_ids filter on best-model
+ranking, and the /api/training/compare/best route.
 """
 
 from __future__ import annotations
@@ -93,13 +93,12 @@ def _compared(project: Path, *experiment_ids: str) -> list[dict]:
     ).model_dump()["experiments"]
 
 
-def test_the_dataset_fingerprints_are_unread_not_same_when_one_id_is_an_error(
+def test_an_id_naming_no_run_is_uncompared_beside_the_runs_own_fingerprints(
     tmp_path: Path,
 ) -> None:
-    """The dataset fingerprint comparison is ``unread``, not ``same``, when one id is an error.
+    """An id naming no run is an uncompared column, the read runs each carrying their own.
 
-    Two runs over one dataset compare as ``same``; the same two beside one missing run compare as
-    ``unread``.
+    Two runs over one dataset carry one fingerprint beside the missing run's uncompared column.
     """
     from tcip_mcp.experiments import compare_experiments
     from tests._verified_checkpoint_fixtures import opened_run
@@ -108,18 +107,15 @@ def test_the_dataset_fingerprints_are_unread_not_same_when_one_id_is_an_error(
     shared = _config(tmp_path, _make_dataset(tmp_path / "shared"))
     opened_run(tmp_path, shared, experiment_id="e1")
     opened_run(tmp_path, shared, experiment_id="e2")
-    assert (
-        compare_experiments(
-            ["e1", "e2"], project=tmp_path
-        ).dataset_fingerprints
-        == "same"
-    )
 
-    result = compare_experiments(
+    e1, e2, missing = compare_experiments(
         ["e1", "e2", "missing"], project=tmp_path
-    ).model_dump()
-    assert any("error" in c for c in result["experiments"])
-    assert result["dataset_fingerprints"] == "unread"
+    ).experiments
+    assert e1.kind == "compared", e1
+    assert e2.kind == "compared", e2
+    assert e1.dataset_fingerprint is not None
+    assert e1.dataset_fingerprint == e2.dataset_fingerprint
+    assert missing.kind == "uncompared", missing
 
 
 def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
@@ -196,12 +192,7 @@ def test_split_reports_a_drawn_seed_with_no_binding(tmp_path: Path) -> None:
     )
 
     (c,) = _compared(tmp_path, "exp-drawn-split")
-    assert c["split"] == {
-        "case": "drawn",
-        "selection_dir": None,
-        "seed": 99,
-        "redraw": None,
-    }
+    assert c["split"] == {"case": "drawn", "seed": 99}
 
 
 def test_status_error_names_a_diverged_run_reason(tmp_path: Path) -> None:
@@ -279,7 +270,7 @@ def test_rank_registered_models_ranks_only_within_the_marked_set(
         experiment_ids=["exp-low"],
     )
     assert not isinstance(res, dict), res
-    assert (res.entry.name, res.entry.experiment_id) == ("exp-low", "exp-low")
+    assert (res.entry.name, res.entry.origin) == ("exp-low", "run")
 
 
 def test_a_ranking_answers_each_marked_run_it_skipped_with_why(
@@ -346,7 +337,7 @@ def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_
     res = ranked_registered_model(
         tmp_path,
         "val_map50",
-        higher_is_better=None,
+        direction="unstated",
         include_unverified=False,
         experiment_ids=["exp-marked"],
         tag=None,
@@ -451,9 +442,10 @@ def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the
 
     listed = opened_client.get("/api/results/models/registered")
     assert listed.status_code == 200
-    assert [m["entry"]["experiment_id"] for m in listed.json()["models"]] == [
-        "exp-a"
-    ]
+    assert [
+        (m["entry"]["origin"], m["entry"]["name"])
+        for m in listed.json()["models"]
+    ] == [("run", "exp-a")]
 
     resp = opened_client.post(
         "/api/training/compare/best",
@@ -483,7 +475,7 @@ def test_compare_best_route_answers_the_ranking(
     ranked = ranked_registered_model(
         tmp_path,
         "val_map50",
-        higher_is_better=None,
+        direction="unstated",
         include_unverified=True,
         experiment_ids=["exp-a"],
         tag=None,

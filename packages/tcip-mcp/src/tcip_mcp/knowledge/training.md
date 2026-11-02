@@ -95,7 +95,7 @@ does not report refuses the launch, naming the row's keys. A run whose body is i
 `training_source` is not read at the smoke, and its warnings say so; a body delegating to
 `ctx.default_train()` is read at its first epoch. A sweep's base point is read at its smoke, and a
 point that changes what its evaluator reports is read at its trial's first epoch. Both compare in
-whichever direction `schemas.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
+whichever direction `schemas.DIRECTION_BY_METRIC` declares for that metric,
 not always "lower wins": selecting on `f1` keeps the highest-F1 checkpoint, selecting on `loss`
 keeps the lowest-loss one. A `selection_metric` with no declared direction is refused. For a
 count trait with a center-match criterion, a `selection_metric` that criterion demotes to
@@ -296,8 +296,9 @@ skill's Orient step states.
   `log_every_n_batches` training batches counted across the run when the config states that override
 - The same per-batch emission (`ctx.log_batch`) writes a per-batch row to the run's
   `metrics.jsonl`, which the Training tab shows as the in-progress epoch's line
-- `monitor_training` includes that `tensorboard` answer while the TensorBoard runs; a sweep's
-  board is its own directory, every trial's events beneath it
+- `monitor_training`'s `tensorboard` is that answer while the TensorBoard runs, and of `kind`
+  `not_serving` while none does; a sweep's board is its own directory, every trial's events
+  beneath it
 - The Training tab shows a run's epoch rows as a table beside the TensorBoard it embeds, which
   reloads its data in place each time the table gains an epoch row
 
@@ -362,11 +363,13 @@ run_hyperparameter_search(
   parallel trials (default 1, safe for single-GPU training).
 - A sweep is its own directory, `.tcip/experiments/<sweep_id>/` beside the runs: its `sweep.json` (its input and the
   trait revision it resolved once), a heartbeat, its final status once it ends, and one run
-  directory per trial, `<sweep_id>_<ray trial id>`, a run like any other with the sampled point
-  as its `trial_params` and the sweep's trait revision as its own. Ray's own store sits in the same directory
+  directory per trial, `<sweep_id>_<ray trial id>`, a run like any other whose record is
+  `launched_as` a trial at the sampled point (`params`), with the sweep's trait revision as its own.
+  A run's row is of `kind` `standalone` or `trial`, a trial's naming its `sweep_id` and `params`. Ray's own store sits in the same directory
   (also the TensorBoard logdir); auto-launches TensorBoard. Returns the ended sweep as
-  `monitor_training` reads it, `{"run", "sweep", "tensorboard"}`: the sweep's trial rows and
-  their outcome (`best_params`/`best_value`) under `sweep`, with `best_at_range_end` naming each
+  `monitor_training` reads it, a detail of `kind` `sweep` beside its `tensorboard`: the sweep's
+  trial rows and their outcome (its best point and value, or why none) under `sweep`, with
+  `best_at_range_end` naming each
   integer or grid axis whose best sits exactly at the `low` or `high` you stated: a range the
   search could not look past, a finding to report rather than a tuned value.
 - `monitor_training` on a sweep's id answers the same "how is this sweep doing" question the web

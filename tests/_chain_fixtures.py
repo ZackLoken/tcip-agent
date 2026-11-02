@@ -263,7 +263,7 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
     """
     from datetime import datetime
 
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tests._image_fixtures import capture_exif
     from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
@@ -283,8 +283,8 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
         )
 
     ingested = ingest_images(root, source=str(raw), actor=None)
-    assert "error" not in ingested, ingested
-    assert ingested["copied"] == len(STEMS), ingested
+    assert isinstance(ingested, IngestManifest), ingested
+    assert ingested.copied == len(STEMS), ingested
 
     images_dir = image_dir(root, date)
     for index, stem in enumerate(STEMS):
@@ -457,7 +457,9 @@ def confirm_count_trait(project_root: Path, **fields: object) -> TraitRevision:
             measured_subject=SUBJECT,
         ),
     )
-    assert not revision.confirmed, "a proposed revision must land unconfirmed"
+    assert revision.state.kind == "proposed", (
+        "a proposed revision must land unconfirmed"
+    )
     return fx.confirm(project_root, revision, user="chain-breeder")
 
 
@@ -562,15 +564,29 @@ def acknowledged[T](
 
     with pytest.raises(DeliveryRefusedError) as refused:
         deliver(None)
-    if refused.value.result_sha256 is None:
+    shipping = refused.value.shipping
+    if shipping.kind == "unacknowledgeable":
         raise refused.value
     act = record_acknowledgment(
         project,
         acknowledged_by=by,
         reason=reason,
-        result_sha256=refused.value.result_sha256,
+        result_sha256=shipping.result_sha256,
     )
     return deliver(act.acknowledgment_id)
+
+
+def digest_of(refused: Exception) -> str:
+    """Return the digest a delivery refusal ``refused`` says an acknowledgment would ship.
+
+    A refusal no acknowledgment can ship fails.
+    """
+    from tcip_mcp.delivery import DeliveryRefusedError
+
+    assert isinstance(refused, DeliveryRefusedError), refused
+    shipping = refused.shipping
+    assert shipping.kind == "acknowledgeable", refused
+    return shipping.result_sha256
 
 
 def deliver_acknowledged(
@@ -871,7 +887,7 @@ def attributed_series(
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.inference_tools import run_inference
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
@@ -930,7 +946,7 @@ def attributed_series(
                 h_pos_err=SERIES_POSITION_ERROR_M,
             )
         ingested = ingest_images(root, source=str(capture), actor=None)
-        assert "error" not in ingested, ingested
+        assert isinstance(ingested, IngestManifest), ingested
         for stem, (index, frame_values) in labeled.items():
             label_image(
                 image_dir(root, date) / f"{stem}.jpg",

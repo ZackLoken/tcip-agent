@@ -8,6 +8,7 @@ import pytest
 
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import AugmentationSpec
+from tcip_web.jobstore import Completed
 from tests._predictor_fixtures import BOX, StubPredictor, install
 from tests._training_values import RATIONALE, augmentation
 from tests._web_fixtures import inference_job
@@ -127,7 +128,7 @@ def test_web_worker_uses_generic_predictor_and_publishes_its_documents(
     )
     _worker(job)
 
-    assert job.status == "completed"
+    assert job.state == Completed()
     assert job.done == 1 and job.total == 1
     assert predictor.checkpoint == str(ckpt)
     (execution,) = predictor.executions
@@ -193,7 +194,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
     )
     _worker(job)
 
-    assert job.status == "completed"
+    assert job.state == Completed()
     (obj,) = _annotations(tmp_path)
     # id 1 of the recorded "opening" is "open", under attributes; subject carries the object.
     assert obj["subject"] == "bud"
@@ -237,7 +238,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
     )
     _worker(job)
 
-    assert job.status == "completed"  # no crash
+    assert job.state == Completed()  # no crash
     assert predictor.executions[
         0
     ].tiled  # the breeder's own checkbox choice is honored
@@ -291,7 +292,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     )
     _worker(job)
 
-    assert job.status == "completed", job.error
+    assert job.state == Completed(), job.state
     (execution,) = predictor.executions
     assert (execution.tile_size, execution.tile_resize) == (64, (128, 128))
     assert execution.sources["tile_size"] == "native_ratio"
@@ -332,7 +333,7 @@ def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
     )
     _worker(job)
 
-    assert job.status == "completed", job.error
+    assert job.state == Completed(), job.state
     # The pass ran at the stated values: the one image's one detection landed.
     assert len(_annotations(tmp_path)) == 1
     sources = _sources(tmp_path)
@@ -361,8 +362,9 @@ def test_web_worker_fails_a_job_stating_no_conf_naming_it(
     )
     _worker(job)
 
-    assert job.status == "failed"
-    assert "conf" in (job.error or ""), job.error
+    failed = job.state
+    assert failed.status == "failed", failed
+    assert "conf" in failed.error, failed
 
 
 def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degenerate_box(
@@ -406,7 +408,7 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
     )
     _worker(job)
 
-    assert job.status == "completed"
+    assert job.state == Completed()
     assert read_bucket(tmp_path, BUCKET).dropped_boxes == 1
     assert len(_annotations(tmp_path)) == 1
 
@@ -441,5 +443,6 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path: Path) -> None:
     )
     _worker(job)
 
-    assert job.status == "failed"
-    assert "logical image" in job.error
+    failed = job.state
+    assert failed.status == "failed", failed
+    assert "logical image" in failed.error

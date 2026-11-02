@@ -12,7 +12,7 @@ import { resultsApi } from "@/api/inference";
 import {
   REVISION_MOVED,
   type RevisionMovedRefusal,
-  type ServedRevision,
+  type TraitRevision,
   type ServedTrait,
   type TraitsListing,
 } from "@/api/types.generated";
@@ -38,18 +38,19 @@ const words = (field: string): string => field.replaceAll("_", " ");
 
 const dayOf = (timestamp: string): string => timestamp.slice(0, 10);
 
-function revisionStateText(revision: ServedRevision): string {
-  if (revision.withdrawn_at) {
-    return `Confirmed by ${revision.confirmed_by}, withdrawn by ${revision.withdrawn_by} on ${dayOf(revision.withdrawn_at)}.`;
+function revisionStateText({ state }: TraitRevision): string {
+  switch (state.kind) {
+    case "withdrawn":
+      return `Confirmed by ${state.confirmed_by}, withdrawn by ${state.withdrawn_by} on ${dayOf(state.withdrawn_at)}.`;
+    case "confirmed":
+      return `Confirmed by ${state.confirmed_by} on ${dayOf(state.confirmed_at)}.`;
+    case "proposed":
+      return "Not confirmed";
   }
-  if (revision.confirmed_at) {
-    return `Confirmed by ${revision.confirmed_by} on ${dayOf(revision.confirmed_at)}.`;
-  }
-  return "Not confirmed";
 }
 
 // The agent proposes, the breeder confirms; a correction is a message that proposes no meaning.
-function correctionRequest(trait: string, revision: ServedRevision): string {
+function correctionRequest(trait: string, revision: TraitRevision): string {
   return (
     `Revision ${revision.number} of the "${trait}" trait is not what I mean. Why the agent ` +
     `proposed it: ${revision.rationale} What should change: `
@@ -60,7 +61,7 @@ function RevisionEntry({
   revision,
   definitions,
 }: {
-  revision: ServedRevision;
+  revision: TraitRevision;
   definitions: Record<string, string>;
 }) {
   const { operationalizations, name: _name, ...fields } = revision.entry;
@@ -120,7 +121,7 @@ function TraitRow({
   pending: boolean;
   note: string | null;
   auditWarning?: string | null;
-  onDecide: (revision: ServedRevision, confirmed: boolean) => void;
+  onDecide: (revision: TraitRevision, confirmed: boolean) => void;
 }) {
   const latest = record.revisions[record.revisions.length - 1];
   const [shownNumber, setShownNumber] = useState(latest.number);
@@ -155,7 +156,7 @@ function TraitRow({
       )}
       <div className="mt-2 text-tcip-muted">
         {`Revision ${shown.number}, proposed ${dayOf(shown.proposed_at)}. `}
-        <span className={shown.confirmed ? undefined : "tcip-problem"}>
+        <span className={shown.state.kind === "confirmed" ? undefined : "tcip-problem"}>
           {revisionStateText(shown)}
         </span>
       </div>
@@ -167,7 +168,7 @@ function TraitRow({
       {auditWarning && <div className="mt-2 text-tcip-warn">{auditWarning}</div>}
       {note && <div className="mt-2 tcip-problem">{note}</div>}
       <div className="mt-3 flex items-center gap-2">
-        {!shown.confirmed_at && (
+        {shown.state.kind === "proposed" && (
           <button
             className="tcip-btn-primary"
             onClick={() => onDecide(shown, true)}
@@ -176,7 +177,7 @@ function TraitRow({
             {pending ? "Confirming…" : "Confirm"}
           </button>
         )}
-        {shown.confirmed && (
+        {shown.state.kind === "confirmed" && (
           <button className="tcip-btn" onClick={() => onDecide(shown, false)} disabled={pending}>
             {pending ? "Withdrawing…" : "Withdraw"}
           </button>
@@ -234,7 +235,7 @@ export function TraitRevisionPanel() {
     void reload();
   }, [reload]);
 
-  async function decide(trait: string, revision: ServedRevision, confirmed: boolean) {
+  async function decide(trait: string, revision: TraitRevision, confirmed: boolean) {
     setPendingTrait(trait);
     setNotes((prev) => ({ ...prev, [trait]: "" }));
     setAuditWarnings((prev) => ({ ...prev, [trait]: null }));

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { metaApi } from "@/api/meta";
 import { sessionsApi } from "@/api/sessions";
+import { UNREAD } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { MetaTab } from "@/tabs/MetaTab";
 import { META_ANSWERS } from "@/test/meta";
@@ -62,8 +63,10 @@ describe("MetaTab annotation sessions", () => {
   });
 
   it("lists a report's context as key and value pairs", async () => {
-    const [{ record }] = META_ANSWERS.reports.entries;
-    if ("reason" in record) throw new Error(`the produced report will not read: ${record.reason}`);
+    const [entry] = META_ANSWERS.reports.entries;
+    if (entry.kind === UNREAD)
+      throw new Error(`the produced report will not read: ${entry.reason}`);
+    const { record } = entry;
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
     vi.mocked(metaApi.reports).mockResolvedValue(META_ANSWERS.reports);
 
@@ -78,9 +81,10 @@ describe("MetaTab annotation sessions", () => {
   });
 
   it("lists a retrospective's stated sections under their field names", async () => {
-    const [{ record }, { record: unread }] = META_ANSWERS.retrospectives.entries;
-    if ("reason" in record) throw new Error(`the produced one will not read: ${record.reason}`);
-    if (!("reason" in unread)) throw new Error("the produced damaged one reads");
+    const [read, unread] = META_ANSWERS.retrospectives.entries;
+    if (read.kind === UNREAD) throw new Error(`the produced one will not read: ${read.reason}`);
+    if (unread.kind !== UNREAD) throw new Error("the produced damaged one reads");
+    const { record } = read;
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
     vi.mocked(metaApi.retrospectives).mockResolvedValue(META_ANSWERS.retrospectives);
 

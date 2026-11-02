@@ -201,7 +201,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
     key = tb._board_key(tmp_path)
     try:
         info = tb.launch_tensorboard(tmp_path)
-        if not isinstance(info, tb.TensorboardServing):
+        if info.kind != "serving":
             raise RuntimeError(f"launch_tensorboard did not serve: {info}")
         guardian_pid = tb._TB_PROCESSES[key].proc.pid
         guardian_identity = (

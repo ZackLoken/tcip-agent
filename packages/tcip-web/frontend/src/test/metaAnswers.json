@@ -2,6 +2,7 @@
   "reports": {
     "entries": [
       {
+        "kind": "read",
         "id": "<report id>",
         "record": {
           "timestamp": "2000-01-01T00:00:00+00:00",
@@ -17,6 +18,7 @@
   "retrospectives": {
     "entries": [
       {
+        "kind": "read",
         "id": "<retrospective id>",
         "record": {
           "timestamp": "2000-01-01T00:00:01+00:00",
@@ -31,10 +33,9 @@
         }
       },
       {
+        "kind": "unread",
         "id": "<damaged retrospective id>",
-        "record": {
-          "reason": "1 validation error for Retrospective\n  Input should be a valid dictionary or instance of Retrospective [type=model_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type"
-        }
+        "reason": "1 validation error for Retrospective\n  Input should be a valid dictionary or instance of Retrospective [type=model_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type"
       }
     ],
     "total_available": 2

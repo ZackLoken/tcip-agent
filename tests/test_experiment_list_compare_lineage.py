@@ -65,20 +65,15 @@ def test_experiment_list_compare_lineage(tmp_path: Path) -> None:
 
     assert {e.experiment_id for e in run_rows(tmp_path)} == {"e1", "e2"}
 
-    cmp = compare_experiments(
-        ["e1", "e2", "missing"], project=tmp_path
-    ).model_dump()
-    assert len(cmp["experiments"]) == 3
-    first = next(
-        c
-        for c in cmp["experiments"]
-        if "run" in c and c["run"]["experiment_id"] == "e1"
-    )
-    assert first["run"]["builder"] == "my_models:tv_resnet50_det"
-    assert first["last_logged_metrics"]["map50"] == 0.6
-    assert any(
-        "error" in c for c in cmp["experiments"]
-    )  # the missing run is reported
+    cmp = compare_experiments(["e1", "e2", "missing"], project=tmp_path)
+    assert len(cmp.experiments) == 3
+    first, _, missing = cmp.experiments
+    assert first.kind == "compared", first
+    assert first.run.experiment_id == "e1"
+    assert first.run.builder == "my_models:tv_resnet50_det"
+    assert first.last_logged_metrics is not None
+    assert first.last_logged_metrics.model_dump()["map50"] == 0.6
+    assert missing.kind == "uncompared", missing
 
     lineage = get_experiment_lineage("e1", project=tmp_path)["lineage"]
     record = read_run_record(e1 / RUN_FILE)
@@ -213,12 +208,12 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(
     _opened(tmp_path, "exp-live")
 
     (live,) = compare_experiments(["exp-live"], project=tmp_path).experiments
-    assert isinstance(live, experiments.ComparedRun)
+    assert live.kind == "compared", live
     assert (live.run.state, live.rows_after_end) == ("running", None)
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
     (stale,) = compare_experiments(["exp-live"], project=tmp_path).experiments
-    assert isinstance(stale, experiments.ComparedRun)
+    assert stale.kind == "compared", stale
     assert stale.run.state == "interrupted"
 
 
@@ -235,9 +230,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
 
     from tcip_mcp.experiments import (
         METRICS_FILE,
-        ComparedRun,
         MetricsRow,
-        UncomparedRun,
         append_row,
         compare_experiments,
         observe,
@@ -283,7 +276,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     (compared,) = compare_experiments(
         ["exp-instants"], project=tmp_path
     ).experiments
-    assert isinstance(compared, ComparedRun)
+    assert compared.kind == "compared", compared
     assert compared.rows_after_end == 2
 
     with (run_dir / METRICS_FILE).open("ab") as log:
@@ -291,5 +284,5 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     (refused,) = compare_experiments(
         ["exp-instants"], project=tmp_path
     ).experiments
-    assert isinstance(refused, UncomparedRun)
+    assert refused.kind == "uncompared", refused
     assert "epoch': 6" in refused.error and "timestamp" in refused.error

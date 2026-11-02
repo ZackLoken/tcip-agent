@@ -20,6 +20,7 @@ import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
+import { adoptLoad } from "@/lib/registrySave";
 import { endRecordedSession } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { declaredClient } from "@/store/slices/agentActivity";
@@ -77,7 +78,6 @@ export function ProjectShell() {
   const datasetReady = useStore((s) => s.gui.dataset !== null);
   const projectRoot = useStore(selectProjectRoot);
   const registryCapture = useStore((s) => registryCaptureOf(s.gui.dataset));
-  const setRegistry = useStore((s) => s.setRegistry);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -163,8 +163,8 @@ export function ProjectShell() {
     void (async () => {
       try {
         const reg = await subjectsApi.load(datasetRoot, date);
-        const declared = reg.subjects ?? {};
-        setRegistry(declared, reg.version, reg.discovered);
+        adoptLoad(reg);
+        const declared = useStore.getState().registry.subjects;
         if (reg.unreadable.length) {
           useStore
             .getState()
@@ -186,7 +186,7 @@ export function ProjectShell() {
         useStore.getState().pushToast("Could not load the registry for this project.");
       }
     })();
-  }, [projectRoot, registryCapture, setRegistry]);
+  }, [projectRoot, registryCapture]);
 
   // Only Annotate / Results need an imagery dataset+date and show the picker until one is set;
   // Setup needs an open project. Keyed by TabName, so an added tab with no entry fails the typecheck.

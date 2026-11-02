@@ -16,7 +16,6 @@ from pydantic import ValidationError
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
-from tcip_mcp.model_registry import Producer
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -126,6 +125,7 @@ def test_an_execution_record_stating_no_sources_refuses_naming_them() -> None:
     from tcip_mcp.pipelines.execution import EXECUTION_RECORD, Execution
 
     execution = Execution(
+        kind="pass",
         conf=None,
         density=None,
         masks=False,
@@ -212,14 +212,14 @@ def test_a_registered_checkpoint_reads_back_as_the_entry_it_was_registered_as(
         entry.sha256,
         entry.metrics,
         entry.tags,
-        entry.experiment_id,
+        entry.origin,
     ) == (
         "m",
         "weights/m.pt",
         admitted_digest(ckpt),
         {"map50": 0.5},
         ["field"],
-        None,
+        "foreign",
     )
     assert (returned.sha256, returned.registered_at) == (
         entry.sha256,
@@ -303,7 +303,6 @@ def test_a_published_bucket_reads_back_as_the_pass_that_published_it(
         p.execution,
         checkpoint.producer,
     )
-    assert type(bucket.producer) is Producer
     assert (bucket.documents, bucket.date, bucket.dropped_boxes) == (
         {"a": "a.png"},
         DATE,
@@ -314,7 +313,7 @@ def test_a_published_bucket_reads_back_as_the_pass_that_published_it(
 def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
     tmp_path: Path,
 ) -> None:
-    """A bucket published as proposals reads back with its proposer, never a checkpoint."""
+    """A bucket published as proposals reads back with its proposer and no pass."""
     from tcip_mcp.buckets import (
         Document,
         Proposed,
@@ -323,6 +322,7 @@ def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
         source_root,
     )
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.execution import NoPass
     from tests._producer_fixtures import write_image
 
     image = write_image(image_dir(tmp_path / "ds", DATE) / "a.png", (64, 64))
@@ -334,17 +334,19 @@ def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
         [Document(str(image), {"annotations": []})],
         producer=Proposed(proposed_by="engine"),
         scope=ClassScope(),
-        execution=None,
+        execution=NoPass(),
         raster_path=None,
         raster_identity=None,
         assessment_id=None,
         actor=None,
     )
 
-    producer = read_bucket(root, f"engine/{DATE}/a").producer
+    bucket = read_bucket(root, f"engine/{DATE}/a")
 
-    assert type(producer) is Proposed
-    assert producer == Proposed(proposed_by="engine")
+    assert (bucket.producer, bucket.execution) == (
+        Proposed(proposed_by="engine"),
+        NoPass(),
+    )
 
 
 def test_a_bucket_record_missing_a_field_refuses_naming_it(
@@ -527,6 +529,7 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
     )
     from tcip_mcp.dataset_layout import read_dataset_identity
     from tests import _trait_fixtures as fx
+    from tests._producer_fixtures import published_document
     from tests.test_physical_scale_assessment import (
         DATE as SCALE_DATE,
         _author_tolerance,
@@ -541,23 +544,33 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
 
     assessment = read_assessment(tmp_path, produced["assessment_id"])
     assert (assessment.passed, assessment.failures) == (True, [])
-    assert assessment.scale is not None
+    assert assessment.kind == "physical_scale"
     assert assessment.scale["unit"] == "mm"
     assert assessment.scale["value"] == pytest.approx(0.1)
-    assert assessment.reference.selection_dir is not None
-    assert Path(assessment.reference.selection_dir) == selection.resolve()
+    reference = assessment.reference
+    assert reference.kind == "selection"
+    assert Path(reference.selection_dir) == selection.resolve()
     n_samples = produced["reference"]["n_samples"]
-    assert len(assessment.reference.samples) == n_samples
+    assert len(reference.samples) == n_samples
     identity = read_dataset_identity(tmp_path / "ds")
     assert identity is not None
-    assert assessment.reference.dataset_id == identity.id
+    assert reference.dataset_id == identity.id
     other_date = "2026-02-01"
-    assert {
-        (dataset_id, date): assessment.reference.covers(
-            dataset_id=dataset_id, date=date, raster_identity=None
+    buckets = [
+        published_document(
+            tmp_path,
+            f"covers-{date}",
+            root / "images" / date / "covered.jpg",
+            [],
+            8,
+            8,
         )
-        for dataset_id in (identity.id, None)
+        for root in (tmp_path / "ds", tmp_path / "unidentified")
         for date in (SCALE_DATE, other_date)
+    ]
+    assert {
+        (bucket.dataset_id, bucket.date): reference.covers(bucket)
+        for bucket in buckets
     } == {
         (identity.id, SCALE_DATE): True,
         (identity.id, other_date): False,
@@ -582,7 +595,7 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
                     "captures": [[identity.id, SCALE_DATE]],
                 },
             },
-            r"reference\.captures\s+Unexpected keyword argument",
+            r"reference\.selection\.captures\s+Unexpected keyword argument",
         ),
         (
             {k: v for k, v in stored.items() if k != "failures"},

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator,
@@ -141,10 +141,12 @@ def existing_project(value: str | Path) -> tuple[Path, ProjectRecord]:
     what :func:`read_record` refused.
     """
     project = Path(value).resolve()
-    record, problem = record_or_problem(project)
-    if record is None:
-        raise ValueError(f"{project} names no readable project: {problem}")
-    return project, record
+    reading = record_or_problem(project)
+    if reading.kind == "unread":
+        raise ValueError(
+            f"{project} names no readable project: {reading.problem}"
+        )
+    return project, reading.record
 
 
 def _checked(project_path: str | Path, raw: object) -> ProjectRecord:
@@ -296,20 +298,38 @@ def replace_invariances(
     return _update(project_path, "invariances", invariances, actor=actor)
 
 
-def record_or_problem(
-    project_path: str | Path,
-) -> tuple[ProjectRecord | None, str | None]:
-    """Return the project's record and ``None``, or ``None`` and the text of why it will not read.
+class ReadRecord(BaseModel):
+    """A project whose record read, and that record."""
 
-    A record that is missing, invalid, refused by the store or unreadable from disk is the
-    second; nothing is raised.
+    kind: Literal["read"] = "read"
+    record: ProjectRecord
+
+
+class UnreadRecord(BaseModel):
+    """A project whose record will not read, and why."""
+
+    kind: Literal["unread"] = "unread"
+    problem: str
+
+
+type RecordReading = Annotated[
+    ReadRecord | UnreadRecord, Field(discriminator="kind")
+]
+"""A project's record or why it will not read, told apart by its ``kind``."""
+
+
+def record_or_problem(project_path: str | Path) -> RecordReading:
+    """Return the project's record, or the text of why it will not read.
+
+    A record that is missing, invalid, refused by the store or unreadable from disk is
+    :class:`UnreadRecord`; nothing is raised.
     """
     try:
-        return read_record(project_path), None
+        return ReadRecord(record=read_record(project_path))
     except (
         ProjectRecordMissingError,
         ProjectRecordInvalidError,
         StoreError,
         OSError,
     ) as exc:
-        return None, str(exc)
+        return UnreadRecord(problem=str(exc))

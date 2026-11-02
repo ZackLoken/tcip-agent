@@ -17,14 +17,14 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, TypeAdapter
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 
 import tcip_store
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import ClassScope
-from tcip_mcp.pipelines.execution import Execution
+from tcip_mcp.pipelines.execution import ProposalExecution
 from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 if TYPE_CHECKING:
@@ -59,7 +59,14 @@ class Proposed(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    kind: Literal["proposed"] = "proposed"
     proposed_by: str
+
+
+type BucketProducer = Annotated[
+    Producer | Proposed, Field(discriminator="kind")
+]
+"""What produced a bucket's documents, told apart by its ``kind``."""
 
 
 @dataclass(frozen=True)
@@ -67,11 +74,11 @@ class Bucket:
     """One published bucket, as its record states it.
 
     ``root`` is the dataset root its source images belong to and ``name`` the name it was
-    published under. ``producer`` is a checkpoint's sha256 and run
+    published under. ``producer`` is a checkpoint's sha256 and origin
     (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`), or the engine or agent that
-    proposed the documents (:class:`Proposed`), whose ``execution`` is the record of the inference
-    pass an engine's proposal ran through (``None`` for a proposal no such pass made) and which no
-    class scope decodes (``scope`` empty). ``documents`` maps each
+    proposed the documents (:class:`Proposed`), which no class scope decodes (``scope`` empty).
+    ``execution`` is the record of the pass that produced the documents, or, for a proposal, no
+    pass (:data:`~tcip_mcp.pipelines.execution.ProposalExecution`). ``documents`` maps each
     document's stem to the source file name it was predicted from, ``raster_path`` is the
     raster as stored against the project (:meth:`raster`), and ``published_at`` the instant its
     publication committed.
@@ -80,9 +87,9 @@ class Bucket:
     root: Path
     name: str
     published_at: AwareDatetime
-    producer: Producer | Proposed
+    producer: BucketProducer
     scope: ClassScope
-    execution: Execution | None
+    execution: ProposalExecution
     dataset_id: str | None
     date: str | None
     raster_path: str | None
@@ -298,9 +305,9 @@ def publish(
     name: str,
     documents: Iterable[Document],
     *,
-    producer: Producer | Proposed,
+    producer: BucketProducer,
     scope: ClassScope,
-    execution: Execution | None,
+    execution: ProposalExecution,
     raster_path: str | None,
     raster_identity: RasterIdentity | None,
     assessment_id: str | None,

@@ -160,7 +160,7 @@ def acknowledged_post(
     body = {**body, "user": user}
     refused = client.post(url, json=body)
     assert refused.status_code == 400, refused.text
-    digest = refused.json()["detail"]["result_sha256"]
+    digest = refused.json()["detail"]["shipping"]["result_sha256"]
     assert digest is not None, refused.text
     return client.post(
         url,

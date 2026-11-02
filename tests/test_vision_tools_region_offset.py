@@ -15,6 +15,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
 from tests._producer_fixtures import kept
 
@@ -44,7 +45,7 @@ class PatchProposer:
         mask = (arr[:, :, 0] > 200) & (arr[:, :, 1] < 60) & (arr[:, :, 2] < 60)
         ys, xs = np.nonzero(mask)
         if len(xs) == 0:
-            return Proposal([], None)
+            return Proposal([], NoPass())
         x1, y1 = float(xs.min()), float(ys.min())
         x2, y2 = float(xs.max()), float(ys.max())
         return Proposal(
@@ -58,7 +59,7 @@ class PatchProposer:
                     "rings": [[(x1, y1), (x2, y1), (x2, y2), (x1, y2)]],
                 }
             ],
-            None,
+            NoPass(),
         )
 
 

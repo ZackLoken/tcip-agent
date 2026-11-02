@@ -12,7 +12,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import { messageOf } from "@/api/http";
-import type { ProjectsListing } from "@/api/types.generated";
+import { type ProjectsListing, READ, type ReadProject, UNREAD } from "@/api/types.generated";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SeasonRail } from "@/components/SeasonRail";
 import { UNSET_GLYPH } from "@/lib/glyphs";
@@ -20,8 +20,6 @@ import {
   bucketsForDate,
   choiceForDate,
   defaultDate,
-  openable,
-  type OpenableProject,
   startOpen,
   subjectsForDate,
 } from "@/lib/openProject";
@@ -29,7 +27,7 @@ import { forgetRecentProject } from "@/lib/recentProjects";
 import { useStore } from "@/store";
 import { isAnnotatorName, selectAnnotatorNamed } from "@/store/slices/user";
 
-function selectCard(p: OpenableProject) {
+function selectCard(p: ReadProject) {
   const { patchOpenChoice, patchOpenStatus } = useStore.getState();
   const d = defaultDate(p.tree.captures);
   patchOpenChoice({ projectId: p.record.id, date: d, ...choiceForDate(p.tree, d, null) });
@@ -41,7 +39,7 @@ function RemovalDialog({
   onClose,
   onRemoved,
 }: {
-  project: OpenableProject;
+  project: ReadProject;
   onClose: () => void;
   onRemoved: () => void;
 }) {
@@ -116,7 +114,7 @@ function RenameDialog({
   onClose,
   onRenamed,
 }: {
-  project: OpenableProject;
+  project: ReadProject;
   onClose: () => void;
   onRenamed: () => void;
 }) {
@@ -211,15 +209,15 @@ export function ProjectPicker() {
   const opening = useStore((s) => s.opening !== null);
   const openError = useStore((s) => s.openError);
   const patchOpenChoice = useStore((s) => s.patchOpenChoice);
-  const [removalTarget, setRemovalTarget] = useState<OpenableProject | null>(null);
-  const [renameTarget, setRenameTarget] = useState<OpenableProject | null>(null);
+  const [removalTarget, setRemovalTarget] = useState<ReadProject | null>(null);
+  const [renameTarget, setRenameTarget] = useState<ReadProject | null>(null);
   const annotatorFieldRef = useRef<HTMLInputElement | null>(null);
 
   function commitName() {
     setUser(draft);
   }
 
-  function chooseDate(p: OpenableProject, newDate: string | null) {
+  function chooseDate(p: ReadProject, newDate: string | null) {
     patchOpenChoice({ date: newDate, ...choiceForDate(p.tree, newDate, subject) });
   }
 
@@ -245,7 +243,9 @@ export function ProjectPicker() {
         if (canceled) return;
         showListing(res);
         // The backend's open project is preselected; nothing opens until the person does.
-        const open = res.projects.filter(openable).find((p) => p.record.id === res.open_id);
+        const open = res.projects
+          .filter((p) => p.kind === READ)
+          .find((p) => p.record.id === res.open_id);
         if (open && !useStore.getState().openChoice.projectId) selectCard(open);
       })
       .catch((e) => {
@@ -303,20 +303,21 @@ export function ProjectPicker() {
         {projects && projects.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {projects.map((p, index) => {
-              if (!openable(p)) {
+              const { tree } = p;
+              if (p.kind === UNREAD) {
                 return (
                   <div
-                    key={p.tree.dataset_root}
+                    key={tree.dataset_root}
                     className="tcip-panel p-4 flex flex-col gap-1 text-[13px]"
                   >
-                    <span className="font-mono text-tcip-fg truncate" title={p.tree.dataset_root}>
-                      {p.tree.dataset_root}
+                    <span className="font-mono text-tcip-fg truncate" title={tree.dataset_root}>
+                      {tree.dataset_root}
                     </span>
-                    <span className="tcip-problem">{p.record_problem}</span>
+                    <span className="tcip-problem">{p.problem}</span>
                   </div>
                 );
               }
-              const { record, tree } = p;
+              const { record } = p;
               const isSelected = record.id === selected;
               return (
                 <div

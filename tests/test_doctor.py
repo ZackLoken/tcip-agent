@@ -607,7 +607,7 @@ def test_doctor_reports_a_trait_record_holding_no_revision_without_aborting(
     ((level, msg),) = _messages(found, "trait '")
     assert level == "error"
     assert "'stem' will not read" in msg
-    assert traits.read_trait("leaf", root).latest.confirmed
+    assert traits.read_trait("leaf", root).latest.state.kind == "confirmed"
 
 
 def _published_bucket(
@@ -625,6 +625,7 @@ def _published_bucket(
     """
     from tcip_mcp.buckets import Document, publish, source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.execution import NoPass
 
     images = [write_image(images_dir / f"{s}.JPG", (32, 32)) for s in stems]
     box = Annotation(
@@ -640,7 +641,7 @@ def _published_bucket(
         ],
         producer=producer,
         scope=ClassScope(),
-        execution=None,
+        execution=NoPass(),
         raster_path=None,
         raster_identity=None,
         assessment_id=None,

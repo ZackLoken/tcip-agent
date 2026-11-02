@@ -83,9 +83,9 @@ export function ReviewStrip({
           <label
             className="flex items-center gap-1.5 text-tcip-muted"
             title={
-              operatingPoint === null || operatingPoint.conf === null
-                ? "No validated operating point"
-                : `Validated operating point ${operatingPoint.conf.toFixed(2)}`
+              operatingPoint?.kind === "conf_admitted"
+                ? `Validated operating point ${operatingPoint.conf.toFixed(2)}`
+                : "No validated operating point"
             }
           >
             Confidence

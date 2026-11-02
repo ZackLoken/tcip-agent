@@ -13,6 +13,7 @@ from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.tools.project_tools import (
     DatasetEntry,
+    MappingsListed,
     RecentActivity,
     ZipBundle,
     _external_dataset_paths,
@@ -153,13 +154,13 @@ def test_initialize_project(tmp_path: Path) -> None:
 
 def test_inspect_project(tmp_path: Path) -> None:
     status = inspect_project(tmp_path)
-    assert status["record"] is None
-    assert "initialize_project" in status["record_problem"]
+    assert status["reading"]["kind"] == "unread"
+    assert "initialize_project" in status["reading"]["problem"]
 
     record = _initialized(tmp_path)
     status = inspect_project(tmp_path)
-    assert status["record"] == record
-    assert status["record_problem"] is None
+    assert status["reading"] == {"kind": "read", "record": record}
+    assert status["plant_mappings"] == MappingsListed(names=[]).model_dump()
 
 
 def test_inspect_project_folds_in_recent_activity(tmp_path: Path) -> None:
@@ -223,7 +224,7 @@ def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(
     status = inspect_project(tmp_path)
     assert "undecodable" in status["recent_activity"]["status_unavailable"]
     # The record reads unaffected by a damaged log: different store, different rail.
-    assert status["record_problem"] is None
+    assert status["reading"]["kind"] == "read"
 
 
 def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
@@ -303,7 +304,7 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
     assert imported["files_extracted"] == exported["files_added"]
 
     status = inspect_project(dest)
-    assert status["record"]["id"] == record["id"]
+    assert status["reading"]["record"]["id"] == record["id"]
     # inspect_project counts raw image files, so the two sibling bands count separately here;
     # the logical-image count the band group folds them into is asserted below.
     assert status["image_count"] == 3
@@ -943,7 +944,9 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
     assert isinstance(record, dict), admitted
     assert record["display_name"] == "Test project", admitted
     read_back = (
-        inspect_project(tmp_path / "stated")["record"]["invariances"],
+        inspect_project(tmp_path / "stated")["reading"]["record"][
+            "invariances"
+        ],
         read_record(tmp_path / "stated").invariances.model_dump(),
     )
     for invariances in read_back:
@@ -1169,8 +1172,8 @@ def test_inspect_project_reports_the_record_across_project_states(
     bare = tmp_path / "no_tcip"
     bare.mkdir()
     status = inspect_project(bare)
-    assert status["record"] is None
-    assert "initialize_project" in status["record_problem"]
+    assert status["reading"]["kind"] == "unread"
+    assert "initialize_project" in status["reading"]["problem"]
 
     recordless = tmp_path / "recordless"
     recordless.mkdir()
@@ -1178,14 +1181,13 @@ def test_inspect_project_reports_the_record_across_project_states(
         recordless, category="missing_tool", detail="a", actor=None
     )
     status = inspect_project(recordless)
-    assert status["record"] is None
-    assert "initialize_project" in status["record_problem"]
+    assert status["reading"]["kind"] == "unread"
+    assert "initialize_project" in status["reading"]["problem"]
 
     recorded = tmp_path / "recorded"
     _initialized(recorded)
     status = inspect_project(recorded)
-    assert status["record"]["site"] == "north orchard"
-    assert status["record_problem"] is None
+    assert status["reading"]["record"]["site"] == "north orchard"
 
 
 def test_inspect_project_reports_an_invalid_record(tmp_path: Path) -> None:
@@ -1198,8 +1200,8 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path) -> None:
 
     status = inspect_project(tmp_path)
 
-    assert status["record"] is None
-    assert "is not a project record" in status["record_problem"]
+    assert status["reading"]["kind"] == "unread"
+    assert "is not a project record" in status["reading"]["problem"]
 
 
 def test_archive_and_import_carry_the_project_record(tmp_path: Path) -> None:

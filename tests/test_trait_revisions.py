@@ -37,6 +37,11 @@ CONFIRM_ROUTE = "/api/results/traits/confirm"
 _SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
+def _latest_state(project: Path) -> str:
+    """Return the ``kind`` of the stored count trait's latest revision's state."""
+    return traits.read_trait(fx.COUNT_TRAIT, project).latest.state.kind
+
+
 def _count_entry(**fields: str | tuple[str, ...]) -> traits.TraitEntry:
     return fx.with_operationalization(
         fx.COUNT_SPEC,
@@ -127,7 +132,7 @@ def test_a_proposal_appends_an_unconfirmed_revision_and_a_delivery_refuses_by_na
     revision = fx.propose(tmp_path, _count_entry())
 
     assert revision.number == 1
-    assert not revision.confirmed
+    assert revision.state.kind == "proposed"
     with pytest.raises(OperationalizationRefusedError) as excinfo:
         _deliver_counts(tmp_path, "unconfirmed")
     assert "none of its 1 revision(s) is confirmed" in str(excinfo.value)
@@ -157,7 +162,7 @@ def test_a_later_proposal_leaves_deliveries_under_the_confirmed_one_until_it_is_
         _count_entry(statement="stems per frame, broken tips excluded"),
     )
 
-    assert second.number == 2 and not second.confirmed
+    assert second.number == 2 and second.state.kind == "proposed"
     assert second.entry_sha256 != first.entry_sha256
     assert traits.read_trait(fx.COUNT_TRAIT, tmp_path).revisions[0] == first
     under_first = _deliver_counts(tmp_path, "under_first")
@@ -234,13 +239,16 @@ def test_a_withdrawn_confirmation_marks_the_revision_and_leaves_the_entry(
         confirmed=False,
     )
 
-    assert (
-        withdrawn.withdrawn_by == "user:rosalind" and not withdrawn.confirmed
+    confirmed, state = revision.state, withdrawn.state
+    assert confirmed.kind == "confirmed", confirmed
+    assert state.kind == "withdrawn", state
+    assert state.withdrawn_by == "user:rosalind"
+    assert withdrawn.entry == revision.entry
+    assert (state.confirmed_by, state.confirmed_at) == (
+        confirmed.confirmed_by,
+        confirmed.confirmed_at,
     )
-    assert (
-        withdrawn.entry == revision.entry
-        and withdrawn.confirmed_by == revision.confirmed_by
-    )
+    assert traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest == withdrawn
     with pytest.raises(OperationalizationRefusedError):
         _deliver_counts(tmp_path, "after_withdrawal")
     with pytest.raises(ValueError, match="already confirmed"):
@@ -448,13 +456,12 @@ def test_an_entry_cannot_carry_a_confirmation_and_a_confirmation_needs_a_name(
     for name in REFUSED_NAMES:
         with pytest.raises(ValueError, match="names no one"):
             fx.confirm(tmp_path, revision, user=name)
-    assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
-    confirmed = fx.confirm(tmp_path, revision)
-    assert (
-        confirmed.confirmed_by == "user:grüne"
-        and confirmed.confirmed_at is not None
-        and confirmed.confirmed_at.utcoffset() == timedelta(0)
-    )
+    latest = traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest
+    assert latest.state.kind == "proposed"
+    state = fx.confirm(tmp_path, revision).state
+    assert state.kind == "confirmed", state
+    assert state.confirmed_by == "user:grüne"
+    assert state.confirmed_at.utcoffset() == timedelta(0)
 
 
 def test_a_crossing_proposal_checks_its_positive_state_against_the_registry(
@@ -509,12 +516,15 @@ def test_a_confirmation_with_another_hash_refuses_and_the_revisions_own_hash_con
     assert refused.json()["detail"]["record"]["revisions"][0][
         "entry_sha256"
     ] == (revision.entry_sha256)
-    assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
+    assert _latest_state(tmp_path) == "proposed"
 
     confirmed = _confirm(opened_client, revision, user="rosalind")
 
     assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["revision"]["confirmed_by"] == "user:rosalind"
+    assert (
+        confirmed.json()["revision"]["state"]["confirmed_by"]
+        == "user:rosalind"
+    )
     assert confirmed.json()["audit_warning"] is None
     assert (
         traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest_confirmed.number
@@ -534,7 +544,10 @@ def test_the_traits_route_serves_every_revision_and_the_vocabulary_definitions(
     (record,) = body["traits"]
     assert record["trait"] == fx.COUNT_TRAIT
     assert [r["number"] for r in record["revisions"]] == [1, 2]
-    assert [r["confirmed"] for r in record["revisions"]] == [True, False]
+    assert [r["state"]["kind"] for r in record["revisions"]] == [
+        "confirmed",
+        "proposed",
+    ]
     assert record["latest_confirmed"] == record["revisions"][0]
     assert set(body["definitions"]) == {"stem_count"}
     assert body["unreadable"] == []
@@ -549,7 +562,7 @@ def test_a_nameless_confirmation_confirms_nothing(
     for name in REFUSED_NAMES:
         resp = _confirm(opened_client, revision, user=name)
         assert resp.status_code == 400, (name, resp.text)
-    assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
+    assert _latest_state(tmp_path) == "proposed"
 
 
 def test_confirming_and_withdrawing_land_in_the_project_log_with_the_actor(
@@ -593,9 +606,7 @@ def test_the_confirmation_writes_its_own_audit_line_after_its_record(
 
     def append(key: Key, entry: dict[str, JsonValue]) -> None:
         if entry["tool"] == "confirm_trait_revision":
-            seen.append(
-                traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
-            )
+            seen.append(_latest_state(tmp_path) == "confirmed")
         return real_append(key, entry)
 
     monkeypatch.setattr(audit_module, "append", append)
@@ -642,7 +653,7 @@ def test_a_committed_confirmation_returns_its_audit_failure_as_a_warning(
 
     assert resp.status_code == 200, resp.text
     assert "do not retry it blind" in resp.json()["audit_warning"]
-    assert traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
+    assert _latest_state(tmp_path) == "confirmed"
 
 
 def test_both_trait_routes_refuse_while_no_project_is_open(
@@ -653,7 +664,7 @@ def test_both_trait_routes_refuse_while_no_project_is_open(
 
     assert client.get(TRAITS_ROUTE).status_code == 409
     assert _confirm(client, revision).status_code == 409
-    assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
+    assert _latest_state(tmp_path) == "proposed"
 
 
 # ── the doctor ───────────────────────────────────────────────────────────────

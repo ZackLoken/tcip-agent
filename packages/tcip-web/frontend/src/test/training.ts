@@ -1,18 +1,23 @@
 import type { trainingApi } from "@/api/training";
-import type {
-  ComparedRun,
-  Comparison,
-  NoLogsRefusal,
-  Ranking,
-  RunRow,
-  SplitChoices,
-  SweepGroup,
-  TrainingDetail,
-  TrainingListing,
-  TrainingRowFrame,
-  TrainingStatusFrame,
+import {
+  AGENT,
+  COMPARED,
+  type ComparedRun,
+  type Comparison,
+  NO_LAUNCH_LINE,
+  type NoLogsRefusal,
+  type Ranking,
+  RUN,
+  type RunRow,
+  type SplitChoices,
+  type SweepGroup,
+  type TrainingDetail,
+  type TrainingErrorFrame,
+  type TrainingListing,
+  type TrainingRowFrame,
+  type TrainingStatusFrame,
 } from "@/api/types.generated";
-import { declaredClient } from "@/store/slices/agentActivity";
+import { clientName } from "@/store/slices/agentActivity";
 import type { Refusal } from "@/test/refusals";
 import produced from "@/test/trainingAnswers.json";
 
@@ -56,7 +61,7 @@ const PRODUCED = produced as unknown as {
   run_relaunch: Answer<"relaunch">;
   sweep_relaunch: Answer<"relaunch">;
   frames: [...TrainingRowFrame[], TrainingStatusFrame];
-  unknown_frame: TrainingStatusFrame;
+  unknown_frame: TrainingErrorFrame;
 } & Refusals;
 
 /** The one item of `found`, which holds `what`; any other count throws. */
@@ -82,7 +87,7 @@ export const LISTING_BEFORE_FAILURE = PRODUCED.listing_before_failure;
  *  `unlogged` failed with no logs. */
 export const RUNS = {
   unlaunched: only(
-    LISTED_RUNS.filter((r) => r.state === "running" && r.launch === null),
+    LISTED_RUNS.filter((r) => r.state === "running" && r.launch.kind === NO_LAUNCH_LINE),
     "running runs no launch event names",
   ),
   relaunched: only(
@@ -90,11 +95,11 @@ export const RUNS = {
     "relaunched runs",
   ),
   agent: only(
-    LISTED_RUNS.filter((r) => Boolean(r.launch?.agent_client_name)),
+    LISTED_RUNS.filter((r) => r.launch.kind === AGENT),
     "runs an agent declared",
   ),
   completed: only(
-    LISTED_RUNS.filter((r) => r.state === "completed" && r.best_metric !== null),
+    LISTED_RUNS.filter((r) => r.state === "completed" && r.best !== null),
     "completed runs with a best value",
   ),
   empty: only(
@@ -113,9 +118,9 @@ export const RUNS = {
 
 /** The client the agent run's launch declared, as the GUI names a declared client. */
 export const AGENT_CLIENT = (() => {
-  const client = declaredClient(RUNS.agent.launch);
-  if (client === null) throw new Error("the produced agent run declares no client");
-  return client;
+  const { launch } = RUNS.agent;
+  if (launch.kind !== AGENT) throw new Error("the produced agent run declares no client");
+  return clientName(launch.agent_client_name, launch.agent_client_version);
 })();
 
 /** The listing's sweeps: `searched`, whose one completed trial its outcome names beside one still
@@ -147,7 +152,9 @@ export const TRIALS = {
  *  for throws. */
 export function detailOf(id: string): TrainingDetail {
   return only(
-    PRODUCED.details.filter((d) => d.run?.experiment_id === id || d.sweep?.sweep_id === id),
+    PRODUCED.details.filter((d) =>
+      d.kind === RUN ? d.run.experiment_id === id : d.sweep.sweep_id === id,
+    ),
     `details of ${id}`,
   );
 }
@@ -175,11 +182,12 @@ export const COMPARISONS = {
   verified: PRODUCED.compare_verified,
 };
 
-/** `comparison`'s columns, each a run the route read (the entry carrying `run`); an unread column
- *  throws. */
+/** `comparison`'s columns, each a run the route read; an unread column throws. */
 export function readColumns(comparison: Comparison): ComparedRun[] {
   return comparison.experiments.map((entry) => {
-    if (!("run" in entry)) throw new Error(`the comparison could not read ${entry.experiment_id}`);
+    if (entry.kind !== COMPARED) {
+      throw new Error(`the comparison could not read ${entry.experiment_id}`);
+    }
     return entry;
   });
 }

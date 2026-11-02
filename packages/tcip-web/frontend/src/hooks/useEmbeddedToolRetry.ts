@@ -4,17 +4,22 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import type { NoLogsRefusal, TensorboardLaunch } from "@/api/types.generated";
+
 /** The retry cadence, in milliseconds. */
 export const EMBEDDED_TOOL_RETRY_MS = 3000;
 
-export interface EmbeddedToolOutcome {
-  url: string | null;
-  error: string | null;
-}
+/** What a board's launch has come to: not answered yet, its launch's answer, the refusal that
+ * its run wrote no logs, or a request that never reached an answer, with its error's message. */
+export type EmbeddedToolOutcome =
+  { kind: "pending" } | TensorboardLaunch | NoLogsRefusal | { kind: "unreached"; message: string };
 
-export interface EmbeddedToolStepResult extends EmbeddedToolOutcome {
-  /** True once a further attempt would change nothing: a url landed, or the run/sweep behind
-   * it reached a state a retry can't recover from. False keeps the timer running. */
+export const PENDING: EmbeddedToolOutcome = { kind: "pending" };
+
+export interface EmbeddedToolStepResult {
+  outcome: EmbeddedToolOutcome;
+  /** True once a further attempt would change nothing: a board is serving, or the run/sweep
+   * behind it reached a state a retry can't recover from. False keeps the timer running. */
   done: boolean;
 }
 
@@ -25,19 +30,19 @@ export function useEmbeddedToolRetry(
   step: () => Promise<EmbeddedToolStepResult>,
   retryMs: number = EMBEDDED_TOOL_RETRY_MS,
 ): EmbeddedToolOutcome {
-  const [outcome, setOutcome] = useState<EmbeddedToolOutcome>({ url: null, error: null });
+  const [outcome, setOutcome] = useState<EmbeddedToolOutcome>(PENDING);
   const stepRef = useRef(step);
   stepRef.current = step;
 
   useEffect(() => {
-    setOutcome({ url: null, error: null });
+    setOutcome(PENDING);
     if (!active) return;
     let canceled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       const result = await stepRef.current();
       if (canceled) return;
-      setOutcome({ url: result.url, error: result.error });
+      setOutcome(result.outcome);
       if (!result.done) timer = setTimeout(() => void tick(), retryMs);
     };
     void tick();

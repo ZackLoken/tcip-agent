@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ImageBands } from "@/api/types.generated";
+import { type ImageBands, SAMPLED } from "@/api/types.generated";
 import { BandPicker } from "@/components/BandPicker";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { BAND_ANSWERS } from "@/test/bands";
@@ -68,8 +68,9 @@ describe("BandPicker", () => {
 
   it("says the band ranges came from a sample, and from how much of the raster", () => {
     const sampled = BAND_ANSWERS.sampled;
+    if (sampled.read.kind !== SAMPLED) throw new Error("the produced answer is no sample");
     renderPicker(sampled, defaultBandSelection(sampled));
-    const percent = Math.round(Number(sampled.pixel_fraction) * 100);
+    const percent = Math.round(sampled.read.pixel_fraction * 100);
     expect(screen.getByText(`stats from a ${percent}% pixel sample`)).toBeInTheDocument();
   });
 
@@ -85,7 +86,7 @@ describe("BandPicker", () => {
   });
 
   it("says nothing when the reported ranges are the raster's own exact bounds", () => {
-    expect(FOUR.sampled).toBe(false);
+    expect(FOUR.read).toMatchObject({ kind: SAMPLED, pixel_fraction: 1 });
     renderPicker(FOUR, defaultBandSelection(FOUR));
     expect(screen.queryByText(/pixel sample/)).not.toBeInTheDocument();
   });

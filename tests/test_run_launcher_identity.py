@@ -14,6 +14,7 @@ import pytest
 
 from tcip_mcp.agent_identity import RecordedIdentity
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tcip_mcp.experiments import AgentLaunch, NoAgentLaunch
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import (
     fake_popen as _fake_popen,
@@ -82,7 +83,7 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
     )
     assert isinstance(result, training_tools.RunLaunched), result
     launch = _row(tmp_path, result.experiment_id)["launch"]
-    assert RecordedIdentity.model_validate(launch) == RecordedIdentity()
+    assert launch == NoAgentLaunch().model_dump()
     assert "launched_by" not in _launch_record(tmp_path, result.experiment_id)
 
 
@@ -111,10 +112,10 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     )
     agent_identity.end()
     assert isinstance(result, training_tools.RunLaunched), result
-    launch = RecordedIdentity.model_validate(
+    launch = AgentLaunch.model_validate(
         _row(tmp_path, result.experiment_id)["launch"]
     )
-    assert launch == RecordedIdentity(
+    assert launch == AgentLaunch(
         agent_client_name="claude-code",
         agent_client_version="2.1.238",
         agent_session=identity.agent_session,
@@ -122,7 +123,7 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     (line,) = audit_rows(tmp_path, "launch_training")
     assert {
         f: line.get(f) for f in RecordedIdentity.model_fields
-    } == launch.model_dump()
+    } == launch.model_dump(exclude={"kind"})
     assert "launched_by" not in _launch_record(tmp_path, result.experiment_id)
 
 

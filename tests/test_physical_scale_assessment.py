@@ -173,15 +173,17 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
 ) -> None:
     """A passing scale assessment covering the delivered capture answers for an mm2 area.
 
-    The delivery names it, and the same delivery with no scale named refuses.
+    The delivery names it, and the same delivery with no scale named refuses; named over a
+    capture its reference does not cover, the scale's finding is among the refusal's sentences.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.buckets import Bucket, read_bucket
+    from tcip_mcp.delivery import DeliveryRefusedError, read_delivery_events
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
     from tests._chain_fixtures import acknowledged, predicted, published
+    from tests._producer_fixtures import write_image
 
     _author_tolerance(tmp_path)
     fx.seed_confirmed_aggregate(
@@ -209,23 +211,28 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         {"plant_id": "p1", "area_mm2": 12.5, "plant_attribution": "image"}
     ]
 
-    def deliver(out: Path, **kw: str | dict | None) -> dict:
+    def delivered(
+        out: Path, ack: str | None, over: Bucket, **kw: str | None
+    ) -> dict:
+        return deliver_per_plant_aggregate(
+            tmp_path,
+            records,
+            str(out),
+            value_key="area_mm2",
+            delivered_phenotype="plant_surface_area",
+            delivery_kind="per_plant_count_aggregate",
+            buckets=[over],
+            plants=["p1"],
+            door="test_scale",
+            acknowledgment_id=ack,
+            actor=None,
+            **kw,
+        )
+
+    def deliver(out: Path, **kw: str | None) -> dict:
         return acknowledged(
             tmp_path,
-            lambda ack: deliver_per_plant_aggregate(
-                tmp_path,
-                records,
-                str(out),
-                value_key="area_mm2",
-                delivered_phenotype="plant_surface_area",
-                delivery_kind="per_plant_count_aggregate",
-                buckets=[bucket],
-                plants=["p1"],
-                door="test_scale",
-                acknowledgment_id=ack,
-                actor=None,
-                **kw,
-            ),
+            lambda ack: delivered(out, ack, bucket, **kw),
             reason="the count is not yet assessed",
         )
 
@@ -239,6 +246,29 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     assert row["units"] == "mm2"
     (event,) = read_delivery_events(tmp_path)
     assert event.scale_assessment_id == scale["assessment_id"]
+
+    later = "2026-01-02"
+    uncovered = published(
+        tmp_path,
+        f"m/{later}",
+        [
+            predicted(
+                write_image(image_dir(tmp_path / "ds", later) / "r0.png"),
+                [SUBJECT],
+            )
+        ],
+        scope={"subject": SUBJECT},
+    )
+    with pytest.raises(
+        DeliveryRefusedError,
+        match=f"scale assessment {scale['assessment_id']}'s reference does not cover",
+    ):
+        delivered(
+            tmp_path / "uncovered.csv",
+            None,
+            read_bucket(uncovered.root, uncovered.name),
+            scale_assessment_id=scale["assessment_id"],
+        )
 
 
 def test_a_bar_annotated_at_45_degrees_implies_the_same_scale_as_an_axis_aligned_one(

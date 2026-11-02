@@ -355,11 +355,7 @@ def test_run_summary_reads_the_run_directory(tmp_path: Path) -> None:
     assert result["state"] == "running"
     assert result["current_epoch"] == 3
     assert result["output_dir"] == str(run_dir)
-    assert result["best_metric"] is None
-    assert (
-        result["best_metric_name"]
-        == observation.record.spec.evaluation.selection_metric
-    )
+    assert result["best"] is None
 
 
 @pytest.mark.parametrize(
@@ -402,10 +398,7 @@ def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
     result = run_summary(
         observation, read_rows(observation.metrics_log)[0], {}
     ).model_dump()
-    assert (result["best_metric_name"], result["best_metric"]) == (
-        metric,
-        best,
-    )
+    assert result["best"] == {"metric": metric, "value": best}
 
 
 def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(

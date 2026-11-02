@@ -18,10 +18,18 @@ import tcip_store
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.delivery import DeliveryRefusal
 from tcip_mcp.operationalization import OperationalizationRefusal
+from tcip_mcp.pipelines.delivery_events_schema import (
+    ShippedAcknowledged,
+    ShippedValidated,
+)
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_web.routes.audit_gap import AuditGapRefusal
-from tcip_web.routes.results import EXPORT_HEADER, CountExport, SavedExport
+from tcip_web.routes.results import (
+    EXPORT_HEADER,
+    CountExport,
+    SavedExport,
+)
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
@@ -161,7 +169,7 @@ def test_an_assessed_series_measures_its_curves_and_milestones_validated(
 
     assert resp.status_code == 200, resp.text[:300]
     out = resp.json()
-    assert out["unvalidated"] is None
+    assert out["validation"] == {"kind": "cleared"}
     assert out["positive_class_assessed"] is True
     assert len(out["milestones"]) == 2
     by_key = {(r["plant_id"], r["capture"]): r for r in out["curves"]}
@@ -236,19 +244,21 @@ def test_an_unassessed_series_refuses_until_shown_unvalidated_and_never_exports_
     )
 
     assert refused.status_code == 400
-    unvalidated = shown.json()["unvalidated"]
+    unvalidated = shown.json()["validation"]
+    assert unvalidated["kind"] == "shown_unvalidated"
     assert refused.json()["detail"]["message"] == unvalidated["message"]
     assert shown.status_code == 200
     assert "no assessment answers" in unvalidated["message"]
     assert shown.json()["curves"]
     shown_digests = unvalidated["digests"]
-    for payload in get_args(phenology.Projection):
+    for payload in get_args(phenology.Projection.__value__):
         export = _export(client, body, payload)
         assert export.status_code == 400, payload
         # The screen and the export name one prepared result: the digest an acknowledgment of
         # what was shown binds to is the one the export would write.
         assert (
-            export.json()["detail"]["result_sha256"] == shown_digests[payload]
+            export.json()["detail"]["shipping"]["result_sha256"]
+            == shown_digests[payload]
         ), payload
     assert shown_digests["curves"] != shown_digests["milestones"]
 
@@ -274,11 +284,11 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
         for r in events
         if r["event"]["door"] == "results.export_csv"
     ]
+    shipped = ShippedAcknowledged.model_validate(event["shipped"])
     assert (
-        event["acknowledgment"]["acknowledged_by"],
-        event["acknowledgment"]["reason"],
+        shipped.acknowledgment.acknowledged_by,
+        shipped.acknowledgment.reason,
     ) == ("user:breeder", "a look before assessment")
-    assert event["validated"] is False
     lines = [
         e
         for root in {tmp_path, Path(event["buckets"][0]["dataset_root"])}
@@ -306,7 +316,9 @@ def test_an_acknowledgment_is_recorded_only_from_the_browser_and_with_a_reason(
 
     body = _series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
 
-    digest = _export(client, body).json()["detail"]["result_sha256"]
+    digest = _export(client, body).json()["detail"]["shipping"][
+        "result_sha256"
+    ]
     acknowledgment = {"reason": "needs a look", "result_sha256": digest}
     bare = _export(client, body, acknowledgment=acknowledgment)
     agent = _export(
@@ -606,7 +618,9 @@ def _export_count(
 
 def _digest(client: TestClient, body: dict) -> str:
     """Return the result digest the count export's refusal of ``body`` names."""
-    return _export_count(client, body).json()["detail"]["result_sha256"]
+    return _export_count(client, body).json()["detail"]["shipping"][
+        "result_sha256"
+    ]
 
 
 def test_an_unassessed_count_bucket_refuses_with_no_acknowledgment(
@@ -638,17 +652,15 @@ def test_an_unassessed_count_bucket_delivers_under_acknowledgment(
 
     assert resp.status_code == 200, resp.text[:300]
     reported = CountExport.model_validate_json(resp.headers[EXPORT_HEADER])
-    assert (reported.validated, reported.acknowledged_by) == (
-        False,
-        "user:breeder",
-    )
+    assert reported.shipped.kind == "acknowledged", reported
+    assert reported.shipped.acknowledgment.acknowledged_by == "user:breeder"
     rows = _rows(resp.text)
     assert [r["detection_count"] for r in rows] == ["3", "3"]
     assert {r["validated"] for r in rows} == {"False"}
     (served,) = client.get("/api/results/delivery-events").json()["records"]
     event = served["event"]
     assert event["door"] == "results.export_count_csv"
-    assert event["acknowledgment"]["acknowledged_by"] == "user:breeder"
+    assert event["shipped"] == reported.shipped.model_dump(mode="json")
 
 
 def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgment(
@@ -694,17 +706,17 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     assert unregistered.status_code == 403, unregistered.text[:300]
     assert bare.status_code == 200, bare.text[:300]
     reported = CountExport.model_validate_json(bare.headers[EXPORT_HEADER])
-    assert (reported.validated, reported.acknowledged_by) == (True, None)
+    assert reported.shipped == ShippedValidated()
     assert {r["validated"] for r in _rows(bare.text)} == {"True"}
     assert posted.status_code == 200
     assert (
-        CountExport.model_validate_json(
-            posted.headers[EXPORT_HEADER]
-        ).acknowledged_by
-        is None
+        CountExport.model_validate_json(posted.headers[EXPORT_HEADER]).shipped
+        == ShippedValidated()
     )
     events = client.get("/api/results/delivery-events").json()["records"]
-    assert [e["event"]["acknowledgment"] for e in events] == [None, None]
+    assert [e["event"]["shipped"] for e in events] == [
+        {"kind": "validated"}
+    ] * 2
     lines = [
         e
         for root in {tmp_path, Path(chain.root)}
@@ -947,10 +959,8 @@ def test_an_unassessed_raster_bucket_delivers_under_acknowledgment_with_its_regi
 
     assert resp.status_code == 200, resp.text[:300]
     reported = CountExport.model_validate_json(resp.headers[EXPORT_HEADER])
-    assert (reported.validated, reported.acknowledged_by) == (
-        False,
-        "user:breeder",
-    )
+    assert reported.shipped.kind == "acknowledged", reported
+    assert reported.shipped.acknowledgment.acknowledged_by == "user:breeder"
     rows = {r["plant_id"]: r for r in _rows(resp.text)}
     assert rows["plot0"]["value"] == "1" and rows["plot3"]["value"] == "0"
     assert {r["validated"] for r in rows.values()} == {"False"}
@@ -1037,7 +1047,8 @@ def test_assessments_lists_each_recorded_assessment_with_the_checkpoint_it_judge
     (model,) = [
         m["entry"]
         for m in models.json()["models"]
-        if m["entry"]["experiment_id"] == "exp-web-assessed"
+        if (m["entry"]["origin"], m["entry"]["name"])
+        == ("run", "exp-web-assessed")
     ]
     from tcip_mcp.assessment import ASSESSMENT_RECORD, read_assessment
 
@@ -1047,9 +1058,9 @@ def test_assessments_lists_each_recorded_assessment_with_the_checkpoint_it_judge
         "passed": True,
     }
     producer = row["assessment"]["producer"]
-    assert (producer["checkpoint_sha256"], producer["experiment_id"]) == (
+    assert (producer["checkpoint_sha256"], producer["origin"]) == (
         model["sha256"],
-        "exp-web-assessed",
+        model["origin"],
     )
 
 
@@ -1136,7 +1147,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     from PIL import Image
 
     from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tcip_web.routes import inference as inference_routes
     from tests._image_fixtures import capture_exif
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -1146,8 +1157,8 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     Image.new("RGB", (16, 16)).save(
         source / "tree_01.jpg", exif=capture_exif(datetime(2026, 2, 11, 9))
     )
-    assert "error" not in ingest_images(
-        opened_project, str(source), actor=None
+    assert isinstance(
+        ingest_images(opened_project, str(source), actor=None), IngestManifest
     )
     ckpt = produced_checkpoint(
         opened_project / "m.pt", "cancel fixture weights"
@@ -1208,6 +1219,7 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
     opened_project: Path,
 ) -> None:
     """The inference list row and the stream's final frame carry one record of the job."""
+    from tcip_web.jobstore import Completed
     from tcip_web.routes import inference as inference_routes
     from tests._web_fixtures import inference_job
 
@@ -1215,7 +1227,7 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
         image_dir(opened_project / "ds", "2026-01-01"),
         opened_project,
         job_id="inf-warn-test",
-        status="completed",
+        state=Completed(),
     )
     inference_routes._registry.launch(job, lambda _job: None)
     try:
@@ -1238,13 +1250,14 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
 def test_inference_stream_to_a_missing_job_sends_a_typed_terminal_frame(
     client: TestClient,
 ) -> None:
-    """A stream to a missing job sends a ``final`` frame naming the job as not found."""
+    """A stream to a missing job sends its own missing frame naming the job as not found."""
+    from tcip_web.routes.inference import MissingJobFrame
+
     with client.websocket_connect(
         "ws://127.0.0.1/api/inference/jobs/does-not-exist/stream"
     ) as ws:
         frame = ws.receive_json()
-    assert frame["type"] == "final"
-    assert frame["error"] == "job not found"
+    assert frame == MissingJobFrame(error="job not found").model_dump()
 
 
 def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:

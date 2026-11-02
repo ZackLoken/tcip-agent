@@ -489,7 +489,7 @@ def test_the_screen_door_still_honors_show_unvalidated_for_the_evidence_gate(
     )
 
     assert resp.status_code == 200, resp.text
-    assert "no assessment answers" in resp.json()["unvalidated"]["message"]
+    assert "no assessment answers" in resp.json()["validation"]["message"]
     assert (
         client.post(
             "/api/results/phenology_measurement", json=body

@@ -202,10 +202,10 @@ def test_ws_training_stream_of_the_open_project_opens_and_names_an_unknown_run(
 ) -> None:
     # The rail must admit valid work: with a project open the socket opens and reaches its normal
     # "unknown run" error message.
+    from tcip_web.routes.training import TrainingErrorFrame
+
     with client.websocket_connect(
         "ws://127.0.0.1/api/training/runs/does-not-exist/stream",
     ) as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "status"
-        assert msg["status"] is None
-        assert msg["error"]
+        refused = TrainingErrorFrame.model_validate(ws.receive_json())
+        assert "does-not-exist" in refused.error

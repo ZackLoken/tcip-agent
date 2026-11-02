@@ -326,20 +326,21 @@ def test_an_orientation_whose_overview_and_entries_do_not_fit_stays_under_its_ca
         actor=None,
     )
 
-    text = pty_host.orientation(opened, "startup")
+    told = pty_host.orientation(opened, "startup")
 
-    assert text is not None
+    assert told.kind == "told", told
+    text = told.text
     assert len(text) <= pty_host.ORIENTATION_CAP
     assert "overview is longer than this orientation holds" in text
     assert '{"entries": [], "total_available": 1}' in text
 
 
-def _findings_part(text: str | None) -> tuple[str, list]:
+def _findings_part(told: pty_host.SessionOrientation) -> tuple[str, list]:
     """Return the orientation's findings part: its statement of the count and what it lists."""
-    assert text is not None
+    assert told.kind == "told", told
     (part,) = [
         p
-        for p in text.split("\n\n")
+        for p in told.text.split("\n\n")
         if p.startswith(f"{diagnose_project.__name__} answers")
     ]
     counted, _, listed = part.partition("; the first ")

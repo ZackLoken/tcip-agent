@@ -94,14 +94,15 @@ def _project(path: Path, photographs: Path, registry: dict = REGISTRY) -> Path:
     registered by ``register_dataset``. Returns the project root.
     """
     from tcip_mcp.tools.annotation_tools import write_subject_registry
-    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
     from tests._web_fixtures import named_project
 
     root = named_project(path, path.name).root
+    ingested = ingest_images(root, source=str(photographs), actor=None)
+    assert isinstance(ingested, IngestManifest), ingested
     for answer in (
-        ingest_images(root, source=str(photographs), actor=None),
         write_subject_registry(root, str(root), subjects=registry, actor=None),
         register_dataset(
             root, str(root), crop=sorted(registered_crops())[0], actor=None

@@ -1,13 +1,14 @@
 """The declared shapes of a delivery event record and of the acknowledgment it may ship under.
 
-``DeliveryEventRecord.plant_mapping`` is one of three disclosures or ``None``; no two declare the
-same required key set, so with an undeclared key forbidden on every model a stored dict validates
-against at most one.
+``DeliveryEventRecord.plant_mapping`` is one of three disclosures, told apart by its ``kind``, or
+``None``.
 """
 
 from __future__ import annotations
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict
+from typing import Annotated, Literal
+
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from tcip_annotation.text import Text
 from tcip_mcp.model_registry import Producer
@@ -33,6 +34,7 @@ class PlantRegistryDisclosure(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["plant_registry"] = "plant_registry"
     plant_registry: PlantRegistryReference
     raster_identity: RasterIdentity
     nn_tolerance_m: MatchTolerance
@@ -86,6 +88,7 @@ class CanopySegmentDisclosure(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["canopy_segments"] = "canopy_segments"
     plant_registry: PlantRegistryReference
     raster_identity: RasterIdentity
     canopy_segments: CanopySegmentsDocument
@@ -105,20 +108,43 @@ class CanopySegmentDisclosure(BaseModel):
     plant_attribution: str
 
 
-class BucketFinding(BaseModel):
-    """What the gate found for one delivered bucket, named by its dataset root and its name.
+class ValidatedBucket(BaseModel):
+    """A delivered bucket the assessment it was published under validates.
 
-    The bucket is validated when no reason refuses it.
+    The bucket is named by its dataset root, its name and its capture date (``None`` for an
+    undated bucket).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    kind: Literal["validated"] = "validated"
+    dataset_root: str
+    bucket: str
+    date: str | None
+    assessment_id: str
+
+
+class UnvalidatedBucket(BaseModel):
+    """A delivered bucket nothing validates, and why.
+
+    The bucket is named as a :class:`ValidatedBucket` is, beside the assessment it was published
+    under, ``None`` when it names none.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["unvalidated"] = "unvalidated"
     dataset_root: str
     bucket: str
     date: str | None
     assessment_id: str | None
-    validated: bool
-    reason: str | None
+    reason: str
+
+
+type BucketFinding = Annotated[
+    ValidatedBucket | UnvalidatedBucket, Field(discriminator="kind")
+]
+"""What the gate found for one delivered bucket, told apart by its ``kind``."""
 
 
 class Acknowledgment(BaseModel):
@@ -137,11 +163,35 @@ class Acknowledgment(BaseModel):
     recorded_at: AwareDatetime
 
 
-RasterDisclosure = PlantRegistryDisclosure | CanopySegmentDisclosure
-"""The disclosures of an orthomosaic delivery, which attributes through a plant registry."""
+class ShippedValidated(BaseModel):
+    """A delivery every finding of which the gate validated, shipped under no acknowledgment."""
 
-PlantMapping = PlantMappingDisclosure | RasterDisclosure
-"""The disclosure a delivery's ``plant_mapping`` is: a walked mapping's or a raster one."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["validated"] = "validated"
+
+
+class ShippedAcknowledged(BaseModel):
+    """A delivery shipped unvalidated under a breeder's acknowledgment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["acknowledged"] = "acknowledged"
+    acknowledgment: Acknowledgment
+
+
+type Shipped = Annotated[
+    ShippedValidated | ShippedAcknowledged, Field(discriminator="kind")
+]
+"""How a delivery shipped, validated or under an acknowledgment, told apart by its ``kind``."""
+
+
+type PlantMapping = Annotated[
+    PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure,
+    Field(discriminator="kind"),
+]
+"""The disclosure a delivery's ``plant_mapping`` is, a walked mapping's or one of an orthomosaic
+delivery's two regimes, told apart by its ``kind``."""
 
 
 class DeliveryEventRecord(TraitRevisionRef):
@@ -149,7 +199,7 @@ class DeliveryEventRecord(TraitRevisionRef):
 
     It holds the trait revision it shipped under (its
     :class:`~tcip_mcp.pipelines.schemas.TraitRevisionRef` fields), what shipped and of which kind,
-    from which producer, what the gate found per bucket, and the acknowledgment it shipped under.
+    from which producer, what the gate found per bucket, and how it shipped (:data:`Shipped`).
     """
 
     event_id: str
@@ -160,8 +210,7 @@ class DeliveryEventRecord(TraitRevisionRef):
     producer: Producer
     buckets: list[BucketFinding]
     scale_assessment_id: str | None
-    validated: bool
-    acknowledgment: Acknowledgment | None
+    shipped: Shipped
     population: list[str]
     plant_mapping: PlantMapping | None
     produced_at: AwareDatetime

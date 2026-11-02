@@ -17,6 +17,7 @@ import pytest
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
 from tests import _trait_fixtures as fx, csv_rows
+from tests._chain_fixtures import digest_of
 
 SCOPE = {"subject": fx.COUNT_SUBJECT}
 
@@ -96,7 +97,7 @@ def test_an_unassessed_bucket_refuses_with_no_acknowledgment_and_writes_nothing(
     ) as refused:
         _deliver(tmp_path, bucket)
 
-    assert refused.value.result_sha256 is not None
+    assert digest_of(refused.value)
     assert not (tmp_path / "out" / "counts.csv").exists()
 
 
@@ -116,17 +117,17 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
         reason="a look before assessing",
     )
 
-    assert result["validated"] is False
-    assert result["acknowledged_by"] == "user:breeder"
     assert {r["validated"] for r in csv_rows(result["csv_path"])} == {"False"}
     (event,) = read_delivery_events(tmp_path)
-    assert event.acknowledgment is not None
+    assert result["shipped"] == event.shipped.model_dump(mode="json")
+    assert event.shipped.kind == "acknowledged", event.shipped
     assert (
-        event.acknowledgment.acknowledged_by,
-        event.acknowledgment.reason,
+        event.shipped.acknowledgment.acknowledged_by,
+        event.shipped.acknowledgment.reason,
     ) == ("user:breeder", "a look before assessing")
-    assert event.buckets[0].validated is False
-    assert "no assessment answers" in str(event.buckets[0].reason)
+    (finding,) = event.buckets
+    assert finding.kind == "unvalidated", finding
+    assert "no assessment answers" in finding.reason
 
 
 def test_an_acknowledgment_given_for_another_result_refuses(
@@ -151,7 +152,7 @@ def test_an_acknowledgment_given_for_another_result_refuses(
         tmp_path,
         acknowledged_by="user:breeder",
         reason="the other one",
-        result_sha256=str(other.value.result_sha256),
+        result_sha256=digest_of(other.value),
     )
 
     with pytest.raises(
@@ -159,7 +160,7 @@ def test_an_acknowledgment_given_for_another_result_refuses(
     ) as refused:
         _deliver(tmp_path, bucket, act.acknowledgment_id)
 
-    assert refused.value.result_sha256 not in (None, act.result_sha256)
+    assert digest_of(refused.value) != act.result_sha256
     assert not (tmp_path / "out" / "counts.csv").exists()
 
 
@@ -187,7 +188,7 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
         tmp_path,
         acknowledged_by="user:breeder",
         reason="six of them",
-        result_sha256=str(six.value.result_sha256),
+        result_sha256=digest_of(six.value),
     )
     document = read_bucket(tmp_path / "ds", bucket).document_key(
         _image(tmp_path, "a").stem
@@ -252,7 +253,7 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
         tmp_path,
         acknowledged_by="user:breeder",
         reason="a look",
-        result_sha256=str(computed.value.result_sha256),
+        result_sha256=digest_of(computed.value),
     )
     shipped = deliver_per_image_counts(
         tmp_path,
@@ -263,9 +264,9 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
         acknowledgment_id=act.acknowledgment_id,
         actor=None,
     )
-    assert (
-        shipped["validated"] is False
-        and shipped["acknowledged_by"] == "user:breeder"
+    assert shipped["shipped"]["kind"] == "acknowledged"
+    assert shipped["shipped"]["acknowledgment"]["acknowledged_by"] == (
+        "user:breeder"
     )
 
 
@@ -280,9 +281,8 @@ def test_a_validated_delivery_carries_no_acknowledgment(
 
     result = _deliver(tmp_path, chain.bucket)
 
-    assert result["validated"] is True
-    assert result["acknowledged_by"] is None
-    assert read_delivery_events(tmp_path)[0].acknowledgment is None
+    assert result["shipped"] == {"kind": "validated"}
+    assert read_delivery_events(tmp_path)[0].shipped.kind == "validated"
 
 
 def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(
@@ -393,7 +393,7 @@ def test_a_delivery_over_no_bucket_refuses_and_carries_no_result_to_acknowledge(
             revision=fx.count_revision(tmp_path),
             result=Result((), (), population=()),
         )
-    assert refused.value.result_sha256 is None
+    assert refused.value.shipping.kind == "unacknowledgeable"
 
 
 def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
@@ -439,4 +439,5 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     ):
         deliver("leaf", "other")
     assert not (tmp_path / "other.csv").exists()
-    assert deliver(fx.COUNT_SUBJECT, "measured")["validated"] is False
+    shipped = deliver(fx.COUNT_SUBJECT, "measured")["shipped"]
+    assert shipped["kind"] == "acknowledged"

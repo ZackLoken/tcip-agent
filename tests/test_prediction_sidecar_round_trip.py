@@ -87,7 +87,4 @@ def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
     assert bucket.date == "2026-03-01" and bucket.documents == {
         "capture_a": "capture_a.png"
     }
-    assert bucket.producer == Producer(
-        checkpoint_sha256=result["checkpoint_sha256"],
-        experiment_id=result["experiment_id"],
-    )
+    assert bucket.producer == Producer.model_validate(result["producer"])

@@ -177,9 +177,8 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
         "2026-02-11": {
             "value": max(FIRST_DATE_ERRORS.values()),
             "source": "h_pos_err",
-            "rationale": None,
         },
-        "2026-02-25": {"value": 1.0, "source": "h_pos_err", "rationale": None},
+        "2026-02-25": {"value": 1.0, "source": "h_pos_err"},
     }
 
 

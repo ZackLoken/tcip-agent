@@ -10,36 +10,63 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import BaseModel, PrivateAttr, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 from tcip_mcp.dataset_layout import parse_capture_dir
-from tcip_mcp.experiments import FINAL_STATES, FinalState
+from tcip_mcp.experiments import FINAL_STATES
 
 MAX_JOBS = 100
 
-JobStatus = Literal["pending", "running", FinalState]
-"""Every status a job holds: ``pending`` and ``running``, then the final state it ends in
-(``experiments.FinalState``)."""
+
+class Pending(BaseModel):
+    """A job not yet started."""
+
+    status: Literal["pending"] = "pending"
+
+
+class Running(BaseModel):
+    """A job its thread is running."""
+
+    status: Literal["running"] = "running"
+
+
+class Completed(BaseModel):
+    """A job that ran to its end."""
+
+    status: Literal["completed"] = "completed"
+
+
+class Canceled(BaseModel):
+    """A job stopped by a cancel before its end."""
+
+    status: Literal["canceled"] = "canceled"
+
+
+class Failed(BaseModel):
+    """A job that ended on an error, and the error."""
+
+    status: Literal["failed"] = "failed"
+    error: str
+
+
+type JobState[C: Completed] = Annotated[
+    Pending | Running | C | Canceled | Failed,
+    Field(discriminator="status"),
+]
+"""The state a job holds, told apart by its ``status``; ``C`` is its kind's completed state."""
 
 
 class Job(BaseModel):
-    """A job as the registry holds it: its id, the status it holds and the error it ended on.
+    """A job as the registry holds it: its id and the state it holds.
 
     The thread it runs on is private state, absent from every dump of it.
     """
 
     job_id: str
-    status: JobStatus = "pending"
-    error: str | None = None
+    state: JobState[Completed] = Pending()
     _thread: threading.Thread | None = PrivateAttr(default=None)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def live(self) -> bool:
-        """Whether the job has not yet ended: its status is ``pending`` or ``running``."""
-        return self.status not in FINAL_STATES
 
     @property
     def thread(self) -> threading.Thread | None:
@@ -82,12 +109,17 @@ class ProjectJob(Job):
 def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:
     """Drop the oldest ended jobs of any project from ``jobs``, in place.
 
-    Ended means not :attr:`Job.live`. Drops until ``jobs`` holds at most ``max_jobs`` or every job
-    left is live. Relies on dict insertion order (oldest first).
+    Ended is a state whose status is one of ``experiments.FINAL_STATES``. Drops until ``jobs``
+    holds at most ``max_jobs`` or no job left has ended. Relies on dict insertion order (oldest
+    first).
     """
     overflow = len(jobs) - max_jobs
     if overflow > 0:
-        evictable = [jid for jid, job in jobs.items() if not job.live]
+        evictable = [
+            jid
+            for jid, job in jobs.items()
+            if job.state.status in FINAL_STATES
+        ]
         for jid in evictable[:overflow]:
             del jobs[jid]
 
@@ -167,11 +199,12 @@ class JobRegistry[J: Job]:
     ) -> list[P]:
         """Return a snapshot of every held job that runs for ``project``.
 
-        With ``unended``, only the jobs that have not ended (:attr:`Job.live`).
+        With ``unended``, only the jobs whose status is not one of ``experiments.FINAL_STATES``.
         """
         with self.lock:
             return [
                 j.model_copy()
                 for j in self.jobs.values()
-                if j.project == project and (j.live or not unended)
+                if j.project == project
+                and not (unended and j.state.status in FINAL_STATES)
             ]

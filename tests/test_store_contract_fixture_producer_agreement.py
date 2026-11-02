@@ -57,14 +57,12 @@ TRAIT_GOLDEN: dict[str, Any] = {
             "rationale": "the breeder described the state directly",
             "relayed_note": "",
             "proposed_at": "2026-03-04T12:00:00+00:00",
-            "confirmed_by": "user:ü",
-            "confirmed_at": "2026-03-04T12:30:00+00:00",
-            "withdrawn_by": None,
-            "withdrawn_at": None,
+            "state": dict.fromkeys(("kind", "confirmed_by", "confirmed_at")),
         }
     ]
 }
-"""One trait's record as the proposing and confirming producers leave it."""
+"""One trait's record as the proposing and confirming producers leave it, its revision's state
+named by its keys alone, the tag its producer writes."""
 
 DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
     "event_id": "a1b2c3d4e5f60718",
@@ -75,45 +73,47 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
     "door": "deliver_phenology_milestones",
     "output_path": "büsch_phenology.csv",
     "output_sha256": "0" * 64,
-    "producer": {"checkpoint_sha256": "0" * 64, "experiment_id": "exp_042"},
+    "producer": dict.fromkeys(("kind", "checkpoint_sha256", "origin")),
     "buckets": [
-        {
-            "dataset_root": "dü",
-            "bucket": "live/2026-03-04",
-            "date": "2026-03-04",
-            "assessment_id": "assessment-ü",
-            "validated": True,
-            "reason": None,
-        }
+        dict.fromkeys(
+            (
+                "kind",
+                "dataset_root",
+                "bucket",
+                "date",
+                "assessment_id",
+                "reason",
+            )
+        )
     ],
     "scale_assessment_id": None,
-    "validated": True,
-    "acknowledgment": None,
+    "shipped": dict.fromkeys(("kind",)),
     "population": ["plot_ü"],
-    "plant_mapping": {
-        "name": "valley",
-        "dataset_id": "ds-1",
-        "dataset_root": "dü",
-        "built_at": "2026-03-04T12:00:00+00:00",
-        "record_sha256": "0" * 64,
-        "match_radius": {
-            "2026-03-04": {
-                "value": 3.0,
-                "source": "h_pos_err",
-                "rationale": None,
-            }
-        },
-        "capture_digests": {"2026-03-04": {"capture": "0" * 16}},
-        "captures_unverified": [],
-        "plant_csvs_unverified": [],
-        "dates_delivered": ["2026-03-04"],
-        "images_unattributed": 0,
-        "plant_attribution": "image",
-    },
+    "plant_mapping": dict.fromkeys(
+        (
+            "kind",
+            "name",
+            "dataset_id",
+            "dataset_root",
+            "built_at",
+            "record_sha256",
+            "match_radius",
+            "capture_digests",
+            "captures_unverified",
+            "plant_csvs_unverified",
+            "dates_delivered",
+            "images_unattributed",
+            "plant_attribution",
+        )
+    ),
     "produced_at": "2026-03-04T12:00:00+00:00",
 }
 """The shape of one completed phenology delivery's event, with the gate's finding for the bucket
-it shipped and its plant mapping's disclosure."""
+it shipped and its plant mapping's disclosure; each part told apart by a tag is named by its keys
+alone, the tag its producer writes."""
+
+MATCH_RADIUS_KEYS = frozenset(("value", "source"))
+"""The keys of a match radius the platform derived for a mapped date."""
 
 
 def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_side(
@@ -207,9 +207,7 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
     assert set(golden["plant_mapping"]) == set(fresh["plant_mapping"])
     assert fresh["plant_mapping"]["match_radius"]
     for radius in fresh["plant_mapping"]["match_radius"].values():
-        assert set(radius) == set(
-            next(iter(golden["plant_mapping"]["match_radius"].values()))
-        )
+        assert set(radius) == MATCH_RADIUS_KEYS
 
 
 def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_producers_write(

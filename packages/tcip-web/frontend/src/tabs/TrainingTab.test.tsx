@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { openTrainingStream, trainingApi } from "@/api/training";
 import {
+  ADMITTED,
+  FINITE_BEST,
   NOT_FINITE_SUFFIX,
+  READ,
   TENSORBOARD_RELOAD_SELECTOR,
   type SplitChoices,
+  type TrainingFrame,
   type TrainingListing,
-  type TrainingRowFrame,
-  type TrainingStatusFrame,
 } from "@/api/types.generated";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
@@ -66,9 +68,9 @@ function rowFor(id: string, inside: HTMLElement = document.body): HTMLElement {
 }
 
 /** The produced best value as a row shows it, through the frontend's own number format. */
-const BEST = `best ${RUNS.completed.best_metric_name} ${formatNumber(Number(RUNS.completed.best_metric))}`;
+const BEST = `best ${RUNS.completed.best?.metric} ${formatNumber(Number(RUNS.completed.best?.value))}`;
 
-type Frame = TrainingRowFrame | TrainingStatusFrame;
+type Frame = TrainingFrame;
 
 /** Every stream the tab opens delivers the produced ``frames`` at once. */
 function streamFrames(...frames: Frame[]) {
@@ -246,8 +248,9 @@ describe("TrainingTab sweeps", () => {
   const sweepGroupNamed = { name: `Sweep ${searched.sweep_id}` };
 
   it("groups a sweep's trial rows under the sweep, with its state and outcome", async () => {
-    const best = searched.outcome.best_value;
-    expect(best).not.toBeNull();
+    const { outcome } = searched;
+    if (outcome.kind !== FINITE_BEST) throw new Error("the produced sweep holds no finite best");
+    const best = outcome.best_value;
     listing();
 
     render(<TrainingTab />);
@@ -423,7 +426,9 @@ describe("TrainingTab tensorboard panel", () => {
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
-    expect(await screen.findByText("connection refused")).toBeInTheDocument();
+    expect(
+      await screen.findByText("TensorBoard could not be reached: connection refused"),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again: TensorBoard" })).toBeInTheDocument();
   });
 
@@ -769,7 +774,9 @@ describe("TrainingTab launch picker", () => {
 
   it("opens a row's Data choices only once selected, and starts with the chosen manifest", async () => {
     const choices = SPLIT_CHOICES;
-    const selection = choices.selections.find((choice) => choice.reason === null)!;
+    const [selection] = choices.selections.flatMap((c) =>
+      c.kind === READ && c.check.kind === ADMITTED ? [c] : [],
+    );
     const listSplitChoicesSpy = vi
       .spyOn(trainingApi, "listSplitChoices")
       .mockResolvedValue(choices);

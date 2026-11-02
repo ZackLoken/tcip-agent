@@ -333,9 +333,7 @@ class TrainContext:
         return generic_trainer._build_scheduler(
             optimizer,
             scheduler,
-            higher_is_better=selection_of(
-                self.spec.evaluation.selection_metric
-            )[1],
+            direction=selection_of(self.spec.evaluation.selection_metric)[1],
         )
 
     apply_stage_freeze = staticmethod(generic_trainer.apply_stage_freeze)

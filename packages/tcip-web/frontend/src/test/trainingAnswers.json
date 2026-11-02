@@ -3,35 +3,30 @@
     "as_recorded": {
       "case": "drawn",
       "line": "draws its split again with seed 0 over the labels as they are now",
-      "reason": null
+      "check": { "kind": "admitted" }
     },
     "selections": [
       {
         "selection_dir": "/scratch/workspace/training/dataset/splits",
-        "reason": null,
+        "replaced_split_keys": [
+          "calibration_ratio",
+          "grouping",
+          "holdout_ratio",
+          "rationale",
+          "seed",
+          "stratify_foreground",
+          "val_ratio"
+        ],
+        "kind": "read",
+        "check": { "kind": "admitted" },
         "seed": 2,
         "group_by": "tile_prefix",
         "train": 4,
         "val": 2,
-        "calibration": 1,
-        "replaced_split_keys": [
-          "calibration_ratio",
-          "grouping",
-          "holdout_ratio",
-          "rationale",
-          "seed",
-          "stratify_foreground",
-          "val_ratio"
-        ]
+        "calibration": 1
       },
       {
         "selection_dir": "/scratch/workspace/training/dataset/splits/unreadable",
-        "reason": "1 validation error for Selection\n  Input should be a dictionary or an instance of Selection [type=dataclass_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/dataclass_type",
-        "seed": null,
-        "group_by": null,
-        "train": 0,
-        "val": 0,
-        "calibration": 0,
         "replaced_split_keys": [
           "calibration_ratio",
           "grouping",
@@ -40,80 +35,78 @@
           "seed",
           "stratify_foreground",
           "val_ratio"
-        ]
+        ],
+        "kind": "unread",
+        "reason": "1 validation error for Selection\n  Input should be a dictionary or an instance of Selection [type=dataclass_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/dataclass_type"
       }
     ]
   },
   "cancel": {
+    "kind": "run",
     "run": {
       "experiment_id": "train-x",
       "state": "running",
       "created": "2000-01-01T00:00:00+00:00",
       "relaunched_from": null,
-      "sweep": null,
-      "trial_params": null,
       "builder": "bespoke_models:build_bespoke_detection",
       "task": "detection",
       "images_dir": "/scratch/workspace/training/dataset/images/undated",
       "current_epoch": null,
-      "best_metric": null,
-      "best_metric_name": "objective",
+      "best": null,
       "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
       "status_error": null,
       "heartbeat": "2000-01-01T00:00:01+00:00",
-      "launch": null
+      "launch": { "kind": "no_launch_line" },
+      "kind": "standalone"
     },
-    "sweep": null,
-    "tensorboard": null
+    "tensorboard": { "kind": "not_serving" }
   },
   "compare": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-done",
           "state": "completed",
           "created": "2000-01-01T00:00:09+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training-data/train-done/images/undated",
           "current_epoch": 1.0,
-          "best_metric": 0.413004,
-          "best_metric_name": "objective",
+          "best": { "metric": "objective", "value": 0.413004 },
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:10+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
@@ -133,261 +126,252 @@
               "registered_at": "2000-01-01T00:00:12+00:00",
               "metrics": {},
               "tags": [],
-              "experiment_id": "train-done"
+              "origin": "run"
             },
             "facts": { "metrics": { "val_map50": 0.5 }, "metrics_source": "training_source" }
           }
         ],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n2>"
       }
     ],
-    "dataset_fingerprints": "different",
-    "higher_is_better": { "val_map50": true }
+    "directions": { "val_map50": "higher" }
   },
   "compare_same": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-y",
           "state": "running",
           "created": "2000-01-01T00:00:02+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:03+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       }
     ],
-    "dataset_fingerprints": "same",
-    "higher_is_better": {}
+    "directions": {}
   },
   "compare_one": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       }
     ],
-    "dataset_fingerprints": "same",
-    "higher_is_better": {}
+    "directions": {}
   },
   "compare_unread": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       },
-      { "experiment_id": "train-unknown", "error": "Experiment not found: train-unknown" }
+      {
+        "kind": "uncompared",
+        "experiment_id": "train-unknown",
+        "error": "Experiment not found: train-unknown"
+      }
     ],
-    "dataset_fingerprints": "unread",
-    "higher_is_better": {}
+    "directions": {}
   },
   "compare_unset": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-loose",
           "state": "canceled",
           "created": "2000-01-01T00:00:27+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
           "task": "classification",
           "images_dir": "/scratch/workspace/loose/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:28+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": 0,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": null,
         "dataset_id": null,
         "dataset_fingerprint": null
       }
     ],
-    "dataset_fingerprints": "unset",
-    "higher_is_better": {}
+    "directions": {}
   },
   "compare_rich": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-rich",
           "state": "completed",
           "created": "2000-01-01T00:00:13+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training-data/train-rich/images/undated",
           "current_epoch": 1.0,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:14+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
@@ -406,7 +390,7 @@
               "registered_at": "2000-01-01T00:00:16+00:00",
               "metrics": {},
               "tags": [],
-              "experiment_id": "train-rich"
+              "origin": "run"
             },
             "facts": {
               "metrics": { "val_map50": 0.71234, "val_map99": 0.7, "val_selection": "held-out" },
@@ -414,35 +398,33 @@
             }
           }
         ],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n4>"
       }
     ],
-    "dataset_fingerprints": "different",
-    "higher_is_better": { "val_map50": true, "val_map99": null }
+    "directions": { "val_map50": "higher", "val_map99": "unstated" }
   },
   "compare_unstamped": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-unstamped",
           "state": "completed",
           "created": "2000-01-01T00:00:21+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training-data/train-unstamped/images/undated",
           "current_epoch": 1.0,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:22+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
@@ -462,68 +444,65 @@
               "registered_at": "2000-01-01T00:00:24+00:00",
               "metrics": {},
               "tags": [],
-              "experiment_id": "train-unstamped"
+              "origin": "run"
             },
             "facts": { "metrics": {}, "metrics_source": null }
           }
         ],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n6>"
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       }
     ],
-    "dataset_fingerprints": "different",
-    "higher_is_better": {}
+    "directions": {}
   },
   "compare_unranked": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-undeclared",
           "state": "completed",
           "created": "2000-01-01T00:00:17+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training-data/train-undeclared/images/undated",
           "current_epoch": 1.0,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:18+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
@@ -542,34 +521,33 @@
               "registered_at": "2000-01-01T00:00:20+00:00",
               "metrics": {},
               "tags": [],
-              "experiment_id": "train-undeclared"
+              "origin": "run"
             },
             "facts": { "metrics": { "val_map99": 0.2 }, "metrics_source": "training_source" }
           }
         ],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n8>"
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-done",
           "state": "completed",
           "created": "2000-01-01T00:00:09+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training-data/train-done/images/undated",
           "current_epoch": 1.0,
-          "best_metric": 0.413004,
-          "best_metric_name": "objective",
+          "best": { "metric": "objective", "value": 0.413004 },
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:10+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
@@ -589,19 +567,18 @@
               "registered_at": "2000-01-01T00:00:12+00:00",
               "metrics": {},
               "tags": [],
-              "experiment_id": "train-done"
+              "origin": "run"
             },
             "facts": { "metrics": { "val_map50": 0.5 }, "metrics_source": "training_source" }
           }
         ],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n2>"
       }
     ],
-    "dataset_fingerprints": "different",
-    "higher_is_better": { "val_map50": true, "val_map99": null }
+    "directions": { "val_map50": "higher", "val_map99": "unstated" }
   },
   "compare_best": {
     "entry": {
@@ -611,11 +588,12 @@
       "registered_at": "2000-01-01T00:00:12+00:00",
       "metrics": {},
       "tags": [],
-      "experiment_id": "train-done"
+      "origin": "run"
     },
     "facts": { "metrics": { "val_map50": 0.5 }, "metrics_source": "training_source" },
+    "kind": "ranking",
     "metric": "val_map50",
-    "higher_is_better": true,
+    "direction": "higher",
     "direction_source": "declared",
     "unregistered": ["train-x"],
     "skipped": []
@@ -628,14 +606,15 @@
       "registered_at": "2000-01-01T00:00:16+00:00",
       "metrics": {},
       "tags": [],
-      "experiment_id": "train-rich"
+      "origin": "run"
     },
     "facts": {
       "metrics": { "val_map50": 0.71234, "val_map99": 0.7, "val_selection": "held-out" },
       "metrics_source": "training_source"
     },
+    "kind": "ranking",
     "metric": "val_map50",
-    "higher_is_better": true,
+    "direction": "higher",
     "direction_source": "declared",
     "unregistered": ["train-x"],
     "skipped": []
@@ -648,11 +627,12 @@
       "registered_at": "2000-01-01T00:00:12+00:00",
       "metrics": {},
       "tags": [],
-      "experiment_id": "train-done"
+      "origin": "run"
     },
     "facts": { "metrics": { "val_map50": 0.5 }, "metrics_source": "training_source" },
+    "kind": "ranking",
     "metric": "val_map50",
-    "higher_is_better": true,
+    "direction": "higher",
     "direction_source": "declared",
     "unregistered": [],
     "skipped": [{ "name": "train-undeclared", "unverified": false, "unstamped": true }]
@@ -677,7 +657,7 @@
           {
             "metric": "val_map50",
             "role": "comparability_only",
-            "higher_is_better": true,
+            "direction": "higher",
             "sources": ["training_source"]
           }
         ],
@@ -707,199 +687,171 @@
         "state": "running",
         "created": "2000-01-01T00:00:00+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:01+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-y",
         "state": "running",
         "created": "2000-01-01T00:00:02+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": 3.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:03+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-done",
         "state": "completed",
         "created": "2000-01-01T00:00:09+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-done/images/undated",
         "current_epoch": 1.0,
-        "best_metric": 0.413004,
-        "best_metric_name": "objective",
+        "best": { "metric": "objective", "value": 0.413004 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:10+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-rich",
         "state": "completed",
         "created": "2000-01-01T00:00:13+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-rich/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:14+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-undeclared",
         "state": "completed",
         "created": "2000-01-01T00:00:17+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-undeclared/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:18+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-unstamped",
         "state": "completed",
         "created": "2000-01-01T00:00:21+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-unstamped/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:22+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-empty",
         "state": "completed",
         "created": "2000-01-01T00:00:25+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-empty",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:26+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-loose",
         "state": "canceled",
         "created": "2000-01-01T00:00:27+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
         "task": "classification",
         "images_dir": "/scratch/workspace/loose/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:28+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-refused",
         "state": "failed",
         "created": "2000-01-01T00:00:29+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "not.a:module",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/train-refused-data/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-refused",
         "status_error": "a sample failure the scene records for this run",
         "heartbeat": "2000-01-01T00:00:30+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "<relaunched run id>",
         "state": "running",
         "created": "2000-01-01T00:00:31+00:00",
         "relaunched_from": "train-x",
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:32+00:00",
-        "launch": {
-          "agent_client_name": null,
-          "agent_client_version": null,
-          "agent_session": null,
-          "terminal_session": null
-        }
+        "launch": { "kind": "no_agent" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "<agent run id>",
         "state": "running",
         "created": "2000-01-01T00:00:34+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<agent run id>",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:35+00:00",
@@ -907,8 +859,10 @@
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
           "agent_session": "<agent_session n9>",
-          "terminal_session": null
-        }
+          "terminal_session": null,
+          "kind": "agent"
+        },
+        "kind": "standalone"
       }
     ],
     "sweeps": [
@@ -1017,45 +971,45 @@
             "state": "completed",
             "created": "2000-01-01T00:00:05+00:00",
             "relaunched_from": null,
-            "sweep": "<sweep id>",
-            "trial_params": { "optimizer.head_lr": 0.001 },
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
             "images_dir": "/scratch/workspace/training/dataset/images/undated",
             "current_epoch": 1.0,
-            "best_metric": 0.7,
-            "best_metric_name": "objective",
+            "best": { "metric": "objective", "value": 0.7 },
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
             "status_error": null,
             "heartbeat": "2000-01-01T00:00:06+00:00",
-            "launch": null
+            "launch": { "kind": "no_launch_line" },
+            "kind": "trial",
+            "sweep_id": "<sweep id>",
+            "params": { "optimizer.head_lr": 0.001 }
           },
           {
             "experiment_id": "<sweep id>_t1",
             "state": "running",
             "created": "2000-01-01T00:00:07+00:00",
             "relaunched_from": null,
-            "sweep": "<sweep id>",
-            "trial_params": { "optimizer.head_lr": 0.01 },
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
             "images_dir": "/scratch/workspace/training/dataset/images/undated",
             "current_epoch": null,
-            "best_metric": null,
-            "best_metric_name": "objective",
+            "best": null,
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
             "status_error": null,
             "heartbeat": "2000-01-01T00:00:08+00:00",
-            "launch": null
+            "launch": { "kind": "no_launch_line" },
+            "kind": "trial",
+            "sweep_id": "<sweep id>",
+            "params": { "optimizer.head_lr": 0.01 }
           }
         ],
         "outcome": {
           "best_params": { "optimizer.head_lr": 0.001 },
-          "best_value": 0.7,
-          "best_value_state": null,
           "best_value_spread": null,
           "split_sensitivity": null,
-          "best_at_range_end": {}
+          "best_at_range_end": {},
+          "kind": "finite_best",
+          "best_value": 0.7
         },
         "selection_metric": "objective"
       },
@@ -1159,14 +1113,7 @@
         "cancel_requested": false,
         "heartbeat": "2000-01-01T00:00:33+00:00",
         "trials": [],
-        "outcome": {
-          "best_params": null,
-          "best_value": null,
-          "best_value_state": null,
-          "best_value_spread": null,
-          "split_sensitivity": null,
-          "best_at_range_end": {}
-        },
+        "outcome": { "kind": "no_best", "split_sensitivity": null },
         "selection_metric": "objective"
       }
     ]
@@ -1178,199 +1125,171 @@
         "state": "running",
         "created": "2000-01-01T00:00:00+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:01+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-y",
         "state": "failed",
         "created": "2000-01-01T00:00:02+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": 3.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": "a sample failure the scene records for this run",
         "heartbeat": "2000-01-01T00:00:03+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-done",
         "state": "completed",
         "created": "2000-01-01T00:00:09+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-done/images/undated",
         "current_epoch": 1.0,
-        "best_metric": 0.413004,
-        "best_metric_name": "objective",
+        "best": { "metric": "objective", "value": 0.413004 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:10+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-rich",
         "state": "completed",
         "created": "2000-01-01T00:00:13+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-rich/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:14+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-undeclared",
         "state": "completed",
         "created": "2000-01-01T00:00:17+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-undeclared/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:18+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-unstamped",
         "state": "completed",
         "created": "2000-01-01T00:00:21+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-unstamped/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:22+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-empty",
         "state": "completed",
         "created": "2000-01-01T00:00:25+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-empty",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:26+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-loose",
         "state": "canceled",
         "created": "2000-01-01T00:00:27+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
         "task": "classification",
         "images_dir": "/scratch/workspace/loose/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:28+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "train-refused",
         "state": "failed",
         "created": "2000-01-01T00:00:29+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "not.a:module",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/train-refused-data/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-refused",
         "status_error": "a sample failure the scene records for this run",
         "heartbeat": "2000-01-01T00:00:30+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "<relaunched run id>",
         "state": "running",
         "created": "2000-01-01T00:00:31+00:00",
         "relaunched_from": "train-x",
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:32+00:00",
-        "launch": {
-          "agent_client_name": null,
-          "agent_client_version": null,
-          "agent_session": null,
-          "terminal_session": null
-        }
+        "launch": { "kind": "no_agent" },
+        "kind": "standalone"
       },
       {
         "experiment_id": "<agent run id>",
         "state": "running",
         "created": "2000-01-01T00:00:34+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<agent run id>",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:35+00:00",
@@ -1378,8 +1297,10 @@
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
           "agent_session": "<agent_session n9>",
-          "terminal_session": null
-        }
+          "terminal_session": null,
+          "kind": "agent"
+        },
+        "kind": "standalone"
       }
     ],
     "sweeps": [
@@ -1488,45 +1409,45 @@
             "state": "completed",
             "created": "2000-01-01T00:00:05+00:00",
             "relaunched_from": null,
-            "sweep": "<sweep id>",
-            "trial_params": { "optimizer.head_lr": 0.001 },
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
             "images_dir": "/scratch/workspace/training/dataset/images/undated",
             "current_epoch": 1.0,
-            "best_metric": 0.7,
-            "best_metric_name": "objective",
+            "best": { "metric": "objective", "value": 0.7 },
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
             "status_error": null,
             "heartbeat": "2000-01-01T00:00:06+00:00",
-            "launch": null
+            "launch": { "kind": "no_launch_line" },
+            "kind": "trial",
+            "sweep_id": "<sweep id>",
+            "params": { "optimizer.head_lr": 0.001 }
           },
           {
             "experiment_id": "<sweep id>_t1",
             "state": "running",
             "created": "2000-01-01T00:00:07+00:00",
             "relaunched_from": null,
-            "sweep": "<sweep id>",
-            "trial_params": { "optimizer.head_lr": 0.01 },
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
             "images_dir": "/scratch/workspace/training/dataset/images/undated",
             "current_epoch": null,
-            "best_metric": null,
-            "best_metric_name": "objective",
+            "best": null,
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
             "status_error": null,
             "heartbeat": "2000-01-01T00:00:08+00:00",
-            "launch": null
+            "launch": { "kind": "no_launch_line" },
+            "kind": "trial",
+            "sweep_id": "<sweep id>",
+            "params": { "optimizer.head_lr": 0.01 }
           }
         ],
         "outcome": {
           "best_params": { "optimizer.head_lr": 0.001 },
-          "best_value": 0.7,
-          "best_value_state": null,
           "best_value_spread": null,
           "split_sensitivity": null,
-          "best_at_range_end": {}
+          "best_at_range_end": {},
+          "kind": "finite_best",
+          "best_value": 0.7
         },
         "selection_metric": "objective"
       },
@@ -1630,258 +1551,224 @@
         "cancel_requested": false,
         "heartbeat": "2000-01-01T00:00:33+00:00",
         "trials": [],
-        "outcome": {
-          "best_params": null,
-          "best_value": null,
-          "best_value_state": null,
-          "best_value_spread": null,
-          "split_sensitivity": null,
-          "best_at_range_end": {}
-        },
+        "outcome": { "kind": "no_best", "split_sensitivity": null },
         "selection_metric": "objective"
       }
     ]
   },
   "details": [
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-x",
         "state": "running",
         "created": "2000-01-01T00:00:00+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:01+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-y",
         "state": "failed",
         "created": "2000-01-01T00:00:02+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": 3.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": "a sample failure the scene records for this run",
         "heartbeat": "2000-01-01T00:00:03+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-done",
         "state": "completed",
         "created": "2000-01-01T00:00:09+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-done/images/undated",
         "current_epoch": 1.0,
-        "best_metric": 0.413004,
-        "best_metric_name": "objective",
+        "best": { "metric": "objective", "value": 0.413004 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:10+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-rich",
         "state": "completed",
         "created": "2000-01-01T00:00:13+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-rich/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:14+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-undeclared",
         "state": "completed",
         "created": "2000-01-01T00:00:17+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-undeclared/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:18+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-unstamped",
         "state": "completed",
         "created": "2000-01-01T00:00:21+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training-data/train-unstamped/images/undated",
         "current_epoch": 1.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:22+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-empty",
         "state": "completed",
         "created": "2000-01-01T00:00:25+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-empty",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:26+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-loose",
         "state": "canceled",
         "created": "2000-01-01T00:00:27+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
         "task": "classification",
         "images_dir": "/scratch/workspace/loose/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:28+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "train-refused",
         "state": "failed",
         "created": "2000-01-01T00:00:29+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "not.a:module",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/train-refused-data/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-refused",
         "status_error": "a sample failure the scene records for this run",
         "heartbeat": "2000-01-01T00:00:30+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "<relaunched run id>",
         "state": "running",
         "created": "2000-01-01T00:00:31+00:00",
         "relaunched_from": "train-x",
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:32+00:00",
-        "launch": {
-          "agent_client_name": null,
-          "agent_client_version": null,
-          "agent_session": null,
-          "terminal_session": null
-        }
+        "launch": { "kind": "no_agent" },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "<agent run id>",
         "state": "running",
         "created": "2000-01-01T00:00:34+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<agent run id>",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:35+00:00",
@@ -1889,14 +1776,15 @@
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
           "agent_session": "<agent_session n9>",
-          "terminal_session": null
-        }
+          "terminal_session": null,
+          "kind": "agent"
+        },
+        "kind": "standalone"
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
-      "run": null,
+      "kind": "sweep",
       "sweep": {
         "sweep_id": "<sweep id>",
         "state": "running",
@@ -2002,52 +1890,52 @@
             "state": "completed",
             "created": "2000-01-01T00:00:05+00:00",
             "relaunched_from": null,
-            "sweep": "<sweep id>",
-            "trial_params": { "optimizer.head_lr": 0.001 },
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
             "images_dir": "/scratch/workspace/training/dataset/images/undated",
             "current_epoch": 1.0,
-            "best_metric": 0.7,
-            "best_metric_name": "objective",
+            "best": { "metric": "objective", "value": 0.7 },
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
             "status_error": null,
             "heartbeat": "2000-01-01T00:00:06+00:00",
-            "launch": null
+            "launch": { "kind": "no_launch_line" },
+            "kind": "trial",
+            "sweep_id": "<sweep id>",
+            "params": { "optimizer.head_lr": 0.001 }
           },
           {
             "experiment_id": "<sweep id>_t1",
             "state": "running",
             "created": "2000-01-01T00:00:07+00:00",
             "relaunched_from": null,
-            "sweep": "<sweep id>",
-            "trial_params": { "optimizer.head_lr": 0.01 },
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
             "images_dir": "/scratch/workspace/training/dataset/images/undated",
             "current_epoch": null,
-            "best_metric": null,
-            "best_metric_name": "objective",
+            "best": null,
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
             "status_error": null,
             "heartbeat": "2000-01-01T00:00:08+00:00",
-            "launch": null
+            "launch": { "kind": "no_launch_line" },
+            "kind": "trial",
+            "sweep_id": "<sweep id>",
+            "params": { "optimizer.head_lr": 0.01 }
           }
         ],
         "outcome": {
           "best_params": { "optimizer.head_lr": 0.001 },
-          "best_value": 0.7,
-          "best_value_state": null,
           "best_value_spread": null,
           "split_sensitivity": null,
-          "best_at_range_end": {}
+          "best_at_range_end": {},
+          "kind": "finite_best",
+          "best_value": 0.7
         },
         "selection_metric": "objective"
       },
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
-      "run": null,
+      "kind": "sweep",
       "sweep": {
         "sweep_id": "<relaunched sweep id>",
         "state": "running",
@@ -2148,88 +2036,75 @@
         "cancel_requested": false,
         "heartbeat": "2000-01-01T00:00:33+00:00",
         "trials": [],
-        "outcome": {
-          "best_params": null,
-          "best_value": null,
-          "best_value_state": null,
-          "best_value_spread": null,
-          "split_sensitivity": null,
-          "best_at_range_end": {}
-        },
+        "outcome": { "kind": "no_best", "split_sensitivity": null },
         "selection_metric": "objective"
       },
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "<sweep id>_t0",
         "state": "completed",
         "created": "2000-01-01T00:00:05+00:00",
         "relaunched_from": null,
-        "sweep": "<sweep id>",
-        "trial_params": { "optimizer.head_lr": 0.001 },
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": 1.0,
-        "best_metric": 0.7,
-        "best_metric_name": "objective",
+        "best": { "metric": "objective", "value": 0.7 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:06+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "trial",
+        "sweep_id": "<sweep id>",
+        "params": { "optimizer.head_lr": 0.001 }
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     },
     {
+      "kind": "run",
       "run": {
         "experiment_id": "<sweep id>_t1",
         "state": "running",
         "created": "2000-01-01T00:00:07+00:00",
         "relaunched_from": null,
-        "sweep": "<sweep id>",
-        "trial_params": { "optimizer.head_lr": 0.01 },
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": null,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
         "status_error": null,
         "heartbeat": "2000-01-01T00:00:08+00:00",
-        "launch": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "trial",
+        "sweep_id": "<sweep id>",
+        "params": { "optimizer.head_lr": 0.01 }
       },
-      "sweep": null,
-      "tensorboard": null
+      "tensorboard": { "kind": "not_serving" }
     }
   ],
   "compare_bound": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "<relaunched run id>",
           "state": "running",
           "created": "2000-01-01T00:00:31+00:00",
           "relaunched_from": "train-x",
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:32+00:00",
-          "launch": {
-            "agent_client_name": null,
-            "agent_client_version": null,
-            "agent_session": null,
-            "terminal_session": null
-          }
+          "launch": { "kind": "no_agent" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
@@ -2246,41 +2121,41 @@
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-x",
           "state": "running",
           "created": "2000-01-01T00:00:00+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training/dataset/images/undated",
           "current_epoch": null,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:01+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 0,
         "last_logged_metrics": null,
         "rows_after_end": null,
         "registry": [],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n0>"
       }
     ],
-    "dataset_fingerprints": "same",
-    "higher_is_better": {}
+    "directions": {}
   },
   "run_relaunch": {
+    "kind": "run",
     "experiment_id": "<relaunched run id>",
     "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
     "tensorboard": {
+      "kind": "failed",
       "error": "no TensorBoard starts under this test: /scratch/workspace/training/.tcip/experiments/<relaunched run id>",
       "output": null
     },
@@ -2288,7 +2163,7 @@
     "overfit_check": null,
     "warnings": []
   },
-  "sweep_relaunch": { "sweep_id": "<relaunched sweep id>", "warnings": [] },
+  "sweep_relaunch": { "kind": "sweep", "sweep_id": "<relaunched sweep id>", "warnings": [] },
   "crashed_no_logs_refusal": {
     "status": 404,
     "body": {
@@ -2344,56 +2219,54 @@
         "state": "failed",
         "created": "2000-01-01T00:00:02+00:00",
         "relaunched_from": null,
-        "sweep": null,
-        "trial_params": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
         "images_dir": "/scratch/workspace/training/dataset/images/undated",
         "current_epoch": 3.0,
-        "best_metric": null,
-        "best_metric_name": "objective",
+        "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": "a sample failure the scene records for this run",
         "heartbeat": "2000-01-01T00:00:03+00:00",
-        "launch": null
-      },
-      "error": null
+        "launch": { "kind": "no_launch_line" },
+        "kind": "standalone"
+      }
     }
   ],
   "unknown_frame": {
-    "type": "status",
+    "type": "error",
     "experiment_id": "train-unknown",
-    "status": null,
     "error": "Run not found: train-unknown"
   },
   "moved_split_choices": {
     "as_recorded": {
       "case": "drawn",
       "line": "draws its split again with seed 0 over the labels as they are now",
-      "reason": "Not found: data.images_dir = '/scratch/workspace/moved-data/images/undated'"
+      "check": {
+        "kind": "blocked",
+        "reason": "Not found: data.images_dir = '/scratch/workspace/moved-data/images/undated'"
+      }
     },
     "selections": []
   },
   "compare_verified": {
     "experiments": [
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-verified",
           "state": "completed",
           "created": "2000-01-01T00:00:41+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "tiny_trainer_fixtures:build_mean_intensity_regressor",
           "task": "regression",
           "images_dir": "/scratch/workspace/verified/images/undated",
           "current_epoch": 1.0,
-          "best_metric": 0.036369,
-          "best_metric_name": "loss",
+          "best": { "metric": "loss", "value": 0.036369 },
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-verified",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:42+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
@@ -2424,7 +2297,7 @@
               "registered_at": "2000-01-01T00:00:44+00:00",
               "metrics": {},
               "tags": [],
-              "experiment_id": "train-verified"
+              "origin": "run"
             },
             "facts": {
               "metrics": {
@@ -2446,29 +2319,28 @@
             }
           }
         ],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": null,
         "dataset_id": null,
         "dataset_fingerprint": null
       },
       {
+        "kind": "compared",
         "run": {
           "experiment_id": "train-unstamped",
           "state": "completed",
           "created": "2000-01-01T00:00:21+00:00",
           "relaunched_from": null,
-          "sweep": null,
-          "trial_params": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
           "images_dir": "/scratch/workspace/training-data/train-unstamped/images/undated",
           "current_epoch": 1.0,
-          "best_metric": null,
-          "best_metric_name": "objective",
+          "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
           "status_error": null,
           "heartbeat": "2000-01-01T00:00:22+00:00",
-          "launch": null
+          "launch": { "kind": "no_launch_line" },
+          "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
@@ -2488,29 +2360,28 @@
               "registered_at": "2000-01-01T00:00:24+00:00",
               "metrics": {},
               "tags": [],
-              "experiment_id": "train-unstamped"
+              "origin": "run"
             },
             "facts": { "metrics": {}, "metrics_source": null }
           }
         ],
-        "split": { "case": "drawn", "selection_dir": null, "seed": 0, "redraw": null },
+        "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
         "dataset_id": null,
         "dataset_fingerprint": "<dataset_fingerprint n6>"
       }
     ],
-    "dataset_fingerprints": "unset",
-    "higher_is_better": {
-      "lr": null,
-      "optimizer_steps": null,
-      "selection": null,
-      "stage": null,
-      "target_eff_batch": null,
-      "train_loss": null,
-      "trainable_params": null,
-      "val_loss": false,
-      "val_mae": false,
-      "val_rmse": false
+    "directions": {
+      "lr": "unstated",
+      "optimizer_steps": "unstated",
+      "selection": "unstated",
+      "stage": "unstated",
+      "target_eff_batch": "unstated",
+      "train_loss": "unstated",
+      "trainable_params": "unstated",
+      "val_loss": "lower",
+      "val_mae": "lower",
+      "val_rmse": "lower"
     }
   },
   "verified_best": {
@@ -2521,7 +2392,7 @@
       "registered_at": "2000-01-01T00:00:44+00:00",
       "metrics": {},
       "tags": [],
-      "experiment_id": "train-verified"
+      "origin": "run"
     },
     "facts": {
       "metrics": {
@@ -2541,8 +2412,9 @@
       },
       "metrics_source": "trainer"
     },
+    "kind": "ranking",
     "metric": "val_loss",
-    "higher_is_better": false,
+    "direction": "lower",
     "direction_source": "declared",
     "unregistered": [],
     "skipped": [{ "name": "train-unstamped", "unverified": true, "unstamped": true }]

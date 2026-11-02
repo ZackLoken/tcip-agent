@@ -319,22 +319,26 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
 
 
 def test_record_or_problem_reports_the_record(tmp_path: Path) -> None:
-    from tcip_mcp.project_record import create_record, record_or_problem
+    from tcip_mcp.project_record import (
+        ReadRecord,
+        create_record,
+        record_or_problem,
+    )
 
     record = create_record(
         tmp_path, "Valley block", "north orchard", INVARIANCES
     )
 
-    assert record_or_problem(tmp_path) == (record, None)
+    assert record_or_problem(tmp_path) == ReadRecord(record=record)
 
 
 def test_record_or_problem_names_the_absent_record(tmp_path: Path) -> None:
     from tcip_mcp.project_record import record_or_problem
 
-    record, problem = record_or_problem(tmp_path)
+    reading = record_or_problem(tmp_path)
 
-    assert record is None
-    assert problem is not None and "initialize_project" in problem
+    assert reading.kind == "unread"
+    assert "initialize_project" in reading.problem
 
 
 def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
@@ -348,10 +352,10 @@ def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
     create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
     damage_record(project_record_key(tmp_path), b"{not valid json")
 
-    record, problem = record_or_problem(tmp_path)
+    reading = record_or_problem(tmp_path)
 
-    assert record is None
-    assert problem is not None and "does not decode" in problem
+    assert reading.kind == "unread"
+    assert "does not decode" in reading.problem
 
 
 def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_record(

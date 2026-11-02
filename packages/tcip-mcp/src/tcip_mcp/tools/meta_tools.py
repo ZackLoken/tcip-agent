@@ -10,12 +10,13 @@ import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum, auto
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
+    Field,
     JsonValue,
     ValidationError,
 )
@@ -119,19 +120,26 @@ def _write_memory(project: Path, record: MemoryRecord) -> str:
     return record_id
 
 
-class Unreadable(BaseModel):
-    """A stored record that will not read as its corpus's record, and the reason its reader gave."""
+class ReadEntry[M: MemoryRecord](BaseModel):
+    """One record of a project-memory corpus that read, under the id it is stored as."""
 
-    model_config = ConfigDict(extra="forbid")
+    kind: Literal["read"] = "read"
+    id: str
+    record: M
 
+
+class UnreadEntry(BaseModel):
+    """A stored record that will not read as its corpus's record: its id and its reader's why."""
+
+    kind: Literal["unread"] = "unread"
+    id: str
     reason: str
 
 
-class MemoryEntry[M: MemoryRecord](BaseModel):
-    """One record of a project-memory corpus under the id it is stored as."""
-
-    id: str
-    record: M | Unreadable
+type MemoryEntry[M: MemoryRecord] = Annotated[
+    ReadEntry[M] | UnreadEntry, Field(discriminator="kind")
+]
+"""One stored record of a corpus, told apart by its ``kind``."""
 
 
 class MemoryPage[M: MemoryRecord](BaseModel):
@@ -146,7 +154,7 @@ def memory_entries[M: MemoryRecord](
 ) -> list[MemoryEntry[M]]:
     """Return every entry of ``record``'s corpus under a project, newest stated time first.
 
-    A record that will not read (:func:`read_memory`) is carried as :class:`Unreadable` and,
+    A record that will not read (:func:`read_memory`) is carried as an :class:`UnreadEntry` and,
     stating no time, sorts after every one that does; entries stating one time keep id order.
     """
     stated: list[tuple[datetime, MemoryEntry[M]]] = []
@@ -156,11 +164,9 @@ def memory_entries[M: MemoryRecord](
         try:
             read = read_memory(record, project_path, name)
         except (DecodeError, ValidationError) as exc:
-            unread.append(
-                MemoryEntry(id=name, record=Unreadable(reason=str(exc)))
-            )
+            unread.append(UnreadEntry(id=name, reason=str(exc)))
         else:
-            stated.append((read.timestamp, MemoryEntry(id=name, record=read)))
+            stated.append((read.timestamp, ReadEntry(id=name, record=read)))
     stated.sort(key=lambda pair: pair[0], reverse=True)
     return [*(entry for _, entry in stated), *unread]
 
@@ -243,12 +249,20 @@ def load_project_memory(
     needle = filter_substring.lower().strip()
 
     def matches(entry: MemoryEntry[Any]) -> bool:
-        record = entry.record
         if category is not None and not (
-            isinstance(record, FrictionReport) and record.category == category
+            entry.kind == "read"
+            and isinstance(entry.record, FrictionReport)
+            and entry.record.category == category
         ):
             return False
-        texts = [entry.id, *record.model_dump().values()]
+        texts = [
+            entry.id,
+            *(
+                [entry.reason]
+                if entry.kind == "unread"
+                else entry.record.model_dump().values()
+            ),
+        ]
         return any(
             isinstance(text, str) and needle in text.lower() for text in texts
         )
