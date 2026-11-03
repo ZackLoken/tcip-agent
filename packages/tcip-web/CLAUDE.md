@@ -40,8 +40,9 @@ Every row's preparation writes the operating contract and every knowledge docume
 the workspace at its row's `files` (`tcip_mcp.knowledge.harness_files`): Claude's the contract's
 block of `CLAUDE.md` and `.claude/skills/`, Codex's the block of `AGENTS.md` and
 `.agents/skills/`, each block replacing an earlier launch's and keeping the file's other text, and
-each skill naming the `serve_domain_knowledge` call that serves its document. The Antigravity row, whose harness takes
-its MCP server, its tool approvals and its hooks only through its own configuration, also
+each skill naming the `serve_domain_knowledge` call that serves its document. The Antigravity row,
+whose harness takes its MCP server, its tool approvals and its hooks only through its own
+configuration, also
 registers the server through `agy mcp add`, allows every tcip tool in agy's settings file, keeping
 the file's other entries, writes the session hook into the workspace's `.agents/hooks.json`,
 keeping that file's other entries, and writes `.agents/skills/` and one always-on rule into the
@@ -72,8 +73,9 @@ none, that it has none and to hold each report until `initialize_project` create
 lands in; on a resume nothing; with where the knowledge documents are served beside each.
 Antigravity documents no hook after a compaction and injects an always-on rule into every turn,
 so its row's rule carries the contract and names the tools those parts come from, to read them
-again through once the conversation's earlier turns are summarized. The parts are fit to `ORIENTATION_CAP`, Claude Code's documented cap: whole while all
-fit together, otherwise sharing the room so a part
+again through once the conversation's earlier turns are summarized. The parts are fit to
+`ORIENTATION_CAP`, Claude Code's documented cap: whole while all fit together, otherwise sharing
+the room so a part
 needing less than an equal share keeps all of it, each cut part stating how many it was cut from
 and a part that does not fit standing as a short fixed statement of it; Codex's hook passes its
 whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness reads
@@ -89,7 +91,8 @@ agent as a nested session, every prompt-cache control Claude Code ranks above th
 `promptCacheTtl` or that turns its caching off, so the lifetime the row requests is the one its
 agent runs with, and `PYTHONPATH`, so no harness inherits the backend's import roots, a
 repository's on a development machine; its `PWD` is the workspace it runs in. The MCP server and
-the session hook import through the packages the backend's interpreter has installed. Session create names a row by its exact id; the status route lists every row
+the session hook import through the packages the backend's interpreter has installed. Session
+create names a row by its exact id; the status route lists every row
 as `provider_status` answers it, launchable or with the reason it cannot launch, and the rail lets
 the breeder pick one. A row is added
 only after its harness's real flags are read from the installed CLI and one live smoke
