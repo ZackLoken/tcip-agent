@@ -4,12 +4,7 @@ The developer's contract for Claude (and any Claude-driven agent) changing this 
 this file or the operating contract and a knowledge document disagree on a domain fact, the
 document wins; on behavior, this file and the contract win. Machine and harness facts live in
 `CLAUDE.local.md` (not shipped); commit, push and prose rules that hold across projects live in the
-global `CLAUDE.md`.
-
-While the architecture contraction is underway, `docs/NEXT_SESSION_PROMPT.md` governs procedure
-only: which session does what, in what order, with which tools. This file governs what a change is
-and how it is judged, and the prompt never overrides it; a prompt sentence that would change how a
-change is judged is a conflict brought to the owner rather than followed.
+global `CLAUDE.md`; the gates and rules a contributor meets live in `CONTRIBUTING.md`.
 
 ## The operating contract
 
@@ -66,68 +61,48 @@ or schema currently serves one, that implementation is replaceable and the guara
 
 ## Working a change
 
-- A contraction change starts from its deletion list: the functions, keys, branches and records it
-  removes, named with their line counts read from the tree, and what replaces each. The change is
-  done when each is gone and nothing was added beside the replacement. The line delta by area
-  (`packages/`, `tests/`, other, off `git diff --numstat`, run by `tools/line_delta.py`) is evidence
-  that the list was executed, never the target: package code that grew means a mechanism survived
-  beside its replacement and is named and deleted or the change stops, and a delta that fell without
-  a named deletion is the same finding the other way. A finding names a site; the fix names the
-  mechanism that produced the site and removes it. Patching the site with a refusal, a second
-  comparison, a lookup by another spelling or a per-shape copy of an existing reader keeps the
-  mechanism and is how it survives to the next read. Before proposing any fix, say what deleting the
-  mechanism would look like and what stops that; only a live consumer or an owner ruling stops it,
-  never the code's current shape. A brief never scopes out a sibling of a mechanism the change
-  deletes: if every instance cannot go, that is the stop rule, brought to the owner, never a
-  paragraph naming what was left. When the shape a fact travels in changes (a record gains a field,
-  a value arrives whole where parts arrived before, a sample list stands where a directory stood),
-  the functions that read it change their parameters to the new shape in the same change. A caller
-  adapting a new-shape value to an old-shape parameter, by splitting a path into a directory and a
-  stem, listing a directory to rebuild a sample list it already holds, or passing a config key where
-  the record carries the value, keeps the old shape alive at that call and leaves the signature
-  claiming it is the real one. Enumerate those callers; only a caller that genuinely holds the old
-  shape keeps a parameter for it.
-- A test that guards a fix is observed failing without the fix. Say when you have seen it fail and
-  say when you have not. Every admits-valid-work test constructs its input through the platform's
-  own producer.
-- Before changing how a shared fact is spelled, produced or read, enumerate every producer of it and
-  every reader of it, and state that list before the change rather than after. The rule that covers
-  deleting something shared covers changing one: a convention changed at the site that named the
-  defect and not at its siblings leaves the fact spelled two ways, and a producer and a reader
-  spelling one key differently is a rail that answers no leak where there is one.
-- A shared fact ships an agreement test: two routes' own records compared against each other, not
-  each against a fixture. The two routes share one implementation of the fact (CLAUDE.md's "call one
-  from the other"); the test guards that they still agree, and never licenses a second
-  implementation to stay. Guard tests cannot stand in for it. A guard test proves the site it
-  guards, so a suite of them stays green over exactly this defect, which is how it survives to be
-  found by a reader instead of by the suite. A metric, a derivation or a training mechanism
-  ships the same test pointed outward: its number compared against an external reference
-  (pycocotools for average precision, scikit-learn for the agreement and classification metrics,
-  a tiny dataset whose right answer is known in advance for a training or freezing mechanism),
-  since a suite that compares the platform only to itself proves nothing about the number. A
-  change replacing a hand-written implementation with a library call lands with that test as
-  its gate.
-- Gates before reporting a change done: the Commands block's ruff and mypy lines, and the change's
-  own test files. Never report a gate before its slowest part finishes; green means no detected
-  breakage, never correctness. A test touching the filesystem outside `tmp_path` is the first reread
-  on a break that only shows in CI.
+- A test that guards a fix is observed failing without the fix, through
+  `tools/prove_test_fails_before.py`, and the verdict is named: `GUARDS` is the only evidence, and
+  `VACUOUS`, `INDETERMINATE` and `REFUSED` are reported as what they are, never as coverage. Say
+  when you have seen a test fail and when you have not. Every admits-valid-work test constructs its
+  input through the platform's own producer.
+- A shared fact has one implementation (the operating contract's "call one from the other") and
+  ships an agreement test: two routes' own records compared against each other, not each
+  against a fixture. The test guards that the routes still agree, and never licenses a second
+  implementation to stay. Guard tests cannot stand in for it: a guard test proves the site it
+  guards, so a suite of them stays green over exactly this defect. A metric, a derivation or a
+  training mechanism ships the same test pointed outward: its number compared against an external
+  reference (pycocotools for average precision, scikit-learn for the agreement and classification
+  metrics, a tiny dataset whose right answer is known in advance for a training or freezing
+  mechanism), since a suite that compares the platform only to itself proves nothing about the
+  number. A change replacing a hand-written implementation with a library call lands with that
+  test as its gate.
+- Gates before a pull request: the Commands block's ruff and mypy lines, and the change's own test
+  files, each run to its end and its output read before the pull request opens. CI is the full
+  gate. Green means no detected breakage, never correctness. A test touching the filesystem
+  outside `tmp_path` is the first reread on a break that only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
   as proof a change was safe, check that some fixture could have come out differently.
 - Every change names the behaviors it alters and the ones it preserves, each held by a test that
   reads what the agent or the breeder receives through its producer (the hook's orientation, a
   rendered instruction file, the settings, the argv, a route's answer), seen failing without the
-  change; a behavior no test can reach is named with the one check that reaches it. A
-  regression's scope is its introducing commit's whole removal set, each thing removed or moved
-  given a named home.
+  change; a behavior no test can reach is named with the one check that reaches it.
+- The line delta by area (`packages/`, `tests/`, other, off `git diff --numstat`, run by
+  `tools/line_delta.py`) is reported on every pull request. On an issue labeled `mechanism`,
+  package code that grew stops the merge until the code reviewer names what survived beside its
+  replacement and the growth is justified on the pull request; on an issue labeled `outcome` it
+  is a signal, reported and not a gate.
+- Two readers on every pull request, launched together and never the implementer: one reads the
+  diff against the issue's done-criterion and the invariants, checks nothing hand-written where a
+  library exists, and answers what exists twice in the touched mechanism; the other reads the
+  tests, every guard's fail-before verdict, whether any behavior lost its guard, and whether each
+  test reaches the boundary a breeder or the agent touches.
+- A read by another model family is advisory on a design and binding on a change to a persisted
+  format: when two families agree against the author's position, the author conforms or brings
+  the split to the owner, and the outvoted side never lands on its own authority.
 - The production mypy gate is the full one; only `tests` keeps grandfathered codes, in `mypy.ini`.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs, never a narrative of the session that made it.
-- Match the weight of the process to the change. Reach for a worktree, a second reader or another
-  model family when the change is genuinely hard to get right, not as a standing ritual, and say why
-  you reached for it.
-- A second model family's verdict is not advisory. When two families agree against your own
-  position, conform to them or bring the split to the owner; the outvoted side never lands on the
-  adjudicator's own authority.
 - One fact has one spelling. Whenever a change touches a fact, ask what else states it: a second
   key, field, flag or parameter that must agree with the first is a derived spelling, whether or not
   this change introduced it, and it is deleted rather than kept, reconciled or asked which one
