@@ -38,8 +38,21 @@ class Invalid(BaseModel):
 
     @classmethod
     def of(cls, exc: ValidationError) -> Invalid:
-        """Return ``exc``'s errors as ``exc.errors(include_url=False)`` reports them."""
-        return cls(issues=_ISSUES.validate_python(exc.errors(include_url=False)))
+        """Return ``exc``'s errors as ``exc.errors(include_url=False)`` reports them.
+
+        A validator's own refusal (``value_error``) is its raised error's message, which pydantic
+        carries under the error's ``ctx``.
+        """
+        return cls(
+            issues=_ISSUES.validate_python(
+                [
+                    {**e, "msg": str(e["ctx"]["error"])}
+                    if e["type"] == "value_error"
+                    else e
+                    for e in exc.errors(include_url=False)
+                ]
+            )
+        )
 
     def __str__(self) -> str:
         """Return each issue as text, in the order the model raised them."""
