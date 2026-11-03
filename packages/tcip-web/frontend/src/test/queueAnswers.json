@@ -187,8 +187,8 @@
         "total_candidates": 4,
         "reviewed_skipped": 1,
         "queue": [
-          { "image": "img1.jpg", "score": 0.4, "reference_member": null },
-          { "image": "img5.jpg", "score": 0.3, "reference_member": null },
+          { "image": "img5.jpg", "score": 0.4, "reference_member": null },
+          { "image": "img1.jpg", "score": 0.3, "reference_member": null },
           { "image": "img3.jpg", "score": 0.2, "reference_member": null },
           { "image": "img4.jpg", "score": 0.1, "reference_member": null }
         ]

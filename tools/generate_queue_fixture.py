@@ -59,8 +59,9 @@ GENERATED_PATH = FRONTEND_SRC / "test" / "queueAnswers.json"
 STATED_SCORER = "stated"
 """The name :func:`stated_scorer` is registered under for the whole scene."""
 
-SCORES = {"img1.jpg": 0.4, "img3.jpg": 0.2, "img4.jpg": 0.1, "img5.jpg": 0.3}
-"""The score :func:`stated_scorer` answers for each photograph not finished, sample values."""
+SCORES = {"img5.jpg": 0.4, "img1.jpg": 0.3, "img3.jpg": 0.2, "img4.jpg": 0.1}
+"""The score :func:`stated_scorer` answers for each photograph not finished, sample values ranking
+the fifth first, so the rank order is not the photographs' own order."""
 
 STATED = {
     "scorer": {"name": STATED_SCORER},
