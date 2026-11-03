@@ -32,9 +32,20 @@ CI's jobs, whose module docstring says which steps it leaves to CI.
   for one of these without a design discussion already open.
 - One concern per commit, in dependency order, with LF line endings. A commit message states the
   standing constraint the change installs, not a narrative of the session that wrote it.
+- A pull request states its line delta by area (`python tools/line_delta.py <repo> main..`) as a
+  signal, and leaves the mechanism it touched with less to maintain than it found: no second
+  implementation of a fact, nothing written by hand that a library the environment carries
+  provides, no vocabulary or key declared in more than one place, no per-shape copy of a reader.
+  Growth a pull request justifies is admitted; machinery kept beside its replacement is not.
+- Two readers read every pull request before it merges, a code review against the issue's
+  done-criterion and the invariants, and a test-engineering read of every guard's fail-before
+  verdict and of whether each test reaches the boundary a breeder or the agent touches; their
+  verdicts are recorded on the pull request.
 - The crop trait vocabulary is controlled: it lives in `crops.yml` and
   `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`. Do not invent a trait name, state, or column
   prefix anywhere else; thread a real trait through as data read from the project's own registry.
-- Agent-driven contributions are welcome under the same gates as a human's: the same tests, the same
-  review, the same design-first rule for a persisted-format or refusal change. A pull request is
-  judged on what it changes, not on who or what wrote it.
+- The platform has one maintainer, and every change lands through the maintainer's own review.
+  A pull request from outside is read as a report of what its author needs: it is reviewed,
+  what it asks for is re-implemented under these rules when the roadmap takes it, and the pull
+  request itself is closed with that answer, never merged. An issue is the better form for the
+  same request.
