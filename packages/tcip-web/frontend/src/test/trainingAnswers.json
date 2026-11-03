@@ -37,7 +37,12 @@
           "val_ratio"
         ],
         "kind": "unread",
-        "reason": "1 validation error for Selection\n  Input should be a dictionary or an instance of Selection [type=dataclass_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/dataclass_type"
+        "reason": {
+          "kind": "invalid",
+          "issues": [
+            { "loc": [], "msg": "Input should be a dictionary or an instance of Selection" }
+          ]
+        }
       }
     ]
   },

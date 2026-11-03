@@ -2776,14 +2776,14 @@ def test_the_orientation_of_a_project_whose_record_will_not_read_states_why(
 
     damage_record(project_record_key(str(opened.root)), b"{not valid json")
     reading = record_or_problem(opened.root)
-    assert reading.kind == "unread"
+    assert reading.kind == "unread" and reading.problem.kind == "unreadable"
 
     created = client.post("/api/terminal/sessions", json=LAUNCH)
 
     assert created.status_code == 200, created.text
     told = _started(client, created.json()["session_id"])
     assert told is not None
-    assert f'"problem": {json.dumps(reading.problem)}' in told
+    assert json.dumps(reading.problem.message) in told
 
 
 # ── resuming a row's conversation ───────────────────────────────────────

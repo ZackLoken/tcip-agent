@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readRefusalText } from "@/api/http";
 import { metaApi } from "@/api/meta";
 import { sessionsApi } from "@/api/sessions";
 import { UNREAD } from "@/api/types.generated";
@@ -65,7 +66,7 @@ describe("MetaTab annotation sessions", () => {
   it("lists a report's context as key and value pairs", async () => {
     const [entry] = META_ANSWERS.reports.entries;
     if (entry.kind === UNREAD)
-      throw new Error(`the produced report will not read: ${entry.reason}`);
+      throw new Error(`the produced report will not read: ${readRefusalText(entry.reason)}`);
     const { record } = entry;
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
     vi.mocked(metaApi.reports).mockResolvedValue(META_ANSWERS.reports);
@@ -82,7 +83,8 @@ describe("MetaTab annotation sessions", () => {
 
   it("lists a retrospective's stated sections under their field names", async () => {
     const [read, unread] = META_ANSWERS.retrospectives.entries;
-    if (read.kind === UNREAD) throw new Error(`the produced one will not read: ${read.reason}`);
+    if (read.kind === UNREAD)
+      throw new Error(`the produced one will not read: ${readRefusalText(read.reason)}`);
     if (unread.kind !== UNREAD) throw new Error("the produced damaged one reads");
     const { record } = read;
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
@@ -95,9 +97,7 @@ describe("MetaTab annotation sessions", () => {
     expect(screen.getByText(record.did_not_work)).toBeInTheDocument();
     expect(record.assumptions_wrong).toBe("");
     expect(screen.queryByText("assumptions wrong")).not.toBeInTheDocument();
-    // The reason spans lines, compared with its whitespace collapsed as the matcher reads a node.
-    const collapsed = (text: string) => text.replace(/\s+/g, " ").trim();
-    expect(screen.getByText(collapsed(unread.reason))).toBeInTheDocument();
+    expect(screen.getByText(readRefusalText(unread.reason))).toBeInTheDocument();
   });
 
   it("lists the sessions a load returns", async () => {

@@ -17,6 +17,7 @@ from typing import Any, Literal, NamedTuple, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from tcip_mcp.agent_identity import RecordedIdentity
+from tcip_mcp.read_refusal import Invalid
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
     DatasetSelection,
@@ -357,7 +358,7 @@ class StateStore:
             try:
                 new_state = GuiState.model_validate(merged)
             except ValidationError as exc:
-                raise GuiMutationInvalidError(str(exc)) from exc
+                raise GuiMutationInvalidError(str(Invalid.of(exc))) from exc
             if opened is not None:
                 await asyncio.to_thread(
                     write_gui_snapshot, opened.root, new_state

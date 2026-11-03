@@ -158,6 +158,24 @@ def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     )
 
 
+def test_no_fixture_carries_a_link_naming_the_library_release_that_wrote_it() -> (
+    None
+):
+    """No fixture holds pydantic's documentation link, whose path names its minor release.
+
+    A served reason built from a model's refusal carries each error's place and message, so no
+    fixture goes stale on a pydantic release.
+    """
+    carrying = [
+        name
+        for name in SERVED_FIXTURES
+        if "errors.pydantic.dev"
+        in _generator(name).GENERATED_PATH.read_text(encoding="utf-8")
+    ]
+
+    assert carrying == []
+
+
 def _values_under(served: object, key: str) -> list[object]:
     """Return every value ``served`` holds under ``key``, at any depth."""
     if isinstance(served, dict):

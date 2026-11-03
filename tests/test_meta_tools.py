@@ -169,7 +169,11 @@ def test_a_stored_report_whose_category_is_outside_the_vocabulary_reads_as_unrea
 
     (entry,) = load_project_memory(tmp_path, MemoryKind.reports)["entries"]
     assert entry["id"] == written["id"]
-    assert "category" in entry["reason"]
+    assert isinstance(entry["reason"], dict)
+    assert entry["reason"]["kind"] == "invalid"
+    assert [issue["loc"] for issue in entry["reason"]["issues"]] == [
+        ["category"]
+    ]
 
 
 def test_two_reports_in_one_instant_under_one_category_land_under_ids_naming_neither(
@@ -414,7 +418,7 @@ def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading
     )
 
     (entry,) = load_project_memory(tmp_path, MemoryKind.reports)["entries"]
-    assert "category" in entry["reason"]
+    assert ["category"] in [issue["loc"] for issue in entry["reason"]["issues"]]
 
 
 def test_a_report_that_is_not_a_json_object_will_not_decode(
@@ -477,7 +481,8 @@ def test_a_retrospective_that_will_not_read_sorts_after_every_dated_one_by_id(
         "aaa-unreadable",
         "zzz-unreadable",
     ]
-    assert "Retrospective" in entries[1]["reason"]
+    (issue,) = entries[1]["reason"]["issues"]
+    assert issue["loc"] == [] and "Retrospective" in issue["msg"]
 
 
 def test_load_reports_filters_by_category(tmp_path: Path) -> None:

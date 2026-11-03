@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
+import { readRefusalText } from "@/api/http";
 import { resultsApi } from "@/api/inference";
 import {
   type CaptureInvariances,
@@ -237,7 +238,9 @@ describe("SetupTab trait revisions", () => {
 
     render(<SetupTab />);
 
-    expect(await screen.findByText(innermostHolding(`${trait}: ${reason}`))).toBeInTheDocument();
+    expect(
+      await screen.findByText(innermostHolding(`${trait}: ${readRefusalText(reason)}`)),
+    ).toBeInTheDocument();
   });
 });
 

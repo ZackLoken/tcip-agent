@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
+import { readRefusalText } from "@/api/http";
 import { type OpenAnswer, type SnapshotProject, UNREAD } from "@/api/types.generated";
 import { LISTING_REFRESH_MS, ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
@@ -75,7 +76,7 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker />);
 
     if (STRAY.kind !== UNREAD) throw new Error("the produced stray's record read");
-    expect(await screen.findByText(STRAY.problem)).toBeInTheDocument();
+    expect(await screen.findByText(readRefusalText(STRAY.problem))).toBeInTheDocument();
     expect(screen.getByText(STRAY.tree.dataset_root)).toBeInTheDocument();
   });
 

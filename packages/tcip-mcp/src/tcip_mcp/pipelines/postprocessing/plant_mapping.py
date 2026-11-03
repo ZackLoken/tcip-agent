@@ -381,12 +381,14 @@ class MappingBuild:
         """
         from pydantic import ValidationError
 
+        from tcip_mcp.read_refusal import Invalid
+
         try:
             build = _MAPPING_RECORD.validate_json(encode_record(raw))
         except ValidationError as exc:
             raise ValueError(
                 f"plant mapping {name!r} under {project} is not a record this "
-                f"reader decodes: {exc}"
+                f"reader decodes: {Invalid.of(exc)}"
             ) from exc
         return replace(build, record_sha256=record_digest(raw))
 

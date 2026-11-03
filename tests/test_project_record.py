@@ -338,7 +338,8 @@ def test_record_or_problem_names_the_absent_record(tmp_path: Path) -> None:
     reading = record_or_problem(tmp_path)
 
     assert reading.kind == "unread"
-    assert "initialize_project" in reading.problem
+    assert reading.problem.kind == "unreadable"
+    assert "initialize_project" in reading.problem.message
 
 
 def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
@@ -355,7 +356,36 @@ def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
     reading = record_or_problem(tmp_path)
 
     assert reading.kind == "unread"
-    assert "does not decode" in reading.problem
+    assert reading.problem.kind == "unreadable"
+    assert "does not decode" in reading.problem.message
+
+
+def test_record_or_problem_serves_a_record_its_model_refuses_by_the_models_issues(
+    tmp_path: Path,
+) -> None:
+    """A record that decodes but is no project record is unread by its model's issues.
+
+    Each issue is the record's place and the model's message, the record lacking its site.
+    """
+    from tcip_mcp.project_record import (
+        create_record,
+        project_record_key,
+        record_or_problem,
+    )
+
+    record = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
+    ts.replace(
+        project_record_key(tmp_path),
+        record.model_dump(mode="json", exclude={"site"}),
+    )
+
+    reading = record_or_problem(tmp_path)
+
+    assert reading.kind == "unread"
+    assert reading.problem.kind == "invalid"
+    assert [issue.loc for issue in reading.problem.issues] == [["site"]]
 
 
 def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_record(
