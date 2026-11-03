@@ -158,6 +158,23 @@ def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     )
 
 
+def test_the_completed_review_queue_ranks_by_the_scores_its_scene_states() -> (
+    None
+):
+    """The queue fixture's completed queue carries the scores its scene's scorer states.
+
+    Each photograph not finished reads at the score ``generate_queue_fixture.SCORES`` states for
+    it, highest first, so no score is one a model forward computed where the fixture was made.
+    """
+    module = _generator("generate_queue_fixture")
+    served = json.loads(module.GENERATED_PATH.read_text(encoding="utf-8"))
+    queue = served["completed"]["state"]["ranked"]["queue"]
+
+    assert [(entry["image"], entry["score"]) for entry in queue] == sorted(
+        module.SCORES.items(), key=lambda stated: stated[1], reverse=True
+    )
+
+
 def test_a_tensorboard_whose_stop_is_unconfirmed_fails_the_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
