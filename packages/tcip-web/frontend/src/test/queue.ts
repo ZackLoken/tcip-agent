@@ -7,7 +7,8 @@ import type { Refusal } from "@/test/refusals";
  *  boolean, a list of floats and an optional float registered as `typed` (`typed_scorers`), a
  *  launch of it the launch route refused for a value of the wrong type, one not taken and its
  *  required ones unstated (`refused_launch`), the photographs' selection for the subject whose
- *  second photograph is finished (`selection`), a queue launched there (`launched`),
+ *  second photograph is finished (`selection`), the catalog with a sample scorer answering stated
+ *  scores registered as `stated` (`stated_scorers`), a queue launched there by it (`launched`),
  *  polled while it ranks (`running`) and once it ended (`completed`), a diversity queue over a
  *  subject no photograph is finished for, ended on the scorer's refusal (`failed`), and the
  *  selection of the dataset's later capture, whose one photograph is named as the first is
@@ -19,6 +20,7 @@ export const QUEUE_ANSWERS = produced as unknown as {
   typed_scorers: ScorerCatalog;
   refused_launch: Refusal<unknown>;
   selection: SelectAnswer;
+  stated_scorers: ScorerCatalog;
   launched: PriorityQueueJob;
   running: PriorityQueueJob;
   completed: PriorityQueueJob;
