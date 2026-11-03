@@ -158,6 +158,41 @@ def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     )
 
 
+def _values_under(served: object, key: str) -> list[object]:
+    """Return every value ``served`` holds under ``key``, at any depth."""
+    if isinstance(served, dict):
+        return [
+            *([served[key]] if key in served else []),
+            *(
+                v
+                for value in served.values()
+                for v in _values_under(value, key)
+            ),
+        ]
+    if isinstance(served, list):
+        return [v for value in served for v in _values_under(value, key)]
+    return []
+
+
+def test_the_delivery_fixture_reads_each_source_digest_as_its_stand_in() -> (
+    None
+):
+    """Each ``source_digest`` the delivery fixture carries is a stand-in, never a digest.
+
+    The digest is over a photograph's encoded bytes, which another platform's encoder writes
+    differently, so the fixture keeps which samples share one and nothing else.
+    """
+    module = _generator("generate_delivery_fixture")
+    served = json.loads(module.GENERATED_PATH.read_text(encoding="utf-8"))
+    digests = _values_under(served, "source_digest")
+
+    assert digests
+    assert all(
+        isinstance(d, str) and d.startswith("<source_digest n")
+        for d in digests
+    ), digests[:3]
+
+
 def test_the_completed_review_queue_ranks_by_the_scores_its_scene_states() -> (
     None
 ):
