@@ -101,6 +101,40 @@ def test_a_run_naming_no_model_launches_antigravity_on_the_parity_argon_model(
     assert meta["effort_requested"] == "high"
 
 
+def test_a_codex_run_naming_no_effort_passes_and_records_the_parity_effort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Codex run naming no effort passes the parity effort explicitly and records it.
+
+    Under the no-tools condition the harness ignores its own config, so the effort the run
+    records is the one its argv carries.
+    """
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "codex",
+        "qid",
+        "no-tools",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        "stub-model",
+        None,
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "no-tools" / "codex"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert "--ignore-user-config" in argv
+    assert 'model_reasoning_effort="medium"' in argv
+    assert meta["effort_requested"] == "medium"
+
+
 def test_an_effort_claude_would_ignore_is_refused_by_name() -> None:
     with pytest.raises(SystemExit, match="claude effort 'turbo'"):
         cross_family_ask.effective_effort("claude", "opus", "turbo")

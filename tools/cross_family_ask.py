@@ -103,12 +103,15 @@ CONDITIONS = {
 
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
-    "codex": {"model": None, "effort": "high"},
+    "codex": {"model": None, "effort": "medium"},
     "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
 """The default model and reasoning effort per family, used where the command line names none.
 
-Antigravity's effort is None because its model id states it (:func:`model_id_effort`)."""
+Codex's model is None because it is read from the harness's own config
+(:func:`resolve_codex_model`); its effort is passed explicitly on every run, so a run that
+ignores that config still runs at it. Antigravity's effort is None because its model id states it
+(:func:`model_id_effort`)."""
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
