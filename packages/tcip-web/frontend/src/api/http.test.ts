@@ -5,14 +5,18 @@ import {
   committedOf,
   decodeRefusal,
   getJson,
+  issuesText,
   postJson,
+  readRefusalText,
   refusalOf,
   StructuredRefusalError,
 } from "@/api/http";
 import {
   AUDIT_ENTRY_NOT_WRITTEN,
   type AuditGapRefusal,
+  INVALID,
   type SavedExport,
+  UNREADABLE,
 } from "@/api/types.generated";
 import { ANNOTATE_ANSWERS } from "@/test/annotate";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
@@ -104,5 +108,35 @@ describe("http helpers", () => {
     expect(committedOf(await thrown(RESULTS_ANSWERS.mapping_audit_gap))).toBeNull();
 
     expect(committedOf(await thrown(ANNOTATE_ANSWERS.engine_refusal))).toBeNull();
+  });
+});
+
+describe("a read refusal's text", () => {
+  it("issuesText joins each issue's dotted place and message, a placeless one by its message", () => {
+    expect(
+      issuesText([
+        { loc: ["revisions", 0, "entry"], msg: "Field required" },
+        { loc: [], msg: "Input should be a valid dictionary" },
+      ]),
+    ).toBe("revisions.0.entry: Field required; Input should be a valid dictionary");
+    expect(issuesText([])).toBe("");
+  });
+
+  it("readRefusalText reads an invalid record by its issues and an unreadable one by its message", () => {
+    expect(
+      readRefusalText({ kind: INVALID, issues: [{ loc: ["site"], msg: "Field required" }] }),
+    ).toBe("site: Field required");
+    expect(readRefusalText({ kind: UNREADABLE, message: "the record does not decode" })).toBe(
+      "the record does not decode",
+    );
+  });
+
+  it("decodeRefusal reads an invalid detail as its issues' text", async () => {
+    const raised = await decodeRefusal(
+      answeredWith(400, {
+        detail: { kind: INVALID, issues: [{ loc: ["view", "scale"], msg: "must be positive" }] },
+      }),
+    );
+    expect(raised.message).toBe("view.scale: must be positive");
   });
 });

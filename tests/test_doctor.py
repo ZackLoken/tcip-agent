@@ -174,8 +174,8 @@ def test_doctor_flags_a_trait_record_that_will_not_read(
 ) -> None:
     """The doctor flags a trait record that will not read.
 
-    For a trait record the schema refuses, the doctor names the record and its refused
-    localization in an error finding.
+    For a trait record the schema refuses, the doctor names the record and the place of its
+    refused localization in an error finding.
     """
     import tcip_store as ts
 
@@ -189,7 +189,7 @@ def test_doctor_flags_a_trait_record_that_will_not_read(
 
     ((level, msg),) = _messages(found, "'unicorn' will not read")
     assert level == "error"
-    assert "unicorn_match" in msg
+    assert "revisions.0.entry.localization: " in msg
 
 
 def _clean_project(tmp_path: Path) -> Path:
@@ -531,7 +531,7 @@ def test_only_the_unreadable_trait_record_is_reported(tmp_path: Path) -> None:
     ((level, msg),) = _messages(found, "trait '")
     assert level == "error"
     assert "'burr_size' will not read" in msg
-    assert "not_a_localization" in msg
+    assert "revisions.0.entry.localization: " in msg
 
 
 def test_doctor_is_silent_on_a_confirmed_latest_revision(

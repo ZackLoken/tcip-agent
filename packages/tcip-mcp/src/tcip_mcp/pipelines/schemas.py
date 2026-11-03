@@ -39,6 +39,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 from tcip_mcp.pipelines.derivations import DetectorGeometryDerivation
 from tcip_mcp.pipelines.execution import MaskCut
 from tcip_mcp.pipelines.raster_source import RasterIdentity
+from tcip_mcp.read_refusal import Invalid
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -987,7 +988,7 @@ def checked_train_config(
             config, context={"project": project}
         ), []
     except ValidationError as e:
-        return None, _issues(e)
+        return None, [str(issue) for issue in Invalid.of(e).issues]
 
 
 def train_config(
@@ -1001,15 +1002,3 @@ def train_config(
     if spec is None:
         raise ValueError(f"invalid training config: {'; '.join(issues)}")
     return spec
-
-
-def _issues(error: ValidationError) -> list[str]:
-    """Return one issue string per error ``error`` carries, located by its config path."""
-    issues: list[str] = []
-    for err in error.errors():
-        loc = ".".join(str(x) for x in err.get("loc", ()))
-        msg = err.get("msg", "invalid")
-        if err.get("type") == "value_error":
-            msg = str(err.get("ctx", {}).get("error", msg))
-        issues.append(f"{loc}: {msg}" if loc else msg)
-    return issues
