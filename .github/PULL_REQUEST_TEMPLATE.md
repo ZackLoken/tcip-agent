@@ -17,5 +17,9 @@
       design issue was opened and discussed before this pull request
 - [ ] Commits are one concern each, in dependency order, with LF line endings, and each message
       states the standing constraint the change installs
+- [ ] The line delta by area is stated above (`python tools/line_delta.py <repo> main..`), and the
+      mechanism touched is left with less to maintain: no second implementation, no hand-written
+      version of what a library provides, no vocabulary declared twice
+- [ ] The code reviewer's and the test engineer's reads are recorded here with their verdicts
 - [ ] No new or renamed crop trait vocabulary outside `crops.yml` and
       `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`
