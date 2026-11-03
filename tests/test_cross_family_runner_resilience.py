@@ -26,13 +26,13 @@ def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said(
     """A model id that states its effort takes it, with the --effort flag medium or unset."""
     assert (
         cross_family_ask.effective_effort(
-            "antigravity", "gemini-3.1-pro-high", "medium"
+            "antigravity", "gemini-4-argon-high", "medium"
         )
         == "high"
     )
     assert (
         cross_family_ask.effective_effort(
-            "antigravity", "gemini-3.1-pro-high", None
+            "antigravity", "gemini-4-argon-high", None
         )
         == "high"
     )
@@ -48,6 +48,69 @@ def test_an_effort_claude_would_ignore_is_refused_by_name() -> None:
         cross_family_ask.effective_effort("codex", "gpt-5.6-sol", "high")
         == "high"
     )
+
+
+def test_an_antigravity_launch_passes_no_effort_flag_beside_the_id_that_states_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An Antigravity launch names the model and no effort flag; the record holds the suffix.
+
+    The harness refuses ``--effort`` beside an id that states its effort, so the argv carries
+    none whatever effort was asked for, and the run records the id's own.
+    """
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "antigravity",
+        "qid",
+        "as-shipped",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        "gemini-4-argon-low",
+        "high",
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert "--effort" not in argv
+    assert argv[argv.index("--model") + 1] == "gemini-4-argon-low"
+    assert meta["effort_requested"] == "low"
+
+
+def test_a_run_naming_no_model_launches_antigravity_on_the_parity_argon_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run naming neither model nor effort launches Antigravity on the parity Argon model."""
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "antigravity",
+        "qid",
+        "as-shipped",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        None,
+        None,
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert argv[argv.index("--model") + 1] == "gemini-4-argon-high"
+    assert meta["effort_requested"] == "high"
 
 
 def _stub_run(

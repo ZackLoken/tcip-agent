@@ -104,9 +104,13 @@ CONDITIONS = {
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
     "codex": {"model": None, "effort": "high"},
-    "antigravity": {"model": "gemini-3.1-pro-high", "effort": None},
+    "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
-"""The default model and reasoning effort per family, used where the command line names none."""
+"""The default model and reasoning effort per family, used where the command line names none.
+
+Antigravity's model id states its effort in its own suffix, so its effort entry is None. A
+family whose harness echoes nothing has the request as its record, so a bogus value here fails
+the run by name instead of running on a default."""
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -118,8 +122,8 @@ ANTIGRAVITY_ID_EFFORTS = ("low", "medium", "high")
 def model_id_effort(family: str, model: str | None) -> str | None:
     """Return the effort a model id states in its own suffix, or None.
 
-    Only a family whose harness takes effort that way (antigravity's `gemini-3.1-pro-high`) has
-    one; every other id or family answers None.
+    Only a family whose harness takes effort that way (antigravity, whose every listed id ends
+    in low, medium or high) has one; every other id or family answers None.
     """
     if family == "antigravity" and model:
         suffix = model.rsplit("-", 1)[-1]
@@ -379,7 +383,9 @@ def build_agy(
 
     The prompt file's text is passed as ``--print``, with JSON output, the sandbox, a print
     timeout of ``timeout`` seconds and ``cwd`` added; ``condition`` is not read, so a run's MCP
-    servers are whatever the harness's own configuration names.
+    servers are whatever the harness's own configuration names. ``effort`` is not passed: every
+    model id the harness lists states its effort in its own suffix, and the harness refuses an
+    ``--effort`` flag beside one.
     """
     argv = [
         str(AGY),
@@ -395,8 +401,6 @@ def build_agy(
     ]
     if model:
         argv += ["--model", model]
-    if effort:
-        argv += ["--effort", effort]
     return argv, None
 
 
@@ -643,7 +647,7 @@ def run_one(
     (run_dir / "response.md").write_text(response, encoding="utf-8")
 
     # Claude Code names the model it ran; the others echo nothing, so for them the request is
-    # the record and a bogus value fails the run by name (see the PARITY note).
+    # the record and a bogus value fails the run by name (the PARITY docstring).
     model_used = claude_model_used(stdout) if family == "claude" else None
     model_mismatch = bool(
         model_used
