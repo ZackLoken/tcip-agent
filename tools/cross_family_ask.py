@@ -104,7 +104,7 @@ CONDITIONS = {
 
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
-    "codex": {"model": None, "effort": "high"},
+    "codex": {"model": None, "effort": "medium"},
     "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
 """The default model and reasoning effort per family, used where the command line names none
