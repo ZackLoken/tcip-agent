@@ -104,9 +104,11 @@ CONDITIONS = {
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
     "codex": {"model": None, "effort": "high"},
-    "antigravity": {"model": "gemini-3.1-pro-high", "effort": None},
+    "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
-"""The default model and reasoning effort per family, used where the command line names none."""
+"""The default model and reasoning effort per family, used where the command line names none.
+
+Antigravity's effort is None because its model id states it (:func:`model_id_effort`)."""
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -115,13 +117,13 @@ CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ANTIGRAVITY_ID_EFFORTS = ("low", "medium", "high")
 
 
-def model_id_effort(family: str, model: str | None) -> str | None:
-    """Return the effort a model id states in its own suffix, or None.
+def model_id_effort(model: str | None) -> str | None:
+    """Return the effort an Antigravity model id states in its own suffix, or None.
 
-    Only a family whose harness takes effort that way (antigravity's `gemini-3.1-pro-high`) has
-    one; every other id or family answers None.
+    Every id that harness lists ends in one of :data:`ANTIGRAVITY_ID_EFFORTS`; an id ending in
+    none of them, or no id, answers None.
     """
-    if family == "antigravity" and model:
+    if model:
         suffix = model.rsplit("-", 1)[-1]
         if suffix in ANTIGRAVITY_ID_EFFORTS:
             return suffix
@@ -133,12 +135,18 @@ def effective_effort(
 ) -> str | None:
     """Return the effort a run records and, where the harness takes one, passes.
 
-    A model id that states its own effort (:func:`model_id_effort`) is the effort, whatever
-    ``effort`` says. For claude, a supplied, nonempty ``effort`` not in :data:`CLAUDE_EFFORTS`
-    raises ``SystemExit``.
+    For antigravity the effort is the one its model id states (:func:`model_id_effort`), the
+    harness taking no flag beside it; a supplied ``effort`` that is not that one raises
+    ``SystemExit`` naming the id to pass instead. For claude, a supplied, nonempty ``effort``
+    not in :data:`CLAUDE_EFFORTS` raises ``SystemExit``.
     """
-    stated = model_id_effort(family, model)
-    if stated is not None:
+    if family == "antigravity":
+        stated = model_id_effort(model)
+        if effort and effort != stated:
+            raise SystemExit(
+                f"antigravity takes its effort from the model id, and {model!r} states "
+                f"{stated!r}; for {effort!r} pass the id ending in -{effort} and no --effort"
+            )
         return stated
     if family == "claude" and effort and effort not in CLAUDE_EFFORTS:
         raise SystemExit(
@@ -379,7 +387,8 @@ def build_agy(
 
     The prompt file's text is passed as ``--print``, with JSON output, the sandbox, a print
     timeout of ``timeout`` seconds and ``cwd`` added; ``condition`` is not read, so a run's MCP
-    servers are whatever the harness's own configuration names.
+    servers are whatever the harness's own configuration names, and ``effort`` is not read,
+    since the model id carries it.
     """
     argv = [
         str(AGY),
@@ -395,8 +404,6 @@ def build_agy(
     ]
     if model:
         argv += ["--model", model]
-    if effort:
-        argv += ["--effort", effort]
     return argv, None
 
 
