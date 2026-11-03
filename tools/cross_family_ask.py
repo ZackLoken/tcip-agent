@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import dataclasses
 import datetime
 import hashlib
 import json
@@ -104,9 +105,10 @@ CONDITIONS = {
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
     "codex": {"model": None, "effort": "high"},
-    "antigravity": {"model": "gemini-3.1-pro-high", "effort": None},
+    "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
-"""The default model and reasoning effort per family, used where the command line names none."""
+"""The default model and reasoning effort per family, used where the command line names none
+(:func:`resolve_launch`)."""
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -115,17 +117,16 @@ CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ANTIGRAVITY_ID_EFFORTS = ("low", "medium", "high")
 
 
-def model_id_effort(family: str, model: str | None) -> str | None:
-    """Return the effort a model id states in its own suffix, or None.
+def model_id_effort(model: str | None) -> tuple[str, str | None]:
+    """Return an Antigravity model id's base and the effort its suffix states.
 
-    Only a family whose harness takes effort that way (antigravity's `gemini-3.1-pro-high`) has
-    one; every other id or family answers None.
+    The suffix is one of :data:`ANTIGRAVITY_ID_EFFORTS`, split off the base at its hyphen; an
+    id ending in none of them, or no id, answers the whole id (empty for none) and None.
     """
-    if family == "antigravity" and model:
-        suffix = model.rsplit("-", 1)[-1]
-        if suffix in ANTIGRAVITY_ID_EFFORTS:
-            return suffix
-    return None
+    base, _, suffix = (model or "").rpartition("-")
+    if suffix in ANTIGRAVITY_ID_EFFORTS:
+        return base, suffix
+    return model or "", None
 
 
 def effective_effort(
@@ -133,12 +134,20 @@ def effective_effort(
 ) -> str | None:
     """Return the effort a run records and, where the harness takes one, passes.
 
-    A model id that states its own effort (:func:`model_id_effort`) is the effort, whatever
-    ``effort`` says. For claude, a supplied, nonempty ``effort`` not in :data:`CLAUDE_EFFORTS`
-    raises ``SystemExit``.
+    For antigravity it is the effort :func:`model_id_effort` reads from the id; a supplied
+    ``effort`` that is not that one raises ``SystemExit`` naming the id to pass instead. For
+    claude, a supplied, nonempty ``effort`` not in :data:`CLAUDE_EFFORTS` raises ``SystemExit``.
     """
-    stated = model_id_effort(family, model)
-    if stated is not None:
+    if family == "antigravity":
+        base, stated = model_id_effort(model)
+        if effort and effort != stated:
+            wanted = (
+                f"{base}-{effort}" if stated else f"an id ending in -{effort}"
+            )
+            raise SystemExit(
+                f"antigravity takes its effort from the model id, and {model!r} states "
+                f"{stated!r}; for {effort!r} pass {wanted} and no --effort"
+            )
         return stated
     if family == "claude" and effort and effort not in CLAUDE_EFFORTS:
         raise SystemExit(
@@ -164,6 +173,41 @@ def resolve_codex_model(requested: str | None) -> tuple[str, str]:
     raise SystemExit(
         "codex model is unnamed: pass --model or set `model` in ~/.codex/config.toml; a run "
         "on the harness's built-in default would not record which model answered"
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class Launch:
+    """What one family's run launches with: the family, its model and source, and its effort."""
+
+    family: str
+    requested_model: str | None
+    model: str | None
+    model_source: str
+    effort: str | None
+
+
+def resolve_launch(
+    family: str, model: str | None, effort: str | None
+) -> Launch:
+    """Return what ``family`` launches with from the flags ``model`` and ``effort``.
+
+    A flag left unset takes :data:`PARITY`'s value; codex's model then comes from its config
+    (:func:`resolve_codex_model`) and the effort is :func:`effective_effort`'s, so each refusal
+    those raise fires here.
+    """
+    resolved_model = model or PARITY[family]["model"]
+    model_source = "flag" if model else "parity table"
+    if family == "codex":
+        resolved_model, model_source = resolve_codex_model(resolved_model)
+    return Launch(
+        family,
+        model,
+        resolved_model,
+        model_source,
+        effective_effort(
+            family, resolved_model, effort or PARITY[family]["effort"]
+        ),
     )
 
 
@@ -379,7 +423,7 @@ def build_agy(
 
     The prompt file's text is passed as ``--print``, with JSON output, the sandbox, a print
     timeout of ``timeout`` seconds and ``cwd`` added; ``condition`` is not read, so a run's MCP
-    servers are whatever the harness's own configuration names.
+    servers are whatever the harness's own configuration names, and ``effort`` is not read.
     """
     argv = [
         str(AGY),
@@ -395,8 +439,6 @@ def build_agy(
     ]
     if model:
         argv += ["--model", model]
-    if effort:
-        argv += ["--effort", effort]
     return argv, None
 
 
@@ -550,23 +592,23 @@ def extract_response(
 
 
 def run_one(
-    family: str,
     question_id: str,
     condition_name: str,
     prompt: str,
     cwd: pathlib.Path,
     out_root: pathlib.Path,
     timeout: int,
-    model: str | None,
-    effort: str | None,
+    launch: Launch,
     images: list[pathlib.Path] | None = None,
     prompt_source: str | None = None,
 ) -> dict:
     """Run one family on one question under one condition and return its metadata row.
 
-    The run's directory under ``out_root`` receives the prompt, the argv, stdout, stderr, the
-    extracted response and ``meta.json``.
+    The family, its model and its effort are ``launch``'s (:func:`resolve_launch`). The run's
+    directory under ``out_root`` receives the prompt, the argv, stdout, stderr, the extracted
+    response and ``meta.json``.
     """
+    family = launch.family
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
     # A prior meta.json here is this family's own earlier run under the same question and condition.
@@ -580,20 +622,14 @@ def run_one(
     prompt_file = run_dir / "prompt.txt"
     prompt_file.write_text(body, encoding="utf-8")
 
-    resolved_model = model or PARITY[family]["model"]
-    model_source = "flag" if model else "parity table"
-    if family == "codex":
-        resolved_model, model_source = resolve_codex_model(resolved_model)
-    resolved_effort = effective_effort(
-        family, resolved_model, effort or PARITY[family]["effort"]
-    )
+    resolved_model = launch.model
     argv, last = BUILDERS[family](
         prompt_file,
         run_dir,
         cwd,
         condition,
         resolved_model,
-        resolved_effort,
+        launch.effort,
         timeout,
         images=resolved_images,
     )
@@ -643,7 +679,7 @@ def run_one(
     (run_dir / "response.md").write_text(response, encoding="utf-8")
 
     # Claude Code names the model it ran; the others echo nothing, so for them the request is
-    # the record and a bogus value fails the run by name (see the PARITY note).
+    # the record.
     model_used = claude_model_used(stdout) if family == "claude" else None
     model_mismatch = bool(
         model_used
@@ -664,12 +700,12 @@ def run_one(
         "family": family,
         "executable": str(EXECUTABLES[family]),
         "harness_version": harness_version(EXECUTABLES[family]),
-        "model_requested": model,
+        "model_requested": launch.requested_model,
         "model_resolved": resolved_model,
-        "model_source": model_source,
+        "model_source": launch.model_source,
         "model_used": model_used,
         "model_mismatch": model_mismatch,
-        "effort_requested": resolved_effort,
+        "effort_requested": launch.effort,
         "cwd": str(cwd),
         "mcp": condition["mcp"],
         "guidance_injected": condition["guidance"],
@@ -719,7 +755,10 @@ def main() -> int:
     parser.add_argument(
         "--effort",
         default=None,
-        help="Override the per-family parity reasoning effort.",
+        help=(
+            "Override the per-family parity reasoning effort; for antigravity the effort is "
+            "the model id's own, and a value disagreeing with it is refused."
+        ),
     )
     parser.add_argument(
         "--serial", action="store_true", help="Run families one at a time."
@@ -780,6 +819,11 @@ def main() -> int:
     if missing:
         parser.error("harness not found: " + "; ".join(missing))
 
+    launches = {
+        family: resolve_launch(family, args.model, args.effort)
+        for family in families
+    }
+
     if CONDITIONS[args.condition]["mcp"] == "tcip" and "codex" in families:
         print(
             "note: headless codex reaches no locally spawned MCP server, so its run in this "
@@ -811,15 +855,13 @@ def main() -> int:
             family_prompt, family_prompt_source = prompt_for(family)
             results.append(
                 run_one(
-                    family,
                     args.question_id,
                     args.condition,
                     family_prompt,
                     args.cwd,
                     args.out,
                     args.timeout,
-                    args.model,
-                    args.effort,
+                    launches[family],
                     images=args.image,
                     prompt_source=family_prompt_source,
                 )
@@ -834,15 +876,13 @@ def main() -> int:
                 futures[
                     pool.submit(
                         run_one,
-                        family,
                         args.question_id,
                         args.condition,
                         family_prompt,
                         args.cwd,
                         args.out,
                         args.timeout,
-                        args.model,
-                        args.effort,
+                        launches[family],
                         images=args.image,
                         prompt_source=family_prompt_source,
                     )
