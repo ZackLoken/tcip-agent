@@ -1125,7 +1125,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n25>"
                 },
-                "source_digest": "4a88ef6a96da568be1fcd3c40ac8979af9f672665e155ace3b317cc30cdb4e10"
+                "source_digest": "<source_digest n41>"
               },
               {
                 "sample": {
@@ -1141,7 +1141,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n26>"
                 },
-                "source_digest": "0eb0414895217c5084e206c5dddafa3d7a9778b50458e977c355f1930173c3df"
+                "source_digest": "<source_digest n42>"
               },
               {
                 "sample": {
@@ -1157,7 +1157,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n27>"
                 },
-                "source_digest": "239bb19a349b9029bb90bddf3382fa871e1f00546cd6b35c858c787412dc7581"
+                "source_digest": "<source_digest n43>"
               },
               {
                 "sample": {
@@ -1173,7 +1173,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n28>"
                 },
-                "source_digest": "1431ecd2f3739a66d36fb3096d59da7be0024ad2be94246d2d98b4493b693a98"
+                "source_digest": "<source_digest n44>"
               },
               {
                 "sample": {
@@ -1189,7 +1189,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n29>"
                 },
-                "source_digest": "0aac2809980ecfcf293f2dd2cfd1d062dd691adf6afb0d048c15d327e36637d4"
+                "source_digest": "<source_digest n45>"
               },
               {
                 "sample": {
@@ -1205,7 +1205,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n30>"
                 },
-                "source_digest": "7c01fd57e3d6c53a931760c287b57a14d42c313259731d21d62db79c2172af21"
+                "source_digest": "<source_digest n46>"
               },
               {
                 "sample": {
@@ -1221,7 +1221,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n31>"
                 },
-                "source_digest": "874f5efed8d4450861918e7e3840225b6ebc12cc7b204cba9cebdd501e3b8ae8"
+                "source_digest": "<source_digest n47>"
               },
               {
                 "sample": {
@@ -1237,7 +1237,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n32>"
                 },
-                "source_digest": "83c0cd56fc3687d698fa462690c90d2dde4701e1d496398760c8158159cad9c1"
+                "source_digest": "<source_digest n48>"
               },
               {
                 "sample": {
@@ -1253,7 +1253,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n33>"
                 },
-                "source_digest": "52275db7ea452dd8d5824aa3a2f72fa4f2788a28db2c9067a34306efc05dfbe6"
+                "source_digest": "<source_digest n49>"
               },
               {
                 "sample": {
@@ -1269,7 +1269,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n34>"
                 },
-                "source_digest": "656b9d6c0b36a4dc0805b15dffe7131c70e74b8054930d1780a08f51405d938b"
+                "source_digest": "<source_digest n50>"
               },
               {
                 "sample": {
@@ -1285,7 +1285,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n35>"
                 },
-                "source_digest": "67ce87a3fd62e3f3120fe5f7ec7c1f50826c300bd838369ae0cf8ba37fa2ff04"
+                "source_digest": "<source_digest n51>"
               },
               {
                 "sample": {
@@ -1301,7 +1301,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n36>"
                 },
-                "source_digest": "4e71cc175a1cee4db5fba64ceea74c998818ddc5986d4ef10d6f72a276b4f1e8"
+                "source_digest": "<source_digest n52>"
               },
               {
                 "sample": {
@@ -1317,7 +1317,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n37>"
                 },
-                "source_digest": "f9e96335bd078b6b679668e1cb852b0f62208e1ee1abf9a7a65d1af3cbaaec08"
+                "source_digest": "<source_digest n53>"
               },
               {
                 "sample": {
@@ -1333,7 +1333,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n38>"
                 },
-                "source_digest": "90ebeed530f2ad409809993700ce1819142c0c23263b71e06c72e63682b3d1ef"
+                "source_digest": "<source_digest n54>"
               },
               {
                 "sample": {
@@ -1349,7 +1349,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n39>"
                 },
-                "source_digest": "851120a4313efdffc93ef8295bf5f400d074d459df93ad4763d60a0b8afbfdfb"
+                "source_digest": "<source_digest n55>"
               },
               {
                 "sample": {
@@ -1365,7 +1365,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n40>"
                 },
-                "source_digest": "61098cde229e5968733862b01c0dc6e3fcf964690eb921f13e7eb6e9219cc6e7"
+                "source_digest": "<source_digest n56>"
               }
             ],
             "selection_dir": "/scratch/workspace/counts/selection",
@@ -1763,7 +1763,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n25>"
                 },
-                "source_digest": "4a88ef6a96da568be1fcd3c40ac8979af9f672665e155ace3b317cc30cdb4e10"
+                "source_digest": "<source_digest n41>"
               },
               {
                 "sample": {
@@ -1779,7 +1779,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n26>"
                 },
-                "source_digest": "0eb0414895217c5084e206c5dddafa3d7a9778b50458e977c355f1930173c3df"
+                "source_digest": "<source_digest n42>"
               },
               {
                 "sample": {
@@ -1795,7 +1795,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n27>"
                 },
-                "source_digest": "239bb19a349b9029bb90bddf3382fa871e1f00546cd6b35c858c787412dc7581"
+                "source_digest": "<source_digest n43>"
               },
               {
                 "sample": {
@@ -1811,7 +1811,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n28>"
                 },
-                "source_digest": "1431ecd2f3739a66d36fb3096d59da7be0024ad2be94246d2d98b4493b693a98"
+                "source_digest": "<source_digest n44>"
               },
               {
                 "sample": {
@@ -1827,7 +1827,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n29>"
                 },
-                "source_digest": "0aac2809980ecfcf293f2dd2cfd1d062dd691adf6afb0d048c15d327e36637d4"
+                "source_digest": "<source_digest n45>"
               },
               {
                 "sample": {
@@ -1843,7 +1843,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n30>"
                 },
-                "source_digest": "7c01fd57e3d6c53a931760c287b57a14d42c313259731d21d62db79c2172af21"
+                "source_digest": "<source_digest n46>"
               },
               {
                 "sample": {
@@ -1859,7 +1859,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n31>"
                 },
-                "source_digest": "874f5efed8d4450861918e7e3840225b6ebc12cc7b204cba9cebdd501e3b8ae8"
+                "source_digest": "<source_digest n47>"
               },
               {
                 "sample": {
@@ -1875,7 +1875,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n32>"
                 },
-                "source_digest": "83c0cd56fc3687d698fa462690c90d2dde4701e1d496398760c8158159cad9c1"
+                "source_digest": "<source_digest n48>"
               },
               {
                 "sample": {
@@ -1891,7 +1891,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n33>"
                 },
-                "source_digest": "52275db7ea452dd8d5824aa3a2f72fa4f2788a28db2c9067a34306efc05dfbe6"
+                "source_digest": "<source_digest n49>"
               },
               {
                 "sample": {
@@ -1907,7 +1907,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n34>"
                 },
-                "source_digest": "656b9d6c0b36a4dc0805b15dffe7131c70e74b8054930d1780a08f51405d938b"
+                "source_digest": "<source_digest n50>"
               },
               {
                 "sample": {
@@ -1923,7 +1923,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n35>"
                 },
-                "source_digest": "67ce87a3fd62e3f3120fe5f7ec7c1f50826c300bd838369ae0cf8ba37fa2ff04"
+                "source_digest": "<source_digest n51>"
               },
               {
                 "sample": {
@@ -1939,7 +1939,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n36>"
                 },
-                "source_digest": "4e71cc175a1cee4db5fba64ceea74c998818ddc5986d4ef10d6f72a276b4f1e8"
+                "source_digest": "<source_digest n52>"
               },
               {
                 "sample": {
@@ -1955,7 +1955,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n37>"
                 },
-                "source_digest": "f9e96335bd078b6b679668e1cb852b0f62208e1ee1abf9a7a65d1af3cbaaec08"
+                "source_digest": "<source_digest n53>"
               },
               {
                 "sample": {
@@ -1971,7 +1971,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n38>"
                 },
-                "source_digest": "90ebeed530f2ad409809993700ce1819142c0c23263b71e06c72e63682b3d1ef"
+                "source_digest": "<source_digest n54>"
               },
               {
                 "sample": {
@@ -1987,7 +1987,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n39>"
                 },
-                "source_digest": "851120a4313efdffc93ef8295bf5f400d074d459df93ad4763d60a0b8afbfdfb"
+                "source_digest": "<source_digest n55>"
               },
               {
                 "sample": {
@@ -2003,7 +2003,7 @@
                   "extent": { "kind": "whole" },
                   "ground_truth_digest": "<digest n40>"
                 },
-                "source_digest": "61098cde229e5968733862b01c0dc6e3fcf964690eb921f13e7eb6e9219cc6e7"
+                "source_digest": "<source_digest n56>"
               }
             ],
             "selection_dir": "/scratch/workspace/counts/selection",
@@ -2221,7 +2221,7 @@
                   "capture": "2026-02-11",
                   "stem": "s16"
                 },
-                "digest": "<digest n41>",
+                "digest": "<digest n57>",
                 "copy": "reference/0000_s16.json"
               },
               {
@@ -2230,7 +2230,7 @@
                   "capture": "2026-02-11",
                   "stem": "s18"
                 },
-                "digest": "<digest n42>",
+                "digest": "<digest n58>",
                 "copy": "reference/0001_s18.json"
               },
               {
@@ -2239,7 +2239,7 @@
                   "capture": "2026-02-11",
                   "stem": "s22"
                 },
-                "digest": "<digest n43>",
+                "digest": "<digest n59>",
                 "copy": "reference/0002_s22.json"
               },
               {
@@ -2248,7 +2248,7 @@
                   "capture": "2026-02-11",
                   "stem": "s24"
                 },
-                "digest": "<digest n44>",
+                "digest": "<digest n60>",
                 "copy": "reference/0003_s24.json"
               },
               {
@@ -2257,7 +2257,7 @@
                   "capture": "2026-02-11",
                   "stem": "s27"
                 },
-                "digest": "<digest n45>",
+                "digest": "<digest n61>",
                 "copy": "reference/0004_s27.json"
               },
               {
@@ -2266,7 +2266,7 @@
                   "capture": "2026-02-11",
                   "stem": "s28"
                 },
-                "digest": "<digest n46>",
+                "digest": "<digest n62>",
                 "copy": "reference/0005_s28.json"
               },
               {
@@ -2275,7 +2275,7 @@
                   "capture": "2026-02-11",
                   "stem": "s31"
                 },
-                "digest": "<digest n47>",
+                "digest": "<digest n63>",
                 "copy": "reference/0006_s31.json"
               },
               {
@@ -2284,7 +2284,7 @@
                   "capture": "2026-02-11",
                   "stem": "s39"
                 },
-                "digest": "<digest n48>",
+                "digest": "<digest n64>",
                 "copy": "reference/0007_s39.json"
               },
               {
@@ -2293,7 +2293,7 @@
                   "capture": "2026-02-11",
                   "stem": "s03"
                 },
-                "digest": "<digest n49>",
+                "digest": "<digest n65>",
                 "copy": "reference/0008_s03.json"
               },
               {
@@ -2302,7 +2302,7 @@
                   "capture": "2026-02-11",
                   "stem": "s10"
                 },
-                "digest": "<digest n50>",
+                "digest": "<digest n66>",
                 "copy": "reference/0009_s10.json"
               },
               {
@@ -2311,7 +2311,7 @@
                   "capture": "2026-02-11",
                   "stem": "s12"
                 },
-                "digest": "<digest n51>",
+                "digest": "<digest n67>",
                 "copy": "reference/0010_s12.json"
               },
               {
@@ -2320,7 +2320,7 @@
                   "capture": "2026-02-11",
                   "stem": "s14"
                 },
-                "digest": "<digest n52>",
+                "digest": "<digest n68>",
                 "copy": "reference/0011_s14.json"
               },
               {
@@ -2329,7 +2329,7 @@
                   "capture": "2026-02-11",
                   "stem": "s15"
                 },
-                "digest": "<digest n53>",
+                "digest": "<digest n69>",
                 "copy": "reference/0012_s15.json"
               },
               {
@@ -2338,7 +2338,7 @@
                   "capture": "2026-02-11",
                   "stem": "s30"
                 },
-                "digest": "<digest n54>",
+                "digest": "<digest n70>",
                 "copy": "reference/0013_s30.json"
               },
               {
@@ -2347,7 +2347,7 @@
                   "capture": "2026-02-11",
                   "stem": "s33"
                 },
-                "digest": "<digest n55>",
+                "digest": "<digest n71>",
                 "copy": "reference/0014_s33.json"
               },
               {
@@ -2356,7 +2356,7 @@
                   "capture": "2026-02-11",
                   "stem": "s37"
                 },
-                "digest": "<digest n56>",
+                "digest": "<digest n72>",
                 "copy": "reference/0015_s37.json"
               }
             ],
@@ -2373,9 +2373,9 @@
                   "group": "2026-02-11/s16",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n41>"
+                  "ground_truth_digest": "<digest n57>"
                 },
-                "source_digest": "4a88ef6a96da568be1fcd3c40ac8979af9f672665e155ace3b317cc30cdb4e10"
+                "source_digest": "<source_digest n41>"
               },
               {
                 "sample": {
@@ -2389,9 +2389,9 @@
                   "group": "2026-02-11/s18",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n42>"
+                  "ground_truth_digest": "<digest n58>"
                 },
-                "source_digest": "0eb0414895217c5084e206c5dddafa3d7a9778b50458e977c355f1930173c3df"
+                "source_digest": "<source_digest n42>"
               },
               {
                 "sample": {
@@ -2405,9 +2405,9 @@
                   "group": "2026-02-11/s22",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n43>"
+                  "ground_truth_digest": "<digest n59>"
                 },
-                "source_digest": "239bb19a349b9029bb90bddf3382fa871e1f00546cd6b35c858c787412dc7581"
+                "source_digest": "<source_digest n43>"
               },
               {
                 "sample": {
@@ -2421,9 +2421,9 @@
                   "group": "2026-02-11/s24",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n44>"
+                  "ground_truth_digest": "<digest n60>"
                 },
-                "source_digest": "1431ecd2f3739a66d36fb3096d59da7be0024ad2be94246d2d98b4493b693a98"
+                "source_digest": "<source_digest n44>"
               },
               {
                 "sample": {
@@ -2437,9 +2437,9 @@
                   "group": "2026-02-11/s27",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n45>"
+                  "ground_truth_digest": "<digest n61>"
                 },
-                "source_digest": "0aac2809980ecfcf293f2dd2cfd1d062dd691adf6afb0d048c15d327e36637d4"
+                "source_digest": "<source_digest n45>"
               },
               {
                 "sample": {
@@ -2453,9 +2453,9 @@
                   "group": "2026-02-11/s28",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n46>"
+                  "ground_truth_digest": "<digest n62>"
                 },
-                "source_digest": "7c01fd57e3d6c53a931760c287b57a14d42c313259731d21d62db79c2172af21"
+                "source_digest": "<source_digest n46>"
               },
               {
                 "sample": {
@@ -2469,9 +2469,9 @@
                   "group": "2026-02-11/s31",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n47>"
+                  "ground_truth_digest": "<digest n63>"
                 },
-                "source_digest": "874f5efed8d4450861918e7e3840225b6ebc12cc7b204cba9cebdd501e3b8ae8"
+                "source_digest": "<source_digest n47>"
               },
               {
                 "sample": {
@@ -2485,9 +2485,9 @@
                   "group": "2026-02-11/s39",
                   "side": "calibration",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n48>"
+                  "ground_truth_digest": "<digest n64>"
                 },
-                "source_digest": "83c0cd56fc3687d698fa462690c90d2dde4701e1d496398760c8158159cad9c1"
+                "source_digest": "<source_digest n48>"
               },
               {
                 "sample": {
@@ -2501,9 +2501,9 @@
                   "group": "2026-02-11/s03",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n49>"
+                  "ground_truth_digest": "<digest n65>"
                 },
-                "source_digest": "52275db7ea452dd8d5824aa3a2f72fa4f2788a28db2c9067a34306efc05dfbe6"
+                "source_digest": "<source_digest n49>"
               },
               {
                 "sample": {
@@ -2517,9 +2517,9 @@
                   "group": "2026-02-11/s10",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n50>"
+                  "ground_truth_digest": "<digest n66>"
                 },
-                "source_digest": "656b9d6c0b36a4dc0805b15dffe7131c70e74b8054930d1780a08f51405d938b"
+                "source_digest": "<source_digest n50>"
               },
               {
                 "sample": {
@@ -2533,9 +2533,9 @@
                   "group": "2026-02-11/s12",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n51>"
+                  "ground_truth_digest": "<digest n67>"
                 },
-                "source_digest": "67ce87a3fd62e3f3120fe5f7ec7c1f50826c300bd838369ae0cf8ba37fa2ff04"
+                "source_digest": "<source_digest n51>"
               },
               {
                 "sample": {
@@ -2549,9 +2549,9 @@
                   "group": "2026-02-11/s14",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n52>"
+                  "ground_truth_digest": "<digest n68>"
                 },
-                "source_digest": "4e71cc175a1cee4db5fba64ceea74c998818ddc5986d4ef10d6f72a276b4f1e8"
+                "source_digest": "<source_digest n52>"
               },
               {
                 "sample": {
@@ -2565,9 +2565,9 @@
                   "group": "2026-02-11/s15",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n53>"
+                  "ground_truth_digest": "<digest n69>"
                 },
-                "source_digest": "f9e96335bd078b6b679668e1cb852b0f62208e1ee1abf9a7a65d1af3cbaaec08"
+                "source_digest": "<source_digest n53>"
               },
               {
                 "sample": {
@@ -2581,9 +2581,9 @@
                   "group": "2026-02-11/s30",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n54>"
+                  "ground_truth_digest": "<digest n70>"
                 },
-                "source_digest": "90ebeed530f2ad409809993700ce1819142c0c23263b71e06c72e63682b3d1ef"
+                "source_digest": "<source_digest n54>"
               },
               {
                 "sample": {
@@ -2597,9 +2597,9 @@
                   "group": "2026-02-11/s33",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n55>"
+                  "ground_truth_digest": "<digest n71>"
                 },
-                "source_digest": "851120a4313efdffc93ef8295bf5f400d074d459df93ad4763d60a0b8afbfdfb"
+                "source_digest": "<source_digest n55>"
               },
               {
                 "sample": {
@@ -2613,9 +2613,9 @@
                   "group": "2026-02-11/s37",
                   "side": "holdout",
                   "extent": { "kind": "whole" },
-                  "ground_truth_digest": "<digest n56>"
+                  "ground_truth_digest": "<digest n72>"
                 },
-                "source_digest": "61098cde229e5968733862b01c0dc6e3fcf964690eb921f13e7eb6e9219cc6e7"
+                "source_digest": "<source_digest n56>"
               }
             ],
             "selection_dir": "/scratch/workspace/failed/selection",
@@ -2786,7 +2786,7 @@
           "delivery_kind": "per_image_count",
           "producer": {
             "kind": "checkpoint",
-            "checkpoint_sha256": "<checkpoint_sha256 n57>",
+            "checkpoint_sha256": "<checkpoint_sha256 n73>",
             "origin": "run"
           },
           "execution": {
@@ -2859,7 +2859,7 @@
         "entry": {
           "name": "<second run>",
           "checkpoint_path": "/scratch/workspace/counts/.tcip/experiments/<second run>/model_final.pt",
-          "sha256": "<sha256 n58>",
+          "sha256": "<sha256 n74>",
           "registered_at": "2000-01-01T00:00:04+00:00",
           "metrics": {},
           "tags": [],
@@ -2871,7 +2871,7 @@
         "entry": {
           "name": "other",
           "checkpoint_path": "/scratch/workspace/counts/.tcip/experiments/<second run>/second.pt",
-          "sha256": "<sha256 n59>",
+          "sha256": "<sha256 n75>",
           "registered_at": "2000-01-01T00:00:05+00:00",
           "metrics": {},
           "tags": [],
@@ -2961,7 +2961,7 @@
     "unreadable_deliveries": {
       "status": 400,
       "body": {
-        "detail": "1 validation error for DeliveryEventRecord\n  Input should be a valid dictionary or instance of DeliveryEventRecord [type=model_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type"
+        "detail": "1 validation error for DeliveryEventRecord\n  Input should be a valid dictionary or instance of DeliveryEventRecord [type=model_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.14/v/model_type"
       }
     },
     "mapping_cited": {
@@ -3065,7 +3065,7 @@
       "validation": {
         "kind": "shown_unvalidated",
         "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-        "digests": { "curves": "<export 1 digest>", "milestones": "<milestones n60>" }
+        "digests": { "curves": "<export 1 digest>", "milestones": "<milestones n76>" }
       },
       "positive_class_assessed": true,
       "plant_mapping": {
@@ -3245,16 +3245,16 @@
         "validation": {
           "kind": "shown_unvalidated",
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n61>", "milestones": "<milestones n62>" }
+          "digests": { "curves": "<curves n77>", "milestones": "<milestones n78>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "kind": "plant_mapping",
           "name": "valley",
-          "dataset_id": "<dataset_id n63>",
+          "dataset_id": "<dataset_id n79>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n64>",
+          "record_sha256": "<record_sha256 n80>",
           "match_radius": {
             "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
             "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
@@ -3325,16 +3325,16 @@
         "validation": {
           "kind": "shown_unvalidated",
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n65>", "milestones": "<milestones n66>" }
+          "digests": { "curves": "<curves n81>", "milestones": "<milestones n82>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "kind": "plant_mapping",
           "name": "valley",
-          "dataset_id": "<dataset_id n63>",
+          "dataset_id": "<dataset_id n79>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n64>",
+          "record_sha256": "<record_sha256 n80>",
           "match_radius": {
             "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
             "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
@@ -3409,16 +3409,16 @@
         "validation": {
           "kind": "shown_unvalidated",
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n67>", "milestones": "<milestones n68>" }
+          "digests": { "curves": "<curves n83>", "milestones": "<milestones n84>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "kind": "plant_mapping",
           "name": "valley",
-          "dataset_id": "<dataset_id n63>",
+          "dataset_id": "<dataset_id n79>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n64>",
+          "record_sha256": "<record_sha256 n80>",
           "match_radius": {
             "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
             "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
@@ -3520,10 +3520,10 @@
       "plant_mapping": {
         "kind": "plant_mapping",
         "name": "valley",
-        "dataset_id": "<dataset_id n69>",
+        "dataset_id": "<dataset_id n85>",
         "dataset_root": "ds",
         "built_at": "2000-01-01T00:00:16+00:00",
-        "record_sha256": "<record_sha256 n70>",
+        "record_sha256": "<record_sha256 n86>",
         "match_radius": {
           "2026-02-11": { "source": "h_pos_err", "value": 3.0 },
           "2026-02-25": { "source": "h_pos_err", "value": 3.0 },
