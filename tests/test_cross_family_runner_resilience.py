@@ -817,24 +817,83 @@ def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
     )
 
     with pytest.raises(SystemExit, match="codex model is unnamed"):
-        cross_family_ask.resolve_codex_model(None)
+        cross_family_ask.resolve_codex(None, "high")
 
 
-def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
+def test_an_unnamed_codex_effort_with_no_config_is_refused_before_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A config naming the model but no effort refuses an unnamed effort by name."""
     config = tmp_path / "config.toml"
     config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
     monkeypatch.setattr(cross_family_ask, "CODEX_CONFIG", config)
 
-    assert cross_family_ask.resolve_codex_model(None) == (
+    with pytest.raises(SystemExit, match="codex effort is unnamed"):
+        cross_family_ask.resolve_codex(None, None)
+
+
+def test_the_codex_model_and_effort_are_read_from_the_config_and_the_source_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'model = "gpt-from-config"' + chr(10) + 'model_reasoning_effort = "medium"' + chr(10),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cross_family_ask, "CODEX_CONFIG", config)
+
+    assert cross_family_ask.resolve_codex(None, None) == (
         "gpt-from-config",
+        "medium",
         str(config),
     )
-    assert cross_family_ask.resolve_codex_model("gpt-from-flag") == (
+    assert cross_family_ask.resolve_codex("gpt-from-flag", "high") == (
         "gpt-from-flag",
+        "high",
         "flag",
     )
+
+
+def test_a_codex_run_naming_no_effort_passes_and_records_its_configs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run naming no model or effort passes Codex its config's own, and records both.
+
+    The argv names the config's model and effort explicitly, so a run that ignores the user
+    config still runs at them, and the record carries the effort that answered.
+    """
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'model = "gpt-from-config"' + chr(10) + 'model_reasoning_effort = "medium"' + chr(10),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cross_family_ask, "CODEX_CONFIG", config)
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "codex",
+        "qid",
+        "no-tools",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        None,
+        None,
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "no-tools" / "codex"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert "--ignore-user-config" in argv
+    assert argv[argv.index("--model") + 1] == "gpt-from-config"
+    assert 'model_reasoning_effort="medium"' in argv
+    assert meta["effort_requested"] == "medium"
+    assert meta["model_source"] == str(config)
 
 
 def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(

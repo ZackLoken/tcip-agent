@@ -103,11 +103,12 @@ CONDITIONS = {
 
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
-    "codex": {"model": None, "effort": "high"},
+    "codex": {"model": None, "effort": None},
     "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
 """The default model and reasoning effort per family, used where the command line names none.
 
+Codex's None pair means both are read from ``~/.codex/config.toml`` (:func:`resolve_codex`).
 Antigravity's model id states its effort in its own suffix, so its effort entry is None. A
 family whose harness echoes nothing has the request as its record, so a bogus value here fails
 the run by name instead of running on a default."""
@@ -152,22 +153,37 @@ def effective_effort(
     return effort
 
 
-def resolve_codex_model(requested: str | None) -> tuple[str, str]:
-    """Return the codex model name to pass explicitly and where it came from.
+def resolve_codex(
+    model: str | None, effort: str | None
+) -> tuple[str, str, str]:
+    """Return the codex model and effort to pass explicitly, and where the model came from.
 
-    An explicit request wins. Otherwise the `model` key of ~/.codex/config.toml is read. No
-    resolvable name raises ``SystemExit``.
+    An explicit value wins for each. Otherwise the ``model`` and ``model_reasoning_effort`` keys
+    of ~/.codex/config.toml are read, in one read. A model or an effort resolvable from neither
+    raises ``SystemExit``, since a run on the harness's built-in default would not record what
+    answered.
     """
-    if requested:
-        return requested, "flag"
+    config: dict[str, object] = {}
     if CODEX_CONFIG.exists():
         with open(CODEX_CONFIG, "rb") as fh:
-            model = tomllib.load(fh).get("model")
-        if model:
-            return str(model), str(CODEX_CONFIG)
-    raise SystemExit(
-        "codex model is unnamed: pass --model or set `model` in ~/.codex/config.toml; a run "
-        "on the harness's built-in default would not record which model answered"
+            config = tomllib.load(fh)
+    resolved_model = model or config.get("model")
+    if not resolved_model:
+        raise SystemExit(
+            "codex model is unnamed: pass --model or set `model` in ~/.codex/config.toml; a "
+            "run on the harness's built-in default would not record which model answered"
+        )
+    resolved_effort = effort or config.get("model_reasoning_effort")
+    if not resolved_effort:
+        raise SystemExit(
+            "codex effort is unnamed: pass --effort or set `model_reasoning_effort` in "
+            "~/.codex/config.toml; a run on the harness's built-in default would not record "
+            "the effort that answered"
+        )
+    return (
+        str(resolved_model),
+        str(resolved_effort),
+        "flag" if model else str(CODEX_CONFIG),
     )
 
 
@@ -343,7 +359,8 @@ def build_codex(
 
     The prompt goes on stdin (the trailing ``-``). Each image attaches through its own ``-i``
     flag, placed before the other options. The run is read-only in ``cwd``, with
-    ``--ignore-user-config`` outside a ``tcip`` condition.
+    ``--ignore-user-config`` outside a ``tcip`` condition, so the model and effort are passed
+    explicitly on every run rather than left to that file.
     """
     last = run_dir / "final_message.txt"
     argv = [str(CODEX), "exec"]
@@ -587,7 +604,9 @@ def run_one(
     resolved_model = model or PARITY[family]["model"]
     model_source = "flag" if model else "parity table"
     if family == "codex":
-        resolved_model, model_source = resolve_codex_model(resolved_model)
+        resolved_model, effort, model_source = resolve_codex(
+            resolved_model, effort or PARITY[family]["effort"]
+        )
     resolved_effort = effective_effort(
         family, resolved_model, effort or PARITY[family]["effort"]
     )
