@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { readRefusalText } from "@/api/http";
 import { ADMITTED, BLOCKED, type ChoiceCheck, READ, UNREAD } from "@/api/types.generated";
 import { LaunchPicker, NO_OTHER_PARTITION, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { thrown } from "@/test/refusals";
@@ -24,8 +25,8 @@ function reasonOf(check: ChoiceCheck): string {
   return check.reason;
 }
 
-/** The disabled partition's reason as the page shows it, its whitespace collapsed. */
-const DISABLED_REASON = DISABLED.reason.replace(/\s+/g, " ").trim();
+/** The disabled partition's reason as the page shows it. */
+const DISABLED_REASON = readRefusalText(DISABLED.reason);
 
 /** The radio of the partition under `dir` itself, never of one in a directory beneath it. */
 function radioOf(dir: string): HTMLElement {

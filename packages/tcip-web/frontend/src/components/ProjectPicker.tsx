@@ -11,7 +11,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { api } from "@/api/client";
-import { messageOf } from "@/api/http";
+import { messageOf, readRefusalText } from "@/api/http";
 import { type ProjectsListing, READ, type ReadProject, UNREAD } from "@/api/types.generated";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SeasonRail } from "@/components/SeasonRail";
@@ -313,7 +313,7 @@ export function ProjectPicker() {
                     <span className="font-mono text-tcip-fg truncate" title={tree.dataset_root}>
                       {tree.dataset_root}
                     </span>
-                    <span className="tcip-problem">{p.problem}</span>
+                    <span className="tcip-problem">{readRefusalText(p.problem)}</span>
                   </div>
                 );
               }

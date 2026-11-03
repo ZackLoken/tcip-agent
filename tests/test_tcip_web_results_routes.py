@@ -51,7 +51,8 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
 ) -> None:
     """The trait listing names a record its schema refuses beside the valid one.
 
-    The refused record is listed under ``unreadable`` by name and reason.
+    The refused record is listed under ``unreadable`` by name, its reason the model's issues,
+    each by its place in the record and its message.
     """
     from tcip_mcp import traits
 
@@ -69,7 +70,11 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
 
     assert [record["trait"] for record in body["traits"]] == ["bud_opening"]
     assert [entry["trait"] for entry in body["unreadable"]] == ["unicorn"]
-    assert "localization" in body["unreadable"][0]["reason"]
+    reason = body["unreadable"][0]["reason"]
+    assert isinstance(reason, dict) and reason["kind"] == "invalid"
+    assert ["revisions", 0, "entry", "localization"] in [
+        issue["loc"] for issue in reason["issues"]
+    ]
 
 
 def test_plant_mapping_build_requires_a_registered_dataset(

@@ -180,7 +180,7 @@ def _entry_line(entry: MemoryEntry[Any], width: int) -> str:
     """
     label: str
     if entry.kind == "unread":
-        label, text = "malformed", entry.reason
+        label, text = "malformed", str(entry.reason)
     elif isinstance(record := entry.record, FrictionReport):
         label, text = record.category, record.detail
     else:

@@ -707,6 +707,7 @@ def admitted(
         stem_of,
     )
     from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.read_refusal import read_refusal
     from tcip_mcp.subject_registry import registry_for_dataset_root
 
     keys: dict[Key, ImageClaim] = {}
@@ -742,7 +743,7 @@ def admitted(
                     document = label_document(item.document)
                     flags_of(item.flags)
                 except (UnreadableLabelDocumentError, ValidationError) as exc:
-                    faults.append(f"{where} does not read: {exc}")
+                    faults.append(f"{where} does not read: {read_refusal(exc)}")
                     continue
                 labeled = (document.width, document.height)
                 for subject in {a.subject for a in document.annotations} | set(

@@ -258,7 +258,8 @@ def test_read_selection_checked_tells_absence_apart_from_a_broken_record(
     ts.replace(selection_key(broken_dir), {"seed": 1, "samples": []})
     broken, broken_error = read_selection_checked(broken_dir, project=tmp_path)
     assert broken is None
-    assert broken_error is not None and "group_by" in broken_error
+    assert broken_error is not None and broken_error.kind == "invalid"
+    assert ["group_by"] in [issue.loc for issue in broken_error.issues]
 
 
 # -- list_split_choices ------------------------------------------------------------
@@ -428,7 +429,9 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     chosen = _chosen(picked_cfg, str(other_subject_dir), tmp_path)
     assert "scope" not in chosen["data"]
 
-    UnreadSelectionChoice.model_validate(by_dir[str(broken_dir)])
+    broken = by_dir[str(broken_dir)]
+    assert isinstance(broken["reason"], dict)
+    assert UnreadSelectionChoice.model_validate(broken).reason.kind == "invalid"
 
 
 def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path) -> None:

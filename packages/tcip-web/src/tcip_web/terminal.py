@@ -42,6 +42,7 @@ from tcip_mcp.knowledge.harness_files import (
     write_skills,
     write_text,
 )
+from tcip_mcp.read_refusal import Invalid
 from tcip_web.state import OpenProject, store
 
 if TYPE_CHECKING:
@@ -348,7 +349,9 @@ def _json_object(path: Path) -> dict[str, Any]:
             else {}
         )
     except ValidationError as exc:
-        raise ValueError(f"{path} does not hold a JSON object: {exc}") from exc
+        raise ValueError(
+            f"{path} does not hold a JSON object: {Invalid.of(exc)}"
+        ) from exc
 
 
 def _write_json(path: Path, body: dict) -> None:

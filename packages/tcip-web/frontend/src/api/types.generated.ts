@@ -51,6 +51,8 @@ export const FINITE_BEST = "finite_best";
 
 export const HAND_OFF_ASKED = "hand_off_asked";
 
+export const INVALID = "invalid";
+
 export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
 
 export const LANDED = "landed";
@@ -158,6 +160,8 @@ export const UNCOMPARED = "uncompared";
 export const UNLAUNCHABLE = "unlaunchable";
 
 export const UNREAD = "unread";
+
+export const UNREADABLE = "unreadable";
 
 export const UNVALIDATED = "unvalidated";
 
@@ -1215,6 +1219,16 @@ export interface InferenceJobFrame {
   job: InferenceJob;
 }
 
+export interface Invalid {
+  kind: "invalid";
+  issues: Issue[];
+}
+
+export interface Issue {
+  loc: (string | number)[];
+  msg: string;
+}
+
 export type JobState_Completed_ = Pending | Running | Completed | Canceled | Failed;
 
 export type JobState_QueueRanked_ = Pending | Running | QueueRanked | Canceled | Failed;
@@ -1536,6 +1550,8 @@ export interface ReadProject {
   kind: "read";
   record: ProjectRecord;
 }
+
+export type ReadRefusal = Invalid | Unreadable;
 
 export interface RecordedIdentity {
   agent_client_name: string | null;
@@ -2073,7 +2089,7 @@ export interface Unlaunchable {
 export interface UnreadEntry {
   kind: "unread";
   id: string;
-  reason: string;
+  reason: ReadRefusal;
 }
 
 export interface UnreadProject {
@@ -2081,19 +2097,24 @@ export interface UnreadProject {
   tree: DatasetTree;
   image_count: number;
   kind: "unread";
-  problem: string;
+  problem: ReadRefusal;
 }
 
 export interface UnreadSelectionChoice {
   selection_dir: string;
   replaced_split_keys: string[];
   kind: "unread";
-  reason: string;
+  reason: ReadRefusal;
+}
+
+export interface Unreadable {
+  kind: "unreadable";
+  message: string;
 }
 
 export interface UnreadableTrait {
   trait: string;
-  reason: string;
+  reason: Invalid;
 }
 
 export interface UnvalidatedBucket {

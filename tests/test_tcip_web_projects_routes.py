@@ -16,6 +16,7 @@ from tests._web_fixtures import INVARIANCES
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from tcip_mcp.read_refusal import ReadRefusal
     from tcip_web.state import OpenProject
 
 
@@ -325,15 +326,15 @@ def test_list_reports_the_record_across_four_project_states(
     assert len(good.id) == 12
     assert good.invariances == INVARIANCES
 
-    def problem(project: Path) -> str:
+    def problem(project: Path) -> ReadRefusal:
         return UnreadProject.model_validate(
             by_path[str(project.resolve())]
         ).problem
 
-    assert "initialize_project" in problem(recordless)
+    assert "initialize_project" in str(problem(recordless))
     assert not database_file(str(recordless)).is_file()
-    assert "does not decode" in problem(undecodable)
-    assert "is not a project record" in problem(invalid)
+    assert "does not decode" in str(problem(undecodable))
+    assert problem(invalid).kind == "invalid"
 
 
 def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
