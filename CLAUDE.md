@@ -29,8 +29,8 @@ naming the `serve_domain_knowledge` tool, which serves it; a document is read in
 ## Working on the platform
 
 - Platform work skips the operating contract's project ritual entirely.
-- Orientation reads go by `git grep` or the Grep tool over a named subtree and then the file
-  itself; no code index is maintained while the tree changes daily.
+- Orientation reads go by a code search (the semantic index where it is connected, otherwise
+  `git grep` or the Grep tool over a named subtree) and then the file itself, whole.
 
 ## Invariants for platform code
 
@@ -77,9 +77,10 @@ or schema currently serves one, that implementation is replaceable and the guara
   mechanism), since a suite that compares the platform only to itself proves nothing about the
   number. A change replacing a hand-written implementation with a library call lands with that
   test as its gate.
-- Gates before a pull request: the Commands block's ruff and mypy lines, and the change's own test
-  files, each run to its end and its output read before the pull request opens. CI is the full
-  gate. Green means no detected breakage, never correctness. A test touching the filesystem
+- Gates before a pull request: the Commands block's lines for what the change touched (the ruff
+  and mypy lines for Python, the five frontend lines for a frontend file), and the change's own
+  test files, each run to its end and its output read before the pull request opens. CI is the
+  full gate. Green means no detected breakage, never correctness. A test touching the filesystem
   outside `tmp_path` is the first reread on a break that only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
   as proof a change was safe, check that some fixture could have come out differently.
@@ -87,11 +88,18 @@ or schema currently serves one, that implementation is replaceable and the guara
   reads what the agent or the breeder receives through its producer (the hook's orientation, a
   rendered instruction file, the settings, the argv, a route's answer), seen failing without the
   change; a behavior no test can reach is named with the one check that reaches it.
-- The line delta by area (`packages/`, `tests/`, other, off `git diff --numstat`, run by
-  `tools/line_delta.py`) is reported on every pull request. On an issue labeled `mechanism`,
-  package code that grew stops the merge until the code reviewer names what survived beside its
-  replacement and the growth is justified on the pull request; on an issue labeled `outcome` it
-  is a signal, reported and not a gate.
+- The platform has one maintainer, and every change leaves the mechanism it touched with less to
+  maintain than it found. The line delta by area (`packages/`, `tests/`, other, off
+  `git diff --numstat`, run by `tools/line_delta.py`) is reported on every pull request as a
+  signal, never a target: growth the pull request justifies is admitted. What is never admitted
+  is machinery kept or added beside its replacement: a second implementation of a fact, a
+  hand-written version of what a library the environment carries provides, a vocabulary or key
+  declared in more than one place, a per-shape copy of a reader. The code reviewer names any of
+  these in the touched mechanism, and the pull request removes it before it merges.
+- Before changing how a shared fact is spelled, produced or read, enumerate its producers and
+  readers in the mechanism the change touches and state the list on the pull request; a
+  convention changed at the site that named the defect and not at its siblings leaves the fact
+  spelled two ways.
 - Two readers on every pull request, launched together and never the implementer: one reads the
   diff against the issue's done-criterion and the invariants, checks nothing hand-written where a
   library exists, and answers what exists twice in the touched mechanism; the other reads the
@@ -120,6 +128,7 @@ or schema currently serves one, that implementation is replaceable and the guara
 conda activate tcip-agent
 pytest tests/ -n 4 --tb=short --timeout=300 -q
 ruff check packages tests tools
+ruff format --check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
 npm --prefix packages/tcip-web/frontend run format:check   # the frontend gate, whole and in order
