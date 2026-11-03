@@ -107,8 +107,7 @@ PARITY: dict[str, dict[str, str | None]] = {
     "codex": {"model": None, "effort": "medium"},
     "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
-"""The default model and reasoning effort per family, used where the command line names none
-(:func:`resolve_launch`)."""
+"""The default model and reasoning effort per family, used where the command line names none."""
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
