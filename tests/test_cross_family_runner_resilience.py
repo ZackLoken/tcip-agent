@@ -20,22 +20,67 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said() -> (
-    None
-):
-    """A model id that states its effort takes it, with the --effort flag medium or unset."""
-    assert (
-        cross_family_ask.effective_effort(
-            "antigravity", "gemini-3.1-pro-high", "medium"
-        )
-        == "high"
+def test_an_antigravity_launch_passes_no_effort_flag_and_records_the_ids_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An Antigravity launch names the model and no effort flag; the record holds the suffix.
+
+    The run proceeds the same with no effort named and with the id's own effort named.
+    """
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
     )
-    assert (
-        cross_family_ask.effective_effort(
-            "antigravity", "gemini-3.1-pro-high", None
-        )
-        == "high"
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
+
+    for effort in (None, "low"):
+        meta = cross_family_ask.run_one(
+            "antigravity",
+            "qid",
+            "as-shipped",
+            "question",
+            tmp_path,
+            tmp_path / "out",
+            5,
+            cross_family_ask.resolve_launch(
+                "antigravity", "gemini-4-argon-low", effort
+            ),
+        )
+
+        run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+        argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+        assert "--effort" not in argv
+        assert argv[argv.index("--model") + 1] == "gemini-4-argon-low"
+        assert meta["effort_requested"] == "low"
+
+
+def test_a_run_naming_no_model_launches_antigravity_on_the_parity_argon_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run naming neither model nor effort launches Antigravity on the parity Argon model."""
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "antigravity",
+        "qid",
+        "as-shipped",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        cross_family_ask.resolve_launch("antigravity", None, None),
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert argv[argv.index("--model") + 1] == "gemini-4-argon-high"
+    assert meta["effort_requested"] == "high"
 
 
 def test_an_effort_claude_would_ignore_is_refused_by_name() -> None:
@@ -91,8 +136,7 @@ def test_a_harness_returning_no_usable_stdout_still_records_its_run(
         tmp_path,
         tmp_path / "out",
         5,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
     )
 
     run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
@@ -601,8 +645,7 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
         tmp_path,
         tmp_path / "out",
         5,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
     )
     assert meta["fault"] == ""
 
@@ -731,8 +774,7 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
         tmp_path,
         tmp_path / "out",
         30,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
     )
 
     run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
@@ -996,8 +1038,7 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
         tmp_path,
         tmp_path / "out",
         5,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
         images=[image],
     )
 
@@ -1136,6 +1177,63 @@ def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
         cross_family_ask.main()
     assert refused.value.code != 0
     assert launched == []
+
+
+def test_an_effort_disagreeing_with_the_antigravity_id_is_refused_before_any_family_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An --effort the Antigravity id disagrees with refuses at the flag, and no family launches.
+
+    The id's own effort named on the flag launches every family named, each with the effort its
+    record will state.
+    """
+    launched: list[tuple] = []
+
+    def stub_run_one(*a: object, **k: object) -> dict:
+        launched.append(a)
+        return cross_family_ask.failed_run_meta(
+            str(a[0]), RuntimeError("stub")
+        )
+
+    monkeypatch.setattr(cross_family_ask, "run_one", stub_run_one)
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
+    )
+    config = tmp_path / "config.toml"
+    config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
+    monkeypatch.setattr(cross_family_ask, "CODEX_CONFIG", config)
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    (tmp_path / "out" / "qid" / "as-shipped").mkdir(parents=True)
+
+    def argv(effort: str) -> list[str]:
+        return [
+            "cross_family_ask.py",
+            "--question-id",
+            "qid",
+            "--prompt-file",
+            str(tmp_path / "q.txt"),
+            "--families",
+            "codex,antigravity",
+            "--effort",
+            effort,
+            "--cwd",
+            str(tmp_path),
+            "--out",
+            str(tmp_path / "out"),
+            "--serial",
+        ]
+
+    monkeypatch.setattr(sys, "argv", argv("medium"))
+    with pytest.raises(SystemExit, match="pass gemini-4-argon-medium"):
+        cross_family_ask.main()
+    assert launched == []
+
+    monkeypatch.setattr(sys, "argv", argv("high"))
+    cross_family_ask.main()
+    assert [(call[0], call[7].effort) for call in launched] == [
+        ("codex", "high"),
+        ("antigravity", "high"),
+    ]
 
 
 def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
