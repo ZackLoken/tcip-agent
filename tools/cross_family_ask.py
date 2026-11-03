@@ -103,10 +103,14 @@ CONDITIONS = {
 
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
-    "codex": {"model": None, "effort": "high"},
-    "antigravity": {"model": "gemini-3.1-pro-high", "effort": None},
+    "codex": {"model": None, "effort": None},
+    "antigravity": {"model": "gemini-4-argon-high", "effort": None},
 }
-"""The default model and reasoning effort per family, used where the command line names none."""
+"""The default model and reasoning effort per family, used where the command line names none.
+
+Codex's ``None`` pair reads its model from ``~/.codex/config.toml`` and leaves its effort to the
+same file; Antigravity's model id states its effort in its own suffix.
+"""
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -118,7 +122,7 @@ ANTIGRAVITY_ID_EFFORTS = ("low", "medium", "high")
 def model_id_effort(family: str, model: str | None) -> str | None:
     """Return the effort a model id states in its own suffix, or None.
 
-    Only a family whose harness takes effort that way (antigravity's `gemini-3.1-pro-high`) has
+    Only a family whose harness takes effort that way (antigravity's `gemini-4-argon-high`) has
     one; every other id or family answers None.
     """
     if family == "antigravity" and model:
@@ -379,7 +383,9 @@ def build_agy(
 
     The prompt file's text is passed as ``--print``, with JSON output, the sandbox, a print
     timeout of ``timeout`` seconds and ``cwd`` added; ``condition`` is not read, so a run's MCP
-    servers are whatever the harness's own configuration names.
+    servers are whatever the harness's own configuration names. ``--effort`` is passed only for
+    a model id that does not state its effort in its own suffix, since the harness refuses the
+    flag beside one that does.
     """
     argv = [
         str(AGY),
@@ -395,7 +401,7 @@ def build_agy(
     ]
     if model:
         argv += ["--model", model]
-    if effort:
+    if effort and model_id_effort("antigravity", model) is None:
         argv += ["--effort", effort]
     return argv, None
 

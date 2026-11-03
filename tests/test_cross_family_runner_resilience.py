@@ -50,6 +50,78 @@ def test_an_effort_claude_would_ignore_is_refused_by_name() -> None:
     )
 
 
+def test_a_run_naming_no_model_launches_antigravity_on_argon_with_no_effort_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run naming neither model nor effort launches Antigravity on the parity Argon model.
+
+    The model id states its effort in its own suffix, so the argv carries no --effort flag,
+    which the harness refuses beside such an id, and the run records the suffix as its effort.
+    """
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "antigravity",
+        "qid",
+        "as-shipped",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        None,
+        None,
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert argv[argv.index("--model") + 1] == "gemini-4-argon-high"
+    assert "--effort" not in argv
+    assert meta["effort_requested"] == "high"
+
+
+def test_a_codex_run_naming_no_effort_leaves_the_effort_to_its_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run naming no effort passes Codex no reasoning-effort override.
+
+    The effort Codex runs at is then the one its own config states, beside the model the same
+    config names.
+    """
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setattr(
+        cross_family_ask,
+        "resolve_codex_model",
+        lambda requested: ("a-config-model", "config"),
+    )
+
+    meta = cross_family_ask.run_one(
+        "codex",
+        "qid",
+        "as-shipped",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        None,
+        None,
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert not any("model_reasoning_effort" in word for word in argv)
+    assert meta["effort_requested"] is None
+
+
 def _stub_run(
     stdout: str | bytes | None, stderr: str = ""
 ) -> Callable[..., subprocess.CompletedProcess[str | bytes | None]]:
