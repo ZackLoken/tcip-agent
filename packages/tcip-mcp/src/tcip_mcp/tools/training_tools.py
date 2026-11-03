@@ -48,6 +48,7 @@ from tcip_mcp.pipelines.training.tensorboard_manager import (
     TensorboardNotServing,
     TensorboardState,
 )
+from tcip_mcp.read_refusal import ReadRefusal, read_refusal
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import StoreError, canonical_path
@@ -225,7 +226,7 @@ def _preflight(
                 spec, sources.layout, project=project, tallies_out=counts
             )
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
-            issues.append(str(exc))
+            issues.append(str(read_refusal(exc)))
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
         # images would otherwise read "valid, no warnings" while training on far fewer.
         dropped = {k: v for k, v in counts.items() if not admits(k) and v}
@@ -838,7 +839,7 @@ class UnreadSelectionChoice(_Offered):
     """An offered selection directory whose selection will not read, and why it will not."""
 
     kind: Literal["unread"] = "unread"
-    reason: str
+    reason: ReadRefusal
 
 
 class SplitChoices(BaseModel):
@@ -907,9 +908,10 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         )
         reasons = (
             [
-                own_error
-                or f"no selection recorded under {split.selection_dir}; run draw_splits "
+                f"no selection recorded under {split.selection_dir}; run draw_splits "
                 "first."
+                if own_error is None
+                else str(own_error)
             ]
             if own_selection is None
             else selection_compatibility(data, split, own_selection)
@@ -976,16 +978,16 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
 
     selections: list[SelectionChoice | UnreadSelectionChoice] = []
     for candidate_dir in candidate_dirs:
-        selection, error_text = read_selection_checked(
+        selection, refusal = read_selection_checked(
             candidate_dir, project=project
         )
         if selection is None:
-            if error_text is None:
+            if refusal is None:
                 continue  # nothing recorded there; not a real candidate
             selections.append(
                 UnreadSelectionChoice(
                     selection_dir=candidate_dir,
-                    reason=error_text,
+                    reason=refusal,
                     replaced_split_keys=replaced_split_keys,
                 )
             )
@@ -1161,7 +1163,7 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
                 trait_revision=observed.trait_revision,
             ).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
-            status_error = str(exc)
+            status_error = str(read_refusal(exc))
     open_run(
         trial_dir,
         spec,

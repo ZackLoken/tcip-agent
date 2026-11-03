@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 
-import { messageOf } from "@/api/http";
+import { messageOf, readRefusalText } from "@/api/http";
 import { metaApi } from "@/api/meta";
 import { sessionsApi } from "@/api/sessions";
 import type {
@@ -137,7 +137,7 @@ export function MetaTab() {
               // A report that will not read shows its id and the reason in place of its fields.
               const [category, stated, text, context] =
                 entry.kind === "unread"
-                  ? ([UNSET_GLYPH, id, entry.reason, {}] as const)
+                  ? ([UNSET_GLYPH, id, readRefusalText(entry.reason), {}] as const)
                   : ([
                       entry.record.category,
                       entry.record.timestamp,
@@ -189,7 +189,7 @@ export function MetaTab() {
               // Each section is headed by its field's own name; one that will not read shows why.
               const [title, stated, sections] =
                 entry.kind === "unread"
-                  ? ([id, "", { reason: entry.reason }] as const)
+                  ? ([id, "", { reason: readRefusalText(entry.reason) }] as const)
                   : headedSections(entry.record);
               return (
                 <div
