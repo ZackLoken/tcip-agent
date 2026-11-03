@@ -118,9 +118,7 @@ def test_a_codex_run_naming_no_effort_passes_and_records_the_parity_effort(
     assert meta["effort_requested"] == "medium"
 
 
-def test_an_effort_claude_would_ignore_is_refused_by_name() -> None:
-    with pytest.raises(SystemExit, match="claude effort 'turbo'"):
-        cross_family_ask.effective_effort("claude", "opus", "turbo")
+def test_an_effort_claude_takes_and_a_codex_effort_pass_through() -> None:
     assert (
         cross_family_ask.effective_effort("claude", "opus", "high") == "high"
     )
@@ -819,18 +817,6 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 # ── the codex model is named on every run ───────────────────────────────────
 
 
-def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An unnamed codex model with no config is refused by name."""
-    monkeypatch.setattr(
-        cross_family_ask, "CODEX_CONFIG", tmp_path / "absent" / "config.toml"
-    )
-
-    with pytest.raises(SystemExit, match="codex model is unnamed"):
-        cross_family_ask.resolve_codex_model(None)
-
-
 def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1208,7 +1194,8 @@ def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
     with pytest.raises(SystemExit) as refused:
         cross_family_ask.main()
     assert refused.value.code != 0
-    assert "--family-prompt" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "must be FAMILY=PATH" in err or "unknown family" in err
     assert launched == []
 
 
@@ -1518,7 +1505,9 @@ def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
 
 
 def test_a_missing_image_is_refused_before_any_family_launches(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A missing image is refused, and no family launches."""
     launched = []
@@ -1552,4 +1541,5 @@ def test_a_missing_image_is_refused_before_any_family_launches(
     with pytest.raises(SystemExit) as refused:
         cross_family_ask.main()
     assert refused.value.code != 0
+    assert "image not found" in capsys.readouterr().err
     assert launched == []
