@@ -73,14 +73,28 @@ class AnnotationStats(BaseModel):
     sessions: list[Session]
 
 
-def read_stats(raw: JsonValue) -> AnnotationStats:
-    """Return the annotation-stats record ``raw`` decodes to, holding no session for ``None``.
+def read_stats(raw: JsonValue, where: str) -> AnnotationStats:
+    """Return the annotation-stats record ``raw``, stored at ``where``; ``None`` holds no session.
 
-    A document that is not the record's whole shape raises ``ValidationError``.
+    A document that is not the record's whole shape raises ``tcip_store.ReadRefusedError``.
     """
     if raw is None:
         return AnnotationStats(sessions=[])
-    return AnnotationStats.model_validate(raw)
+    return tcip_store.validated(AnnotationStats, raw, where)
+
+
+def stored_stats(
+    read: Callable[..., JsonValue], root: Path
+) -> AnnotationStats:
+    """Return the stats record of the project at ``root``, read by ``read`` (store or transaction).
+
+    Bytes that do not decode and a document that is not the record's whole shape raise
+    ``tcip_store.ReadRefusedError`` naming the record (:func:`read_stats`).
+    """
+    where = f"the annotation stats of the project at {root}"
+    with tcip_store.unreadable(where, tcip_store.DecodeError):
+        raw = read(annotation_stats_key(str(root)), default=None)
+    return read_stats(raw, where)
 
 
 def _session_start(sessions: list[Session]) -> datetime:
@@ -247,7 +261,7 @@ def _land(
     """
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
-        stats = read_stats(txn.read(key, default=None))
+        stats = stored_stats(txn.read, root)
         sessions = stats.sessions
         for held in sessions:
             if any(
@@ -328,7 +342,7 @@ def end_sessions(
     """
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
-        stats = read_stats(txn.read(key, default=None))
+        stats = stored_stats(txn.read, root)
         named = [s for s in stats.sessions if started in (None, s.started)]
         if started is not None and not named:
             raise LookupError(
@@ -386,11 +400,7 @@ def load_sessions() -> SessionsListing:
     """Return every recorded session of the open project (:class:`SessionsListing`)."""
     from tcip_web.state import store
 
-    stats = read_stats(
-        tcip_store.read(
-            annotation_stats_key(str(store.held().root)), default=None
-        )
-    )
+    stats = stored_stats(tcip_store.read, store.held().root)
     return SessionsListing(sessions=[_summary(s) for s in stats.sessions])
 
 
