@@ -199,7 +199,7 @@ config = {
     "evaluation": {"selection_metric": ..., "rationale": ...},
     "checkpoint_every_n_epochs": ...,
     "mixed_precision": ...,
-    "device": "cuda",
+    "device": ...,
     "seed": ...,  # every stream's seed, recorded on the run
     "deterministic": ...,  # cuDNN deterministic algorithms (slower)
     # optional; each transform states every value its constructor takes, and the launch
