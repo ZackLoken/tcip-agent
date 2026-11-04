@@ -5,8 +5,8 @@ title: "[design] "
 labels: design
 ---
 
-CONTRIBUTING.md requires design review before code for any change touching a persisted field, a
-refusal, an operating-point stamp, or a delivery gate. This template is that review.
+A change touching a persisted format, a refusal, an operating-point stamp or a delivery gate is
+designed here before any code is written. This template is that design.
 
 ## What changes
 
