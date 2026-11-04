@@ -131,6 +131,8 @@ def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(
     )
 
     assert resp.status_code == 400
+    assert "errors.pydantic.dev" not in resp.text
+    assert "display_name" in resp.json()["detail"]
     assert read_record(made.root).display_name == "Valley block"
     assert audit_rows(made.root, "project_record_corrected") == []
 

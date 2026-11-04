@@ -128,20 +128,24 @@ def test_create_record_refuses_a_different_display_name_naming_rename(
 def test_create_record_refuses_a_present_record_missing_a_field(
     tmp_path: Path,
 ) -> None:
+    """A present record lacking a field refuses naming it, and never quotes what it holds."""
     from tcip_mcp.project_record import create_record, project_record_key
 
+    record = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
+    stored = ts.read_versioned(project_record_key(tmp_path))
     ts.replace(
         project_record_key(tmp_path),
-        {"site": "north orchard"},
-        expect=ts.Version.ABSENT,
+        record.model_dump(exclude={"invariances"}),
+        expect=stored.version,
     )
 
-    with pytest.raises(
-        ts.ReadRefusedError, match="the project record of"
-    ) as refused:
-        create_record(tmp_path, "Valley block", "south block", INVARIANCES)
+    with pytest.raises(ValueError) as refused:
+        create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
     assert "north orchard" not in str(refused.value)
+    assert "invariances" in str(refused.value)
 
 
 def test_read_record_refuses_a_record_stating_no_invariances(
@@ -237,8 +241,6 @@ def test_replace_invariances_writes_the_block_and_records_one_correction_line(
 def test_replace_invariances_refuses_a_block_the_type_refuses_writing_nothing(
     tmp_path: Path,
 ) -> None:
-    from pydantic import ValidationError
-
     from tcip_mcp.identity import actor
     from tcip_mcp.project_record import read_record, replace_invariances
 
@@ -246,7 +248,7 @@ def test_replace_invariances_refuses_a_block_the_type_refuses_writing_nothing(
     before, lines = read_record(project), audit_rows(project)
     unvalidated = INVARIANCES.model_copy(update={"rotation": 400.0})
 
-    with pytest.raises(ValidationError, match="rotation"):
+    with pytest.raises(ts.ReadRefusedError, match="rotation"):
         replace_invariances(project, unvalidated, actor=actor("tester"))
 
     assert read_record(project) == before

@@ -242,8 +242,10 @@ def _update(
     while True:
         stored = tcip_store.read_versioned(key, default=None)
         current = _checked(project_path, stored.value)
-        updated = ProjectRecord.model_validate(
-            current.model_copy(update={field: value}).model_dump()
+        updated = validated(
+            ProjectRecord,
+            current.model_copy(update={field: value}).model_dump(),
+            _record_place(project_path),
         )
         written = updated.model_dump()
         try:
