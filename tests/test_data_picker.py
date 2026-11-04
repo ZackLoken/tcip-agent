@@ -306,7 +306,6 @@ def _bound_to_a_selection_deleted_after_binding(tmp_path: Path) -> dict:
     [
         (_bound_to_a_selection_damaged_after_binding, "invalid"),
         (_bound_to_a_selection_deleted_after_binding, "unreadable"),
-        (_bound_to_a_draw, None),
     ],
 )
 def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
@@ -314,25 +313,17 @@ def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
     opened_project: Path,
     client: TestClient,
     bound_to: Callable[[Path], dict],
-    kind: str | None,
+    kind: str,
 ) -> None:
     """The split route serves a bound run's refused selection as the record its reader raises.
 
     The "As recorded" check is blocked and its reason is ``read_selection``'s refusal as a
     record: the selection model's issues for a record it refuses, the absence's sentence for one
-    no longer recorded. Over the draw untouched (``kind`` ``None``) the check admits.
+    no longer recorded.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
 
     config = bound_to(tmp_path)
-    if kind is None:
-        assert (
-            client.get("/api/training/runs/exp-bound/splits").json()[
-                "as_recorded"
-            ]["check"]
-            == ADMITTED
-        )
-        return
     with pytest.raises(ts.ReadRefusedError) as refused:
         read_selection(
             config["data"]["split"]["selection_dir"], project=tmp_path
@@ -345,6 +336,21 @@ def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
     assert check["kind"] == "blocked"
     assert check["reason"] == refused.value.refusal.model_dump(mode="json")
     assert check["reason"]["kind"] == kind
+
+
+def test_the_split_route_admits_a_bound_run_over_the_selection_it_drew(
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+) -> None:
+    """The split route admits "As recorded" for a bound run over the draw it bound, untouched."""
+    _bound_to_a_draw(tmp_path)
+
+    check = client.get("/api/training/runs/exp-bound/splits").json()[
+        "as_recorded"
+    ]["check"]
+
+    assert check == ADMITTED
 
 
 def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_does(
