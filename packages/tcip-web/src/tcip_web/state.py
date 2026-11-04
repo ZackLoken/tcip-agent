@@ -208,7 +208,9 @@ class StateStore:
         """Make ``project`` the open project (:meth:`_switch`), holding its persisted state.
 
         A fresh state is held when it has none. Raises what
-        :func:`tcip_mcp.web_client.read_gui_snapshot` raises, leaving the open project unchanged.
+        :func:`tcip_mcp.web_client.read_gui_snapshot` raises, and ``tcip_store.ReadRefusedError``
+        for a departing project whose stats record will not read, leaving the open project
+        unchanged.
         """
         state = (
             await asyncio.to_thread(read_gui_snapshot, project.root)

@@ -150,7 +150,8 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
 
     400 for a request naming no one, 404 when the workspace holds no single project with it (a
     project whose record will not read is not found by its id), 409 when its persisted GUI
-    state will not read, its detail the :data:`~tcip_store.ReadRefusal` saying why.
+    state, or the stats record of the project it replaces, will not read, its detail the
+    :data:`~tcip_store.ReadRefusal` saying why.
     """
     from tcip_store import ReadRefusedError
 
