@@ -29,7 +29,8 @@ naming the `serve_domain_knowledge` tool, which serves it; a document is read in
 
 ## Working on the platform
 
-- Platform work skips the operating contract's project ritual entirely.
+- Platform work skips the operating contract's steps that act on a breeder's project:
+  `inspect_project`, `load_project_memory`, `report_friction` and `write_retrospective`.
 - Orientation reads go by a code search (the semantic index where it is connected, otherwise
   `git grep` or the Grep tool over a named subtree) and then the file itself, whole.
 
@@ -137,14 +138,15 @@ naming `--project` until a project is created, and the knowledge tools work.
 - A standing capability the agent uses is an MCP tool, which every harness lists with its schema
   and runs outside the harness's own sandbox; when an operator runs it too, its console command
   calls the same function. A capability only an operator uses is a console command alone.
-- Crop traits are controlled vocabulary in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`; verify
-  there before asserting.
+- Crop traits are controlled vocabulary in
+  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`; verify there before asserting.
 - Every piece of shipped prose (comments, docstrings, log and UI strings, test names, file names,
   scripts, README, skills, package `CLAUDE.md`s) is for whoever reads it next, never a changelog of
   the session that wrote it: no tracking labels and no inline decision dates. If nothing survives
   once that framing is stripped, write nothing.
 - A docstring states what the function does and its contract: its inputs, what it returns, what it
   refuses. It never restates a rule from this file or a package `CLAUDE.md`, never names its
-  callers, and never explains a rejected alternative; those live in the design record or nowhere.
+  callers, and never explains a rejected alternative; those live in the change's design issue or
+  nowhere.
 - `docs/` and `.claude/` are local, gitignored dev tooling, except the generated skills under
   `.claude/skills/`, which are tracked.
