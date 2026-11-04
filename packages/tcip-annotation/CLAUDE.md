@@ -10,11 +10,13 @@ here and aren't restated.
 src/tcip_annotation/
   json_io.py      # the per-image label document: records, completion marks, provenance stamping
   verdicts.py     # the verdict shard: a person's accept/reject decisions on a bucket's proposals
+  flags.py        # review flags: a person's request for a second look, and the reply resolving it
   matching.py     # the one matcher of detections to ground truth, and geometry helpers
   format_io.py    # the external COCO reader, for the import only
   grid.py         # reference-grid cell names and the named-cell lookup
   mask_contours.py  # a binary mask's rings, one per connected region
   state.py        # the Annotation record and its geometries
+  text.py         # the platform's non-empty text type
   utils.py, viz.py
 ```
 
