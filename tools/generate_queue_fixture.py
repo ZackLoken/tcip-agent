@@ -5,9 +5,9 @@ opens is laid down again by its own layout (``generate_open_fixture.captures``),
 registered in it (``tests._verified_checkpoint_fixtures.project_checkpoint``), and it is opened
 through the picker's route. The second photograph holds a box marked complete for
 :data:`~tools.generate_open_fixture.FOCUSED_SUBJECT` and the third a box not marked complete
-(``tests._producer_fixtures``). ``GET /api/annotate/scorers`` answers the scorer catalog
-(``scorers``), and again with :func:`typed_scorer` registered beside the platform's
-(``typed_scorers``), when a launch stating :data:`REFUSED` is refused (``refused_launch``). The
+(``tests._producer_fixtures``). ``GET /api/annotate/scorers`` answers the scorer catalog with
+:func:`typed_scorer` registered beside the platform's scorers (``typed_scorers``), when a launch
+stating :data:`REFUSED` is refused (``refused_launch``). The
 photographs' capture is selected for that subject (``selection``). With :func:`stated_scorer`
 registered beside the platform's, the catalog is answered again (``stated_scorers``) and a
 queue launched through ``POST /api/annotate/queue/launch`` under :data:`STATED` (``launched``); its
@@ -201,9 +201,7 @@ def produce() -> dict[str, JsonValue]:
                 path={"job_id": job_id},
             )
 
-        served: dict[str, JsonValue] = {
-            "scorers": answered(client, "list_scorers", 200)
-        }
+        served: dict[str, JsonValue] = {}
         with pytest.MonkeyPatch.context() as patch:
             patch.setitem(al_scorer.SCORER_REGISTRY, TYPED, typed_scorer)
             served["typed_scorers"] = answered(client, "list_scorers", 200)
