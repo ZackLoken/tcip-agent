@@ -267,6 +267,52 @@ def test_read_selection_checked_tells_absence_apart_from_a_broken_record(
     assert ["group_by"] in [issue.loc for issue in broken_error.issues]
 
 
+def test_every_refusal_of_the_selection_reader_names_the_selection_place(
+    tmp_path: Path,
+) -> None:
+    """An absent, a damaged, an unlisting and an unresolvable record each name one place.
+
+    The four records are an absence, a drawn selection's record replaced by one its model refuses,
+    one that validates but lists no samples, and one whose sample path will not resolve. Each
+    ``read_selection`` refusal's ``where`` is :func:`selection_place`'s sentence for its directory.
+    """
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        selection_key,
+        selection_place,
+    )
+    from tcip_store import ReadRefusedError
+
+    drawn = tmp_path / "drawn"
+    _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "ds"), drawn)
+    stored = ts.read(selection_key(drawn))
+    assert isinstance(stored, dict)
+    unlisting = tmp_path / "unlisting"
+    ts.replace(selection_key(unlisting), {**stored, "samples": []})
+    unresolvable = tmp_path / "unresolvable"
+    samples = stored["samples"]
+    assert isinstance(samples, list)
+    first, *rest = samples
+    assert isinstance(first, dict)
+    ts.replace(
+        selection_key(unresolvable),
+        {**stored, "samples": [{**first, "source": "../escape.jpg"}, *rest]},
+    )
+    damaged = tmp_path / "damaged"
+    ts.replace(selection_key(damaged), {"seed": 1, "samples": []})
+
+    reached = {}
+    for directory in (tmp_path / "absent", damaged, unlisting, unresolvable):
+        with pytest.raises(ReadRefusedError) as refused:
+            read_selection(directory, project=tmp_path)
+        assert refused.value.where == selection_place(directory)
+        reached[directory.name] = str(refused.value.refusal)
+    assert "no selection recorded" in reached["absent"]
+    assert "group_by" in reached["damaged"]
+    assert "lists no samples" in reached["unlisting"]
+    assert "escape.jpg" in reached["unresolvable"], reached["unresolvable"]
+
+
 def _bound_to_a_draw(tmp_path: Path) -> dict:
     """Return a config of ``tmp_path`` bound to a real draw, opened as the run ``exp-bound``."""
     root = _two_subject_two_date_dataset(tmp_path / "ds")
