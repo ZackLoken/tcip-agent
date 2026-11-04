@@ -424,3 +424,39 @@ def test_loading_a_registry_its_model_refuses_answers_500_with_its_readers_sente
     detail = resp.json()["detail"]
     assert LIBRARY_LINK not in detail
     assert "the subject registry: subjects.0.description" in detail
+
+
+def test_a_check_of_a_dataset_identity_its_model_refuses_states_the_issues(
+    project: Path,
+) -> None:
+    """A check of an identity its model refuses states the issues, with no library link.
+
+    The identity ``register_dataset`` wrote has its crop changed to no text; the reason
+    ``check_dataset_identity`` answers names the document, ``register_dataset`` and that one
+    field. Bytes that do not decode refuse naming the document too.
+    """
+    from tcip_mcp.dataset_layout import dataset_identity_path
+    from tcip_mcp.tools.project_tools import check_dataset_identity
+
+    _registered_dataset(project)
+    assert check_dataset_identity(project, str(project)).state == "unchanged"
+    path = dataset_identity_path(project)
+    _rewritten(path, {"crop": 5})
+
+    checked = check_dataset_identity(project, str(project))
+
+    assert checked.reason is not None
+    assert LIBRARY_LINK not in checked.reason
+    assert str(path) in checked.reason
+    assert "register_dataset" in checked.reason
+    assert "crop:" in checked.reason
+
+    tcip_store.put_blob(
+        path,
+        b"{ not json",
+        expect=tcip_store.read_blob_versioned(path).version,
+    )
+    undecodable = check_dataset_identity(project, str(project))
+
+    assert undecodable.reason is not None
+    assert str(path) in undecodable.reason
