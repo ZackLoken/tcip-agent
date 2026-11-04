@@ -20,7 +20,8 @@ export function issuesText(issues: Issue[]): string {
     .join("; ");
 }
 
-/** The text why a record will not read reads as: its model's issues, or its own sentence. */
+/** The text a refusal reads as: its model's issues or a check's objections, each an issue that
+ * may name no place, or the sentence of why a record will not read. */
 export function readRefusalText(refusal: ReadRefusal): string {
   return refusal.kind === INVALID ? issuesText(refusal.issues) : refusal.message;
 }

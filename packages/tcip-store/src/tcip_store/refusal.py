@@ -19,7 +19,11 @@ from tcip_store.errors import ReadRefusedError
 
 
 class Issue(BaseModel):
-    """One error a model's validation raised: where in the input (``loc``) and what (``msg``)."""
+    """One error a model's validation raised, or one objection a check states, and what (``msg``).
+
+    ``loc`` is where in the input it lies, empty for the input as a whole or an objection that
+    names no place.
+    """
 
     loc: list[str | int]
     msg: str
@@ -37,7 +41,10 @@ _ISSUES: TypeAdapter[list[Issue]] = TypeAdapter(list[Issue])
 
 
 class Invalid(BaseModel):
-    """A value its model refused, with every error the refusal carried."""
+    """A value its model refused, with every error the refusal carried, or a check's objections.
+
+    A check's objection is an issue of its own, its sentence naming any place it has.
+    """
 
     kind: Literal["invalid"] = "invalid"
     issues: list[Issue]

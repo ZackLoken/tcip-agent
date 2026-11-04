@@ -877,11 +877,12 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
 
     Every check is :func:`selection_compatibility` over a selection this reader read itself: the
     run's own through :func:`~tcip_mcp.pipelines.data.selection.read_selection`, whose refusal
-    is the "As recorded" reason, and each candidate through
+    alone is the "As recorded" reason, with no candidate listed, and each candidate through
     :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
     selection is checked against the data block :func:`data_with_selection` builds
     (``data.split`` replaced wholesale); "As recorded" is checked against the stated config
-    unchanged, plus the directory-presence issues :func:`preflight_config` would raise.
+    unchanged, and an unbound one also for the directory-presence issues
+    :func:`preflight_config` would raise.
 
     The listing: the selection directories other runs of this project bound (the picked run's
     own excluded, since it is "As recorded"), plus, when
