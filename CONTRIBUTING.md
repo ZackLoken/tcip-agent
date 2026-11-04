@@ -19,11 +19,10 @@ CI's jobs, whose module docstring says which steps it leaves to CI.
 - Tests construct their inputs through the platform's own producers (the MCP tools, the pipeline
   functions), never a hand-built fixture standing in for one.
 - A test that guards a fix is shown failing without the fix:
-  `python tools/prove_test_fails_before.py <testfile> -k <expr>`. Its four verdicts are `GUARDS`
-  (the recorded failure is the assertion the test names; only this counts as evidence), `VACUOUS`
-  (the test passed even without the fix), `INDETERMINATE` (the baseline is not shown to precede the
-  change), and `REFUSED` (nothing was selected, or collection failed). Only `GUARDS` is reported as
-  a guard; state a `VACUOUS` result as vacuous, not as passing coverage.
+  `python tools/prove_test_fails_before.py <testfile> -k <expr>`. Its four verdicts are `GUARDS`,
+  `VACUOUS`, `INDETERMINATE` and `REFUSED`, whose meanings the tool's module docstring states.
+  Only `GUARDS` is evidence and reported as a guard; each other verdict is stated as what it is,
+  never as passing coverage.
 - A record is the shape its one producer writes and its one reader reads. A re-shaped record changes
   both together, and the records already written are regenerated or discarded with the change; there
   are no runtime migration shims and no defaults for a field a record lacks.
@@ -49,4 +48,4 @@ CI's jobs, whose module docstring says which steps it leaves to CI.
   A pull request from outside is read as a report of what its author needs: it is reviewed,
   what it asks for is re-implemented under these rules when the roadmap takes it, and the pull
   request itself is closed with that answer, never merged. An issue is the better form for the
-  same request.
+  same request, and an issue from outside takes its kind and size labels at triage.

@@ -1,6 +1,6 @@
 """Sum a change's insertions and deletions by area: package code, tests, everything else.
 
-    python tools/line_delta.py <repo> <rev | --cached | <rev1>..<rev2>>
+    python tools/line_delta.py <repo> <rev | <rev>.. | --cached | <rev1>..<rev2>>
 
 Reads `git diff --numstat` or `git show --numstat` for the target and prints one line per area.
 """
