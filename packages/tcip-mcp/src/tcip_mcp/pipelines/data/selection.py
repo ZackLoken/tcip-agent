@@ -24,7 +24,6 @@ from pydantic import (
 
 import tcip_store
 from tcip_annotation.text import Text
-from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -32,7 +31,13 @@ from tcip_mcp.registry_paths import (
     within,
 )
 from tcip_mcp.subject_registry import Attribute, named
-from tcip_store import Key, ReadRefusal, encode_record
+from tcip_store import (
+    Key,
+    ReadRefusal,
+    RecordInvalidError,
+    Unreadable,
+    encode_record,
+)
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -580,15 +585,17 @@ def read_selection_checked(
     """Return :func:`read_selection`'s selection for ``selection_dir``, or why it is refused.
 
     The answer is ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, refusal)``
-    for a record that exists and is refused (:func:`~tcip_mcp.read_refusal.read_refusal`).
+    for a record that exists and is refused: its model's issues, or any other refusal's sentence.
     """
     try:
         document = _read_selection_document(selection_dir, project)
         if document is None:
             return None, None
         return as_selection(document, where=str(selection_dir)), None
+    except RecordInvalidError as exc:
+        return None, exc.refusal
     except ValueError as exc:
-        return None, read_refusal(exc)
+        return None, Unreadable(message=str(exc))
 
 
 def _read_selection_document(

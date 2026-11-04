@@ -377,19 +377,15 @@ class MappingBuild:
         """Return the build the stored record ``raw`` under ``name`` holds, with its digest.
 
         The digest is :func:`record_digest`'s. A document that does not decode as this record
-        raises ``ValueError`` naming the project and the name.
+        raises ``tcip_store.RecordInvalidError`` naming the project and the name.
         """
-        from pydantic import ValidationError
+        from tcip_store import validated
 
-        from tcip_store import Invalid
-
-        try:
-            build = _MAPPING_RECORD.validate_json(encode_record(raw))
-        except ValidationError as exc:
-            raise ValueError(
-                f"plant mapping {name!r} under {project} is not a record this "
-                f"reader decodes: {Invalid.of(exc)}"
-            ) from exc
+        build = validated(
+            _MAPPING_RECORD,
+            encode_record(raw),
+            f"plant mapping {name!r} under {project}",
+        )
         return replace(build, record_sha256=record_digest(raw))
 
     def unattributed(self, dates: Iterable[str] | None = None) -> int:

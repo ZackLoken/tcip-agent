@@ -18,15 +18,21 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    ValidationError,
 )
 
 import tcip_store
 from tcip_mcp.audit import audited, now
 from tcip_mcp.pipelines.training.hpo import Count
-from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.server import tool
-from tcip_store import DecodeError, Key, ReadRefusal, Version, validated
+from tcip_store import (
+    DecodeError,
+    Key,
+    ReadRefusal,
+    RecordInvalidError,
+    Unreadable,
+    Version,
+    validated,
+)
 
 FrictionCategory = Literal[
     "missing_tool",
@@ -167,8 +173,12 @@ def memory_entries[M: MemoryRecord](
         name = key.parts[0]
         try:
             read = read_memory(record, project_path, name)
-        except (DecodeError, ValidationError) as exc:
-            unread.append(UnreadEntry(id=name, reason=read_refusal(exc)))
+        except RecordInvalidError as exc:
+            unread.append(UnreadEntry(id=name, reason=exc.refusal))
+        except DecodeError as exc:
+            unread.append(
+                UnreadEntry(id=name, reason=Unreadable(message=str(exc)))
+            )
         else:
             stated.append((read.timestamp, ReadEntry(id=name, record=read)))
     stated.sort(key=lambda pair: pair[0], reverse=True)

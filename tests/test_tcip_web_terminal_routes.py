@@ -677,7 +677,7 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     ]
 
     settings.write_text("[]", encoding="utf-8")
-    with pytest.raises(ValueError, match="does not hold a JSON object"):
+    with pytest.raises(ValueError, match="as a JSON object: "):
         pty_host.allow_tcip_tools(settings)
 
 
@@ -724,7 +724,7 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
     assert set(written) == {"my-linter-hook", pty_host.ANTIGRAVITY_HOOK_ENTRY}
 
     hooks.write_text("[]", encoding="utf-8")
-    with pytest.raises(ValueError, match="does not hold a JSON object"):
+    with pytest.raises(ValueError, match="as a JSON object: "):
         pty_host.prepare_antigravity(
             pty_host.ANTIGRAVITY, "agy", opened, "term_third"
         )

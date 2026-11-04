@@ -23,7 +23,6 @@ from pydantic import (
     Field,
     NonNegativeFloat,
     PositiveInt,
-    ValidationError,
     model_validator,
 )
 
@@ -459,20 +458,16 @@ def _stated_transforms(
     """Return each transform ``config`` states, in its order, beside its name.
 
     Each is the transform its stated values validate to. Refuses (``ValueError``) an unknown
-    transform, and, naming the entry, one whose values its transform's type refuses.
+    transform, and, naming the entry, one whose values its transform's type refuses
+    (``tcip_store.RecordInvalidError``).
     """
     from tcip_mcp.pipelines.model_build import resolve_named
-    from tcip_store import Invalid
+    from tcip_store import validated
 
     stated = []
     for name, params in (config.model_extra or {}).items():
         cls = resolve_named(name, _AUGMENTATION_REGISTRY, kind="augmentation")
-        try:
-            stated.append((name, cls.model_validate(params)))
-        except ValidationError as exc:
-            raise ValueError(
-                f"augmentation {name!r}: {Invalid.of(exc)}"
-            ) from exc
+        stated.append((name, validated(cls, params, f"augmentation {name!r}")))
     return stated
 
 
