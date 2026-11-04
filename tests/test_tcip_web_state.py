@@ -24,7 +24,6 @@ from tcip_mcp.web_client import (
     selection_for,
 )
 from tcip_web.state import (
-    GuiMutationInvalidError,
     Held,
     NoProjectOpenError,
     OpenProject,
@@ -323,7 +322,7 @@ def test_a_persisted_snapshot_stating_a_nested_field_partly_is_reported_not_defa
 
 def test_mutate_refuses_a_partial_nested_object_and_holds_nothing() -> None:
     store = StateStore()
-    with pytest.raises(GuiMutationInvalidError, match="view"):
+    with pytest.raises(tcip_store.ReadRefusedError, match="view"):
         asyncio.run(
             store.mutate(lambda _held: {"view": {"scale": 2.0}}, project=None)
         )
@@ -334,14 +333,14 @@ def test_mutate_refuses_a_partial_nested_object_and_holds_nothing() -> None:
 def test_mutate_refuses_a_view_at_no_positive_zoom_and_holds_nothing() -> None:
     store = StateStore()
     view = {"scale": 0.0, "offset_x": 0.0, "offset_y": 0.0}
-    with pytest.raises(GuiMutationInvalidError, match="scale"):
+    with pytest.raises(tcip_store.ReadRefusedError, match="scale"):
         asyncio.run(store.mutate(lambda _held: {"view": view}, project=None))
     assert store.version == 0
 
 
 def test_mutate_refuses_an_unknown_tab_and_holds_nothing() -> None:
     store = StateStore()
-    with pytest.raises(GuiMutationInvalidError):
+    with pytest.raises(tcip_store.ReadRefusedError):
         asyncio.run(
             store.mutate(
                 lambda _held: {"active_tab": "nonexistent"}, project=None
@@ -370,7 +369,7 @@ def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothi
         )
     ).model_copy(update={"current_image_index": "banana"})
     store = StateStore()
-    with pytest.raises(GuiMutationInvalidError):
+    with pytest.raises(tcip_store.ReadRefusedError):
         asyncio.run(
             store.mutate(
                 lambda _held: {"dataset": bad_selection}, project=None
@@ -386,7 +385,7 @@ def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
     The key is ``activ_tab`` for ``active_tab``, and the store holds nothing.
     """
     store = StateStore()
-    with pytest.raises(GuiMutationInvalidError):
+    with pytest.raises(tcip_store.ReadRefusedError):
         asyncio.run(
             store.mutate(lambda _held: {"activ_tab": "results"}, project=None)
         )
