@@ -21,7 +21,7 @@ from pydantic import (
     TypeAdapter,
 )
 
-from tcip_store.errors import RecordInvalidError
+from tcip_store.errors import ReadRefusedError
 from tcip_store.refusal import validated
 
 
@@ -155,7 +155,7 @@ def check_json_value(value: object, *, path: str = "value") -> None:
     """
     try:
         validated(_FINITE_JSON, value, f"{path} is not a finite JSON value")
-    except RecordInvalidError as exc:
+    except ReadRefusedError as exc:
         raise ValueError(
             f"{exc}\nConvert what it holds to a JSON type at the writer, a non-finite number to "
             "null beside a field naming its state (stored_number)."

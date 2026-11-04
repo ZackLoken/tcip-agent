@@ -591,20 +591,29 @@ def _record(trait: str, project: str | Path, value: JsonValue) -> TraitRecord:
     """Return ``trait``'s stored ``value`` read through its schema.
 
     An absent value raises :class:`TraitUnknownError` naming the project's traits; a value the
-    schema refuses raises ``tcip_store.RecordInvalidError`` naming the trait.
+    schema refuses raises ``tcip_store.ReadRefusedError`` naming the trait.
     """
     if value is None:
         raise TraitUnknownError(
             f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}"
         )
-    return ts.validated(TraitRecord, value, f"the record of trait {trait!r}")
+    return ts.validated(TraitRecord, value, _trait_place(trait))
+
+
+def _trait_place(trait: str) -> str:
+    """Return where ``trait``'s record lives, as a refusal names it."""
+    return f"the record of trait {trait!r}"
 
 
 def read_trait(trait: str, project: str | Path) -> TraitRecord:
-    """Read one trait's record through its schema; refuses as :func:`_record` does."""
-    return _record(
-        trait, project, ts.read(trait_key(project, trait), default=None)
-    )
+    """Read one trait's record through its schema.
+
+    Refuses as :func:`_record` does, and a record the store will not read with
+    ``tcip_store.ReadRefusedError`` naming the trait and carrying the store's sentence.
+    """
+    with ts.unreadable(_trait_place(trait), ts.StoreError):
+        value = ts.read(trait_key(project, trait), default=None)
+    return _record(trait, project, value)
 
 
 # ── the proposal and the confirmation ────────────────────────────────────────

@@ -144,11 +144,11 @@ def check_registry(
         RegistryPathTraversalError,
         resolved_registry_path,
     )
-    from tcip_store import RecordInvalidError, StoreError
+    from tcip_store import ReadRefusedError, StoreError
 
     try:
         entries = registered_entries(root)
-    except (StoreError, RecordInvalidError) as exc:
+    except (StoreError, ReadRefusedError) as exc:
         findings.append(
             (
                 "error",
@@ -294,12 +294,12 @@ def check_traits(root: Path, findings: list) -> None:
     trait whose latest revision the breeder has not confirmed.
     """
     from tcip_mcp.traits import read_trait, trait_names
-    from tcip_store import RecordInvalidError, StoreError
+    from tcip_store import ReadRefusedError
 
     for name in trait_names(root):
         try:
             record = read_trait(name, root)
-        except (StoreError, RecordInvalidError) as exc:
+        except ReadRefusedError as exc:
             findings.append(("error", f"trait {name!r} will not read: {exc}"))
             continue
         if record.latest.state.kind != "confirmed":

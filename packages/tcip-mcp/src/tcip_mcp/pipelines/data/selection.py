@@ -34,7 +34,7 @@ from tcip_mcp.subject_registry import Attribute, named
 from tcip_store import (
     Key,
     ReadRefusal,
-    RecordInvalidError,
+    ReadRefusedError,
     Unreadable,
     encode_record,
 )
@@ -494,34 +494,32 @@ _SELECTION = TypeAdapter(Selection)
 def as_selection(document: JsonValue, *, where: str) -> Selection:
     """Read a held document back as a :class:`Selection`, refusing anything a draw never writes.
 
-    ``where`` names the document in every refusal: the record's own
-    (``tcip_store.RecordInvalidError`` naming each field that does not decode, a side outside
-    :data:`SIDES` among them), an empty ``samples`` list, samples whose sources lie under more
+    Every refusal is ``tcip_store.ReadRefusedError`` naming the document at ``where``: the
+    record's own issues (each field that does not decode, a side outside :data:`SIDES` among
+    them), or the sentence of an empty ``samples`` list, samples whose sources lie under more
     than one dataset root (:func:`~tcip_mcp.dataset_layout.image_capture`), a partition whose
-    sides cross (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read
+    sides cross (:func:`refuse_crossing_sides`), or a scope its samples' shape cannot be read
     under (:meth:`ClassScope.admitted_for`).
     """
     from tcip_mcp.dataset_layout import image_capture
 
-    selection = tcip_store.validated(
-        _SELECTION, document, f"the selection at {where}"
-    )
-    if not selection.samples:
-        raise ValueError(
-            f"the selection at {where} lists no samples: a selection is its sample list, so an "
-            "empty one binds nothing. Draw it again over the current data."
-        )
-    roots = {image_capture(s.source)[0] for s in selection.samples}
-    if len(roots) > 1:
-        raise ValueError(
-            f"the selection at {where} holds samples under the dataset roots "
-            f"{', '.join(sorted(map(str, roots)))}: a selection is drawn over one dataset "
-            "root. Draw it over one with draw_splits."
-        )
-    refuse_crossing_sides(selection.samples)
-    selection.scope.admitted_for(
-        selection.samples[0].shape, f"the selection at {where}"
-    )
+    place = f"the selection at {where}"
+    selection = tcip_store.validated(_SELECTION, document, place)
+    with tcip_store.unreadable(place, ValueError):
+        if not selection.samples:
+            raise ValueError(
+                "it lists no samples: a selection is its sample list, so an empty one binds "
+                "nothing. Draw it again over the current data."
+            )
+        roots = {image_capture(s.source)[0] for s in selection.samples}
+        if len(roots) > 1:
+            raise ValueError(
+                "it holds samples under the dataset roots "
+                f"{', '.join(sorted(map(str, roots)))}: a selection is drawn over one dataset "
+                "root. Draw it over one with draw_splits."
+            )
+        refuse_crossing_sides(selection.samples)
+        selection.scope.admitted_for(selection.samples[0].shape, "it")
     return selection
 
 
@@ -566,13 +564,15 @@ def read_selection(
 ) -> Selection:
     """Read the selection of ``project`` recorded under ``selection_dir``.
 
-    Refuses with ``ValueError`` naming ``selection_dir`` when nothing is recorded there, when the
-    record will not decode, or when it fails any of :func:`as_selection`'s shape checks.
+    Refuses with ``tcip_store.ReadRefusedError`` naming ``selection_dir`` when nothing is
+    recorded there, when the record will not decode, or when it fails any of
+    :func:`as_selection`'s checks.
     """
     document = _read_selection_document(selection_dir, project)
     if document is None:
-        raise ValueError(
-            f"no selection recorded under {selection_dir}; run draw_splits first."
+        raise ReadRefusedError(
+            Unreadable(message="no selection recorded there; run draw_splits first."),
+            f"the selection at {selection_dir}",
         )
     return as_selection(document, where=str(selection_dir))
 
@@ -592,10 +592,8 @@ def read_selection_checked(
         if document is None:
             return None, None
         return as_selection(document, where=str(selection_dir)), None
-    except RecordInvalidError as exc:
+    except ReadRefusedError as exc:
         return None, exc.refusal
-    except ValueError as exc:
-        return None, Unreadable(message=str(exc))
 
 
 def _read_selection_document(
@@ -603,17 +601,16 @@ def _read_selection_document(
 ) -> JsonValue:
     from tcip_store import DecodeError
 
-    try:
+    with tcip_store.unreadable(
+        f"the selection at {selection_dir}", DecodeError, ValueError
+    ):
         document = tcip_store.read(selection_key(selection_dir), default=None)
-    except DecodeError as exc:
-        raise ValueError(
-            f"the selection at {selection_dir} could not be read: {exc}"
-        ) from exc
-    return (
-        None
-        if document is None
-        else runtime_paths(document, SELECTION_PATHS, project)
-    )
+        resolved = (
+            None
+            if document is None
+            else runtime_paths(document, SELECTION_PATHS, project)
+        )
+    return resolved
 
 
 def ground_truth_digest(ground_truth: Key | str) -> str:

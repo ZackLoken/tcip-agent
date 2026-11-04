@@ -1,20 +1,21 @@
-"""Why a record or value will not read, and the one validation that states it.
+"""Why a record or value will not read, and the two boundaries that state it.
 
 :func:`validated` validates a raw value against its model and, when the model refuses it, raises
-:class:`~tcip_store.errors.RecordInvalidError` carrying every error the model raised, each by its
-place and message (:class:`Invalid`), behind where the value lives. :class:`Unreadable` is a
-record that would not read for any other reason, as that error's sentence. Each reads as text
-where a sentence carries it.
+:class:`~tcip_store.errors.ReadRefusedError` carrying every error the model raised, each by its
+place and message (:class:`Invalid`), behind where the value lives. :func:`unreadable` raises the
+same error carrying :class:`Unreadable`, the sentence of any other error that stops a read. Each
+reads as text where a sentence carries it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Annotated, Any, Literal
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from typing import Annotated, Any, Literal, overload
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from tcip_store.errors import RecordInvalidError
+from tcip_store.errors import ReadRefusedError
 
 
 class Issue(BaseModel):
@@ -79,23 +80,62 @@ type ReadRefusal = Annotated[Invalid | Unreadable, Field(discriminator="kind")]
 """Why a record will not read, told apart by its ``kind``."""
 
 
-def validated[T](
-    model: type[T] | TypeAdapter[T],
+@overload
+def validated[M: BaseModel](
+    model: type[M],
     raw: object,
     where: str,
     *,
     context: Mapping[str, Any] | None = None,
-) -> T:
-    """Return ``raw`` validated as ``model``, a type or its adapter, under ``context``.
+) -> M: ...
 
-    ``raw`` is the decoded value, or the JSON bytes that spell it. ``where`` names where the
-    value lives. A value the model refuses raises :class:`~tcip_store.errors.RecordInvalidError`
-    carrying the model's errors as :class:`Invalid`, behind ``where``.
+
+@overload
+def validated[T](
+    model: TypeAdapter[T],
+    raw: object,
+    where: str,
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> T: ...
+
+
+def validated(
+    model: type[BaseModel] | TypeAdapter[Any],
+    raw: object,
+    where: str,
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> Any:
+    """Return ``raw`` validated as ``model``, a model or the adapter of a type, under ``context``.
+
+    A model validates through its own ``model_validate``. ``raw`` is the decoded value, or the
+    JSON bytes that spell it. ``where`` names where the value lives. A value the model refuses
+    raises :class:`~tcip_store.errors.ReadRefusedError` carrying the model's errors as
+    :class:`Invalid`, behind ``where``.
     """
-    adapter = model if isinstance(model, TypeAdapter) else TypeAdapter(model)
     try:
+        if isinstance(model, TypeAdapter):
+            if isinstance(raw, bytes):
+                return model.validate_json(raw, context=context)
+            return model.validate_python(raw, context=context)
         if isinstance(raw, bytes):
-            return adapter.validate_json(raw, context=context)
-        return adapter.validate_python(raw, context=context)
+            return model.model_validate_json(raw, context=context)
+        return model.model_validate(raw, context=context)
     except ValidationError as exc:
-        raise RecordInvalidError(Invalid.of(exc), where) from exc
+        raise ReadRefusedError(Invalid.of(exc), where) from exc
+
+
+@contextmanager
+def unreadable(where: str, *errors: type[Exception]) -> Iterator[None]:
+    """Raise :class:`~tcip_store.errors.ReadRefusedError` for any of ``errors`` raised inside.
+
+    The error carries the caught error's sentence as :class:`Unreadable`, behind ``where``; a
+    ``ReadRefusedError`` raised inside passes as it is.
+    """
+    try:
+        yield
+    except ReadRefusedError:
+        raise
+    except errors as exc:
+        raise ReadRefusedError(Unreadable(message=str(exc)), where) from exc

@@ -42,7 +42,7 @@ from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import PathSegment
-from tcip_store import RecordInvalidError, validated
+from tcip_store import ReadRefusedError, validated
 
 if TYPE_CHECKING:
     import numpy as np
@@ -392,7 +392,7 @@ def propose_annotations(
             except (
                 ImportError,
                 FileNotFoundError,
-                RecordInvalidError,
+                ReadRefusedError,
                 ExecutionRefusedError,
             ) as e:
                 return {"error": str(e)}
@@ -408,7 +408,7 @@ def propose_annotations(
                 proposed.candidates,
                 f"the candidates engine {engine!r} proposed",
             )
-        except RecordInvalidError as exc:
+        except ReadRefusedError as exc:
             return {"error": str(exc)}
         if origin is not None:
             candidates = _offset_candidates(candidates, origin)

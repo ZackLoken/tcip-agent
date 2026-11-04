@@ -780,7 +780,7 @@ def _observed[R: RunRecord | SweepRecord](
 def read_run(run_dir: Path) -> RunRecord:
     """Return the :class:`RunRecord` the run at ``run_dir`` holds, its paths read as resolved.
 
-    A record its model refuses raises ``tcip_store.RecordInvalidError`` naming its file.
+    A record its model refuses raises ``tcip_store.ReadRefusedError`` naming its file.
     """
     path = run_dir / RUN_FILE
     return validated(RunRecord, read_run_record(path), str(path))

@@ -298,7 +298,7 @@ def draw_splits(
             image; the images are the dataset's own ``images/`` tree either way.
 
     """
-    from tcip_store import RecordInvalidError, validated
+    from tcip_store import ReadRefusedError, validated
 
     try:
         draw = validated(
@@ -314,7 +314,7 @@ def draw_splits(
             },
             "the draw",
         )
-    except RecordInvalidError as exc:
+    except ReadRefusedError as exc:
         return {"error": str(exc)}
     return draw_splits_at(
         project,

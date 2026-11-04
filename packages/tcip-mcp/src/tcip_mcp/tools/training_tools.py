@@ -156,7 +156,7 @@ def _admitted(
     validate, its staged sources, ``None`` when none were taken, and every issue.
     """
     from tcip_mcp.pipelines.data.augmentations import forbidden_transforms
-    from tcip_mcp.project_record import ProjectRecordMissingError, read_record
+    from tcip_mcp.project_record import read_record
 
     try:
         spec, issues = checked_train_config(
@@ -171,7 +171,7 @@ def _admitted(
             issues = forbidden_transforms(
                 spec.augmentation, read_record(project).invariances
             )
-        except (ValueError, ProjectRecordMissingError) as exc:
+        except ValueError as exc:
             issues = [str(exc)]
     sources, structural = _structural_issues(spec, project)
     return spec, sources, [*issues, *structural]

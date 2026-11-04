@@ -377,7 +377,7 @@ class MappingBuild:
         """Return the build the stored record ``raw`` under ``name`` holds, with its digest.
 
         The digest is :func:`record_digest`'s. A document that does not decode as this record
-        raises ``tcip_store.RecordInvalidError`` naming the project and the name.
+        raises ``tcip_store.ReadRefusedError`` naming the project and the name.
         """
         from tcip_store import validated
 

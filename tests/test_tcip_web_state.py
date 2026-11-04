@@ -288,7 +288,7 @@ def test_opening_a_project_whose_snapshot_does_not_decode_refuses_and_leaves_the
         expect=tcip_store.Version.ABSENT,
     )
 
-    with pytest.raises(tcip_store.RecordInvalidError, match="active_tab"):
+    with pytest.raises(tcip_store.ReadRefusedError, match="active_tab"):
         asyncio.run(store.open_project(proj_b))
     assert store.opened == proj_a
 

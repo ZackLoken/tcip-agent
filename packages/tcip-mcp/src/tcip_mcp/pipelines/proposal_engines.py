@@ -317,7 +317,7 @@ class PromptableSegmenter:
         The proposal is :class:`~tcip_mcp.pipelines.execution.NoPass`'s: a prompt window is no
         tiled pass.
 
-        ``params`` is :class:`SegmenterParams`, refused (``tcip_store.RecordInvalidError``) as
+        ``params`` is :class:`SegmenterParams`, refused (``tcip_store.ReadRefusedError``) as
         that model refuses it. Each prompt runs on its :func:`prompt_window` at the processor's
         own ``longest_edge``, prompts sharing a window sharing one image embedding. Each candidate
         is :func:`mask_candidate`'s moved into the frame (:func:`shifted_candidate`), its
@@ -510,7 +510,7 @@ class TextPromptedDetector:
     def propose(self, image_path: str, **params: JsonValue) -> Proposal:
         """Return a box candidate per detection over the frame, through the platform's tiled pass.
 
-        ``params`` is :class:`DetectorParams`, refused (``tcip_store.RecordInvalidError``) as that
+        ``params`` is :class:`DetectorParams`, refused (``tcip_store.ReadRefusedError``) as that
         model refuses it. The frame runs through :class:`PhraseDetectionModel` by
         :func:`detected_proposal`, the processor's own ``shortest_edge`` the model's input edge,
         whose refusals propagate.

@@ -152,18 +152,15 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
     project whose record will not read is not found by its id), 409 when its persisted GUI
     state will not read, its detail the :data:`~tcip_store.ReadRefusal` saying why.
     """
-    from tcip_store import RecordInvalidError, StoreError, Unreadable
+    from tcip_store import ReadRefusedError
 
     actor(req.user)
     root, record = workspace_project(req.id)
     project = OpenProject(root, record.id)
     try:
         await store.open_project(project)
-    except RecordInvalidError as exc:
+    except ReadRefusedError as exc:
         raise HTTPException(409, exc.refusal.model_dump()) from exc
-    except (ValueError, StoreError) as exc:
-        detail = Unreadable(message=str(exc)).model_dump()
-        raise HTTPException(409, detail) from exc
     return OpenAnswer(project=SnapshotProject.of(project))
 
 

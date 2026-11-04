@@ -357,31 +357,38 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     """Return ``project``'s persisted GUI state, or ``None`` when it has none.
 
     Its selection is rebuilt through :func:`selection_for`. A snapshot that does not decode as its
-    shape raises (``tcip_store.RecordInvalidError`` naming the project, or the store's own
-    error), as does a selection that will not build.
+    shape, that the store will not read, or whose selection will not build raises
+    ``tcip_store.ReadRefusedError`` naming the project: the shape's issues, or the sentence of the
+    error that stopped it.
     """
     from tcip_mcp.registry_paths import resolved_registry_path
 
-    raw = tcip_store.read(gui_snapshot_key(project), default=None)
+    place = f"the GUI snapshot of {project}"
+    with tcip_store.unreadable(place, tcip_store.StoreError):
+        raw = tcip_store.read(gui_snapshot_key(project), default=None)
     if raw is None:
         return None
-    persisted = tcip_store.validated(
-        _PersistedGuiState, raw, f"the GUI snapshot of {project}"
-    )
+    persisted = tcip_store.validated(_PersistedGuiState, raw, place)
     choice = persisted.dataset
+    with tcip_store.unreadable(place, ValueError):
+        dataset = (
+            None
+            if choice is None
+            else selection_for(
+                choice.model_copy(
+                    update={
+                        "dataset_root": str(
+                            resolved_registry_path(
+                                project, choice.dataset_root
+                            )
+                        )
+                    }
+                )
+            )
+        )
     return GuiState(
         **{name: getattr(persisted, name) for name in _GuiFields.model_fields},
-        dataset=None
-        if choice is None
-        else selection_for(
-            choice.model_copy(
-                update={
-                    "dataset_root": str(
-                        resolved_registry_path(project, choice.dataset_root)
-                    )
-                }
-            )
-        ),
+        dataset=dataset,
     )
 
 

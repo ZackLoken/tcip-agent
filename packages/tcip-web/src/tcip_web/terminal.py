@@ -339,7 +339,7 @@ _JSON_OBJECT: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
 def _json_object(path: Path) -> dict[str, Any]:
     """Return the JSON object the file at ``path`` holds, an empty one when there is no file.
 
-    Raises ``tcip_store.RecordInvalidError`` naming ``path`` when it does not hold a JSON object
+    Raises ``tcip_store.ReadRefusedError`` naming ``path`` when it does not hold a JSON object
     (:data:`_JSON_OBJECT` refusing it), and the filesystem's ``OSError`` when it does not read.
     """
     if not path.is_file():
