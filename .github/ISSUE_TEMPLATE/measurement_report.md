@@ -1,6 +1,6 @@
 ---
 name: Measurement report
-about: A delivered phenotype (a CSV row from deliver_per_image_counts, export_aggregated_csv,
+about: A delivered phenotype (a CSV row from deliver_per_image_counts, deliver_per_plant_csv,
   deliver_phenology_milestones, or deliver_orthomosaic_plant_counts) is wrong or overclaims
 title: "[measurement] "
 labels: measurement
@@ -16,22 +16,17 @@ everything you have; leave the rest blank rather than guessing.
 - Subject (the class registry name the delivery measured):
 - Delivered phenotype or trait name:
 
-## The delivery's own provenance tail
+## The delivery's own record
 
-Copy the values from the delivered CSV's own columns; a blank cell is itself informative, so report
-it as blank rather than omitting the row.
+Every delivered CSV carries, beside its measurement, the columns `DELIVERY_COLUMNS` names in
+`packages/tcip-mcp/src/tcip_mcp/delivery.py`, the same on every row. Copy their cells from one row.
+The row's `delivery_event_id` is the key to the delivery event the platform recorded, which holds
+the producer, each bucket's gate finding, the scale assessment and how the delivery shipped, among
+the rest. The GUI's Results tab lists the events, and `tcip dump-store <project> <out_dir>`
+writes each out as a file to attach.
 
-- `producer_model_sha256`:
-- `producing_experiment_id`:
-- `produced_at`:
-- `validation_record`:
-- `operating_point_conf` / `operating_point_validated`:
-- `positive_state_classifier_validated` (phenology deliveries only):
-- `unvalidated_dimensions`:
-- `plant_mapping_sha256` (phenology deliveries only):
-- `captures_unverified` / `plant_csvs_unverified` (phenology deliveries only):
-- `dates_delivered` / `images_unattributed` (phenology deliveries only):
-- `plant_attribution`:
+- The `DELIVERY_COLUMNS` cells:
+- The delivery event, if you can attach it:
 
 ## What is wrong
 

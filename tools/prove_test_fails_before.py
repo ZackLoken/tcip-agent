@@ -25,10 +25,14 @@ Four verdicts, each its own exit code:
                        change, so passing says nothing about the test; or, under
                        ``--per-test-timeout``, a selected test did not finish within it, named in
                        the verdict, so a hung baseline is told apart from a merely slow one
-    REFUSED (3)        no verdict is available: nothing was selected, everything was skipped, the
-                       baseline could not collect the file, the baseline's own source was not what
-                       got imported, pytest never reported an outcome, or every failure is
-                       fixture-shaped so the code under test was never reached. A setup or
+    REFUSED (3)        no verdict is available: the test file is outside ``tests/`` or does not
+                       exist, ``--test-rev`` was given without ``--baseline``, the baseline does
+                       not resolve or no tree here precedes the change, nothing was selected,
+                       everything was skipped, the baseline could not collect the file, the
+                       baseline's own source was not what got imported, pytest did not finish
+                       within ``--timeout``, hit an internal error or never reported an outcome,
+                       or no failure is behavioral (each rests on a missing import or file or is
+                       fixture-shaped), so the code under test was never reached. A setup or
                        teardown failure that is neither a missing import or file nor a
                        pytest-timeout report is fixture-shaped, whatever raised it; a call-phase
                        failure is fixture-shaped only when it is a ``TypeError`` raised inside
@@ -868,8 +872,9 @@ def main() -> int:
         record.update(
             verdict=REFUSED,
             why=(
-                "--test-rev needs an explicit --baseline. The commit before a test is inside the "
-                "change in a one-file-per-commit history, so guessing one would decide the verdict."
+                "--test-rev needs an explicit --baseline. A change spans one commit per concern, "
+                "so the commit before a test can be inside it, and guessing one would decide the "
+                "verdict."
             ),
         )
         return _report(record, args.json_out)

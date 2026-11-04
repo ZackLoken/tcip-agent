@@ -4,27 +4,23 @@ Not a Python package (no `__init__.py`); each file is an entry point run with
 `python tools/<name>.py`, or from the repository root as `python -m tools.<name>` when it imports
 the test suite's helpers or another tool. Read a script's own module docstring and `--help` for
 exact usage; this index only says what each does. CI and development tooling only; the operator
-commands a breeder or an operator runs against a project are documented in `README.md` and
-`CONTRIBUTING.md` instead.
+commands a breeder or an operator runs against a project are documented in `README.md`'s Running
+section instead.
 
 - `gate_baseline.py` - runs CI's own jobs locally; its module docstring says which jobs and steps
   it leaves out.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
   current test tree so conftest and helpers travel with the test, proves the baseline's own source
   is what gets imported, and reads pytest's per-test outcome to say whether a test actually fails
-  without its fix. Four verdicts on four exit codes: `GUARDS` (0), `VACUOUS` (1), `INDETERMINATE`
-  (2) when the baseline is not shown to precede the change, and `REFUSED` (3) when nothing was
-  selected, everything was skipped, collection failed, or every failure was a missing import. Only
-  `GUARDS` is evidence. The default baseline is `HEAD` for uncommitted work and the merge-base
-  against the integration branch otherwise; the previous commit is not a baseline in a
-  one-file-per-commit history, so pass `--baseline` when neither default applies. `--test-rev`
-  checks a guard claim already in the history.
+  without its fix. Four verdicts, `GUARDS`, `VACUOUS`, `INDETERMINATE` and `REFUSED`, each its own
+  exit code; its module docstring states what each means and how the baseline is chosen, and only
+  `GUARDS` is evidence. `--test-rev` checks a guard claim already in the history.
 - `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
   answers; its module docstring and `--help` say which families it runs and what each run records.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
   for "how many domain tools exist," since the count drifts as tools are added/renamed.
 - `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)
-  for a commit, a `rev1..rev2` range or `--cached`.
+  for a commit, a `rev1..rev2` range, `<rev>..` for the working tree against `rev`, or `--cached`.
 - `worktree_gate.py` - runs ruff, mypy and a pytest file list inside a worktree, its own `tcip_mcp`
   resolution proved first (the editable installs point at the main checkout, so a worktree needs its
   own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves outside it; each

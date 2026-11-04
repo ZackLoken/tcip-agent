@@ -7,9 +7,11 @@ FastAPI backend + Vite/React/TS/Tailwind/Konva frontend: the human's UI. Loads o
 
 ```text
 src/tcip_web/
-  routes/          # annotate, audit_gap, canvas, dataset, fs, images, inference, meta,
+  routes/          # annotate, audit_gap, canvas, dataset, images, inference, meta,
                     # projects, results, sessions, subjects, terminal, training
   app.py, state.py, jobstore.py, paths.py, __main__.py
+  trust_boundary.py  # the network trust boundary: only connections arriving through a loopback
+                      # address or a UNIX socket are served
   cli/             # the tcip dispatcher: each operator-only command's module (COMMANDS, one of
                     # them session_hook here) and every registered tool by its own name
                     # through tcip_mcp.cli.run_tool
