@@ -136,6 +136,9 @@ pip install --upgrade torch torchvision --index-url https://download.pytorch.org
 The build writes the bundle inside the `tcip-web` package, so the environment's editable install
 serves it at once; a wheel or the Docker image carries the bundle built before it was made.
 
+An existing editable checkout gains the `tcip` console script only on the next
+`pip install -e packages/tcip-web`.
+
 `docker build -f packages/tcip-web/Dockerfile -t tcip .` from the repository root, then `docker run
 --network host -e TCIP_WORKSPACE=<workspace> tcip`, builds and runs the platform as a container,
 serving the GUI on the host's loopback. The image carries the CPU build of torch and no agent
@@ -235,8 +238,8 @@ you pasted it into a chat, and the platform does not bound or redact it. Read
 that leaves the machine, the one phone-home you can disable, and the trust boundary the loopback
 bind rests on.
 
-Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) has the gates a change must pass, and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) the standards contributors are held to. What an adopter can
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) says how to report a problem or ask for a feature,
+and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) the standards contributors are held to. What an adopter can
 build against today is [STABILITY.md](STABILITY.md)'s; [VERSIONING.md](VERSIONING.md) explains what
 the version number does and doesn't promise.
 
