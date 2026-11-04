@@ -4,7 +4,26 @@
  * the body is read as.
  */
 
-import { AUDIT_ENTRY_NOT_WRITTEN, type AuditGapRefusal } from "@/api/types.generated";
+import {
+  AUDIT_ENTRY_NOT_WRITTEN,
+  type AuditGapRefusal,
+  INVALID,
+  type Invalid,
+  type Issue,
+  type ReadRefusal,
+} from "@/api/types.generated";
+
+/** The text a model's issues read as: each one's dotted place before its message. */
+export function issuesText(issues: Issue[]): string {
+  return issues
+    .map((issue) => (issue.loc.length ? `${issue.loc.join(".")}: ${issue.msg}` : issue.msg))
+    .join("; ");
+}
+
+/** The text why a record will not read reads as: its model's issues, or its own sentence. */
+export function readRefusalText(refusal: ReadRefusal): string {
+  return refusal.kind === INVALID ? issuesText(refusal.issues) : refusal.message;
+}
 
 /** A refusal whose `detail` is an object, kept parsed so a caller can branch on its own fields. */
 export class StructuredRefusalError extends Error {
@@ -29,14 +48,15 @@ export async function decodeRefusal(r: Response, fallback = ""): Promise<Error> 
   const status = fallback || `${r.status} ${r.statusText}`;
   if (typeof detail === "object" && detail !== null) {
     const parsed = detail as Record<string, unknown>;
-    // A list is a request model's own refusal: one entry per field it refused, naming its place.
+    // A list is a request model's own refusal: one entry per field it refused, naming its place
+    // within the request part its first place names.
     const message = Array.isArray(detail)
-      ? (detail as { loc: (string | number)[]; msg: string }[])
-          .map((issue) => `${issue.loc.slice(1).join(".")}: ${issue.msg}`)
-          .join("; ")
-      : typeof parsed.message === "string"
-        ? parsed.message
-        : "";
+      ? issuesText((detail as Issue[]).map((issue) => ({ ...issue, loc: issue.loc.slice(1) })))
+      : parsed.kind === INVALID
+        ? issuesText((parsed as unknown as Invalid).issues)
+        : typeof parsed.message === "string"
+          ? parsed.message
+          : "";
     return new StructuredRefusalError(parsed, r.status, message || status);
   }
   // A string detail still carries a status a caller may branch on; a body with no detail at

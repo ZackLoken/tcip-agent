@@ -51,7 +51,8 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
 ) -> None:
     """The trait listing names a record its schema refuses beside the valid one.
 
-    The refused record is listed under ``unreadable`` by name and reason.
+    The refused record is listed under ``unreadable`` by name, its reason the model's issues,
+    each by its place in the record and its message.
     """
     from tcip_mcp import traits
 
@@ -69,7 +70,48 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
 
     assert [record["trait"] for record in body["traits"]] == ["bud_opening"]
     assert [entry["trait"] for entry in body["unreadable"]] == ["unicorn"]
-    assert "localization" in body["unreadable"][0]["reason"]
+    reason = body["unreadable"][0]["reason"]
+    assert isinstance(reason, dict) and reason["kind"] == "invalid"
+    assert ["revisions", 0, "entry", "localization"] in [
+        issue["loc"] for issue in reason["issues"]
+    ]
+
+
+@pytest.mark.usefixtures("seed_bud_operationalization")
+def test_a_confirmation_over_a_record_its_schema_refuses_answers_the_schemas_issues(
+    client: TestClient, opened_project: Path
+) -> None:
+    """A confirmation of a trait whose stored record its schema refuses answers 400 with why.
+
+    The detail is the schema's issues, each by its place in the record and its message, and
+    carries no library documentation link.
+    """
+    from tcip_mcp import traits
+
+    record = traits.read_trait("bud_opening", opened_project)
+    revision = record.latest
+    stored = record.model_dump(mode="json")
+    stored["revisions"][0]["entry"]["localization"] = "unicorn_match"
+    tcip_store.replace(traits.trait_key(opened_project, "bud_opening"), stored)
+
+    resp = client.post(
+        "/api/results/traits/confirm",
+        json={
+            "trait": "bud_opening",
+            "revision": revision.number,
+            "entry_sha256": revision.entry_sha256,
+            "user": "tester",
+            "confirmed": True,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "errors.pydantic.dev" not in resp.text
+    detail = resp.json()["detail"]
+    assert isinstance(detail, dict) and detail["kind"] == "invalid"
+    assert ["revisions", 0, "entry", "localization"] in [
+        issue["loc"] for issue in detail["issues"]
+    ]
 
 
 def test_plant_mapping_build_requires_a_registered_dataset(

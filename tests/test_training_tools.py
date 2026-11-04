@@ -2127,7 +2127,7 @@ def test_preflight_refuses_an_augmentation_value_outside_its_range_naming_the_fi
     assert report["valid"] is False
     (name,) = transforms
     assert any(
-        repr(name) in issue and f"\n{field}\n" in issue and refusal in issue
+        repr(name) in issue and f"{field}: " in issue and refusal in issue
         for issue in report["issues"]
     ), report["issues"]
 

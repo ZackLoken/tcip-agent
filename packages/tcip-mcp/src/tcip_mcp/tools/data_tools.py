@@ -300,6 +300,8 @@ def draw_splits(
     """
     from pydantic import ValidationError
 
+    from tcip_mcp.read_refusal import Invalid
+
     try:
         draw = DrawnSplit(
             seed=seed,
@@ -311,7 +313,7 @@ def draw_splits(
             grouping=grouping,
         )
     except ValidationError as exc:
-        return {"error": str(exc)}
+        return {"error": str(Invalid.of(exc))}
     return draw_splits_at(
         project,
         str(located(folder_path, project)),

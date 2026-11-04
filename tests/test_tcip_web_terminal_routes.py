@@ -2770,20 +2770,23 @@ def test_the_orientation_of_a_project_whose_record_will_not_read_states_why(
     client: TestClient,
     opened: OpenProject,
 ) -> None:
-    """A session for a project whose record will not read is told why, in the overview."""
-    from tcip_mcp.project_record import project_record_key, record_or_problem
+    """A session for a project whose record will not read is told why, in the overview.
+
+    The overview states the reading's problem as its record: an unreadable kind and the store's
+    sentence that the record does not decode.
+    """
+    from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
 
     damage_record(project_record_key(str(opened.root)), b"{not valid json")
-    reading = record_or_problem(opened.root)
-    assert reading.kind == "unread"
 
     created = client.post("/api/terminal/sessions", json=LAUNCH)
 
     assert created.status_code == 200, created.text
     told = _started(client, created.json()["session_id"])
     assert told is not None
-    assert f'"problem": {json.dumps(reading.problem)}' in told
+    assert '"problem": {"kind": "unreadable", "message": ' in told
+    assert "does not decode" in told
 
 
 # ── resuming a row's conversation ───────────────────────────────────────

@@ -602,10 +602,11 @@ describe("AnnotateToolbar review queue", () => {
   const valueNames = (scorer: ScorerEntry) =>
     Object.keys(scorer.values_schema.properties as object);
 
-  /** Open the launch from the Images select and wait for its scorers to load. */
+  /** Open the launch from the Images select and wait for its scorers, the catalog the completed
+   *  queue's stated scorer was registered in, to load. */
   async function openLaunch() {
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue(REGISTERED_MODELS);
-    vi.spyOn(api.annotate, "scorers").mockResolvedValue(QUEUE_ANSWERS.scorers);
+    vi.spyOn(api.annotate, "scorers").mockResolvedValue(QUEUE_ANSWERS.stated_scorers);
     fireEvent.change(imagesSelect(), { target: { value: "rank_queue" } });
     await screen.findByRole("option", { name: "combined" });
     await screen.findByRole("option", { name: MODEL.entry.name });
@@ -629,7 +630,7 @@ describe("AnnotateToolbar review queue", () => {
       target: { value: "combined" },
     });
     for (const name of valueNames(
-      QUEUE_ANSWERS.scorers.scorers.find((s) => s.name === "combined")!,
+      QUEUE_ANSWERS.stated_scorers.scorers.find((s) => s.name === "combined")!,
     )) {
       expect(screen.getByLabelText(name)).toHaveValue("");
     }

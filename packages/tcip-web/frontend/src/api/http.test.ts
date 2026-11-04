@@ -5,19 +5,26 @@ import {
   committedOf,
   decodeRefusal,
   getJson,
+  issuesText,
   postJson,
+  readRefusalText,
   refusalOf,
   StructuredRefusalError,
 } from "@/api/http";
 import {
   AUDIT_ENTRY_NOT_WRITTEN,
   type AuditGapRefusal,
+  INVALID,
   type SavedExport,
+  UNREAD,
+  UNREADABLE,
 } from "@/api/types.generated";
 import { ANNOTATE_ANSWERS } from "@/test/annotate";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { IMAGE_ANSWERS } from "@/test/images";
+import { PICKER } from "@/test/projectRecords";
 import { answeredWith, fetchAnswers, thrown } from "@/test/refusals";
+import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 /** A produced refusal whose detail is a sentence: the status route's answer for no such job. */
 const UNKNOWN_JOB = IMAGE_ANSWERS.unknown;
@@ -104,5 +111,45 @@ describe("http helpers", () => {
     expect(committedOf(await thrown(RESULTS_ANSWERS.mapping_audit_gap))).toBeNull();
 
     expect(committedOf(await thrown(ANNOTATE_ANSWERS.engine_refusal))).toBeNull();
+  });
+});
+
+describe("a read refusal's text", () => {
+  /** The produced trait record its schema refuses, by two issues each placed in the record. */
+  const [UNREADABLE_TRAIT] = TRAIT_LISTINGS.unreadable.unreadable;
+  /** The produced delivery listing's refusal: one issue, placed at the record as a whole. */
+  const UNREADABLE_DELIVERIES = RESULTS_ANSWERS.unreadable_deliveries;
+  /** The produced stray directory's problem, a record that will not read for another reason. */
+  const STRAY = PICKER.stray;
+
+  it("issuesText joins each issue's dotted place and message, a placeless one by its message", () => {
+    const delivery = UNREADABLE_DELIVERIES.body.detail;
+    if (delivery.kind !== INVALID) throw new Error("the produced refusal is not a model's");
+    expect(issuesText(UNREADABLE_TRAIT.reason.issues)).toBe(
+      "revisions.0.entry.localization: Input should be '', 'center_match' or 'iou_match'; " +
+        "revisions: Tuple should have at least 1 item after validation, not 0",
+    );
+    expect(issuesText(delivery.issues)).toBe(
+      "Input should be a valid dictionary or instance of DeliveryEventRecord",
+    );
+  });
+
+  it("readRefusalText reads an invalid record by its issues and an unreadable one by its message", () => {
+    if (STRAY.kind !== UNREAD) throw new Error("the produced stray's record read");
+    expect(readRefusalText(UNREADABLE_TRAIT.reason)).toBe(
+      "revisions.0.entry.localization: Input should be '', 'center_match' or 'iou_match'; " +
+        "revisions: Tuple should have at least 1 item after validation, not 0",
+    );
+    expect(STRAY.problem.kind).toBe(UNREADABLE);
+    expect(readRefusalText(STRAY.problem)).toBe(
+      "/scratch/workspace/stray is not a project yet: create it with initialize_project",
+    );
+  });
+
+  it("decodeRefusal reads an invalid detail as its issues' text", async () => {
+    const raised = await thrown(UNREADABLE_DELIVERIES);
+    expect(raised.message).toBe(
+      "Input should be a valid dictionary or instance of DeliveryEventRecord",
+    );
   });
 });
