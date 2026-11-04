@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 import tcip_store
 from tcip_mcp.web_client import annotation_stats_key
@@ -37,7 +36,7 @@ def _contribute(
 def test_the_record_the_session_routes_write_reads_back_through_its_model_unchanged(
     client: TestClient, opened: OpenProject
 ) -> None:
-    from tcip_web.routes.sessions import ImageEntry, read_stats
+    from tcip_web.routes.sessions import ImageEntry, stored_stats
 
     alice = _contribute(client, opened.id, "alice", "c-alice")
     bob = _contribute(client, opened.id, "bob", "c-bob")
@@ -47,8 +46,9 @@ def test_the_record_the_session_routes_write_reads_back_through_its_model_unchan
     )
     assert ended.status_code == 200, ended.text
 
-    raw = tcip_store.read(annotation_stats_key(str(opened.root)))
-    stats = read_stats(raw)
+    key = annotation_stats_key(str(opened.root))
+    raw = tcip_store.read(key)
+    stats = stored_stats(tcip_store.read, key)
 
     stored = stats.model_dump(mode="json")
     assert stored == raw
@@ -77,15 +77,15 @@ def test_a_stored_session_missing_its_person_is_refused_naming_the_field(
     user = session.pop("user")
     tcip_store.replace(key, raw)
     try:
-        with pytest.raises(ValidationError) as refused:
+        with pytest.raises(tcip_store.ReadRefusedError) as refused:
             client.get("/api/sessions/load")
     finally:
         # The backend's teardown ends the open session, which reads the record whole.
         session["user"] = user
         tcip_store.replace(key, raw)
 
-    (error,) = refused.value.errors()
-    assert (error["loc"], error["type"]) == (
-        ("sessions", 0, "user"),
-        "missing",
-    )
+    refusal = refused.value.refusal
+    assert isinstance(refusal, tcip_store.Invalid)
+    assert [issue.loc for issue in refusal.issues] == [["sessions", 0, "user"]]
+    assert str(opened.root) in str(refused.value)
+    assert "errors.pydantic.dev" not in str(refused.value)

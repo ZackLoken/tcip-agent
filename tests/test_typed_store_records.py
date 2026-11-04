@@ -510,7 +510,7 @@ def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuse
     registry_over(tmp_path, registry)
 
     assert sr.read_registry(tmp_path) == registry
-    with pytest.raises(sr.RegistryError, match="description"):
+    with pytest.raises(ts.ReadRefusedError, match="description"):
         sr.registry_from_dict({"bud": {"attributes": None}})
 
 

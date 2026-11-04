@@ -147,7 +147,7 @@ def _entries(manifest: IngestManifest) -> dict[str, tuple[str, str]]:
 def _unreadable(manifest: IngestManifest) -> list[str]:
     """Return each ingested file's reason its capture date could not be read, where it has one."""
     return [
-        f.date.reason for f in manifest.files if f.date.kind == "unreadable"
+        f.date.message for f in manifest.files if f.date.kind == "unreadable"
     ]
 
 

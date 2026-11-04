@@ -297,13 +297,16 @@ class TerminalSession:
                 )
             )
             program = pty_host.launched_program(argv, command.override)
-            launched = LaunchedProgram(
-                provider=provider.id,
-                prepared=prepared.steps,
-                confinement=None if command.override else provider.confinement,
-                resumed=resumed,
-                **program,
-            )
+        except (ValueError, OSError) as exc:
+            return pty_host.NotStarted(why=str(exc))
+        launched = LaunchedProgram(
+            provider=provider.id,
+            prepared=prepared.steps,
+            confinement=None if command.override else provider.confinement,
+            resumed=resumed,
+            **program,
+        )
+        try:
             pty = pty_host.spawn_pty(
                 argv, str(store.workspace), rows, cols, env
             )

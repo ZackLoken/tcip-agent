@@ -312,19 +312,18 @@ def test_a_malformed_registry_refuses_the_fingerprint_and_an_absent_one_admits_i
 ) -> None:
     """A malformed registry refuses the fingerprint, and an absent one admits it.
 
-    A registry whose bytes will not decode raises ``RegistryError``; a dataset holding no
+    A registry whose bytes will not decode raises ``ReadRefusedError``; a dataset holding no
     registry fingerprints to a value other than its registered one.
     """
     import pytest
 
     from tcip_mcp.dataset_layout import subjects_path
-    from tcip_mcp.subject_registry import RegistryError
 
     _make_dataset(tmp_path)
     with_registry = dataset_fingerprint(tmp_path)
     path = subjects_path(tmp_path)
     ts.put_blob(path, b"{not json")
-    with pytest.raises(RegistryError):
+    with pytest.raises(ts.ReadRefusedError):
         dataset_fingerprint(tmp_path)
 
     ts.delete_blob(path)

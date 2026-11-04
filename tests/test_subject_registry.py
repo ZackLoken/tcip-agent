@@ -7,6 +7,7 @@ survives a file round-trip.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,6 +22,7 @@ from tcip_mcp.subject_registry import (
     registry_from_dict,
     registry_to_dict,
 )
+from tcip_store import ReadRefusedError
 from tests._producer_fixtures import registry_of, registry_over, scope_over
 
 if TYPE_CHECKING:
@@ -64,7 +66,7 @@ def _bud_bush() -> SubjectRegistry:
 
 def test_a_subject_stating_no_description_refuses_naming_the_field() -> None:
     """A subject missing ``description`` refuses naming the field."""
-    with pytest.raises(RegistryError, match="description"):
+    with pytest.raises(ReadRefusedError, match="description"):
         registry_from_dict({"bud": {}})
 
 
@@ -158,7 +160,7 @@ def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(
     ],
 )
 def test_malformed_registry_refuses(bad: dict) -> None:
-    with pytest.raises(RegistryError):
+    with pytest.raises(ReadRefusedError):
         registry_from_dict({"bud": {**bad["bud"], "description": "one bud"}})
 
 
@@ -213,7 +215,7 @@ def test_absent_attributes_are_valid_and_any_other_spelling_of_none_refuses() ->
     bush = registry_from_dict({"bush": {"description": ""}}).subject("bush")
     assert bush is not None and bush.attributes == ()
     for bad in (None, False, 0, "", []):
-        with pytest.raises(RegistryError, match="attributes"):
+        with pytest.raises(ReadRefusedError, match="attributes"):
             registry_from_dict(
                 {"bush": {"description": "", "attributes": bad}}
             )
@@ -224,14 +226,14 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(
 ) -> None:
     """An undecodable registry refuses, and an absent one says it is absent.
 
-    An undecodable registry raises ``RegistryError`` and an absent one ``FileNotFoundError``.
+    An undecodable registry raises ``ReadRefusedError`` and an absent one ``FileNotFoundError``.
     """
     path = tmp_path / "subjects.json"
     path.write_bytes(
         b'{"bud": {"description": "a currant bud"'
     )  # truncated mid-object
 
-    with pytest.raises(RegistryError):
+    with pytest.raises(ReadRefusedError, match=re.escape(str(path))):
         read_registry(tmp_path)
     with pytest.raises(FileNotFoundError):
         read_registry(tmp_path / "absent")
