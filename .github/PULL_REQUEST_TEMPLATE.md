@@ -2,12 +2,11 @@
 
 ## Checklist
 
-- [ ] `pytest tests/` passes (or the change's own new/changed test files)
+- [ ] The change's own test files pass, each run to its end; CI runs the full suite
 - [ ] The `ruff` line of CLAUDE.md's Commands block passes
 - [ ] `mypy` passes
 - [ ] `python tools/list_tools.py` was not hardcoded anywhere as a count in a doc, comment, or
       commit message
-- [ ] `python tools/gate_baseline.py --out <dir>` passes, or CI ran the equivalent
 - [ ] The frontend gate in CLAUDE.md's Commands block passes, if a frontend file changed
 - [ ] A new or changed test constructs its input through the platform's own producer, not a
       hand-built fixture standing in for one

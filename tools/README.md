@@ -16,8 +16,8 @@ commands a breeder or an operator runs against a project are documented in `READ
   (2) when the baseline is not shown to precede the change, and `REFUSED` (3) when nothing was
   selected, everything was skipped, collection failed, or every failure was a missing import. Only
   `GUARDS` is evidence. The default baseline is `HEAD` for uncommitted work and the merge-base
-  against the integration branch otherwise; the previous commit is not a baseline in a
-  one-file-per-commit history, so pass `--baseline` when neither default applies. `--test-rev`
+  against the integration branch otherwise; a change spans one commit per concern, so the previous
+  commit is not its baseline, and `--baseline` is passed when neither default applies. `--test-rev`
   checks a guard claim already in the history.
 - `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
   answers; its module docstring and `--help` say which families it runs and what each run records.
