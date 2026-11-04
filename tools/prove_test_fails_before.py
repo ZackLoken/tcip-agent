@@ -872,8 +872,9 @@ def main() -> int:
         record.update(
             verdict=REFUSED,
             why=(
-                "--test-rev needs an explicit --baseline. The commit before a test is inside the "
-                "change in a one-file-per-commit history, so guessing one would decide the verdict."
+                "--test-rev needs an explicit --baseline. A change spans one commit per concern, "
+                "so the commit before a test can be inside it, and guessing one would decide the "
+                "verdict."
             ),
         )
         return _report(record, args.json_out)
