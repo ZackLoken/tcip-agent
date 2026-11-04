@@ -209,8 +209,8 @@ Built:
   active-learning ranking of the next review batch (`prioritize_review_queue`).
 - Whole-mosaic tiled inference with GDAL windowed reads, detections resolved to real-world
   coordinates and matched to a registered plant registry, or attributed to canopy segments.
-- State-crossing milestones for any trait whose entry states a positive state and milestone
-  fractions, delivered per plant from per-date buckets.
+- State-crossing milestones for any trait whose `crops.yml` entry states a positive state and
+  milestone fractions, delivered per plant from per-date buckets.
 - A physical-scale path for per-photo dimensional traits.
 - The in-app agent terminal for three harnesses, resume of a row's last conversation, and the
   hand-off on a switch.

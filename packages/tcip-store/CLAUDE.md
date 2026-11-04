@@ -1,8 +1,8 @@
 # packages/tcip-store
 
 The storage seam: a root's records and logs in one SQLite database, and the files the platform
-writes by path. Bottom of the stack, depending on nothing else in the platform. Loads on top of the
-root `CLAUDE.md` and the operating contract it imports, which apply here and aren't restated.
+writes by path. Loads on top of the root `CLAUDE.md` and the operating contract it imports, which
+apply here and aren't restated.
 
 ## Layout
 
@@ -25,8 +25,9 @@ src/tcip_store/
 
 ## Conventions specific to this package
 
-- A record or log is addressed by a `Key` (store, root, parts); a module that owns a store spells
-  its key builder and nothing else. A file is addressed by the path its owning module computes.
+- A record or log is addressed by a `Key` (store, root, parts); the module that owns a store defines
+  the one function that builds its keys, and no other code builds them. A file is addressed by the
+  path its owning module computes.
 - A transaction is one commit over one root's records and logs: `txn.write`, `txn.delete` and
   `txn.append` land together or not at all.
 - Nothing reads back the files `tcip dump-store` writes.
