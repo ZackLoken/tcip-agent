@@ -83,6 +83,7 @@ def load_subjects(dataset_root: str, date: str) -> SubjectsLoad:
         RegistryError,
         read_versioned_registry,
     )
+    from tcip_store import ReadRefusedError
 
     root = allowed_path(dataset_root)
     discovered, unreadable = capture_subjects(root, date)
@@ -94,7 +95,7 @@ def load_subjects(dataset_root: str, date: str) -> SubjectsLoad:
             discovered=discovered,
             unreadable=unreadable,
         )
-    except (OSError, RegistryError) as exc:
+    except (OSError, RegistryError, ReadRefusedError) as exc:
         raise HTTPException(
             500, f"could not parse the subject registry: {exc}"
         ) from exc

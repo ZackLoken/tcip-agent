@@ -152,20 +152,20 @@ _REGISTRY = TypeAdapter(SubjectRegistry)
 
 
 class RegistryError(ValueError):
-    """A registry that cannot be read as a valid subject registry, or a scope it lacks."""
+    """A registry whose bytes do not decode, a write it refuses, or a scope it lacks."""
 
 
 def registry_from_dict(data: object) -> SubjectRegistry:
     """Parse the nested registry mapping into a :class:`SubjectRegistry`, in declared order.
 
-    Refuses (:class:`RegistryError`) what does not validate as the registry, naming each field.
+    Refuses (``tcip_store.ReadRefusedError``) what does not validate as the registry, naming
+    each field.
     """
-    try:
-        return _REGISTRY.validate_python({"subjects": data})
-    except ValueError as exc:
-        raise RegistryError(
-            f"the subject registry does not read: {exc}"
-        ) from exc
+    import tcip_store
+
+    return tcip_store.validated(
+        _REGISTRY, {"subjects": data}, "the subject registry"
+    )
 
 
 def registry_to_dict(registry: SubjectRegistry) -> dict:
@@ -196,8 +196,9 @@ def read_versioned_registry(
 
     Both come from one read; the registry is a :class:`SubjectRegistry`.
 
-    No registry raises ``FileNotFoundError``, and a registry whose bytes are present but will not
-    decode raises :class:`RegistryError`, the same refusal a structurally invalid registry raises.
+    No registry raises ``FileNotFoundError``, a registry whose bytes are present but will not
+    decode raises :class:`RegistryError`, and one that decodes but is no valid registry raises
+    ``tcip_store.ReadRefusedError`` (:func:`registry_from_dict`).
     """
     import tcip_store
     from tcip_mcp.dataset_layout import subjects_path

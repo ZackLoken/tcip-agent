@@ -386,11 +386,11 @@ def write_subject_registry(
     """
     from tcip_mcp import subject_registry
     from tcip_mcp.audit import AuditEntryNotWrittenError
-    from tcip_store import VersionConflictError
+    from tcip_store import ReadRefusedError, VersionConflictError
 
     try:
         registry = subject_registry.registry_from_dict(subjects)
-    except subject_registry.RegistryError as exc:
+    except ReadRefusedError as exc:
         return {"error": f"invalid registry: {exc}"}
 
     try:

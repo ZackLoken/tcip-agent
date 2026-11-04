@@ -311,3 +311,116 @@ def test_a_preflight_over_a_detector_whose_objects_span_no_pixel_names_the_geome
     (issue,) = [i for i in issues if "anchor_base_size" in i]
     assert LIBRARY_LINK not in issue
     assert "detector geometry" in issue
+
+
+def _registered_dataset(project: Path) -> dict:
+    """Return a training configuration over ``project`` as a registered dataset of labeled images.
+
+    The subject registry is written by ``write_subject_registry`` and the identity by
+    ``register_dataset``.
+    """
+    pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tests._producer_fixtures import (
+        seed_bud_images,
+        small_detection_config,
+    )
+
+    images = seed_bud_images(image_dir(project, UNDATED_BUCKET))
+    assert "error" not in write_subject_registry(
+        project, str(project), {"bud": {"description": "one bud"}}, actor=None
+    )
+    assert "error" not in register_dataset(
+        project, str(project), "currant", actor=None
+    )
+    return small_detection_config(images, project=project)
+
+
+def _rewritten(path: Path, change: dict[str, Any]) -> None:
+    """Rewrite the stored document at ``path`` with the top-level keys of ``change`` replaced."""
+    stored = tcip_store.read_blob_versioned(path)
+    document = cast("dict[str, Any]", tcip_store.decode_value(stored.value))
+    tcip_store.put_blob(
+        path,
+        tcip_store.encode_record(document | change),
+        expect=stored.version,
+    )
+
+
+def test_a_preflight_over_a_subject_registry_its_model_refuses_states_the_issues(
+    project: Path,
+) -> None:
+    """A preflight over a registry its model refuses states the issues, with no library link.
+
+    The registry ``write_subject_registry`` wrote has its subject's description changed to no
+    text; the issue names the registry and that one field.
+    """
+    from tcip_mcp.dataset_layout import subjects_path
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    config = _registered_dataset(project)
+    assert preflight_config(project, config)["issues"] == []
+    _rewritten(subjects_path(project), {"bud": {"description": 5}})
+
+    (issue,) = preflight_config(project, config)["issues"]
+
+    assert LIBRARY_LINK not in issue
+    assert "the subject registry" in issue
+    assert "subjects.0.description" in issue
+
+
+def test_writing_a_registry_its_model_refuses_answers_its_readers_sentence_as_an_error(
+    project: Path,
+) -> None:
+    """Writing a registry its model refuses answers an error holding the sentence.
+
+    The subject states no description; the error names the registry and that one field, and a
+    registry that states one is written.
+    """
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    refused = write_subject_registry(
+        project, str(project), {"bud": {}}, actor=None
+    )
+    written = write_subject_registry(
+        project, str(project), {"bud": {"description": "one bud"}}, actor=None
+    )
+
+    assert LIBRARY_LINK not in refused["error"]
+    assert refused["error"].startswith(
+        "invalid registry: the subject registry: "
+    )
+    assert "subjects.0.description" in refused["error"]
+    assert "error" not in written
+
+
+def test_loading_a_registry_its_model_refuses_answers_500_with_its_readers_sentence(
+    client: TestClient, opened_project: Path
+) -> None:
+    """Loading a stored registry its model refuses answers 500 with the sentence.
+
+    The registry ``write_subject_registry`` wrote has its subject's description changed to no
+    text; the detail names the registry and that one field.
+    """
+    from tcip_mcp.dataset_layout import subjects_path
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    assert "error" not in write_subject_registry(
+        opened_project,
+        str(opened_project),
+        {"bud": {"description": "one bud"}},
+        actor=None,
+    )
+    _rewritten(subjects_path(opened_project), {"bud": {"description": 5}})
+
+    resp = client.get(
+        "/api/subjects/load",
+        params={"dataset_root": str(opened_project), "date": "2026-03-02"},
+    )
+
+    assert resp.status_code == 500
+    detail = resp.json()["detail"]
+    assert LIBRARY_LINK not in detail
+    assert "the subject registry: subjects.0.description" in detail
