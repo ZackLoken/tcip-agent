@@ -14,8 +14,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
+import tcip_store
 from tcip_mcp.agent_identity import RecordedIdentity
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
@@ -26,7 +27,6 @@ from tcip_mcp.web_client import (
     read_gui_snapshot,
     write_gui_snapshot,
 )
-from tcip_store import Invalid
 
 logger = logging.getLogger(__name__)
 
@@ -83,18 +83,6 @@ class PanelEnvelope(BaseModel):
     event: PanelEvent
     event_id: str
     identity: RecordedIdentity
-
-
-class GuiMutationInvalidError(ValueError):
-    """A :meth:`StateStore.mutate` call whose merged result does not validate as ``GuiState``.
-
-    ``refusal`` is the model's issues, the answer a route serves for it.
-    """
-
-    def __init__(self, refusal: Invalid) -> None:
-        """Hold ``refusal``, stated as the error's message."""
-        super().__init__(str(refusal))
-        self.refusal = refusal
 
 
 class NoSelectionError(ValueError):
@@ -348,7 +336,7 @@ class StateStore:
         top-level field names; its exception propagates with nothing held, and a nested field is
         set by a fully built model instance or a complete dict for it. The merged result is
         validated through :class:`GuiState`: a mutation that does not validate, or states a
-        nested field partly, raises :class:`GuiMutationInvalidError` naming the field. A state
+        nested field partly, raises ``tcip_store.ReadRefusedError`` naming the field. A state
         that cannot be persisted raises the store's own error, and nothing is held.
         """
         async with self._lock:
@@ -363,10 +351,9 @@ class StateStore:
                 **self._now.state.model_dump(mode="json", round_trip=True),
                 **dumped,
             }
-            try:
-                new_state = GuiState.model_validate(merged)
-            except ValidationError as exc:
-                raise GuiMutationInvalidError(Invalid.of(exc)) from exc
+            new_state = tcip_store.validated(
+                GuiState, merged, "the GUI state this change makes"
+            )
             if opened is not None:
                 await asyncio.to_thread(
                     write_gui_snapshot, opened.root, new_state
