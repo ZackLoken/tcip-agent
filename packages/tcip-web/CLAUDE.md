@@ -22,6 +22,9 @@ frontend/src/
   api/  components/  hooks/  lib/  store/  tabs/  test/
 ```
 
+A test spawns a command as `python -m tcip_web.cli <command>`, so the suite holds without the
+console script installed.
+
 ## Frontend gate
 
 The root `CLAUDE.md`'s Commands block spells it in CI's order; a partial run misses
@@ -131,8 +134,8 @@ failed fullscreen start, and a `--settings` file's `env` as applied at startup, 
 is applied before the renderer is chosen; the live smoke is what shows the pin holds), and the
 shipped file's academic WebFetch grants are generated from the `cv-research` document by
 `tools/generate_harness_discovery.py`, as are its `Edit` denials, from the harness files and the
-state directory `tcip_store` names. Don't extend or edit that file without calling it out
-explicitly. Its deny list's relative patterns resolve against the workspace the agent runs in
+state directory `tcip_store` names. A change to that file is named in the pull request's
+description. Its deny list's relative patterns resolve against the workspace the agent runs in
 (Claude Code's permissions page; a `/path` pattern anchors at the temporary settings file's
 directory instead): every project's `.tcip` store, written through the tools alone, and the
 instruction files and skills the launches write. Every row's agent runs in the backend's
