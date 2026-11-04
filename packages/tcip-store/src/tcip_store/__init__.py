@@ -5,6 +5,7 @@ from tcip_store.errors import (
     BadKeyError,
     DecodeError,
     NotFoundError,
+    RecordInvalidError,
     StoreBusyError,
     StoreError,
     StoreNotBoundError,
@@ -25,6 +26,13 @@ from tcip_store.model import (
     Version,
     Versioned,
     canonical_path,
+)
+from tcip_store.refusal import (
+    Invalid,
+    Issue,
+    ReadRefusal,
+    Unreadable,
+    validated,
 )
 from tcip_store.sqlite_backend import Txn
 from tcip_store.store import (
@@ -67,15 +75,20 @@ __all__ = [
     "DecodeError",
     "FiniteJsonObject",
     "FiniteJsonValue",
+    "Invalid",
+    "Issue",
     "Key",
     "LogPage",
     "NotFoundError",
     "ReadDefault",
+    "ReadRefusal",
+    "RecordInvalidError",
     "StoreBusyError",
     "StoreError",
     "StoreNotBoundError",
     "TransactionMisuseError",
     "Txn",
+    "Unreadable",
     "Version",
     "VersionConflictError",
     "Versioned",
@@ -108,4 +121,5 @@ __all__ = [
     "stores",
     "transaction",
     "unbind",
+    "validated",
 ]

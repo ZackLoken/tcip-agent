@@ -6,6 +6,20 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tcip_store.model import Key, Version
+    from tcip_store.refusal import Invalid
+
+
+class RecordInvalidError(ValueError):
+    """A value its model refuses (``refusal``), at the place ``where`` names.
+
+    Its message is ``where`` before the refusal's issues; it never quotes the value.
+    """
+
+    def __init__(self, refusal: Invalid, where: str) -> None:
+        """Hold ``refusal`` and ``where``, stated as the error's message."""
+        super().__init__(f"{where}: {refusal}")
+        self.refusal = refusal
+        self.where = where
 
 
 class StoreError(Exception):

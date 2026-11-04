@@ -39,7 +39,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 from tcip_mcp.pipelines.derivations import DetectorGeometryDerivation
 from tcip_mcp.pipelines.execution import MaskCut
 from tcip_mcp.pipelines.raster_source import RasterIdentity
-from tcip_mcp.read_refusal import Invalid
+from tcip_store import Invalid
 
 if TYPE_CHECKING:
     from pydantic import JsonValue

@@ -35,7 +35,6 @@ from tcip_mcp.pipelines.model_build import (
     SNAPSHOT_KEY,
 )
 from tcip_mcp.pipelines.schemas import StatedDirection, TrainGeometry
-from tcip_mcp.read_refusal import Invalid
 from tcip_mcp.registry_paths import (
     checkpoint_registry_path_for,
     is_external_form,
@@ -46,6 +45,7 @@ from tcip_mcp.registry_paths import (
 from tcip_store import (
     FINITE_JSON_OBJECT,
     FiniteJsonObject,
+    Invalid,
     Key,
     finite_number,
 )

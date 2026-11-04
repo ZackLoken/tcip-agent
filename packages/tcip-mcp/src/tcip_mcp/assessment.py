@@ -47,7 +47,6 @@ from tcip_mcp.pipelines.execution import (
 )
 from tcip_mcp.pipelines.raster_source import RasterIdentity
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
-from tcip_mcp.read_refusal import Invalid
 from tcip_mcp.registry_paths import (
     PathFields,
     located,
@@ -62,7 +61,7 @@ from tcip_mcp.traits import (
     PER_PLANT_ORDINAL_AGGREGATE,
     STATE_CROSSING_DATES,
 )
-from tcip_store import Key
+from tcip_store import Invalid, Key
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket

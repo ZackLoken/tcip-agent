@@ -42,7 +42,7 @@ from tcip_mcp.knowledge.harness_files import (
     write_skills,
     write_text,
 )
-from tcip_mcp.read_refusal import Invalid
+from tcip_store import Invalid
 from tcip_web.state import OpenProject, store
 
 if TYPE_CHECKING:
