@@ -105,7 +105,7 @@ ingest_images(source="<raw folder or glob>")
   writes being that engine's own convention). A file that states none goes to
   `images/undated/`; each file's entry in the manifest's `files` carries its `date` on a
   `kind`: `dated` with the item that stated it as its `source`, `unstated`, or `unreadable`
-  with the `reason` its container could not be read. When you know a capture date a file
+  with the `message` its container could not be read. When you know a capture date a file
   does not state, or the date it states is wrong, state it afterwards as its own act:
   `state_capture_date(images, date, rationale)` moves those images, with every record keyed
   by them, into the date's bucket, and the audit line records the date and why it is known.
