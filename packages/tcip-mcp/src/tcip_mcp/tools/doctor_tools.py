@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
@@ -139,25 +138,22 @@ def check_registry(
     that will not open, an index that does not validate) comes out as a finding, not as a
     traceback.
     """
-    from pydantic import ValidationError
-
     from tcip_mcp.model_registry import registered_entries
     from tcip_mcp.registry_paths import (
         RegistryPathEmptyError,
         RegistryPathTraversalError,
         resolved_registry_path,
     )
-    from tcip_store import StoreError
+    from tcip_store import RecordInvalidError, StoreError
 
     try:
         entries = registered_entries(root)
-    except (StoreError, ValidationError) as exc:
+    except (StoreError, RecordInvalidError) as exc:
         findings.append(
             (
                 "error",
                 "the model registry index will not decode or read, so this "
-                "project's registered models could not be checked at all: "
-                f"{read_refusal(exc)}",
+                f"project's registered models could not be checked at all: {exc}",
             )
         )
         return
@@ -297,18 +293,14 @@ def check_traits(root: Path, findings: list) -> None:
     An unreadable record is one the store or its schema refuses to read; an unconfirmed one is a
     trait whose latest revision the breeder has not confirmed.
     """
-    from pydantic import ValidationError
-
     from tcip_mcp.traits import read_trait, trait_names
-    from tcip_store import StoreError
+    from tcip_store import RecordInvalidError, StoreError
 
     for name in trait_names(root):
         try:
             record = read_trait(name, root)
-        except (StoreError, ValidationError) as exc:
-            findings.append(
-                ("error", f"trait {name!r} will not read: {read_refusal(exc)}")
-            )
+        except (StoreError, RecordInvalidError) as exc:
+            findings.append(("error", f"trait {name!r} will not read: {exc}"))
             continue
         if record.latest.state.kind != "confirmed":
             findings.append(

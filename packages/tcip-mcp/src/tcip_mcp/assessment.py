@@ -26,7 +26,6 @@ from pydantic import (
     JsonValue,
     PositiveFloat,
     TypeAdapter,
-    ValidationError,
 )
 
 from tcip_mcp.model_registry import Producer
@@ -61,7 +60,7 @@ from tcip_mcp.traits import (
     PER_PLANT_ORDINAL_AGGREGATE,
     STATE_CROSSING_DATES,
 )
-from tcip_store import Invalid, Key
+from tcip_store import Key, RecordInvalidError, validated
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -1388,11 +1387,9 @@ def _read_reference_csv(
     with io.StringIO(data.decode("utf-8"), newline="") as f:
         for line_no, raw in enumerate(csv.DictReader(f), start=2):
             try:
-                row = _ReferenceRow.model_validate(raw)
-            except ValidationError as exc:
-                raise AssessmentRefusedError(
-                    f"{csv_path}:{line_no}: {Invalid.of(exc)}"
-                ) from exc
+                row = validated(_ReferenceRow, raw, f"{csv_path}:{line_no}")
+            except RecordInvalidError as exc:
+                raise AssessmentRefusedError(str(exc)) from exc
             if row.image_stem in out:
                 raise AssessmentRefusedError(
                     f"{csv_path}:{line_no} repeats stem {row.image_stem!r}."

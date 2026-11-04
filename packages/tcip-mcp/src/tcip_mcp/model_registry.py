@@ -23,7 +23,6 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    ValidationError,
 )
 
 import tcip_store
@@ -45,8 +44,8 @@ from tcip_mcp.registry_paths import (
 from tcip_store import (
     FINITE_JSON_OBJECT,
     FiniteJsonObject,
-    Invalid,
     Key,
+    RecordInvalidError,
     finite_number,
     validated,
 )
@@ -376,15 +375,16 @@ class VerifiedCheckpoint:
         holds invalid and the stamp's writer.
         """
         try:
-            return CheckpointStamp.model_validate(self.payload)
-        except ValidationError as exc:
-            refusal = Invalid.of(exc)
-            keys = ", ".join(sorted({repr(i.loc[0]) for i in refusal.issues}))
+            return validated(CheckpointStamp, self.payload, self.path)
+        except RecordInvalidError as exc:
+            keys = ", ".join(
+                sorted({repr(i.loc[0]) for i in exc.refusal.issues})
+            )
             raise ValueError(
                 f"{self.path} carries no {keys} as generic_trainer.checkpoint_stamp writes "
                 "it, as the default trainer and ctx.save_checkpoint save it, so it was written "
                 "past that stamp. Save it through a run (launch_training, or "
-                f"ctx.save_checkpoint in its training body). {refusal}"
+                f"ctx.save_checkpoint in its training body). {exc.refusal}"
             ) from exc
 
     @cached_property

@@ -48,7 +48,6 @@ from tcip_mcp.pipelines.training.tensorboard_manager import (
     TensorboardNotServing,
     TensorboardState,
 )
-from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import ReadRefusal, StoreError, canonical_path
@@ -226,7 +225,7 @@ def _preflight(
                 spec, sources.layout, project=project, tallies_out=counts
             )
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
-            issues.append(str(read_refusal(exc)))
+            issues.append(str(exc))
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
         # images would otherwise read "valid, no warnings" while training on far fewer.
         dropped = {k: v for k, v in counts.items() if not admits(k) and v}
@@ -861,8 +860,10 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     selection directory this project's own bound runs or the dataset's own ``splits`` directory
     hold, each compatibility-checked the way a launch would check it.
 
-    Every check is :func:`selection_compatibility` over a selection this reader read itself,
-    through :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
+    Every check is :func:`selection_compatibility` over a selection this reader read itself: the
+    run's own through :func:`~tcip_mcp.pipelines.data.selection.read_selection`, whose refusal
+    is the "As recorded" reason as a launch states it, and each candidate through
+    :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
     selection is checked against the data block :func:`data_with_selection` builds
     (``data.split`` replaced wholesale); "As recorded" is checked against the stated config
     unchanged, plus the directory-presence issues :func:`preflight_config` would raise.
@@ -880,7 +881,10 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     ``selections`` is empty. Refuses (``LookupError``) an unknown ``experiment_id``.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
-    from tcip_mcp.pipelines.data.selection import read_selection_checked
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        read_selection_checked,
+    )
 
     observations = {
         o.directory: o for o in experiments.run_observations(project)
@@ -903,19 +907,14 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     case: Literal["bound", "drawn"]
     if isinstance(split, BoundSplit):
         case, line = "bound", "on the partition it bound"
-        own_selection, own_error = read_selection_checked(
-            split.selection_dir, project=project
-        )
-        reasons = (
-            [
-                f"no selection recorded under {split.selection_dir}; run draw_splits "
-                "first."
-                if own_error is None
-                else str(own_error)
-            ]
-            if own_selection is None
-            else selection_compatibility(data, split, own_selection)
-        )
+        try:
+            own_selection = read_selection(
+                split.selection_dir, project=project
+            )
+        except ValueError as exc:
+            reasons = [str(exc)]
+        else:
+            reasons = selection_compatibility(data, split, own_selection)
     elif own.record.resolved is None:
         case, line = "drawn", "resolved to nothing at its launch"
         reasons = [
@@ -1163,7 +1162,7 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
                 trait_revision=observed.trait_revision,
             ).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
-            status_error = str(read_refusal(exc))
+            status_error = str(exc)
     open_run(
         trial_dir,
         spec,

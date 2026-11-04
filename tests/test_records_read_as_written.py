@@ -115,11 +115,10 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     with ``state`` removed fails the read by name.
     """
     import pytest
-    from pydantic import ValidationError
 
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import FINAL_STATUS_FILE, read_record
-    from tcip_store import encode_record
+    from tcip_store import RecordInvalidError, encode_record
     from tests._training_values import fifo_search, sweep_space
 
     def fake_search(**kw: object) -> None:
@@ -150,7 +149,7 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     damaged = read_record(final)
     del damaged["state"]
     final.write_bytes(encode_record(damaged))
-    with pytest.raises(ValidationError, match="state"):
+    with pytest.raises(RecordInvalidError, match="state"):
         tt.monitor_training(tmp_path, sweep_id)
 
 

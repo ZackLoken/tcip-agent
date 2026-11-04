@@ -30,7 +30,6 @@ from pydantic import (
     Field,
     PositiveInt,
     Tag,
-    ValidationError,
     ValidationInfo,
     model_validator,
 )
@@ -39,7 +38,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 from tcip_mcp.pipelines.derivations import DetectorGeometryDerivation
 from tcip_mcp.pipelines.execution import MaskCut
 from tcip_mcp.pipelines.raster_source import RasterIdentity
-from tcip_store import Invalid
+from tcip_store import RecordInvalidError, validated
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -984,11 +983,14 @@ def checked_train_config(
     missing ``model_source.task``, a relative path with no project).
     """
     try:
-        return TrainConfigSchema.model_validate(
-            config, context={"project": project}
+        return validated(
+            TrainConfigSchema,
+            config,
+            "the training config",
+            context={"project": project},
         ), []
-    except ValidationError as e:
-        return None, [str(issue) for issue in Invalid.of(e).issues]
+    except RecordInvalidError as e:
+        return None, [str(issue) for issue in e.refusal.issues]
 
 
 def train_config(

@@ -668,21 +668,22 @@ def list_delivery_events() -> DeliveryEvents:
     The events are :func:`~tcip_mcp.delivery.read_delivery_events`'s: what shipped, under which
     trait revision and kind, over which buckets and with what each bucket's gate finding was,
     each a :class:`ServedDeliveryEvent`. A record that will not decode refuses the whole listing
-    (400), its detail the :data:`~tcip_mcp.read_refusal.ReadRefusal` saying why.
+    (400), its detail the :data:`~tcip_store.ReadRefusal` saying why.
     """
-    from pydantic import ValidationError
-
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         resolved_mapping_key_for_citation,
     )
-    from tcip_store import StoreError
+    from tcip_store import RecordInvalidError, StoreError, Unreadable
 
     root = store.held().root
     try:
         events = read_delivery_events(root)
-    except (StoreError, ValidationError) as exc:
-        raise HTTPException(400, read_refusal(exc).model_dump()) from exc
+    except RecordInvalidError as exc:
+        raise HTTPException(400, exc.refusal.model_dump()) from exc
+    except StoreError as exc:
+        detail = Unreadable(message=str(exc)).model_dump()
+        raise HTTPException(400, detail) from exc
     return DeliveryEvents(
         records=[
             ServedDeliveryEvent(
@@ -743,9 +744,8 @@ class TraitsListing(BaseModel):
 @router.get("/traits")
 def list_traits() -> TraitsListing:
     """List every trait the open project holds (:class:`TraitsListing`)."""
-    from pydantic import ValidationError
-
     from tcip_mcp.traits import crops_definitions, read_trait, trait_names
+    from tcip_store import RecordInvalidError
 
     root = store.held().root
     records: list[ServedTrait] = []
@@ -753,10 +753,8 @@ def list_traits() -> TraitsListing:
     for name in trait_names(root):
         try:
             records.append(ServedTrait.of(name, read_trait(name, root)))
-        except ValidationError as exc:
-            unreadable.append(
-                UnreadableTrait(trait=name, reason=Invalid.of(exc))
-            )
+        except RecordInvalidError as exc:
+            unreadable.append(UnreadableTrait(trait=name, reason=exc.refusal))
     definitions = crops_definitions()
     delivered = {
         p for r in records for rev in r.revisions for p in rev.entry.delivers

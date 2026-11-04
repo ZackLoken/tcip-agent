@@ -82,6 +82,7 @@ from tcip_store import (
     finite_number,
     non_finite_state,
     stored_numbers,
+    validated,
 )
 from tcip_store.file_backend import is_sharing_violation, retry_while_denied
 from tcip_store.values import NOT_FINITE_SUFFIX
@@ -759,7 +760,7 @@ def _observed[R: RunRecord | SweepRecord](
     """
     final_path = directory / FINAL_STATUS_FILE
     final = (
-        FinalStatus.model_validate(read_run_record(final_path))
+        validated(FinalStatus, read_run_record(final_path), str(final_path))
         if final_path.exists()
         else None
     )
@@ -777,8 +778,12 @@ def _observed[R: RunRecord | SweepRecord](
 
 
 def read_run(run_dir: Path) -> RunRecord:
-    """Return the :class:`RunRecord` the run at ``run_dir`` holds, its paths read as resolved."""
-    return RunRecord.model_validate(read_run_record(run_dir / RUN_FILE))
+    """Return the :class:`RunRecord` the run at ``run_dir`` holds, its paths read as resolved.
+
+    A record its model refuses raises ``tcip_store.RecordInvalidError`` naming its file.
+    """
+    path = run_dir / RUN_FILE
+    return validated(RunRecord, read_run_record(path), str(path))
 
 
 def observe_run(directory: Path) -> RunObservation[RunRecord]:
@@ -798,9 +803,10 @@ def observe_run(directory: Path) -> RunObservation[RunRecord]:
 
 def observe_sweep(directory: Path) -> RunObservation[SweepRecord]:
     """Read the sweep at ``directory`` once, its :class:`SweepRecord` validated."""
+    path = directory / SWEEP_FILE
     return _observed(
         directory,
-        SweepRecord.model_validate(read_run_record(directory / SWEEP_FILE)),
+        validated(SweepRecord, read_run_record(path), str(path)),
         SWEEP_FILE,
     )
 
