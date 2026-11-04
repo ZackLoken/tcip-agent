@@ -36,6 +36,7 @@ from tcip_mcp.pipelines.image_utils import (
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.subject_registry import SubjectRegistry
+from tcip_store import Unreadable
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +66,6 @@ class Dated:
     date: str
     source: str
     kind: Literal["dated"] = "dated"
-
-
-@dataclass(frozen=True)
-class Unreadable:
-    """Why a file's container could not be read far enough to find its capture date."""
-
-    reason: str
-    kind: Literal["unreadable"] = "unreadable"
 
 
 @dataclass(frozen=True)
@@ -138,15 +131,17 @@ def _photographic_capture_date(path: Path) -> CaptureDate:
             try:
                 raw = exif_capture_time(exif)
             except Exception as exc:
-                return Unreadable(f"EXIF block could not be read: {exc}")
+                return Unreadable(
+                    message=f"EXIF block could not be read: {exc}"
+                )
     except Exception as exc:
-        return Unreadable(f"image header could not be read: {exc}")
+        return Unreadable(message=f"image header could not be read: {exc}")
     if raw is None:
         return Unstated()
     iso = _iso_date(raw)
     if iso is None:
         return Unreadable(
-            f"EXIF DateTimeOriginal {str(raw)!r} is not a date this reads"
+            message=f"EXIF DateTimeOriginal {str(raw)!r} is not a date this reads"
         )
     return Dated(iso, _EXIF_DATE)
 
@@ -178,7 +173,7 @@ def _gdal_capture_date(path: Path, date_item: str | None) -> CaptureDate:
                     None,
                 )
     except Exception as exc:  # noqa: BLE001, rasterio raises driver-specific errors
-        return Unreadable(f"raster metadata could not be read: {exc}")
+        return Unreadable(message=f"raster metadata could not be read: {exc}")
     found = next(((k, v) for k, v in stated.items() if v), None)
     if found is None:
         return Unstated()
@@ -186,7 +181,7 @@ def _gdal_capture_date(path: Path, date_item: str | None) -> CaptureDate:
     iso = _iso_date(raw)
     if iso is None:
         return Unreadable(
-            f"capture date {str(raw)!r} is not a date this reads"
+            message=f"capture date {str(raw)!r} is not a date this reads"
         )
     return Dated(iso, item)
 
@@ -330,7 +325,7 @@ def ingest_images(
     ingested file: its ``date`` is told apart by its ``kind``, ``dated`` with the date and the
     metadata item that stated it (``TIFFTAG_DATETIME``, ``EXIF_DateTimeOriginal`` or
     ``raster_date_item``) as its ``source``, ``unstated`` for a file that states none, and
-    ``unreadable`` with the ``reason`` its container could not be read that far; the last two land
+    ``unreadable`` with the ``message`` its container could not be read that far; the last two land
     in ``undated/``. ``skipped_collisions`` names only an exact re-ingest, each ``{stem, source,
     existing, bucket}``; ``errors`` each ``{source, error}``; ``band_groups`` is ``{formed,
     refused, manifests}`` over the touched buckets.

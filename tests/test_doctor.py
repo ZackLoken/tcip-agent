@@ -9,6 +9,7 @@ import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tcip_annotation.verdicts import encode_verdict
 from tcip_mcp import traits
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.model_registry import ModelRegistry
@@ -740,6 +741,36 @@ def test_a_verdict_shard_naming_an_image_its_bucket_names_no_document_for_is_a_w
     ((level, msg),) = _messages(found, "verdict shard")
     assert level == "warn"
     assert f"{name}/IMG_B" in msg and "names no document for" in msg
+
+
+def test_a_verdict_shard_an_entry_of_which_its_model_refuses_is_one_warning_with_the_sentence(
+    tmp_path: Path,
+) -> None:
+    """A shard holding an entry its model refuses is one warning, the reader's own sentence.
+
+    The shard of a third image is a verdict a review recorded with its action changed to none
+    the model admits; the diagnosis is answered, and its warning names the shard and the entry's
+    position, with no library link. The reviewed images' shards stay silent.
+    """
+    import tcip_store as ts
+    from tcip_annotation.verdicts import read_verdicts
+    from tcip_mcp.dataset_layout import verdict_key_of
+
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    name = _reviewed_bucket(root, images, ("IMG_A", "IMG_B"))
+    (recorded,) = read_verdicts(
+        verdict_key_of(image_label_key(images / "IMG_A.JPG"), name)
+    )
+    damaged = verdict_key_of(image_label_key(images / "IMG_C.JPG"), name)
+    ts.append(damaged, {**encode_verdict(recorded), "action": "maybe"})
+
+    found = _diagnosed(root)
+
+    ((level, msg),) = _messages(found, "verdict shard")
+    assert level == "warn"
+    assert f"{name}/IMG_C" in msg
+    assert "entry 0 of the verdict shard" in msg
+    assert "errors.pydantic.dev" not in msg
 
 
 def test_doctor_names_a_bucket_whose_record_will_not_read_without_aborting(
