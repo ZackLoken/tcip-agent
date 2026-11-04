@@ -4,7 +4,8 @@ The developer's contract for Claude (and any Claude-driven agent) changing this 
 this file or the operating contract and a knowledge document disagree on a domain fact, the
 document wins; on behavior, this file and the contract win. Machine and harness facts live in
 `CLAUDE.local.md` (not shipped); commit, push and prose rules that hold across projects live in the
-global `CLAUDE.md`; the gates and rules a contributor meets live in `CONTRIBUTING.md`.
+global `CLAUDE.md`; the rules every change meets live here, and `CONTRIBUTING.md` is the page for
+someone outside reporting a problem or asking for a feature.
 
 ## The operating contract
 
@@ -38,18 +39,12 @@ The operating contract's invariants and these state guarantees the platform owes
 protect the mechanisms that happen to provide those guarantees today: where a tool, file, refusal
 or schema currently serves one, that implementation is replaceable and the guarantee is not.
 
-- Agent-legible and breeder-coherent: a discoverable toolkit with docs that match the code, and a
-  GUI that guides the breeder without stranding them, at equal weight.
-- Of the libraries the operating contract names, scipy and scikit-learn are in the lock through the
-  others and are declared where read; scikit-image is never declared. The platform's own code is
-  the measurement gate, the trait entry, the records and the rails, and as little else as possible.
+- The platform's own code is the measurement gate, the trait entry, the records and the rails, and
+  as little else as possible.
 - A required value is a pydantic field or a parameter with no default, and its type is what refuses
-  it unstated; nothing is written by hand to say the same. A hand-written refusal exists in one
-  place only: where the data cannot carry what a claim needs and the message must name the
-  primitive the caller should use instead, at the one boundary that fact enters, never inside each
-  reader of it; several readers each asking the same question is the defect, and a check in each is
-  how it survives. The few hand-written refusals that remain each ship with a test, through the
-  platform's own producer, that a legitimate call still succeeds.
+  it unstated; nothing is written by hand to say the same. The few hand-written refusals that
+  remain each ship with a test, through the platform's own producer, that a legitimate call still
+  succeeds.
 - Nothing on disk is a consumer. Every project, record, lock, hash, log row and checkpoint that
   exists today is sample data made to exercise the implementation, and a change that re-keys,
   re-shapes or invalidates it conforms or discards it as part of the change. A mechanism is never
@@ -63,54 +58,41 @@ or schema currently serves one, that implementation is replaceable and the guara
 
 - A test that guards a fix is observed failing without the fix, through
   `tools/prove_test_fails_before.py`, and the verdict is named: `GUARDS` is the only evidence, and
-  `VACUOUS`, `INDETERMINATE` and `REFUSED` are reported as what they are, never as coverage. Say
-  when you have seen a test fail and when you have not. Every admits-valid-work test constructs its
-  input through the platform's own producer.
+  `VACUOUS`, `INDETERMINATE` and `REFUSED` are reported as what they are, never as coverage. Every
+  test constructs its input through the platform's own producer (an MCP tool, a pipeline function,
+  a route, the document writer), never a hand-built fixture standing in for one.
 - A shared fact has one implementation (the operating contract's "call one from the other") and
   ships an agreement test: two routes' own records compared against each other, not each
   against a fixture. The test guards that the routes still agree, and never licenses a second
-  implementation to stay. Guard tests cannot stand in for it: a guard test proves the site it
-  guards, so a suite of them stays green over exactly this defect. A metric, a derivation or a
-  training mechanism ships the same test pointed outward: its number compared against an external
-  reference (pycocotools for average precision, scikit-learn for the agreement and classification
-  metrics, a tiny dataset whose right answer is known in advance for a training or freezing
-  mechanism), since a suite that compares the platform only to itself proves nothing about the
-  number. A change replacing a hand-written implementation with a library call lands with that
-  test as its gate.
+  implementation to stay. A metric, a derivation or a training mechanism ships the same test
+  pointed outward: its number compared against an external reference (pycocotools for average
+  precision, scikit-learn for the agreement and classification metrics, a tiny dataset whose right
+  answer is known in advance for a training or freezing mechanism), since a suite that compares the
+  platform only to itself proves nothing about the number. A change replacing a hand-written
+  implementation with a library call lands with that test as its gate.
 - Gates before a pull request: the Commands block's lines for what the change touched (the ruff
-  and mypy lines for Python, the five frontend lines for a frontend file), and the change's own
-  test files, each run to its end and its output read before the pull request opens. CI is the
-  full gate. Green means no detected breakage, never correctness. A test touching the filesystem
-  outside `tmp_path` is the first reread on a break that only shows in CI.
+  and mypy lines for Python, the markdown line for a markdown file, the five frontend lines for a
+  frontend file), and the change's own test files, each run to its end and its output read before
+  the pull request opens. CI is the full gate. A test touching the filesystem outside `tmp_path` is
+  the first reread on a break that only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
   as proof a change was safe, check that some fixture could have come out differently.
-- Every change names the behaviors it alters and the ones it preserves, each held by a test that
-  reads what the agent or the breeder receives through its producer (the hook's orientation, a
-  rendered instruction file, the settings, the argv, a route's answer), seen failing without the
-  change; a behavior no test can reach is named with the one check that reaches it.
-- The platform has one maintainer, and every change leaves the mechanism it touched with less to
-  maintain than it found. The line delta by area (`packages/`, `tests/`, other, off
-  `git diff --numstat`, run by `tools/line_delta.py`) is reported on every pull request as a
-  signal, never a target: growth the pull request justifies is admitted. What is never admitted
-  is machinery kept or added beside its replacement: a second implementation of a fact, a
-  hand-written version of what a library the environment carries provides, a vocabulary or key
-  declared in more than one place, a per-shape copy of a reader. The code reviewer names any of
-  these in the touched mechanism, and the pull request removes it before it merges.
+- A guard test reads what the agent or the breeder receives through its producer (the hook's
+  orientation, a rendered instruction file, the settings, the argv, a route's answer); a behavior
+  no test can reach is named on the pull request with the one check that reaches it.
+- Every change leaves the mechanism it touched with less to maintain than it found. The line delta
+  by area (`python tools/line_delta.py <repo> main..`) is reported on every pull request as the
+  signal that prompts the code reviewer's look, never the test. The merge stops, on any issue, when
+  the code reviewer names in the touched mechanism a second implementation of a fact or machinery
+  kept beside its replacement: a vocabulary or key declared twice, a per-shape copy of a reader.
 - Before changing how a shared fact is spelled, produced or read, enumerate its producers and
-  readers in the mechanism the change touches and state the list on the pull request; a
-  convention changed at the site that named the defect and not at its siblings leaves the fact
-  spelled two ways.
-- Two readers on every pull request, launched together and never the implementer: one reads the
-  diff against the issue's done-criterion and the invariants, checks nothing hand-written where a
-  library exists, and answers what exists twice in the touched mechanism; the other reads the
-  tests, every guard's fail-before verdict, whether any behavior lost its guard, and whether each
-  test reaches the boundary a breeder or the agent touches.
+  readers in the touched mechanism and change them together; a convention changed at one site and
+  not its siblings leaves the fact spelled two ways.
 - A read by another model family is advisory on a design and binding on a change to a persisted
   format: when two families agree against the author's position, the author conforms or brings
   the split to the owner, and the outvoted side never lands on its own authority.
-- The production mypy gate is the full one; only `tests` keeps grandfathered codes, in `mypy.ini`.
-- Commits: one concern each, in dependency order, LF endings, messages stating the standing
-  constraint the change installs, never a narrative of the session that made it.
+- Commits: one concern each, in dependency order, each message stating the standing constraint the
+  change installs, never a narrative of the session that made it.
 - One fact has one spelling. Whenever a change touches a fact, ask what else states it: a second
   key, field, flag or parameter that must agree with the first is a derived spelling, whether or not
   this change introduced it, and it is deleted rather than kept, reconciled or asked which one
@@ -126,11 +108,12 @@ or schema currently serves one, that implementation is replaceable and the guara
 
 ```bash
 conda activate tcip-agent
-pytest tests/ -n 4 --tb=short --timeout=300 -q
+pytest <the change's test files> --tb=short --timeout=300 -q   # CI runs the whole suite
 ruff check packages tests tools
 ruff format --check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
+npx --yes markdownlint-cli2@0.23.3   # the markdown gate, run from the repo root
 npm --prefix packages/tcip-web/frontend run format:check   # the frontend gate, whole and in order
 npm --prefix packages/tcip-web/frontend run lint
 npm --prefix packages/tcip-web/frontend run typecheck
@@ -158,8 +141,8 @@ naming `--project` until a project is created, and the knowledge tools work.
   there before asserting.
 - Every piece of shipped prose (comments, docstrings, log and UI strings, test names, file names,
   scripts, README, skills, package `CLAUDE.md`s) is for whoever reads it next, never a changelog of
-  the session that wrote it: no tracking labels, no inline decision dates, no bold or all-caps
-  emphasis, no em dashes. If nothing survives once that framing is stripped, write nothing.
+  the session that wrote it: no tracking labels and no inline decision dates. If nothing survives
+  once that framing is stripped, write nothing.
 - A docstring states what the function does and its contract: its inputs, what it returns, what it
   refuses. It never restates a rule from this file or a package `CLAUDE.md`, never names its
   callers, and never explains a rejected alternative; those live in the design record or nowhere.
