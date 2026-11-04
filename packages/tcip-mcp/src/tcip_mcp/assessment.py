@@ -467,6 +467,7 @@ def _reference_sides(
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
         read_selection,
+        selection_place,
     )
 
     selection = read_selection(selection_dir, project=project)
@@ -478,7 +479,7 @@ def _reference_sides(
     ]
     if empty:
         raise AssessmentRefusedError(
-            f"the selection at {selection_dir} holds no {empty} side: an "
+            f"{selection_place(selection_dir)} holds no {empty} side: an "
             "assessment fits on the calibration side and checks on the "
             "holdout side. Draw a selection with both (draw_splits)."
         )

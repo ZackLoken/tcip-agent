@@ -1111,7 +1111,10 @@ def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(
     foreground groups among them refuses with the draw's own floor message, naming the selection
     and the redraw's remedy. A selection whose members do hold two is admitted.
     """
-    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        selection_place,
+    )
     from tcip_mcp.pipelines.data.split_construction import redrawn_selection
 
     drawn_dir = tmp_path / "drawn"
@@ -1129,7 +1132,7 @@ def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(
             3,
         )
     starved = str(refused.value)
-    assert f"{str(one_group)!r}" in starved
+    assert selection_place(str(one_group)) in starved
     assert (
         "1 foreground group(s), fewer than the 2 the requested sides need"
         in starved
