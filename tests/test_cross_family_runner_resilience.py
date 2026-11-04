@@ -20,27 +20,105 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said() -> (
-    None
-):
-    """A model id that states its effort takes it, with the --effort flag medium or unset."""
-    assert (
-        cross_family_ask.effective_effort(
-            "antigravity", "gemini-3.1-pro-high", "medium"
-        )
-        == "high"
+def test_an_antigravity_launch_passes_no_effort_flag_and_records_the_ids_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An Antigravity launch names the model and no effort flag; the record holds the suffix.
+
+    The run proceeds the same with no effort named and with the id's own effort named.
+    """
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
     )
-    assert (
-        cross_family_ask.effective_effort(
-            "antigravity", "gemini-3.1-pro-high", None
-        )
-        == "high"
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
 
+    for effort in (None, "low"):
+        meta = cross_family_ask.run_one(
+            "qid",
+            "as-shipped",
+            "question",
+            tmp_path,
+            tmp_path / "out",
+            5,
+            cross_family_ask.resolve_launch(
+                "antigravity", "gemini-4-argon-low", effort
+            ),
+        )
 
-def test_an_effort_claude_would_ignore_is_refused_by_name() -> None:
-    with pytest.raises(SystemExit, match="claude effort 'turbo'"):
-        cross_family_ask.effective_effort("claude", "opus", "turbo")
+        run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+        argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+        assert "--effort" not in argv
+        assert argv[argv.index("--model") + 1] == "gemini-4-argon-low"
+        assert meta["effort_requested"] == "low"
+
+
+def test_a_run_naming_no_model_launches_antigravity_on_the_parity_argon_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run naming neither model nor effort launches Antigravity on the parity Argon model."""
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "qid",
+        "as-shipped",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        cross_family_ask.resolve_launch("antigravity", None, None),
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert argv[argv.index("--model") + 1] == "gemini-4-argon-high"
+    assert meta["effort_requested"] == "high"
+
+
+def test_a_codex_run_naming_no_effort_passes_and_records_the_parity_effort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Codex run naming no model or effort runs on its config's model at the parity effort.
+
+    Under the no-tools condition the harness ignores its own config, so the model and effort the
+    run records are the ones its argv carries.
+    """
+    config = tmp_path / "config.toml"
+    config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
+    monkeypatch.setattr(cross_family_ask, "CODEX_CONFIG", config)
+    monkeypatch.setattr(
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+    meta = cross_family_ask.run_one(
+        "qid",
+        "no-tools",
+        "question",
+        tmp_path,
+        tmp_path / "out",
+        5,
+        cross_family_ask.resolve_launch("codex", None, None),
+    )
+
+    run_dir = tmp_path / "out" / "qid" / "no-tools" / "codex"
+    argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
+    assert "--ignore-user-config" in argv
+    assert argv[argv.index("--model") + 1] == "gpt-from-config"
+    assert 'model_reasoning_effort="medium"' in argv
+    assert meta["model_source"] == str(config)
+    assert meta["effort_requested"] == "medium"
+
+
+def test_an_effort_claude_takes_and_a_codex_effort_pass_through() -> None:
     assert (
         cross_family_ask.effective_effort("claude", "opus", "high") == "high"
     )
@@ -84,15 +162,13 @@ def test_a_harness_returning_no_usable_stdout_still_records_its_run(
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
     meta = cross_family_ask.run_one(
-        "codex",
         "qid",
         "as-shipped",
         "question",
         tmp_path,
         tmp_path / "out",
         5,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
     )
 
     run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
@@ -116,13 +192,14 @@ def test_one_familys_failure_leaves_the_others_results_intact(
     real_run_one = cross_family_ask.run_one
 
     def _dispatch(
-        family: str,
-        *args: Path | int | str | None,
+        *args: Path | int | str | cross_family_ask.Launch | None,
         **kwargs: list[Path] | str | None,
     ) -> dict:
-        if family == "codex":
+        launch = args[6]
+        assert isinstance(launch, cross_family_ask.Launch)
+        if launch.family == "codex":
             _explode()
-        return real_run_one(family, *args, **kwargs)
+        return real_run_one(*args, **kwargs)
 
     monkeypatch.setattr(
         cross_family_ask.subprocess, "run", _stub_run("an answer")
@@ -198,15 +275,14 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
     real_run_one = cross_family_ask.run_one
 
     def _capture(
-        family: str,
         qid: str,
         condition: str,
         prompt: str,
-        *args: Path | int | str | None,
+        *args: Path | int | str | cross_family_ask.Launch | None,
         **kwargs: list[Path] | str | None,
     ) -> dict:
         seen.append(prompt)
-        return real_run_one(family, qid, condition, prompt, *args, **kwargs)
+        return real_run_one(qid, condition, prompt, *args, **kwargs)
 
     monkeypatch.setattr(
         cross_family_ask.subprocess, "run", _stub_run("an answer")
@@ -594,15 +670,13 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
     meta = cross_family_ask.run_one(
-        "codex",
         "qid",
         "as-shipped",
         "question",
         tmp_path,
         tmp_path / "out",
         5,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
     )
     assert meta["fault"] == ""
 
@@ -724,15 +798,13 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 
     prompt = "a box-drawing rule: ───"
     meta = cross_family_ask.run_one(
-        "codex",
         "qid",
         "as-shipped",
         prompt,
         tmp_path,
         tmp_path / "out",
         30,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
     )
 
     run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
@@ -743,18 +815,6 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 
 
 # ── the codex model is named on every run ───────────────────────────────────
-
-
-def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An unnamed codex model with no config is refused by name."""
-    monkeypatch.setattr(
-        cross_family_ask, "CODEX_CONFIG", tmp_path / "absent" / "config.toml"
-    )
-
-    with pytest.raises(SystemExit, match="codex model is unnamed"):
-        cross_family_ask.resolve_codex_model(None)
 
 
 def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
@@ -989,15 +1049,13 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
     image.write_bytes(b"png")
 
     meta = cross_family_ask.run_one(
-        "codex",
         "qid",
         "as-shipped",
         "question",
         tmp_path,
         tmp_path / "out",
         5,
-        "stub-model",
-        None,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
         images=[image],
     )
 
@@ -1101,6 +1159,7 @@ def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alo
 def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     bad_flag: str,
 ) -> None:
     """A flag with no '=' and a flag naming an unknown family refuse, and no family launches."""
@@ -1135,11 +1194,70 @@ def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
     with pytest.raises(SystemExit) as refused:
         cross_family_ask.main()
     assert refused.value.code != 0
+    err = capsys.readouterr().err
+    assert "must be FAMILY=PATH" in err or "unknown family" in err
     assert launched == []
 
 
-def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
+def test_an_effort_disagreeing_with_the_antigravity_id_is_refused_before_any_family_launches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An --effort the Antigravity id disagrees with refuses at the flag, and no family launches.
+
+    The id's own effort named on the flag launches every family named, each with the effort its
+    record will state.
+    """
+    launched: list[tuple] = []
+
+    def stub_run_one(*a: object, **k: object) -> dict:
+        launched.append(a)
+        return cross_family_ask.failed_run_meta("stub", RuntimeError("stub"))
+
+    monkeypatch.setattr(cross_family_ask, "run_one", stub_run_one)
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
+    )
+    config = tmp_path / "config.toml"
+    config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
+    monkeypatch.setattr(cross_family_ask, "CODEX_CONFIG", config)
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    (tmp_path / "out" / "qid" / "as-shipped").mkdir(parents=True)
+
+    def argv(effort: str) -> list[str]:
+        return [
+            "cross_family_ask.py",
+            "--question-id",
+            "qid",
+            "--prompt-file",
+            str(tmp_path / "q.txt"),
+            "--families",
+            "codex,antigravity",
+            "--effort",
+            effort,
+            "--cwd",
+            str(tmp_path),
+            "--out",
+            str(tmp_path / "out"),
+            "--serial",
+        ]
+
+    monkeypatch.setattr(sys, "argv", argv("medium"))
+    with pytest.raises(SystemExit, match="pass gemini-4-argon-medium"):
+        cross_family_ask.main()
+    assert launched == []
+
+    monkeypatch.setattr(sys, "argv", argv("high"))
+    cross_family_ask.main()
+    assert [(call[6].family, call[6].effort) for call in launched] == [
+        ("codex", "high"),
+        ("antigravity", "high"),
+    ]
+
+
+def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     launched = []
     monkeypatch.setattr(
@@ -1172,6 +1290,61 @@ def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
     with pytest.raises(SystemExit) as refused:
         cross_family_ask.main()
     assert refused.value.code != 0
+    assert "file not found" in capsys.readouterr().err
+    assert launched == []
+
+
+@pytest.mark.parametrize(
+    ("argv", "refusal"),
+    [
+        (["--families", "codex"], "codex model is unnamed"),
+        (
+            ["--families", "claude", "--effort", "turbo"],
+            "claude effort 'turbo'",
+        ),
+    ],
+)
+def test_a_launch_a_family_refuses_is_refused_at_the_flag_before_any_family_launches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    refusal: str,
+) -> None:
+    """An unnamed Codex model and a Claude effort the harness would ignore refuse at the flag."""
+    launched: list[tuple] = []
+
+    def stub_run_one(*a: object, **k: object) -> dict:
+        launched.append(a)
+        return cross_family_ask.failed_run_meta("stub", RuntimeError("stub"))
+
+    monkeypatch.setattr(cross_family_ask, "run_one", stub_run_one)
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "CODEX_CONFIG", tmp_path / "absent" / "config.toml"
+    )
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    (tmp_path / "out" / "qid" / "as-shipped").mkdir(parents=True)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "cross_family_ask.py",
+            "--question-id",
+            "qid",
+            "--prompt-file",
+            str(tmp_path / "q.txt"),
+            *argv,
+            "--cwd",
+            str(tmp_path),
+            "--out",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    with pytest.raises(SystemExit, match=refusal):
+        cross_family_ask.main()
     assert launched == []
 
 
@@ -1332,7 +1505,9 @@ def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
 
 
 def test_a_missing_image_is_refused_before_any_family_launches(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A missing image is refused, and no family launches."""
     launched = []
@@ -1366,4 +1541,5 @@ def test_a_missing_image_is_refused_before_any_family_launches(
     with pytest.raises(SystemExit) as refused:
         cross_family_ask.main()
     assert refused.value.code != 0
+    assert "image not found" in capsys.readouterr().err
     assert launched == []
