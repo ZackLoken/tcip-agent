@@ -173,11 +173,13 @@ def test_preflight_config_flags_a_selection_that_leaves_an_empty_side(
     tmp_path: Path,
 ) -> None:
     """``preflight_config`` flags a bound selection that leaves an empty side."""
+    from tcip_mcp.pipelines.data.selection import selection_place
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _selection_with_an_empty_val_side(tmp_path, root, out)
+    place = selection_place(out)
 
     result = preflight_config(
         tmp_path,
@@ -190,6 +192,7 @@ def test_preflight_config_flags_a_selection_that_leaves_an_empty_side(
     )
 
     assert any("empty side" in i for i in result["issues"])
+    assert any(i.startswith(place) for i in result["issues"])
 
 
 def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_side(
@@ -299,7 +302,10 @@ def test_every_refusal_of_the_selection_reader_names_the_selection_place(
         {**stored, "samples": [{**first, "source": "../escape.jpg"}, *rest]},
     )
     damaged = tmp_path / "damaged"
-    ts.replace(selection_key(damaged), {"seed": 1, "samples": []})
+    ts.replace(
+        selection_key(damaged),
+        {k: v for k, v in stored.items() if k != "group_by"},
+    )
 
     reached = {}
     for directory in (tmp_path / "absent", damaged, unlisting, unresolvable):
@@ -310,7 +316,7 @@ def test_every_refusal_of_the_selection_reader_names_the_selection_place(
     assert "no selection recorded" in reached["absent"]
     assert "group_by" in reached["damaged"]
     assert "lists no samples" in reached["unlisting"]
-    assert "escape.jpg" in reached["unresolvable"], reached["unresolvable"]
+    assert "carries a '..' segment" in reached["unresolvable"]
 
 
 def _bound_to_a_draw(tmp_path: Path) -> dict:
