@@ -2,7 +2,7 @@
   // The Markdown gate over the documents an adopter reads: the root documents, the packages'
   // and tools' READMEs and CLAUDE.md files, the references index and the GitHub templates.
   // Generated files (AGENTS.md, the skills under .claude and .agents), the knowledge documents
-  // the generated skills mirror, and the local dev-process notes under docs are outside it.
+  // the generated skills mirror, and the local, untracked files under docs are outside it.
   "globs": [
     "*.md",
     "!AGENTS.md",

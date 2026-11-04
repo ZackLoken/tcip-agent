@@ -32,6 +32,16 @@ src/tcip_mcp/
                                 # builds the one Pass from a complete record
     operating_point.py          # the criteria an assessment judges against: count, classifier,
                                  # scalar, and the spatial held-out check
+    slicing.py             # tiled inference over sahi: tile geometry, slice lattice, a checkpoint
+                           # as a SAHI detection model, and the cross-tile merge
+    proposal_engines.py    # the proposal engines that ship registered
+    raster_source.py       # the open-and-read surface over every image source the platform decodes
+    band_stats.py          # display band statistics, the 8-bit band stretch, the RGB composite
+    overviews.py           # external .ovr overview pyramids for large rasters
+    display_bounds.py      # pixel bounds for what is served to a screen or written for the agent
+    reference_grid.py      # the named reference grid over a raster's native pixel frame
+    block_calibration.py   # the reserved-region reference of a within-image split
+    delivery_events_schema.py  # the declared shapes of a delivery event and its acknowledgment
     schemas.py, image_utils.py
   dataset_layout.py      # the one resolver: an image's place, its label document's key, a bucket's
                           # keys, the one label save and the one writer of stored label records;
@@ -46,6 +56,7 @@ src/tcip_mcp/
   project_record.py       # a project's own record: its id, display name, site and invariances
   workspace.py            # the workspace root and its project directories
   project_paths.py        # paths under one project's .tcip/ (state, viz) and the repo root
+  registry_paths.py       # how a record stores a path and where a stored path resolves
   experiments.py, model_registry.py   # runs and sweeps with their trial runs, side by side in
                                         # .tcip/experiments/; the registry: completed runs plus foreign ones
   identity.py             # the user:<name> identity convention, spelled once
