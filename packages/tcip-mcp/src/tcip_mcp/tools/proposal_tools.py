@@ -19,7 +19,6 @@ from pydantic import (
     Field,
     JsonValue,
     TypeAdapter,
-    ValidationError,
 )
 
 import tcip_store as ts
@@ -40,10 +39,10 @@ from tcip_mcp.pipelines.image_utils import (
 )
 from tcip_mcp.pipelines.raster_source import RasterIdentity, SourceHeader
 from tcip_mcp.project_paths import viz_output_path
-from tcip_mcp.read_refusal import Invalid, read_refusal
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import PathSegment
+from tcip_store import ReadRefusedError, validated
 
 if TYPE_CHECKING:
     import numpy as np
@@ -393,10 +392,10 @@ def propose_annotations(
             except (
                 ImportError,
                 FileNotFoundError,
-                ValidationError,
+                ReadRefusedError,
                 ExecutionRefusedError,
             ) as e:
-                return {"error": str(read_refusal(e))}
+                return {"error": str(e)}
         finally:
             if crop_tmp is not None:
                 crop_tmp.unlink(missing_ok=True)
@@ -404,14 +403,13 @@ def propose_annotations(
         # An engine's own candidates are refused here, where they arrive, when unstorable, rings
         # that are no polygon or stating no confidence of their own.
         try:
-            candidates = TypeAdapter(list[ProposalCandidate]).validate_python(
-                proposed.candidates
+            candidates = validated(
+                TypeAdapter(list[ProposalCandidate]),
+                proposed.candidates,
+                f"the candidates engine {engine!r} proposed",
             )
-        except ValidationError as exc:
-            return {
-                "error": f"Engine {engine!r} proposed a candidate this platform cannot "
-                f"hold: {Invalid.of(exc)}"
-            }
+        except ReadRefusedError as exc:
+            return {"error": str(exc)}
         if origin is not None:
             candidates = _offset_candidates(candidates, origin)
 

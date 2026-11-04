@@ -746,17 +746,28 @@ def deliver_csv(
 def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
     """Return every delivery event recorded under ``project``, decoded through its declared shape.
 
-    Its paths are resolved against the project; the events stand in the order produced.
+    Its paths are resolved against the project; the events stand in the order produced. An event
+    its shape refuses, or one the store will not read, raises ``tcip_store.ReadRefusedError``
+    naming the event's id: the shape's issues, or the store's sentence.
     """
-    scope = project_state_dir(project)
+    scope = str(project_state_dir(project))
+    with tcip_store.unreadable(
+        f"the delivery events under {scope}", tcip_store.StoreError
+    ):
+        keys = tcip_store.keys(DELIVERY_EVENTS_STORE, scope)
     return sorted(
-        (
-            DeliveryEventRecord.model_validate(
-                runtime_paths(
-                    tcip_store.read(key), DELIVERY_EVENT_PATHS, project
-                )
-            )
-            for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
-        ),
+        (_delivery_event(key, project) for key in keys),
         key=lambda event: event.produced_at,
+    )
+
+
+def _delivery_event(key: Key, project: str | Path) -> DeliveryEventRecord:
+    """Return the delivery event ``key`` names, its paths resolved against ``project``."""
+    where = f"delivery event {key.parts[0]}"
+    with tcip_store.unreadable(where, tcip_store.StoreError):
+        raw = tcip_store.read(key)
+    return tcip_store.validated(
+        DeliveryEventRecord,
+        runtime_paths(raw, DELIVERY_EVENT_PATHS, project),
+        where,
     )

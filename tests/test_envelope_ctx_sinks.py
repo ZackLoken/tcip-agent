@@ -227,13 +227,14 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(
     tmp_path: Path,
 ) -> None:
     """A checkpoint tag spelled as a path refuses and writes nothing outside the run."""
-    from pydantic import ValidationError
+    from tcip_store import ReadRefusedError
 
     ctx, run_dir = _context(tmp_path)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ReadRefusedError, match="'../escaped'") as refused:
         ctx.save_checkpoint({STATE_DICT_KEY: {}}, "../escaped")
 
+    assert "errors.pydantic.dev" not in str(refused.value)
     assert not (run_dir.parent / "escaped.pt").exists()
 
 
@@ -274,15 +275,16 @@ def test_an_artifact_name_cannot_walk_out_of_the_run_directory(
     tmp_path: Path,
 ) -> None:
     """An artifact name is a name inside the run, so one spelled as a path copies nothing."""
-    from pydantic import ValidationError
+    from tcip_store import ReadRefusedError
 
     ctx, run_dir = _context(tmp_path)
     source = tmp_path / "stderr.txt"
     source.write_text("trace")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ReadRefusedError, match="'../../escaped'") as refused:
         ctx.record_artifact("../../escaped", str(source))
 
+    assert "errors.pydantic.dev" not in str(refused.value)
     assert not (run_dir.parent / "escaped").exists()
 
 

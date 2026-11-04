@@ -23,7 +23,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from tcip_annotation.json_io import Person
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_annotation.text import Text
-from tcip_store import Key
+from tcip_store import Key, validated
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -136,11 +136,11 @@ def flags_of(record: JsonValue) -> list[Flag]:
     """Return the flags a stored record holds, oldest first; an absent record holds none.
 
     A record that does not validate as a :class:`FlagsRecord` refuses
-    (``pydantic.ValidationError``) naming each field.
+    (``tcip_store.ReadRefusedError``) naming the flags record and each field.
     """
     if record is None:
         return []
-    return _FLAGS_RECORD.validate_python(record)["flags"]
+    return validated(_FLAGS_RECORD, record, "the flags record")["flags"]
 
 
 def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:

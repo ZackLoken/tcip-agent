@@ -128,29 +128,30 @@ def test_create_record_refuses_a_different_display_name_naming_rename(
 def test_create_record_refuses_a_present_record_missing_a_field(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.project_record import (
-        ProjectRecordInvalidError,
-        create_record,
-        project_record_key,
-    )
+    """A present record lacking a field refuses naming it, and never quotes what it holds."""
+    from tcip_mcp.project_record import create_record, project_record_key
 
+    record = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
+    stored = ts.read_versioned(project_record_key(tmp_path))
     ts.replace(
         project_record_key(tmp_path),
-        {"site": "north orchard"},
-        expect=ts.Version.ABSENT,
+        record.model_dump(exclude={"invariances"}),
+        expect=stored.version,
     )
 
-    with pytest.raises(
-        ProjectRecordInvalidError, match="is not a project record"
-    ):
+    with pytest.raises(ValueError) as refused:
         create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
+
+    assert "north orchard" not in str(refused.value)
+    assert "invariances" in str(refused.value)
 
 
 def test_read_record_refuses_a_record_stating_no_invariances(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.project_record import (
-        ProjectRecordInvalidError,
         create_record,
         project_record_key,
         read_record,
@@ -166,11 +167,11 @@ def test_read_record_refuses_a_record_stating_no_invariances(
         expect=stored.version,
     )
 
-    with pytest.raises(ProjectRecordInvalidError, match="invariances"):
+    with pytest.raises(ts.ReadRefusedError, match="invariances"):
         read_record(tmp_path)
 
 
-def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
+def test_create_record_refuses_an_undecodable_record_with_the_stores_sentence(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.project_record import create_record, project_record_key
@@ -179,7 +180,7 @@ def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
     create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
     damage_record(project_record_key(tmp_path), b"{not valid json")
 
-    with pytest.raises(ts.DecodeError):
+    with pytest.raises(ts.ReadRefusedError, match="does not decode"):
         create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
 
@@ -240,8 +241,6 @@ def test_replace_invariances_writes_the_block_and_records_one_correction_line(
 def test_replace_invariances_refuses_a_block_the_type_refuses_writing_nothing(
     tmp_path: Path,
 ) -> None:
-    from pydantic import ValidationError
-
     from tcip_mcp.identity import actor
     from tcip_mcp.project_record import read_record, replace_invariances
 
@@ -249,7 +248,7 @@ def test_replace_invariances_refuses_a_block_the_type_refuses_writing_nothing(
     before, lines = read_record(project), audit_rows(project)
     unvalidated = INVARIANCES.model_copy(update={"rotation": 400.0})
 
-    with pytest.raises(ValidationError, match="rotation"):
+    with pytest.raises(ts.ReadRefusedError, match="rotation"):
         replace_invariances(project, unvalidated, actor=actor("tester"))
 
     assert read_record(project) == before
@@ -296,9 +295,9 @@ def test_replace_site_requires_an_actor_by_signature(tmp_path: Path) -> None:
 
 def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path) -> None:
     from tcip_mcp.identity import actor
-    from tcip_mcp.project_record import ProjectRecordMissingError, replace_site
+    from tcip_mcp.project_record import replace_site
 
-    with pytest.raises(ProjectRecordMissingError):
+    with pytest.raises(ts.ReadRefusedError, match="initialize_project"):
         replace_site(tmp_path, "south orchard", actor=actor("tester"))
 
 
@@ -309,10 +308,10 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
     tmp_path: Path,
 ) -> None:
     """Reading an absent record raises naming ``initialize_project`` and creates no database."""
-    from tcip_mcp.project_record import ProjectRecordMissingError, read_record
+    from tcip_mcp.project_record import read_record
     from tcip_store.file_backend import database_file
 
-    with pytest.raises(ProjectRecordMissingError, match="initialize_project"):
+    with pytest.raises(ts.ReadRefusedError, match="initialize_project"):
         read_record(tmp_path)
 
     assert not database_file(str(tmp_path.absolute())).is_file()
@@ -339,7 +338,7 @@ def test_record_or_problem_names_the_absent_record(tmp_path: Path) -> None:
 
     assert reading.kind == "unread"
     assert not isinstance(reading.problem, str)
-    from tcip_mcp.read_refusal import Unreadable
+    from tcip_store import Unreadable
 
     assert isinstance(reading.problem, Unreadable)
     assert "initialize_project" in reading.problem.message
@@ -360,7 +359,7 @@ def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
 
     assert reading.kind == "unread"
     assert not isinstance(reading.problem, str)
-    from tcip_mcp.read_refusal import Unreadable
+    from tcip_store import Unreadable
 
     assert isinstance(reading.problem, Unreadable)
     assert "does not decode" in reading.problem.message
@@ -391,7 +390,7 @@ def test_record_or_problem_serves_a_record_its_model_refuses_by_the_models_issue
 
     assert reading.kind == "unread"
     assert not isinstance(reading.problem, str)
-    from tcip_mcp.read_refusal import Invalid
+    from tcip_store import Invalid
 
     assert isinstance(reading.problem, Invalid)
     assert [issue.loc for issue in reading.problem.issues] == [["site"]]

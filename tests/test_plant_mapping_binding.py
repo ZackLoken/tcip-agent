@@ -387,7 +387,7 @@ def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_prov
         output_csv_path=str(out_csv),
     )
     assert "error" in res
-    assert "is not a record this reader decodes" in res["error"]
+    assert f"plant mapping 'forged' under {tmp_path}" in res["error"]
     assert not out_csv.exists()
 
 

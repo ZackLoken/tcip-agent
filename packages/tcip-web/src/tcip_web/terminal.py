@@ -29,7 +29,7 @@ from queue import Queue, ShutDown
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 
 import psutil
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.knowledge import read_document
@@ -42,7 +42,7 @@ from tcip_mcp.knowledge.harness_files import (
     write_skills,
     write_text,
 )
-from tcip_mcp.read_refusal import Invalid
+from tcip_store import validated
 from tcip_web.state import OpenProject, store
 
 if TYPE_CHECKING:
@@ -339,19 +339,14 @@ _JSON_OBJECT: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
 def _json_object(path: Path) -> dict[str, Any]:
     """Return the JSON object the file at ``path`` holds, an empty one when there is no file.
 
-    Raises ``ValueError`` naming ``path`` when it does not hold a JSON object
+    Raises ``tcip_store.ReadRefusedError`` naming ``path`` when it does not hold a JSON object
     (:data:`_JSON_OBJECT` refusing it), and the filesystem's ``OSError`` when it does not read.
     """
-    try:
-        return (
-            _JSON_OBJECT.validate_json(path.read_bytes())
-            if path.is_file()
-            else {}
-        )
-    except ValidationError as exc:
-        raise ValueError(
-            f"{path} does not hold a JSON object: {Invalid.of(exc)}"
-        ) from exc
+    if not path.is_file():
+        return {}
+    return validated(
+        _JSON_OBJECT, path.read_bytes(), f"{path} as a JSON object"
+    )
 
 
 def _write_json(path: Path, body: dict) -> None:

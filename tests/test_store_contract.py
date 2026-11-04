@@ -1227,6 +1227,24 @@ def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_n
     assert ts.read(key) == {"score": None, "score_state": "nan"}
 
 
+def test_a_value_the_writer_refuses_names_its_place_and_no_library_release(
+    store: Harness,
+) -> None:
+    """The writer's refusal of a non-finite number names where it sits and how to store it.
+
+    The message carries the position of the refused number and ``stored_number``, and no
+    documentation link naming the validation library's release.
+    """
+    key = store.key(LWW, "measurement")
+
+    with pytest.raises(ts.StoreError) as refused:
+        ts.replace(key, {"scores": [1.0, float("inf")]})
+
+    message = str(refused.value)
+    assert "errors.pydantic.dev" not in message
+    assert "scores" in message and "stored_number" in message
+
+
 def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_spelling(
     store: Harness,
 ) -> None:

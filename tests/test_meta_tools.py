@@ -427,11 +427,9 @@ def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading
 def test_a_report_that_is_not_a_json_object_will_not_decode(
     tmp_path: Path,
 ) -> None:
-    from pydantic import ValidationError
-
     ts.replace(memory_key(FrictionReport, str(tmp_path), "unreadable"), "text")
 
-    with pytest.raises(ValidationError, match="FrictionReport"):
+    with pytest.raises(ts.ReadRefusedError, match="FrictionReport"):
         read_memory(FrictionReport, str(tmp_path), "unreadable")
 
 

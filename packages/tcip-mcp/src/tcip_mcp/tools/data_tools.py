@@ -298,22 +298,24 @@ def draw_splits(
             image; the images are the dataset's own ``images/`` tree either way.
 
     """
-    from pydantic import ValidationError
-
-    from tcip_mcp.read_refusal import Invalid
+    from tcip_store import ReadRefusedError, validated
 
     try:
-        draw = DrawnSplit(
-            seed=seed,
-            val_ratio=val_ratio,
-            calibration_ratio=calibration_ratio,
-            holdout_ratio=holdout_ratio,
-            stratify_foreground=stratify_foreground,
-            rationale=rationale,
-            grouping=grouping,
+        draw = validated(
+            DrawnSplit,
+            {
+                "seed": seed,
+                "val_ratio": val_ratio,
+                "calibration_ratio": calibration_ratio,
+                "holdout_ratio": holdout_ratio,
+                "stratify_foreground": stratify_foreground,
+                "rationale": rationale,
+                "grouping": grouping,
+            },
+            "the draw",
         )
-    except ValidationError as exc:
-        return {"error": str(Invalid.of(exc))}
+    except ReadRefusedError as exc:
+        return {"error": str(exc)}
     return draw_splits_at(
         project,
         str(located(folder_path, project)),

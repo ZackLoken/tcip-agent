@@ -248,6 +248,50 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     assert record2["resolved_key"] == f"valley@{before.record_sha256[:12]}"
 
 
+def test_a_rebuild_over_a_refused_delivery_event_answers_the_event_readers_sentence(
+    tmp_path: Path,
+    client: TestClient,
+) -> None:
+    """A rebuild whose citation check meets a refused delivery event answers 400 with why.
+
+    The event a real delivery recorded has its time changed to no instant. The rebuild route's
+    detail is the sentence ``read_delivery_events`` raises, naming the event and the field, and
+    carries no library link.
+    """
+    import asyncio
+
+    import pytest
+
+    from tcip_mcp import delivery
+    from tcip_web.state import store
+
+    project, dataset_root, _ = _cited_mapping(tmp_path)
+    before = plant_mapping.load_mapping(tmp_path, "valley")
+    assert before is not None
+    (event,) = read_delivery_events(tmp_path)
+    key = delivery.delivery_event_key(tmp_path, event.event_id)
+    ts.replace(key, ts.read(key) | {"produced_at": "not an instant"})
+    asyncio.run(store.open_project(project))
+
+    with pytest.raises(ValueError) as refused:
+        read_delivery_events(tmp_path)
+    resp = client.post(
+        "/api/results/plant_mapping/build",
+        json={
+            "name": "valley",
+            "dataset_root": dataset_root,
+            "plant_registry": before.plant_registry.name,
+            "user": "tester",
+        },
+    )
+
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "errors.pydantic.dev" not in detail
+    assert event.event_id in detail and "produced_at" in detail
+    assert detail == str(refused.value)
+
+
 def _built(tmp_path: Path) -> tuple[Path, str]:
     """Build a mapping ``valley`` through the platform's own door.
 

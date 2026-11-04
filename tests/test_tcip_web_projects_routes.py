@@ -16,7 +16,7 @@ from tests._web_fixtures import INVARIANCES
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from tcip_mcp.read_refusal import ReadRefusal
+    from tcip_store import ReadRefusal
     from tcip_web.state import OpenProject
 
 

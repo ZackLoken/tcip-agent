@@ -6,6 +6,21 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tcip_store.model import Key, Version
+    from tcip_store.refusal import ReadRefusal
+
+
+class ReadRefusedError(ValueError):
+    """A record or value that will not read (``refusal``), at the place ``where`` names.
+
+    ``refusal`` is its model's issues, or the sentence of the error that stopped the read. Its
+    message is ``where`` before the refusal's text; it never quotes the value.
+    """
+
+    def __init__(self, refusal: ReadRefusal, where: str) -> None:
+        """Hold ``refusal`` and ``where``, stated as the error's message."""
+        super().__init__(f"{where}: {refusal}")
+        self.refusal = refusal
+        self.where = where
 
 
 class StoreError(Exception):

@@ -677,7 +677,7 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     ]
 
     settings.write_text("[]", encoding="utf-8")
-    with pytest.raises(ValueError, match="does not hold a JSON object"):
+    with pytest.raises(ValueError, match="as a JSON object: "):
         pty_host.allow_tcip_tools(settings)
 
 
@@ -724,10 +724,50 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
     assert set(written) == {"my-linter-hook", pty_host.ANTIGRAVITY_HOOK_ENTRY}
 
     hooks.write_text("[]", encoding="utf-8")
-    with pytest.raises(ValueError, match="does not hold a JSON object"):
+    with pytest.raises(ValueError, match="as a JSON object: "):
         pty_host.prepare_antigravity(
             pty_host.ANTIGRAVITY, "agy", opened, "term_third"
         )
+
+
+def test_an_agy_launch_over_settings_holding_no_json_object_refuses_naming_the_file(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    opened_project: Path,
+) -> None:
+    """An Antigravity launch whose settings file holds no JSON object refuses naming the file.
+
+    The launch answers 503 whose detail names the settings file and the model's issue, carrying
+    no library documentation link; no session is registered and no start line recorded.
+    """
+    row = next(r for r in pty_host.PROVIDERS if r.id == "antigravity")
+    monkeypatch.setattr(
+        pty_host,
+        "PROVIDERS",
+        (
+            dataclasses.replace(
+                row, executable=str(fake_executable(tmp_path / "bin"))
+            ),
+        ),
+    )
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV)
+    monkeypatch.setattr(pty_host, "run_to_completion", lambda argv: "added")
+    settings = tmp_path / "agy-settings.json"
+    settings.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
+    _port_recorded()
+
+    resp = client.post(
+        "/api/terminal/sessions", json={**LAUNCH, "provider": row.id}
+    )
+
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert str(settings) in detail
+    assert "errors.pydantic.dev" not in detail
+    assert terminal_routes._SESSIONS == {}
+    assert audit_rows(opened_project, "agent_terminal_started") == []
 
 
 def test_agys_preparation_writes_one_always_on_rule_naming_the_orientations_tools(

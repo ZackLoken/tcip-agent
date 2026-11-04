@@ -19,8 +19,10 @@ from pydantic import (
     JsonValue,
     PlainValidator,
     TypeAdapter,
-    ValidationError,
 )
+
+from tcip_store.errors import ReadRefusedError
+from tcip_store.refusal import validated
 
 
 def encode_record(value: JsonValue) -> bytes:
@@ -148,14 +150,13 @@ def check_json_value(value: object, *, path: str = "value") -> None:
     A JSON value is pydantic's ``JsonValue``: a ``dict`` keyed by strings, a list, a string,
     number, boolean or None, every number finite (:data:`_FINITE_JSON_RULE`). A non-finite number,
     a ``bytes`` key or a type JSON has no form for refuses (``ValueError``) under ``path``, naming
-    the position and the type it holds, and naming :func:`stored_number` as how a non-finite number
-    is stored.
+    each position and what is wrong there (:func:`~tcip_store.refusal.validated`), and naming
+    :func:`stored_number` as how a non-finite number is stored.
     """
     try:
-        _FINITE_JSON.validate_python(value)
-    except ValidationError as exc:
+        validated(_FINITE_JSON, value, f"{path} is not a finite JSON value")
+    except ReadRefusedError as exc:
         raise ValueError(
-            f"{path} is not a finite JSON value: {exc}\nConvert what it holds to a JSON type at "
-            "the writer, a non-finite number to null beside a field naming its state "
-            "(stored_number)."
+            f"{exc}\nConvert what it holds to a JSON type at the writer, a non-finite number to "
+            "null beside a field naming its state (stored_number)."
         ) from exc

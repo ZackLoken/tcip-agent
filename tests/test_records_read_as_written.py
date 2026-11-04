@@ -89,7 +89,6 @@ def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(
     tmp_path: Path,
 ) -> None:
     import pytest
-    from pydantic import ValidationError
 
     import tcip_store as ts
     from tcip_mcp import traits
@@ -101,7 +100,7 @@ def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(
     del stored.value["revisions"][0]["entry"]["positive_state"]
     ts.replace(key, stored.value, expect=stored.version)
 
-    with pytest.raises(ValidationError, match="positive_state"):
+    with pytest.raises(ts.ReadRefusedError, match="positive_state"):
         traits.read_trait("fruit", tmp_path)
 
 
@@ -116,11 +115,10 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     with ``state`` removed fails the read by name.
     """
     import pytest
-    from pydantic import ValidationError
 
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import FINAL_STATUS_FILE, read_record
-    from tcip_store import encode_record
+    from tcip_store import ReadRefusedError, encode_record
     from tests._training_values import fifo_search, sweep_space
 
     def fake_search(**kw: object) -> None:
@@ -151,7 +149,7 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     damaged = read_record(final)
     del damaged["state"]
     final.write_bytes(encode_record(damaged))
-    with pytest.raises(ValidationError, match="state"):
+    with pytest.raises(ReadRefusedError, match="state"):
         tt.monitor_training(tmp_path, sweep_id)
 
 

@@ -23,7 +23,6 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    ValidationError,
 )
 
 import tcip_store
@@ -35,7 +34,6 @@ from tcip_mcp.pipelines.model_build import (
     SNAPSHOT_KEY,
 )
 from tcip_mcp.pipelines.schemas import StatedDirection, TrainGeometry
-from tcip_mcp.read_refusal import Invalid
 from tcip_mcp.registry_paths import (
     checkpoint_registry_path_for,
     is_external_form,
@@ -47,7 +45,9 @@ from tcip_store import (
     FINITE_JSON_OBJECT,
     FiniteJsonObject,
     Key,
+    ReadRefusedError,
     finite_number,
+    validated,
 )
 
 if TYPE_CHECKING:
@@ -103,14 +103,14 @@ class RegistryIndex(BaseModel):
 
 def _index_entries(stored: JsonValue) -> list[RegistryEntry]:
     """Return the entries of a stored index, validated as a :class:`RegistryIndex`."""
-    return RegistryIndex.model_validate(stored).entries
+    return validated(RegistryIndex, stored, "the model registry index").entries
 
 
 def read_registry_index(project_path: str | Path) -> list[RegistryEntry]:
     """Return every foreign checkpoint the project has registered, in registration order.
 
     A project that has registered nothing reads as an empty list; an index that does not decode
-    raises ``DecodeError``, and one that does not validate ``pydantic.ValidationError``.
+    raises ``DecodeError``, and one that does not validate ``tcip_store.ReadRefusedError``.
     """
     return _index_entries(
         tcip_store.read(
@@ -375,15 +375,16 @@ class VerifiedCheckpoint:
         holds invalid and the stamp's writer.
         """
         try:
-            return CheckpointStamp.model_validate(self.payload)
-        except ValidationError as exc:
-            refusal = Invalid.of(exc)
-            keys = ", ".join(sorted({repr(i.loc[0]) for i in refusal.issues}))
+            return validated(CheckpointStamp, self.payload, self.path)
+        except ReadRefusedError as exc:
+            refusal = exc.refusal
+            issues = refusal.issues if refusal.kind == "invalid" else []
+            keys = ", ".join(sorted({repr(i.loc[0]) for i in issues}))
             raise ValueError(
                 f"{self.path} carries no {keys} as generic_trainer.checkpoint_stamp writes "
                 "it, as the default trainer and ctx.save_checkpoint save it, so it was written "
                 "past that stamp. Save it through a run (launch_training, or "
-                f"ctx.save_checkpoint in its training body). {refusal}"
+                f"ctx.save_checkpoint in its training body). {exc.refusal}"
             ) from exc
 
     @cached_property

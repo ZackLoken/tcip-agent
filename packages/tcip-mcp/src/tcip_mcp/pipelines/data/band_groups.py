@@ -495,12 +495,14 @@ def groups_from_explicit_mapping(
 def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
     """Return the :class:`BandGroupRef` of the ``.bandgroup`` file at ``manifest_path``.
 
-    Raises ``ValueError`` (``pydantic.ValidationError``) when the file's bytes are not a
+    Raises ``tcip_store.ReadRefusedError`` naming the file when its bytes are not a
     :class:`BandGroupManifest`.
     """
     return BandGroupRef(
         manifest_path,
-        BandGroupManifest.model_validate_json(manifest_path.read_bytes()),
+        tcip_store.validated(
+            BandGroupManifest, manifest_path.read_bytes(), str(manifest_path)
+        ),
     )
 
 

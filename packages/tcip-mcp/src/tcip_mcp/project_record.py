@@ -10,37 +10,27 @@ import uuid
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import (
-    AfterValidator,
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationError,
-)
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 import tcip_store
 from tcip_annotation.text import Text
-from tcip_mcp.read_refusal import Invalid, ReadRefusal, read_refusal
-from tcip_store import Key, StoreError, Version, VersionConflictError
+from tcip_store import (
+    Key,
+    ReadRefusal,
+    ReadRefusedError,
+    StoreError,
+    Unreadable,
+    Version,
+    VersionConflictError,
+    unreadable,
+    validated,
+)
 
 PROJECT_RECORD_STORE = "project_record"
 _PROJECT_RECORD_PARTS = ("project",)
 
 _MAX_TEXT_LENGTH = 200
 """The most characters a site or display name holds; tentative, stated by no source."""
-
-
-class ProjectRecordMissingError(Exception):
-    """A project has no record yet."""
-
-
-class ProjectRecordInvalidError(ValueError):
-    """A project's record decodes but is not a :class:`ProjectRecord`, by ``refusal``'s issues."""
-
-    def __init__(self, message: str, refusal: Invalid) -> None:
-        """Hold ``message`` and the model's ``refusal`` it states."""
-        super().__init__(message)
-        self.refusal = refusal
 
 
 class SiteConflictError(ValueError):
@@ -129,15 +119,14 @@ class ProjectRecord(BaseModel):
 def read_record(project_path: str | Path) -> ProjectRecord:
     """Return the project's record.
 
-    Raises :class:`ProjectRecordMissingError` for a project with no record yet, and
-    :class:`ProjectRecordInvalidError` for a document that decodes but is not one. A document
-    that does not decode raises the store's own ``DecodeError``, and a root the store refuses
-    raises its ``StoreError``. Never creates a store.
+    Raises ``tcip_store.ReadRefusedError`` naming the record: for a document that decodes but is
+    not one, its issues; for a project with no record yet, a document that does not decode, a
+    root the store refuses or a database that does not read from disk, that error's sentence.
+    Never creates a store.
     """
-    return _checked(
-        project_path,
-        tcip_store.read(project_record_key(project_path), default=None),
-    )
+    with unreadable(_record_place(project_path), StoreError, OSError):
+        raw = tcip_store.read(project_record_key(project_path), default=None)
+    return _checked(project_path, raw)
 
 
 def existing_project(value: str | Path) -> tuple[Path, ProjectRecord]:
@@ -155,24 +144,27 @@ def existing_project(value: str | Path) -> tuple[Path, ProjectRecord]:
     return project, reading.record
 
 
+def _record_place(project_path: str | Path) -> str:
+    """Return where the project record of ``project_path`` lives, as a refusal names it."""
+    return f"the project record of {project_path}"
+
+
 def _checked(project_path: str | Path, raw: object) -> ProjectRecord:
     """Return ``raw``, a record read from ``project_path``, validated as a :class:`ProjectRecord`.
 
-    Raises ``ProjectRecordMissingError`` for an absent record and ``ProjectRecordInvalidError``
-    naming what the record lacks otherwise.
+    Raises ``tcip_store.ReadRefusedError`` naming the record: for an absent record, the sentence
+    naming ``initialize_project``; otherwise what the record lacks.
     """
+    where = _record_place(project_path)
     if raw is None:
-        raise ProjectRecordMissingError(
-            f"{project_path} is not a project yet: create it with initialize_project"
+        raise ReadRefusedError(
+            Unreadable(
+                message=f"{project_path} is not a project yet: create it with "
+                "initialize_project"
+            ),
+            where,
         )
-    try:
-        return ProjectRecord.model_validate(raw)
-    except ValidationError as exc:
-        refusal = Invalid.of(exc)
-        raise ProjectRecordInvalidError(
-            f"{project_path}'s record is not a project record ({refusal}; found {raw!r})",
-            refusal,
-        ) from exc
+    return validated(ProjectRecord, raw, where)
 
 
 def create_record(
@@ -250,8 +242,10 @@ def _update(
     while True:
         stored = tcip_store.read_versioned(key, default=None)
         current = _checked(project_path, stored.value)
-        updated = ProjectRecord.model_validate(
-            current.model_copy(update={field: value}).model_dump()
+        updated = validated(
+            ProjectRecord,
+            current.model_copy(update={field: value}).model_dump(),
+            _record_place(project_path),
         )
         written = updated.model_dump()
         try:
@@ -330,11 +324,9 @@ def record_or_problem(project_path: str | Path) -> RecordReading:
     """Return the project's record, or why it will not read.
 
     A record that is missing, invalid, refused by the store or unreadable from disk is
-    :class:`UnreadRecord`, an invalid one by its model's issues; nothing is raised.
+    :class:`UnreadRecord`, by :func:`read_record`'s refusal; nothing is raised.
     """
     try:
         return ReadRecord(record=read_record(project_path))
-    except ProjectRecordInvalidError as exc:
+    except ReadRefusedError as exc:
         return UnreadRecord(problem=exc.refusal)
-    except (ProjectRecordMissingError, StoreError, OSError) as exc:
-        return UnreadRecord(problem=read_refusal(exc))

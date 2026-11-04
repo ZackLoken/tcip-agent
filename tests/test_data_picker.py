@@ -259,7 +259,7 @@ def test_read_selection_checked_tells_absence_apart_from_a_broken_record(
     broken, broken_error = read_selection_checked(broken_dir, project=tmp_path)
     assert broken is None
     assert broken_error is not None and not isinstance(broken_error, str)
-    from tcip_mcp.read_refusal import Invalid
+    from tcip_store import Invalid
 
     assert isinstance(broken_error, Invalid)
     assert ["group_by"] in [issue.loc for issue in broken_error.issues]
@@ -287,9 +287,11 @@ def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_
 ) -> None:
     """The preflight and the split picker state one unreadable bound selection alike.
 
-    The preflight's issue for it is the "As recorded" row's reason, the selection model's issues
-    as text, carrying no library documentation link.
+    The preflight's issue for it and the "As recorded" row's reason are each the sentence
+    ``read_selection`` raises: the selection model's issues behind the selection's place,
+    carrying no library documentation link.
     """
+    from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.training_tools import (
         Blocked,
         list_split_choices,
@@ -298,12 +300,19 @@ def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_
 
     config = _bound_to_a_selection_damaged_after_binding(tmp_path)
 
+    with pytest.raises(ValueError) as refused:
+        read_selection(
+            config["data"]["split"]["selection_dir"], project=tmp_path
+        )
     issues = preflight_config(tmp_path, config)["issues"]
     check = list_split_choices(tmp_path, "exp-bound").as_recorded.check
 
-    assert not [i for i in issues if "errors.pydantic.dev" in i], issues
+    sentence = str(refused.value)
+    assert "errors.pydantic.dev" not in sentence
+    assert "group_by: " in sentence
+    assert sentence in issues
     assert isinstance(check, Blocked)
-    assert check.reason in issues
+    assert check.reason == sentence
 
 
 def test_a_trial_over_an_unreadable_bound_selection_records_the_models_issues(

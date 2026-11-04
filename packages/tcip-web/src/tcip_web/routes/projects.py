@@ -150,18 +150,17 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
 
     400 for a request naming no one, 404 when the workspace holds no single project with it (a
     project whose record will not read is not found by its id), 409 when its persisted GUI
-    state will not read, its detail the :data:`~tcip_mcp.read_refusal.ReadRefusal` saying why.
+    state will not read, its detail the :data:`~tcip_store.ReadRefusal` saying why.
     """
-    from tcip_mcp.read_refusal import read_refusal
-    from tcip_store import StoreError
+    from tcip_store import ReadRefusedError
 
     actor(req.user)
     root, record = workspace_project(req.id)
     project = OpenProject(root, record.id)
     try:
         await store.open_project(project)
-    except (ValueError, StoreError) as exc:
-        raise HTTPException(409, read_refusal(exc).model_dump()) from exc
+    except ReadRefusedError as exc:
+        raise HTTPException(409, exc.refusal.model_dump()) from exc
     return OpenAnswer(project=SnapshotProject.of(project))
 
 
