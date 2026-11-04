@@ -8,27 +8,63 @@ import time).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from tcip_mcp.knowledge import (
+    CROPS,
     KNOWLEDGE_DIR,
-    crops_yml_path,
     document_path,
     list_documents,
     read_document,
 )
+from tests import REPO_ROOT
+
+_BACKTICKED = re.compile(r"`(\w[\w./-]*)`")
+_REPOSITORY_WORDS = re.compile(r"\bREADME\b|[\w/-]*SKILL\.md")
 
 
-def test_list_documents_returns_one_entry_per_markdown_file() -> None:
-    """``list_documents`` lists one entry per .md file under KNOWLEDGE_DIR, each named and read."""
+def _repository_paths(text: str) -> list[str]:
+    """Return every name in ``text`` pointing into the repository instead of at a served document.
+
+    That is the README, a skill file, and a backticked path resolving under the repository root
+    but not under the ``tcip_mcp`` package the documents ship in.
+    """
+    package = KNOWLEDGE_DIR.parent
+    return [
+        *_REPOSITORY_WORDS.findall(text),
+        *(
+            token
+            for token in _BACKTICKED.findall(text)
+            if (REPO_ROOT / token).exists() and not (package / token).exists()
+        ),
+    ]
+
+
+def test_no_served_document_points_into_the_repository() -> None:
+    """Every document the knowledge tool serves names documents, never repository paths."""
+    found = {
+        document.name: paths
+        for document in list_documents()
+        if (paths := _repository_paths(read_document(document.name)))
+    }
+
+    assert found == {}
+
+
+def test_list_documents_returns_one_entry_per_markdown_file_and_the_vocabulary() -> (
+    None
+):
+    """``list_documents`` lists each .md file under KNOWLEDGE_DIR and CROPS, each named and read."""
     documents = list_documents()
     on_disk = list(KNOWLEDGE_DIR.rglob("*.md"))
     assert documents, (
         "the walk found no documents; the count comparison below would prove nothing"
     )
-    assert len(documents) == len(on_disk)
+    assert len(documents) == len(on_disk) + 1
+    assert documents[-1] == CROPS
     names = [d.name for d in documents]
     assert len(names) == len(set(names)), "document names must be unique"
     for document in documents:
@@ -117,7 +153,7 @@ def test_a_utf8_bom_does_not_defeat_the_frontmatter_check(
         )
     )
     documents = knowledge.list_documents()
-    assert [d.name for d in documents] == ["bommed"]
+    assert [d.name for d in documents] == ["bommed", CROPS.name]
     assert knowledge.read_document("bommed").strip() == "body"
 
 
@@ -156,10 +192,9 @@ def test_a_description_carrying_a_newline_raises_value_error(
     assert str(bad) in str(excinfo.value)
 
 
-def test_crops_yml_path_resolves_under_knowledge_dir() -> None:
-    path = crops_yml_path()
-    assert path == KNOWLEDGE_DIR / "crops" / "crops.yml"
-    assert path.is_file()
+def test_the_vocabulary_is_a_file_under_knowledge_dir() -> None:
+    assert CROPS.path.is_relative_to(KNOWLEDGE_DIR)
+    assert CROPS.path.is_file()
 
 
 def test_the_vocabulary_still_loads_through_the_relocated_path() -> None:
@@ -199,13 +234,10 @@ def test_serve_domain_knowledge_with_no_name_returns_the_index() -> None:
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 
     result = serve_domain_knowledge()
-    names = {d["name"] for d in result["documents"]}
-    assert names == {d.name for d in list_documents()}
-    for entry in result["documents"]:
-        assert entry["path"], f"{entry['name']}: index entry carries no path"
-        assert not Path(entry["path"]).is_absolute(), (
-            f"{entry['name']}: path is not repo-relative"
-        )
+    assert result["documents"] == [
+        {"name": d.name, "description": d.description}
+        for d in list_documents()
+    ]
 
 
 def test_serve_domain_knowledge_with_a_name_returns_that_documents_body() -> (
@@ -216,6 +248,32 @@ def test_serve_domain_knowledge_with_a_name_returns_that_documents_body() -> (
     result = serve_domain_knowledge("delivery")
     assert result["name"] == "delivery"
     assert result["content"] == read_document("delivery")
+
+
+def test_the_trait_vocabulary_is_served_whole_by_its_name() -> None:
+    """``serve_domain_knowledge(name='crops')`` returns ``crops.yml`` byte for byte."""
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
+
+    result = serve_domain_knowledge("crops")
+
+    assert result["content"].encode("utf-8") == CROPS.path.read_bytes()
+
+
+def test_every_document_naming_the_vocabulary_names_the_call_serving_it() -> (
+    None
+):
+    """A document that names ``crops.yml`` tells the agent the call that serves it."""
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
+
+    call = f"`{serve_domain_knowledge.__name__}(name='crops')`"
+    naming = [
+        document.name
+        for document in list_documents()
+        if "crops.yml" in (text := read_document(document.name))
+        and call not in text
+    ]
+
+    assert naming == []
 
 
 def test_serve_domain_knowledge_with_an_unknown_name_names_the_available_names() -> (

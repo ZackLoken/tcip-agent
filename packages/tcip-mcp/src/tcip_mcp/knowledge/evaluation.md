@@ -29,7 +29,7 @@ over IoU 0.50 to 0.95) from the same matcher over the confidence sweep, matched 
 instance segmentation pass collects and cuts masks and by box where it states `masks` false.
 They are aggregate only; no per-class AP is reported. Per-class precision/recall/F1 is real for classification (`evaluate_model`); ordinal and
 regression get only the scalar metrics in the table above, no per-class breakdown. Change
-detection is not a built task type; see README's Roadmap.
+detection is not a built task type.
 
 R² and CCC ask related but distinct questions of a regression trait, and are not directly
 comparable numbers: R² is "how much better than trivially predicting this set's own mean" (overall

@@ -56,6 +56,9 @@ dev = [
     "pytest-xdist>=3.0",
     "ruff==0.16.8",
     "mypy==2.2.0",
+    # The permission tests match deny rules with its gitignore matcher, installed at 1.1.1
+    # through mypy.
+    "pathspec>=1.1.1",
 ]
 
 [build-system]

@@ -80,9 +80,8 @@ reader, `format_io.parse_coco_annotations`, names each record's subject from the
 fact as no document.
 
 A collaborator's delivery in a schema other than COCO is yours to convert: read a sample, write a
-one-off converter script that emits a COCO document, where
-`packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md` places your own work for a project,
-and import it. COCO is the one built-in import of an external schema.
+one-off converter script that emits a COCO document, where the `project-setup` document places
+your own work for a project, and import it. COCO is the one built-in import of an external schema.
 
 A project's own labels leave it through `export_labels(dataset_root, destination)`, a zip holding
 every label document and flags record as stored, completion marks and provenance included, beside
@@ -332,8 +331,8 @@ bucket and drive the human to review them:
   `shapes_missing` and `shapes_age_seconds`. With no state pushed at all it refuses.
 
 Flow, in the order of the bullets above: a bucket from `run_inference` or `stage_proposals` →
-`focus_human_attention` → the person's review on the canvas. See
-`packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md` for what ships after sign-off.
+`focus_human_attention` → the person's review on the canvas. The `delivery` document states what
+ships after sign-off.
 
 ## Quality Metrics
 

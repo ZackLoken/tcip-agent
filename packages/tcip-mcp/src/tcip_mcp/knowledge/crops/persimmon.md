@@ -30,8 +30,8 @@ ploidy signal rather than a pollination readout.
 
 ## Trait authority
 
-crops.yml is the trait authority (20 persimmon traits). Verify every trait there; never
-assert one it does not list. This skill grounds the imagery; it does not redefine the
+crops.yml is the trait authority (20 persimmon traits), served whole by
+`serve_domain_knowledge(name='crops')`. Verify every trait there; never assert one it does not list. This skill grounds the imagery; it does not redefine the
 vocabulary. Persimmon is the sparsest TCIP crop and carries only the single aggregate
 `overall_disease` trait, no species-specific disease columns.
 

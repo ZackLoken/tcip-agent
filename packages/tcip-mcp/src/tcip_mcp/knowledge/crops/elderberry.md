@@ -41,8 +41,8 @@ its degree with the breeder for any pollination-window modeling.
 
 ## Trait authority
 
-crops.yml is the trait authority (69 elderberry traits). Verify every trait there; never
-assert one it does not list. This skill partitions and contextualizes that catalog; it does
+crops.yml is the trait authority (69 elderberry traits), served whole by
+`serve_domain_knowledge(name='crops')`. Verify every trait there; never assert one it does not list. This skill partitions and contextualizes that catalog; it does
 not reproduce it. Note some documented elderberry problems have no matching crops.yml trait
 (elderberry rust, bacterial/fungal leaf spot, Phomopsis-type cane cankers, leaf-footed bug);
 do not assume a trait exists for them (see expert flags).
