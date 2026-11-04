@@ -489,16 +489,18 @@ _SELECTION = TypeAdapter(Selection)
 def as_selection(document: JsonValue, *, where: str) -> Selection:
     """Read a held document back as a :class:`Selection`, refusing anything a draw never writes.
 
-    The document is validated as the record (``pydantic.ValidationError`` naming each field that
-    does not decode, a side outside :data:`SIDES` among them). ``where`` names the document in
-    every other refusal: an empty ``samples`` list, samples whose sources lie under more than one
-    dataset root (:func:`~tcip_mcp.dataset_layout.image_capture`), a partition whose sides cross
-    (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read under
-    (:meth:`ClassScope.admitted_for`).
+    ``where`` names the document in every refusal: the record's own
+    (``tcip_store.RecordInvalidError`` naming each field that does not decode, a side outside
+    :data:`SIDES` among them), an empty ``samples`` list, samples whose sources lie under more
+    than one dataset root (:func:`~tcip_mcp.dataset_layout.image_capture`), a partition whose
+    sides cross (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read
+    under (:meth:`ClassScope.admitted_for`).
     """
     from tcip_mcp.dataset_layout import image_capture
 
-    selection = _SELECTION.validate_python(document)
+    selection = tcip_store.validated(
+        _SELECTION, document, f"the selection at {where}"
+    )
     if not selection.samples:
         raise ValueError(
             f"the selection at {where} lists no samples: a selection is its sample list, so an "

@@ -128,11 +128,7 @@ def test_create_record_refuses_a_different_display_name_naming_rename(
 def test_create_record_refuses_a_present_record_missing_a_field(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.project_record import (
-        ProjectRecordInvalidError,
-        create_record,
-        project_record_key,
-    )
+    from tcip_mcp.project_record import create_record, project_record_key
 
     ts.replace(
         project_record_key(tmp_path),
@@ -140,9 +136,7 @@ def test_create_record_refuses_a_present_record_missing_a_field(
         expect=ts.Version.ABSENT,
     )
 
-    with pytest.raises(
-        ProjectRecordInvalidError, match="is not a project record"
-    ):
+    with pytest.raises(ts.RecordInvalidError, match="the project record of"):
         create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
 
@@ -150,7 +144,6 @@ def test_read_record_refuses_a_record_stating_no_invariances(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.project_record import (
-        ProjectRecordInvalidError,
         create_record,
         project_record_key,
         read_record,
@@ -166,7 +159,7 @@ def test_read_record_refuses_a_record_stating_no_invariances(
         expect=stored.version,
     )
 
-    with pytest.raises(ProjectRecordInvalidError, match="invariances"):
+    with pytest.raises(ts.RecordInvalidError, match="invariances"):
         read_record(tmp_path)
 
 

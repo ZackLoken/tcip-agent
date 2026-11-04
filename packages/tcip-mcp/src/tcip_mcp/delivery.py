@@ -746,15 +746,18 @@ def deliver_csv(
 def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
     """Return every delivery event recorded under ``project``, decoded through its declared shape.
 
-    Its paths are resolved against the project; the events stand in the order produced.
+    Its paths are resolved against the project; the events stand in the order produced. An event
+    its shape refuses raises ``tcip_store.RecordInvalidError`` naming the event's id.
     """
     scope = project_state_dir(project)
     return sorted(
         (
-            DeliveryEventRecord.model_validate(
+            tcip_store.validated(
+                DeliveryEventRecord,
                 runtime_paths(
                     tcip_store.read(key), DELIVERY_EVENT_PATHS, project
-                )
+                ),
+                f"delivery event {key.parts[0]}",
             )
             for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
         ),

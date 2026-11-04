@@ -48,6 +48,7 @@ from tcip_store import (
     Invalid,
     Key,
     finite_number,
+    validated,
 )
 
 if TYPE_CHECKING:
@@ -103,14 +104,14 @@ class RegistryIndex(BaseModel):
 
 def _index_entries(stored: JsonValue) -> list[RegistryEntry]:
     """Return the entries of a stored index, validated as a :class:`RegistryIndex`."""
-    return RegistryIndex.model_validate(stored).entries
+    return validated(RegistryIndex, stored, "the model registry index").entries
 
 
 def read_registry_index(project_path: str | Path) -> list[RegistryEntry]:
     """Return every foreign checkpoint the project has registered, in registration order.
 
     A project that has registered nothing reads as an empty list; an index that does not decode
-    raises ``DecodeError``, and one that does not validate ``pydantic.ValidationError``.
+    raises ``DecodeError``, and one that does not validate ``tcip_store.RecordInvalidError``.
     """
     return _index_entries(
         tcip_store.read(

@@ -357,15 +357,17 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     """Return ``project``'s persisted GUI state, or ``None`` when it has none.
 
     Its selection is rebuilt through :func:`selection_for`. A snapshot that does not decode as its
-    shape raises (``ValidationError``, or the store's own error), as does a selection that will
-    not build.
+    shape raises (``tcip_store.RecordInvalidError`` naming the project, or the store's own
+    error), as does a selection that will not build.
     """
     from tcip_mcp.registry_paths import resolved_registry_path
 
     raw = tcip_store.read(gui_snapshot_key(project), default=None)
     if raw is None:
         return None
-    persisted = _PersistedGuiState.model_validate(raw)
+    persisted = tcip_store.validated(
+        _PersistedGuiState, raw, f"the GUI snapshot of {project}"
+    )
     choice = persisted.dataset
     return GuiState(
         **{name: getattr(persisted, name) for name in _GuiFields.model_fields},
