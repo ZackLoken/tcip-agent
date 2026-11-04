@@ -149,9 +149,10 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
     """Open the project ``req.id`` names and return it (:class:`OpenAnswer`).
 
     400 for a request naming no one, 404 when the workspace holds no single project with it (a
-    project whose record will not read is not found by its id), 409 naming why when its
-    persisted GUI state will not read.
+    project whose record will not read is not found by its id), 409 when its persisted GUI
+    state will not read, its detail the :data:`~tcip_mcp.read_refusal.ReadRefusal` saying why.
     """
+    from tcip_mcp.read_refusal import read_refusal
     from tcip_store import StoreError
 
     actor(req.user)
@@ -160,7 +161,7 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
     try:
         await store.open_project(project)
     except (ValueError, StoreError) as exc:
-        raise HTTPException(409, str(exc)) from exc
+        raise HTTPException(409, read_refusal(exc).model_dump()) from exc
     return OpenAnswer(project=SnapshotProject.of(project))
 
 

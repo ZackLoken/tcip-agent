@@ -47,6 +47,7 @@ from tcip_mcp.pipelines.execution import (
 )
 from tcip_mcp.pipelines.raster_source import RasterIdentity
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
+from tcip_mcp.read_refusal import Invalid
 from tcip_mcp.registry_paths import (
     PathFields,
     located,
@@ -1391,7 +1392,7 @@ def _read_reference_csv(
                 row = _ReferenceRow.model_validate(raw)
             except ValidationError as exc:
                 raise AssessmentRefusedError(
-                    f"{csv_path}:{line_no}: {exc}"
+                    f"{csv_path}:{line_no}: {Invalid.of(exc)}"
                 ) from exc
             if row.image_stem in out:
                 raise AssessmentRefusedError(

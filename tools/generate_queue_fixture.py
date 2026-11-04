@@ -5,13 +5,15 @@ opens is laid down again by its own layout (``generate_open_fixture.captures``),
 registered in it (``tests._verified_checkpoint_fixtures.project_checkpoint``), and it is opened
 through the picker's route. The second photograph holds a box marked complete for
 :data:`~tools.generate_open_fixture.FOCUSED_SUBJECT` and the third a box not marked complete
-(``tests._producer_fixtures``). ``GET /api/annotate/scorers`` answers the scorer catalog
-(``scorers``), and again with :func:`typed_scorer` registered beside the platform's
-(``typed_scorers``), when a launch stating :data:`REFUSED` is refused (``refused_launch``). The
-photographs' capture is selected for that subject (``selection``) and a
+(``tests._producer_fixtures``). ``GET /api/annotate/scorers`` answers the scorer catalog with
+:func:`typed_scorer` registered beside the platform's scorers (``typed_scorers``), when a launch
+stating :data:`REFUSED` is refused (``refused_launch``). The
+photographs' capture is selected for that subject (``selection``). With :func:`stated_scorer`
+registered beside the platform's, the catalog is answered again (``stated_scorers``) and a
 queue launched through ``POST /api/annotate/queue/launch`` under :data:`STATED` (``launched``); its
-worker runs the platform's own ranking, whose scorer holds at a ``fixture_session.Gate`` before it
-scores, while ``GET /api/annotate/queue/{job_id}`` answers it running (``running``), and once
+worker runs the platform's own ranking by the stated scorer, which holds at a
+``fixture_session.Gate`` before it scores, while ``GET /api/annotate/queue/{job_id}`` answers it
+running (``running``), and once
 stepped on and ended it answers it completed (``completed``). The capture is selected again for
 :data:`~tools.generate_open_fixture.SUBJECT`, of which no photograph is finished, and a
 ``diversity`` queue launched there ends failed on the scorer's own refusal (``failed``). Last, the
@@ -54,8 +56,15 @@ if TYPE_CHECKING:
 
 GENERATED_PATH = FRONTEND_SRC / "test" / "queueAnswers.json"
 
+STATED_SCORER = "stated"
+"""The name :func:`stated_scorer` is registered under for the stated queue."""
+
+SCORES = {"img5.jpg": 0.4, "img1.jpg": 0.3, "img3.jpg": 0.2, "img4.jpg": 0.1}
+"""The score :func:`stated_scorer` answers for each photograph not finished, sample values ranking
+the fifth first, so the rank order is not the photographs' own order."""
+
 STATED = {
-    "scorer": {"name": "uncertainty"},
+    "scorer": {"name": STATED_SCORER},
     "budget": 4,
     "rationale": "a sample reason the scene states",
 }
@@ -87,6 +96,31 @@ def typed_scorer(
     from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer
 
     return UncertaintyScorer(task)
+
+
+def stated_scorer(task: str) -> object:
+    """Build a scorer answering :data:`SCORES` for each photograph, highest first.
+
+    It reads neither ``task`` nor the model, so the ranking it answers is the same wherever it
+    runs.
+    """
+    from tcip_mcp.pipelines.active_learning.scorer import BaseScorer
+    from tcip_mcp.pipelines.image_utils import logical_image_name
+
+    class Stated(BaseScorer):
+        def score(
+            self,
+            image_paths: list,
+            labeled: list,
+            predictor: GenericPredictor,
+        ) -> list:
+            return sorted(
+                ((p, SCORES[logical_image_name(p)]) for p in image_paths),
+                key=lambda scored: scored[1],
+                reverse=True,
+            )
+
+    return Stated()
 
 
 def produce() -> dict[str, JsonValue]:
@@ -167,9 +201,7 @@ def produce() -> dict[str, JsonValue]:
                 path={"job_id": job_id},
             )
 
-        served: dict[str, JsonValue] = {
-            "scorers": answered(client, "list_scorers", 200)
-        }
+        served: dict[str, JsonValue] = {}
         with pytest.MonkeyPatch.context() as patch:
             patch.setitem(al_scorer.SCORER_REGISTRY, TYPED, typed_scorer)
             served["typed_scorers"] = answered(client, "list_scorers", 200)
@@ -192,6 +224,10 @@ def produce() -> dict[str, JsonValue]:
         mark_complete(finished, FOCUSED_SUBJECT, project=valley.root)
 
         with pytest.MonkeyPatch.context() as patch:
+            patch.setitem(
+                al_scorer.SCORER_REGISTRY, STATED_SCORER, stated_scorer
+            )
+            served["stated_scorers"] = answered(client, "list_scorers", 200)
             patch.setattr(al_scorer, "resolve_scorer", held)
             served["launched"] = launch(**STATED)
             job_id = annotate.PriorityQueueJob.model_validate(
@@ -201,7 +237,7 @@ def produce() -> dict[str, JsonValue]:
             served["running"] = status(job_id)
             gate.step()
             ended(annotate._pq_registry, job_id)
-        served["completed"] = status(job_id)
+            served["completed"] = status(job_id)
 
         select(SUBJECT)
         failing = annotate.PriorityQueueJob.model_validate(
@@ -219,7 +255,6 @@ def produce() -> dict[str, JsonValue]:
                 failing: "<failed job>",
                 Path(checkpoint).parent.name: "<registered run>",
             },
-            rounded=True,
         )
 
 

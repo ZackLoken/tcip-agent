@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
@@ -155,7 +156,8 @@ def check_registry(
             (
                 "error",
                 "the model registry index will not decode or read, so this "
-                f"project's registered models could not be checked at all: {exc}",
+                "project's registered models could not be checked at all: "
+                f"{read_refusal(exc)}",
             )
         )
         return
@@ -304,7 +306,9 @@ def check_traits(root: Path, findings: list) -> None:
         try:
             record = read_trait(name, root)
         except (StoreError, ValidationError) as exc:
-            findings.append(("error", f"trait {name!r} will not read: {exc}"))
+            findings.append(
+                ("error", f"trait {name!r} will not read: {read_refusal(exc)}")
+            )
             continue
         if record.latest.state.kind != "confirmed":
             findings.append(
@@ -323,7 +327,7 @@ def check_project_record(root: Path, findings: list) -> None:
 
     reading = record_or_problem(root)
     if reading.kind == "unread":
-        findings.append(("error", reading.problem))
+        findings.append(("error", str(reading.problem)))
 
 
 @tool()

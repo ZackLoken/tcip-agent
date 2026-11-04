@@ -29,11 +29,12 @@ Run it after changing a declared model; it rewrites the module in place.
 from __future__ import annotations
 
 import json
-from typing import TypeAliasType
+from typing import Any, TypeAliasType
 
 from pydantic import BaseModel, TypeAdapter
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_core import core_schema
+from typing_extensions import TypeForm
 
 from tests import FRONTEND_SRC, formatted, write_generated
 
@@ -74,11 +75,11 @@ _PRIMITIVE = {
 }
 
 
-type Declared = type[BaseModel] | TypeAliasType
-"""A model, or a union a ``type`` statement names."""
+type Declared = TypeForm[Any]
+"""A model, or a union a ``type`` statement names, as ``TypeAdapter`` takes it."""
 
 
-def _models_named(annotation: object) -> list[Declared]:
+def _models_named(annotation: TypeForm[Any]) -> list[Declared]:
     """Return every model or named union ``annotation`` names.
 
     That is ``annotation`` itself, or each one a bare union or a generic of it names.
@@ -420,15 +421,14 @@ def _schemas() -> tuple[list[str], dict[str, dict]]:
     from tcip_web.state import StateSnapshotMessage
 
     declared = declared_models()
+    rendered: list[Declared] = [*declared, StateSnapshotMessage]
     refs, combined = TypeAdapter.json_schemas(
-        [
-            (d, "serialization", TypeAdapter(d))
-            for d in [*declared, StateSnapshotMessage]
-        ],
+        [(i, "serialization", TypeAdapter(d)) for i, d in enumerate(rendered)],
         schema_generator=SentSchema,
     )
     names = [
-        refs[(d, "serialization")]["$ref"].rsplit("/", 1)[-1] for d in declared
+        refs[(i, "serialization")]["$ref"].rsplit("/", 1)[-1]
+        for i in range(len(declared))
     ]
     return names, combined["$defs"]
 

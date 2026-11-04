@@ -24,6 +24,7 @@ from pydantic import (
 
 import tcip_store
 from tcip_annotation.text import Text
+from tcip_mcp.read_refusal import ReadRefusal, read_refusal
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -573,11 +574,11 @@ def read_selection_checked(
     selection_dir: str | Path,
     *,
     project: str | Path,
-) -> tuple[Selection | None, str | None]:
-    """Return :func:`read_selection`'s selection for ``selection_dir``, or its refusal as text.
+) -> tuple[Selection | None, ReadRefusal | None]:
+    """Return :func:`read_selection`'s selection for ``selection_dir``, or why it is refused.
 
-    The answer is ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, text)`` for
-    a record that exists and is refused.
+    The answer is ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, refusal)``
+    for a record that exists and is refused (:func:`~tcip_mcp.read_refusal.read_refusal`).
     """
     try:
         document = _read_selection_document(selection_dir, project)
@@ -585,7 +586,7 @@ def read_selection_checked(
             return None, None
         return as_selection(document, where=str(selection_dir)), None
     except ValueError as exc:
-        return None, str(exc)
+        return None, read_refusal(exc)
 
 
 def _read_selection_document(

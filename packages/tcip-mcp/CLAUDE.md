@@ -45,6 +45,8 @@ src/tcip_mcp/
   assessment.py            # the assessment a delivered number rests on, written once
   delivery.py              # the one delivery gate and the delivery event
   project_record.py       # a project's own record: its id, display name, site and invariances
+  read_refusal.py         # why a record will not read, as served: a model's issues by place and
+                            # message (pydantic's errors without their link), or the error's sentence
   workspace.py            # the workspace root and its project directories
   project_paths.py        # paths under one project's .tcip/ (state, viz) and the repo root
   experiments.py, model_registry.py   # runs and sweeps with their trial runs, side by side in
