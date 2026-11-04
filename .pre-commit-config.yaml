@@ -1,5 +1,5 @@
-# A subset of CI's gates, run by each commit after `pre-commit install`; CI alone runs ruff's
-# format check, the test suites, the frontend build, the audits and the docker and environment jobs.
+# The hooks below, a subset of CI's gates, run on each commit after `pre-commit install`; CI alone
+# runs ruff's format check, test suites, frontend build, audits, and docker and environment jobs.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.8
