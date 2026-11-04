@@ -23,13 +23,13 @@ from tcip_web.routes.sessions import (
     SessionsEnded,
     SessionsListing,
     SessionWrite,
-    read_stats,
+    stored_stats,
 )
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     import pytest
     from starlette.testclient import httpx
@@ -107,8 +107,8 @@ def _load(client: TestClient) -> dict:
 
 def _sessions(root: Path) -> list[Session]:
     """Return the sessions ``root``'s annotation-stats record holds, latest first."""
-    return read_stats(
-        tcip_store.read(annotation_stats_key(str(root))), "the stats record"
+    return stored_stats(
+        tcip_store.read, annotation_stats_key(str(root))
     ).sessions
 
 
@@ -137,14 +137,15 @@ def test_throughput_is_derived_from_the_stored_entries(
         "negative_confirmation": 5.0,
     }
 
-    document = tcip_store.read(annotation_stats_key(str(opened.root)))
+    key = annotation_stats_key(str(opened.root))
+    document = tcip_store.read(key)
     assert isinstance(document, dict)
     raw_sessions = document["sessions"]
     assert isinstance(raw_sessions, list)
     (raw_session,) = raw_sessions
     assert isinstance(raw_session, dict)
     assert set(raw_session) == {"user", "started", "state", "entries"}
-    (stored,) = read_stats(document, "the stats record").sessions
+    (stored,) = stored_stats(tcip_store.read, key).sessions
     assert [e.activity for e in stored.entries] == [
         "new_annotation",
         "review",
@@ -303,15 +304,16 @@ def test_opening_another_project_ends_every_unended_session_of_the_one_it_replac
     _assert_departed(valley, started)
 
 
-def test_opening_another_project_over_a_refused_stats_record_answers_409_and_stays(
+def _open_hill_over_damaged_stats(
     tmp_path: Path,
     client: TestClient,
-) -> None:
-    """Opening a project while the open one's stats record is refused answers 409, invalid.
+    damage: Callable[[Key, dict], None],
+) -> tuple[httpx.Response, str | None, str]:
+    """Open Hill while Valley, open over a session, has its stats record damaged by ``damage``.
 
-    The record the sessions route wrote has its first session's person dropped. The detail is the
-    ``invalid`` refusal naming that field, the departed project stays open, and once the record
-    reads again the same open succeeds.
+    ``damage`` is handed the record's key and the document the sessions route wrote. Returns the
+    answer to opening Hill, the id the project listing then names as open, and Valley's id; the
+    record is written back, and opening Hill again must then succeed.
     """
     from tests._web_fixtures import named_project
 
@@ -328,22 +330,53 @@ def test_opening_another_project_over_a_refused_stats_record_answers_409_and_sta
     key = annotation_stats_key(str(valley.root))
     stored = tcip_store.read(key)
     assert isinstance(stored, dict)
-    sessions = stored["sessions"]
-    assert isinstance(sessions, list) and isinstance(sessions[0], dict)
-    damaged = {
-        **stored,
-        "sessions": [
-            {k: v for k, v in sessions[0].items() if k != "user"},
-            *sessions[1:],
-        ],
-    }
-    tcip_store.replace(key, damaged)
+    damage(key, stored)
     try:
         refused = client.post(
             "/api/projects/open", json={"id": hill.id, "user": "g"}
         )
+        open_id = client.get("/api/projects").json()["open_id"]
     finally:
         tcip_store.replace(key, stored)
+
+    assert (
+        client.post(
+            "/api/projects/open", json={"id": hill.id, "user": "g"}
+        ).status_code
+        == 200
+    )
+    return refused, open_id, valley.id
+
+
+def _without_first_sessions_person(key: Key, stored: dict) -> None:
+    """Replace the record at ``key`` with ``stored`` less its first session's person."""
+    sessions = stored["sessions"]
+    assert isinstance(sessions, list) and isinstance(sessions[0], dict)
+    tcip_store.replace(
+        key,
+        {
+            **stored,
+            "sessions": [
+                {k: v for k, v in sessions[0].items() if k != "user"},
+                *sessions[1:],
+            ],
+        },
+    )
+
+
+def test_opening_another_project_over_a_refused_stats_record_answers_409_and_stays(
+    tmp_path: Path,
+    client: TestClient,
+) -> None:
+    """Opening a project while the open one's stats record is refused answers 409, invalid.
+
+    The record the sessions route wrote has its first session's person dropped. The detail is the
+    ``invalid`` refusal naming that field, the departed project stays open, and once the record
+    reads again the same open succeeds.
+    """
+    refused, open_id, valley_id = _open_hill_over_damaged_stats(
+        tmp_path, client, _without_first_sessions_person
+    )
 
     assert refused.status_code == 409, refused.text
     detail = refused.json()["detail"]
@@ -351,12 +384,30 @@ def test_opening_another_project_over_a_refused_stats_record_answers_409_and_sta
     assert [issue["loc"] for issue in detail["issues"]] == [
         ["sessions", 0, "user"]
     ]
-    assert (
-        client.post(
-            "/api/projects/open", json={"id": hill.id, "user": "g"}
-        ).status_code
-        == 200
+    assert open_id == valley_id
+
+
+def test_opening_another_project_over_an_undecodable_stats_record_answers_409_and_stays(
+    tmp_path: Path,
+    client: TestClient,
+) -> None:
+    """Opening a project while the open one's stats record will not decode answers 409.
+
+    The record the sessions route wrote has its bytes replaced by a truncated document. The
+    detail is the ``unreadable`` refusal, and the departed project stays open.
+    """
+    from tests._record_damage_fixtures import damage_record
+
+    def truncated(key: Key, _stored: dict) -> None:
+        damage_record(key, b'{"sessions": [')
+
+    refused, open_id, valley_id = _open_hill_over_damaged_stats(
+        tmp_path, client, truncated
     )
+
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"]["kind"] == "unreadable"
+    assert open_id == valley_id
 
 
 def test_closing_the_open_project_ends_every_unended_session_of_it(
