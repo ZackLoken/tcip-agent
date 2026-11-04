@@ -479,7 +479,7 @@ def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
     del entry["by"]
     ts.replace(flag_key(key), {"flags": [entry]})
     with pytest.raises(
-        ValidationError, match=r"flags\.0\.by\s+Field required"
+        ts.ReadRefusedError, match=r"flags\.0\.by: Field required"
     ):
         read_flags(flag_key(key))
 

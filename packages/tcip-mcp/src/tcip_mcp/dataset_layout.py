@@ -692,8 +692,6 @@ def admitted(
     each such fault naming the subject once with the images that name it. Each fault names what
     to do instead; an image named no image is given no key.
     """
-    from pydantic import ValidationError
-
     from tcip_annotation.flags import flags_of
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
@@ -707,7 +705,7 @@ def admitted(
     )
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.subject_registry import registry_for_dataset_root
-    from tcip_store import Invalid
+    from tcip_store import ReadRefusedError
 
     keys: dict[Key, ImageClaim] = {}
     claimed: dict[Key, str] = {}
@@ -741,11 +739,8 @@ def admitted(
                 try:
                     document = label_document(item.document)
                     flags_of(item.flags)
-                except UnreadableLabelDocumentError as exc:
+                except (UnreadableLabelDocumentError, ReadRefusedError) as exc:
                     faults.append(f"{where} does not read: {exc}")
-                    continue
-                except ValidationError as exc:
-                    faults.append(f"{where} does not read: {Invalid.of(exc)}")
                     continue
                 labeled = (document.width, document.height)
                 for subject in {a.subject for a in document.annotations} | set(
