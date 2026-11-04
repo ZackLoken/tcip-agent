@@ -5,7 +5,7 @@ title: "[design] "
 labels: design
 ---
 
-A change touching a persisted field, a refusal, an operating-point stamp or a delivery gate is
+A change touching a persisted format, a refusal, an operating-point stamp or a delivery gate is
 designed here before any code is written. This template is that design.
 
 ## What changes
