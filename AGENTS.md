@@ -52,11 +52,7 @@ Your default failure is pushing through friction by guessing.
 - Scientific defensibility: every phenotype reproducible and auditable end to end, from data and
   environment through predictions and operating point to the measurement. Parameters are derived
   from the data at runtime, never frozen constants; when a threshold varies by dataset, model or
-  trait, the deliverable is the capability to derive it, never the value. A pass that proposes
-  labels is inference whose producer is an engine instead of a checkpoint: it runs through the one
-  tiled pass, its execution record derived by the same derivations and published on its bucket;
-  a stated number, a knob or a toggle standing where a derivation exists is the defect, and a
-  second pass beside the first is one too.
+  trait, the deliverable is the capability to derive it, never the value.
 - Every state change leaves a record, and a record that cannot be written is raised rather than
   swallowed. Experiments are immutable: a new run, never an overwritten one.
 - A subject is an object class to isolate, not a trait.
@@ -73,11 +69,12 @@ Your default failure is pushing through friction by guessing.
 - Enumerate the consumers before deleting anything; a deleted assertion's fact needs a new home.
 - When two code paths must agree, call one from the other. A consistency check whose two sides share
   an implementation proves nothing.
-- A library the environment already carries is read before anything is written by hand: torch,
-  torchvision, numpy, rasterio, fiona, shapely, pyproj, pycocotools, SAHI, OpenCV, scipy and
-  scikit-learn. OpenCV is the one image-processing library. A hand-written version of what one of
-  them provides and maintains is a defect; only a platform rule the library call cannot carry
-  stays, as a thin layer over the call.
+- Before writing anything by hand, look for a maintained library that provides it, whether or not
+  it is already a dependency; a new dependency is declared where it is read and named on the pull
+  request. Where two maintained libraries provide the same capability, the platform carries one;
+  OpenCV is the image-processing library. A hand-written version of what a maintained library
+  provides is a defect; a platform rule the library cannot carry stays as a thin layer over the
+  call.
 - No silent fallback when required information is missing. A guessed value that can reach a
   delivered result is a fabrication with a warning attached.
 - A stated format, subject or root is a claim the data must positively carry, never one it merely
