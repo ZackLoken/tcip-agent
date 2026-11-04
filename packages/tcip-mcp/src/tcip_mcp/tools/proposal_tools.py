@@ -40,6 +40,7 @@ from tcip_mcp.pipelines.image_utils import (
 )
 from tcip_mcp.pipelines.raster_source import RasterIdentity, SourceHeader
 from tcip_mcp.project_paths import viz_output_path
+from tcip_mcp.read_refusal import Invalid, read_refusal
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import PathSegment
@@ -395,7 +396,7 @@ def propose_annotations(
                 ValidationError,
                 ExecutionRefusedError,
             ) as e:
-                return {"error": str(e)}
+                return {"error": str(read_refusal(e))}
         finally:
             if crop_tmp is not None:
                 crop_tmp.unlink(missing_ok=True)
@@ -409,7 +410,7 @@ def propose_annotations(
         except ValidationError as exc:
             return {
                 "error": f"Engine {engine!r} proposed a candidate this platform cannot "
-                f"hold: {exc}"
+                f"hold: {Invalid.of(exc)}"
             }
         if origin is not None:
             candidates = _offset_candidates(candidates, origin)

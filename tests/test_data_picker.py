@@ -258,7 +258,79 @@ def test_read_selection_checked_tells_absence_apart_from_a_broken_record(
     ts.replace(selection_key(broken_dir), {"seed": 1, "samples": []})
     broken, broken_error = read_selection_checked(broken_dir, project=tmp_path)
     assert broken is None
-    assert broken_error is not None and "group_by" in broken_error
+    assert broken_error is not None and not isinstance(broken_error, str)
+    from tcip_mcp.read_refusal import Invalid
+
+    assert isinstance(broken_error, Invalid)
+    assert ["group_by"] in [issue.loc for issue in broken_error.issues]
+
+
+def _bound_to_a_selection_damaged_after_binding(tmp_path: Path) -> dict:
+    """Return a config of ``tmp_path`` bound to a selection whose record was then refused.
+
+    The selection is a real draw, a run binding it opened as ``exp-bound``; its record is then
+    replaced by one the selection's model refuses.
+    """
+    from tcip_mcp.pipelines.data.selection import selection_key
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    bound = tmp_path / "bound"
+    _draw(tmp_path, root, bound)
+    config = _bound_config(root, bound, tmp_path)
+    opened_run(tmp_path, config, experiment_id="exp-bound")
+    ts.replace(selection_key(bound), {"seed": 1, "samples": []})
+    return config
+
+
+def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_does(
+    tmp_path: Path,
+) -> None:
+    """The preflight and the split picker state one unreadable bound selection alike.
+
+    The preflight's issue for it is the "As recorded" row's reason, the selection model's issues
+    as text, carrying no library documentation link.
+    """
+    from tcip_mcp.tools.training_tools import (
+        Blocked,
+        list_split_choices,
+        preflight_config,
+    )
+
+    config = _bound_to_a_selection_damaged_after_binding(tmp_path)
+
+    issues = preflight_config(tmp_path, config)["issues"]
+    check = list_split_choices(tmp_path, "exp-bound").as_recorded.check
+
+    assert not [i for i in issues if "errors.pydantic.dev" in i], issues
+    assert isinstance(check, Blocked)
+    assert check.reason in issues
+
+
+def test_a_trial_over_an_unreadable_bound_selection_records_the_models_issues(
+    tmp_path: Path,
+) -> None:
+    """A trial whose bound selection's record its model refuses ends failed stating why.
+
+    The final status records the selection model's issues as text, carrying no library
+    documentation link.
+    """
+    from tcip_mcp import experiments
+    from tcip_mcp.pipelines.data.selection import selection_key
+    from tcip_mcp.tools.training_tools import open_trial
+    from tests._verified_checkpoint_fixtures import opened_sweep
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    bound = tmp_path / "bound"
+    _draw(tmp_path, root, bound)
+    sweep = opened_sweep(tmp_path, _bound_config(root, bound, tmp_path))
+    ts.replace(selection_key(bound), {"seed": 1, "samples": []})
+
+    trial = open_trial(sweep, "t0", {"optimizer.head_lr": 0.001})
+    error = experiments.observe_run(trial).status_error
+
+    assert error is not None
+    assert "errors.pydantic.dev" not in error
+    assert "group_by: " in error
 
 
 # -- list_split_choices ------------------------------------------------------------
@@ -428,7 +500,11 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     chosen = _chosen(picked_cfg, str(other_subject_dir), tmp_path)
     assert "scope" not in chosen["data"]
 
-    UnreadSelectionChoice.model_validate(by_dir[str(broken_dir)])
+    broken = by_dir[str(broken_dir)]
+    assert isinstance(broken["reason"], dict)
+    assert (
+        UnreadSelectionChoice.model_validate(broken).reason.kind == "invalid"
+    )
 
 
 def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path) -> None:

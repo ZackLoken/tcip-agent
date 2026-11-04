@@ -240,11 +240,14 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
     """An RGB nested dataset fingerprints to the value one run of ``dataset_fingerprint`` recorded.
 
     The dataset holds one fixed 64 px image, one label document written as stored and a
-    registry.
+    registry. The image is an uncompressed BMP, whose bytes, stated by their digest, are the same
+    whichever platform's encoder wrote them, so the pinned value is a fact about the dataset.
     """
+    import hashlib
+
     registry_over(tmp_path, registry_of("bud"))
     image = write_image(
-        image_dir(tmp_path, "2026-02-11") / "IMG_1.png",
+        image_dir(tmp_path, "2026-02-11") / "IMG_1.bmp",
         (64, 64),
         (90, 110, 70),
     )
@@ -255,7 +258,11 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
         ),
     )
 
-    assert dataset_fingerprint(tmp_path) == "d1950101fcfe4d5c"
+    assert (
+        hashlib.sha256(image.read_bytes()).hexdigest()
+        == "9f59e5b2f3a1672bf6a82f0bf2eee5bc0e2a0c5eca299e496f9e9da6df15b4a8"
+    )
+    assert dataset_fingerprint(tmp_path) == "e2c5c53f908b2a19"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(

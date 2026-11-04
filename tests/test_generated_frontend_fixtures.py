@@ -158,6 +158,79 @@ def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     )
 
 
+def test_no_fixture_carries_a_link_naming_the_library_release_that_wrote_it() -> (
+    None
+):
+    """No fixture holds pydantic's documentation link, whose path names its minor release.
+
+    A served reason built from a model's refusal carries each error's place and message, so no
+    fixture goes stale on a pydantic release.
+    """
+    carrying = [
+        name
+        for name in SERVED_FIXTURES
+        if "errors.pydantic.dev"
+        in _generator(name).GENERATED_PATH.read_text(encoding="utf-8")
+    ]
+
+    assert carrying == []
+
+
+def _values_under(served: object, key: str) -> list[object]:
+    """Return every value ``served`` holds under ``key``, at any depth."""
+    if isinstance(served, dict):
+        return [
+            *([served[key]] if key in served else []),
+            *(
+                v
+                for value in served.values()
+                for v in _values_under(value, key)
+            ),
+        ]
+    if isinstance(served, list):
+        return [v for value in served for v in _values_under(value, key)]
+    return []
+
+
+def test_the_delivery_fixture_reads_each_source_digest_as_its_stand_in() -> (
+    None
+):
+    """Each ``source_digest`` the delivery fixture carries is a stand-in, never a digest.
+
+    The digest is over a photograph's encoded bytes, which another platform's encoder writes
+    differently, so the fixture keeps which samples share one and nothing else.
+    """
+    module = _generator("generate_delivery_fixture")
+    served = json.loads(module.GENERATED_PATH.read_text(encoding="utf-8"))
+    digests = _values_under(served, "source_digest")
+
+    assert digests
+    assert all(
+        isinstance(d, str) and d.startswith("<source_digest n")
+        for d in digests
+    ), digests[:3]
+
+
+def test_the_completed_review_queue_ranks_by_the_scores_its_scene_states() -> (
+    None
+):
+    """The queue fixture's completed queue carries the scores its scene's scorer states.
+
+    Each photograph not finished reads at its stated sample score, highest first, so no score is
+    one a model forward computed where the fixture was made.
+    """
+    module = _generator("generate_queue_fixture")
+    served = json.loads(module.GENERATED_PATH.read_text(encoding="utf-8"))
+    queue = served["completed"]["state"]["ranked"]["queue"]
+
+    assert [(entry["image"], entry["score"]) for entry in queue] == [
+        ("img5.jpg", 0.4),
+        ("img1.jpg", 0.3),
+        ("img3.jpg", 0.2),
+        ("img4.jpg", 0.1),
+    ]
+
+
 def test_a_tensorboard_whose_stop_is_unconfirmed_fails_the_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

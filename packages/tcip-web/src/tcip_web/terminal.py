@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.project_paths import repo_root_from_here
+from tcip_mcp.read_refusal import Invalid
 from tcip_web.state import OpenProject, store
 
 if TYPE_CHECKING:
@@ -343,7 +344,7 @@ def _json_object(path: Path) -> dict[str, Any]:
         raise PreparationFailedError(f"reading {path} failed: {exc}") from exc
     except ValidationError as exc:
         raise PreparationFailedError(
-            f"{path} does not hold a JSON object: {exc}"
+            f"{path} does not hold a JSON object: {Invalid.of(exc)}"
         ) from exc
 
 

@@ -1,39 +1,4 @@
 {
-  "scorers": {
-    "scorers": [
-      {
-        "name": "uncertainty",
-        "values_schema": {
-          "additionalProperties": false,
-          "properties": {},
-          "title": "ScorerValues",
-          "type": "object"
-        }
-      },
-      {
-        "name": "diversity",
-        "values_schema": {
-          "additionalProperties": false,
-          "properties": {},
-          "title": "ScorerValues",
-          "type": "object"
-        }
-      },
-      {
-        "name": "combined",
-        "values_schema": {
-          "additionalProperties": false,
-          "properties": {
-            "uncertainty_weight": { "title": "Uncertainty Weight", "type": "number" },
-            "diversity_weight": { "title": "Diversity Weight", "type": "number" }
-          },
-          "required": ["uncertainty_weight", "diversity_weight"],
-          "title": "ScorerValues",
-          "type": "object"
-        }
-      }
-    ]
-  },
   "typed_scorers": {
     "scorers": [
       {
@@ -137,6 +102,50 @@
     "predictions_present": false,
     "label_problem": null
   },
+  "stated_scorers": {
+    "scorers": [
+      {
+        "name": "uncertainty",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "diversity",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "combined",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "uncertainty_weight": { "title": "Uncertainty Weight", "type": "number" },
+            "diversity_weight": { "title": "Diversity Weight", "type": "number" }
+          },
+          "required": ["uncertainty_weight", "diversity_weight"],
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "stated",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      }
+    ]
+  },
   "launched": {
     "job_id": "<completed job>",
     "state": { "status": "pending" },
@@ -162,17 +171,17 @@
     "state": {
       "status": "completed",
       "ranked": {
-        "scorer": { "name": "uncertainty" },
+        "scorer": { "name": "stated" },
         "budget": 4,
         "rationale": "a sample reason the scene states",
         "task": "detection",
         "total_candidates": 4,
         "reviewed_skipped": 1,
         "queue": [
-          { "image": "img5.jpg", "score": 0.498589, "reference_member": null },
-          { "image": "img1.jpg", "score": 0.498403, "reference_member": null },
-          { "image": "img3.jpg", "score": 0.498339, "reference_member": null },
-          { "image": "img4.jpg", "score": 0.498339, "reference_member": null }
+          { "image": "img5.jpg", "score": 0.4, "reference_member": null },
+          { "image": "img1.jpg", "score": 0.3, "reference_member": null },
+          { "image": "img3.jpg", "score": 0.2, "reference_member": null },
+          { "image": "img4.jpg", "score": 0.1, "reference_member": null }
         ]
       }
     },

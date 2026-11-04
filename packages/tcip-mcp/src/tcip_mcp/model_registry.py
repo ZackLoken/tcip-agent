@@ -35,6 +35,7 @@ from tcip_mcp.pipelines.model_build import (
     SNAPSHOT_KEY,
 )
 from tcip_mcp.pipelines.schemas import StatedDirection, TrainGeometry
+from tcip_mcp.read_refusal import Invalid
 from tcip_mcp.registry_paths import (
     checkpoint_registry_path_for,
     is_external_form,
@@ -376,12 +377,13 @@ class VerifiedCheckpoint:
         try:
             return CheckpointStamp.model_validate(self.payload)
         except ValidationError as exc:
-            keys = ", ".join(sorted({repr(e["loc"][0]) for e in exc.errors()}))
+            refusal = Invalid.of(exc)
+            keys = ", ".join(sorted({repr(i.loc[0]) for i in refusal.issues}))
             raise ValueError(
                 f"{self.path} carries no {keys} as generic_trainer.checkpoint_stamp writes "
                 "it, as the default trainer and ctx.save_checkpoint save it, so it was written "
                 "past that stamp. Save it through a run (launch_training, or "
-                f"ctx.save_checkpoint in its training body). {exc}"
+                f"ctx.save_checkpoint in its training body). {refusal}"
             ) from exc
 
     @cached_property

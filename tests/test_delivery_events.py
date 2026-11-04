@@ -382,6 +382,31 @@ def test_delivery_events_route_lists_a_recorded_event_with_its_revision(
     assert record["delivery_kind"] == PER_IMAGE_COUNT
 
 
+def test_delivery_events_route_refuses_a_record_its_model_refuses_with_the_models_issues(
+    opened_project: Path,
+    client: TestClient,
+) -> None:
+    """A stored event its model refuses refuses the listing (400) with the model's issues.
+
+    The issues are served each by its place in the record and its message: a record that is a
+    list where an event belongs is one issue, placed at the record as a whole.
+    """
+    from tests._record_damage_fixtures import damage_record
+
+    _record(opened_project, seed_confirmed_count(opened_project))
+    (event,) = read_delivery_events(opened_project)
+    damage_record(
+        delivery.delivery_event_key(opened_project, event.event_id), b"[]"
+    )
+
+    resp = client.get(DELIVERY_EVENTS_ROUTE)
+
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert isinstance(detail, dict) and detail["kind"] == "invalid"
+    assert [issue["loc"] for issue in detail["issues"]] == [[]]
+
+
 def test_delivery_events_route_refuses_while_no_project_is_open(
     client: TestClient,
 ) -> None:
