@@ -890,7 +890,6 @@ export interface CanopySegmentDisclosure {
   plants_without_segment: string[];
   plants_within_position_error: string[];
   plants_with_ambiguous_detections: string[];
-  detections_unattributed: number;
   detections_unattributed_by_source: Record<string, number>;
   plant_attribution: string;
 }

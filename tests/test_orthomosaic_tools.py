@@ -909,7 +909,6 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(
     )
 
     assert "error" not in result, result
-    assert result["plant_mapping"]["detections_unattributed"] == 2
     rows = _rows(tmp_path)
     assert {p: r["value"] for p, r in rows.items()} == {
         "plot0": "1",
@@ -918,6 +917,7 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(
     assert {r["plant_attribution"] for r in rows.values()} == {"segment"}
     (event,) = read_delivery_events(tmp_path)
     pm = event.model_dump(mode="json")["plant_mapping"]
+    assert "detections_unattributed" not in pm
     assert (
         pm["canopy_segments"]["n_segments"] == 3
         and pm["canopy_segments"]["subject"] == "canopy"
