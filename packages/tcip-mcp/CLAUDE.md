@@ -66,26 +66,24 @@ src/tcip_mcp/
 ```
 
 Every MCP tool is declared by `server.tool` in its area's `tools/` module: decorated `@tool()`, or,
-for a function another module defines, `tool()(fn)` (`compare_experiments`,
-`available_search_algs`, `available_schedulers`, `scorer_catalog`); a tool that acts on a project
-takes the project the server was started for as its first parameter: `project`, its directory, or
-`bound`, the whole `workspace.BoundProject` (directory, record id, workspace) when it also names the
-project to the backend. The server supplies only those two and `actor` (`server._CONTEXT`), the
-person the server's calls are made by, each read from the server's `server.Session` at the call
-(`Session.bind` is the one way a session gains them; `None` is an MCP client's person), so any other
-parameter, whatever its name, stays the client's (the knowledge door acts on none, the
-project-creation door on `actor` alone), and every mutating door leaves exactly one audit line per
-act, by that `actor`, the decorator's or
-the library's: a tool that changes state is `@audited` unless the library function it calls records
-its own event with facts the decorator cannot carry (a digest, what was written), and then it is not
-decorated. The decorator writes no line for a call returning its error dict and an exception line
-for a call that raises. A read-only tool (a status poll, a listing, a document served back) leaves
-none, so the audit log records mutations and nothing else; a render under `.tcip/artifacts/viz/`
-is a derived view that can be regenerated, not a state change, and leaves none. `serve_domain_knowledge`'s
-`@tool(description=...)` composes its client-visible description from the knowledge corpus at import
-time rather than leaving it as the bare docstring. A mutating door only an operator runs (an
-operator-only command module in `cli/` calls it, as `archive_project`) keeps `@audited` without
-registering.
+for a function another module defines, `tool()(fn)` (`compare_experiments`, `available_search_algs`,
+`available_schedulers`, `scorer_catalog`); a tool that acts on a project takes the project the
+server was started for as its first parameter: `project`, its directory, or `bound`, the whole
+`workspace.BoundProject` (directory, record id, workspace) when it also names the project to the
+backend. The server supplies only those two and `actor` (`server._CONTEXT`), the person the server's
+calls are made by, each read from the server's `server.Session` at the call (`Session.bind` is the
+one way a session gains them; `None` is an MCP client's person), so any other parameter, whatever
+its name, stays the client's (the knowledge door acts on none, the project-creation door on `actor`
+alone); a tool that changes state is `@audited`, by that `actor`, unless the library function it
+calls records its own event with facts the decorator cannot carry (a digest, what was written), and
+then it is not decorated. The decorator writes no line for a call returning its error dict and an
+exception line for a call that raises. A read-only tool (a status poll, a listing, a document served
+back) leaves none, so the audit log records mutations and nothing else; a render under
+`.tcip/artifacts/viz/` is a derived view that can be regenerated, not a state change, and leaves
+none. `serve_domain_knowledge`'s `@tool(description=...)` composes its client-visible description
+from the knowledge corpus at import time rather than leaving it as the bare docstring. A mutating
+door only an operator runs (an operator-only command module in `cli/` calls it, as
+`archive_project`) keeps `@audited` without registering.
 
 ## Conventions specific to this package
 

@@ -35,6 +35,6 @@ What else you considered and why this is the one worth building.
 
 ## Reads by another model family
 
-Before code, the design is read by a model family other than its author's
-(`tools/cross_family_ask.py`), and a change to a stored shape by two. Record each read's verdict
-here, and how the design answers each finding.
+Before code, run the design past a model family other than its author's with
+`tools/cross_family_ask.py`, and past two families when it changes a persisted format. Record each
+read's verdict here, and how the design answers each finding.
