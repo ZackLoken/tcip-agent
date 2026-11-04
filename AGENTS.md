@@ -70,11 +70,10 @@ Your default failure is pushing through friction by guessing.
 - When two code paths must agree, call one from the other. A consistency check whose two sides share
   an implementation proves nothing.
 - Before writing anything by hand, look for a maintained library that provides it, whether or not
-  it is already a dependency; a new dependency is declared where it is read and named on the pull
-  request. Where two maintained libraries provide the same capability, the platform carries one;
-  OpenCV is the image-processing library. A hand-written version of what a maintained library
-  provides is a defect; a platform rule the library cannot carry stays as a thin layer over the
-  call.
+  it is already a dependency; a new dependency is declared where it is read. Where two maintained
+  libraries provide the same capability, the platform carries one; OpenCV is the image-processing
+  library. A hand-written version of what a maintained library provides is a defect; a platform
+  rule the library cannot carry stays as a thin layer over the call.
 - No silent fallback when required information is missing. A guessed value that can reach a
   delivered result is a fabrication with a warning attached.
 - A stated format, subject or root is a claim the data must positively carry, never one it merely
