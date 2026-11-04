@@ -1,4 +1,4 @@
-"""Paths under a project the caller names, and the repository root this package sits in."""
+"""Paths under a project the caller names."""
 
 from __future__ import annotations
 
@@ -22,21 +22,3 @@ def viz_output_path(project: Path, name: str, suffix: str = ".png") -> str:
     return str(
         viz_dir / f"{stamp}_{time.time_ns() % 1_000_000:06d}_{name}{suffix}"
     )
-
-
-def repo_root_from_here() -> Path:
-    """Return the repo root inferred from this file's location.
-
-    The root is the nearest ancestor holding ``.mcp.json``, checked across every ancestor before
-    falling back to the nearest one holding ``CLAUDE.md``, and the cwd when neither is found.
-    Stable regardless of cwd when an ancestor matches.
-    """
-    here = Path(__file__).resolve()
-    parents = list(here.parents)
-    for parent in parents:
-        if (parent / ".mcp.json").is_file():
-            return parent
-    for parent in parents:
-        if (parent / "CLAUDE.md").is_file():
-            return parent
-    return Path.cwd()

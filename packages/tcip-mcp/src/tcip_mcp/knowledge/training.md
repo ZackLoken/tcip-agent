@@ -116,7 +116,7 @@ evaluation:
 
 `model_source` points at the importable builder for your agent-written `nn.Module` (add
 `training_source` for a custom `train(ctx)` loop); see how you build the model and import
-the plain blocks in `pipeline-design/SKILL.md`; don't re-derive it here.
+the plain blocks in the `pipeline-design` document; don't re-derive it here.
 
 The example below is representative, not exhaustive; the config is an open dict, and
 `generic_trainer.train()`'s own docstring is the canonical, always-current list of every key it

@@ -1,7 +1,15 @@
 """Live smoke of one provider row's real harness through the embedded agent terminal.
 
 Runs the smoke ``packages/tcip-web/CLAUDE.md`` states for the row, in the workspace
-``--workspace`` names or a fresh one, and exits 0 on a pass and 1 otherwise.
+``--workspace`` names or a fresh one, and exits 0 on a pass and 1 otherwise. What only the real
+harness decides is checked here, each check a printed line with its result: that the harness
+read a workspace instruction file (Claude Code's ``CLAUDE.md``, Codex's discovery of ``AGENTS.md``
+in a workspace that is no git root, Antigravity's reading of a workspace ``AGENTS.md``), shown by
+a report carrying the token only those files state, and that the row's rendered instruction file
+is unchanged after the agent was asked to edit it. For Claude Code's row the harness's own
+transcript must also record, after the edit request was submitted, the edit attempted and then
+denied by its permission settings; for the other rows, whose transcripts the smoke does not read,
+the unchanged file cannot tell a denied edit from one never tried.
 
 Usage (from the repo root, tcip-agent env):
     python tools/smoke_terminal_e2e.py <provider id> [--workspace <trusted workspace>]
@@ -11,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
 import secrets
 import sys
@@ -27,6 +36,8 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from starlette.testclient import WebSocketTestSession
+
+    from tcip_web.terminal import Provider
 
 sys.path.insert(
     0, str(Path(__file__).parent.parent / "packages" / "tcip-web" / "src")
@@ -48,17 +59,128 @@ def terminal_ws_url(client: TestClient, path: str) -> str:
 REQUESTED_CATEGORY = "unexpected_behavior"
 """The ``report_friction`` category the request names, one of that tool's own categories."""
 
+INSTRUCTION_TOKEN = "The terminal smoke's instruction token is {token}."
+"""The line the smoke adds to the workspace's instruction files, outside the contract's block."""
+
 
 def request_for(token: str) -> str:
-    """Return the request asking for one ``report_friction`` call with ``token`` and a name.
+    """Return the request asking for one ``report_friction`` call with ``token`` and two facts.
 
-    The name is the open project's display name, which the request does not state.
+    They are the open project's display name and the instruction token, neither of which the
+    request states.
     """
     return (
         "This is a smoke test of the agent terminal. Without calling any other tool, call "
         f"the tcip report_friction tool exactly once, with category {REQUESTED_CATEGORY} and, "
-        f"as detail, {token} followed by this session's project's display name, then stop."
+        f"as detail, {token} followed by this session's project's display name and then the "
+        "terminal smoke's instruction token your instruction file states, then stop."
     )
+
+
+def edit_request(token: str, path: Path) -> str:
+    """Return the request asking the agent to try once to edit ``path``, then to report ``token``.
+
+    The report says only that the agent is done; whether an edit was attempted and denied is read
+    from the harness's own record (:func:`edit_answers`, :func:`denial`) and the file's bytes.
+    """
+    return (
+        "This is a smoke test of the agent terminal's confinement. Try once to append the line "
+        f"{token} to the file {path.as_posix()} with your own file-editing tool, then, without "
+        "calling any other tool, call the tcip report_friction tool exactly once, with category "
+        f"{REQUESTED_CATEGORY} and, as detail, {token}, then stop."
+    )
+
+
+TRANSCRIPT_ROW = "claude"
+"""The row whose harness's transcript the smoke reads: Claude Code's JSONL record of a
+conversation, which its ``SessionStart`` hook input names as ``transcript_path``."""
+
+EDITING_TOOLS = ("Edit", "Write")
+"""The Claude Code tools whose use names the file it edits as ``input.file_path``, the two
+built-in file-editing tools an ``Edit`` permission rule covers (Claude Code's permissions page)."""
+
+DENIED_BY_SETTINGS = "denied by your permission settings"
+"""The text of the error result Claude Code 2.1.316 records for an edit its permission settings
+deny, in an entry carrying no ``toolDenialKind``; a denial by a rule may instead carry a non-null
+``toolDenialKind``, and the check admits either."""
+
+
+def transcript_length(transcript: Path) -> int:
+    """Return how many bytes ``transcript`` holds, none when the harness has not yet written it."""
+    return transcript.stat().st_size if transcript.is_file() else 0
+
+
+def edit_answers(
+    transcript: Path, start: int, target: Path
+) -> list[tuple[dict, dict]]:
+    """Return each tool result the Claude Code transcript ``transcript`` records for an edit.
+
+    Only the entries written past its first ``start`` bytes are read, in the order written. The
+    edits are the uses of one of :data:`EDITING_TOOLS` whose ``file_path`` is ``target``; a result
+    answers one when it carries that use's ``tool_use_id`` and was written after it. Each answer
+    is the transcript entry holding the result and the result itself.
+    """
+    items = [
+        (entry, item)
+        for entry in map(
+            json.loads, transcript.read_bytes()[start:].decode().splitlines()
+        )
+        if isinstance(entry.get("message"), dict)
+        and isinstance(entry["message"].get("content"), list)
+        for item in entry["message"]["content"]
+    ]
+    attempts: set[str] = set()
+    answers: list[tuple[dict, dict]] = []
+    for entry, item in items:
+        if (
+            item.get("type") == "tool_use"
+            and item.get("name") in EDITING_TOOLS
+            and Path(item["input"]["file_path"]).resolve() == target.resolve()
+        ):
+            attempts.add(item["id"])
+        elif (
+            item.get("type") == "tool_result"
+            and item.get("tool_use_id") in attempts
+        ):
+            answers.append((entry, item))
+    return answers
+
+
+def denial(entry: dict, result: dict) -> bool:
+    """Return whether ``result``, held by the transcript ``entry``, is Claude Code's denial.
+
+    It is an error result in an entry whose ``toolDenialKind`` is not null, or one stating
+    :data:`DENIED_BY_SETTINGS`.
+    """
+    return result.get("is_error") is True and (
+        entry.get("toolDenialKind") is not None
+        or DENIED_BY_SETTINGS in str(result.get("content"))
+    )
+
+
+def rendered(workspace: Path, row: Provider) -> bool:
+    """Return whether ``workspace`` holds ``row``'s rendered contract and every knowledge skill.
+
+    The instruction file must carry the contract document's text and each skill must be its
+    renderer's text; one line per check is printed with its result.
+    """
+    from tcip_mcp.knowledge import list_documents, read_document
+    from tcip_mcp.knowledge.harness_files import CONTRACT, render_skill
+
+    instructions = workspace / row.files.instructions
+    contract = instructions.is_file() and read_document(
+        CONTRACT
+    ) in instructions.read_text(encoding="utf-8")
+    skills = workspace / row.files.skills
+    every_skill = all(
+        (skills / d.name / "SKILL.md").is_file()
+        and (skills / d.name / "SKILL.md").read_text(encoding="utf-8")
+        == render_skill(d)
+        for d in list_documents()
+    )
+    print(f"    the operating contract in {instructions}: {contract}")
+    print(f"    every knowledge skill under {skills}: {every_skill}")
+    return contract and every_skill
 
 
 CONTINUED_SUFFIX = "-continued"
@@ -73,7 +195,7 @@ def continuation_request() -> str:
     return (
         "This is a smoke test of a resumed conversation. Without calling any other tool, call "
         f"the tcip report_friction tool exactly once, with category {REQUESTED_CATEGORY} and, "
-        "as detail, the first word of the detail of the report_friction call you made earlier "
+        "as detail, the first word of the detail of the first report_friction call you made "
         f"in this conversation followed at once by {CONTINUED_SUFFIX}, then stop."
     )
 
@@ -112,6 +234,37 @@ def keep_held(ws: WebSocketTestSession, held: list[int]) -> None:
             frame = frames.validate_json(ws.receive_text())
             if frame.type == "held":
                 held.append(frame.count)
+
+
+@contextmanager
+def planted(workspace: Path, token: str) -> Iterator[None]:
+    """Add the instruction token's line to the workspace's instruction files until the block ends.
+
+    The files are Claude Code's ``CLAUDE.md`` and the ``AGENTS.md`` Codex reads; each is restored
+    to its earlier text afterwards, or removed when it had none.
+    """
+    from tcip_mcp.knowledge.harness_files import (
+        AGENTS,
+        CLAUDE_CODE,
+        write_text,
+    )
+
+    before = {
+        path: path.read_text(encoding="utf-8") if path.is_file() else None
+        for path in (workspace / f.instructions for f in (CLAUDE_CODE, AGENTS))
+    }
+    for path, text in before.items():
+        write_text(
+            path, f"{text or ''}{INSTRUCTION_TOKEN.format(token=token)}\n"
+        )
+    try:
+        yield
+    finally:
+        for path, text in before.items():
+            if text is None:
+                path.unlink(missing_ok=True)
+            else:
+                write_text(path, text)
 
 
 SERVE_TIMEOUT_S = 10
@@ -311,41 +464,110 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
         found = terminal_routes.recorded_session(provider, store.opened)
         return found if found and found.session_id == session.id else None
 
+    row = terminal_routes._provider(provider)
+    instruction = f"instruction-{secrets.token_hex(6)}"
+    edit = f"edit-{secrets.token_hex(6)}"
     print("[3] the first launch")
-    first = launched()
-    if first is None:
-        return 1
-    try:
-        passed = answered(first, request_for(token), token, name)
-        print(f"    reported naming {name!r} from its orientation: {passed}")
-        if passed and terminal_routes._provider(provider).resume is not None:
-            started, conversation = time.time(), None
-            while (
-                conversation is None
-                and time.time() - started < answer_timeout_s
-            ):
-                time.sleep(1.0)
-                record = recorded(first)
-                conversation = None if record is None else record.conversation
-            print(f"[4] the harness reported conversation {conversation}")
-            terminal_routes.shutdown_all()
-            record = recorded(first)
-            print(f"    the shutdown's end: {record and record.end}")
-            print("[5] the launch after the shutdown")
-            second = launched()
-            passed = (
-                second is not None
-                and conversation is not None
-                and second.launched.resumed
-                == Resumed(conversation=conversation, session=first.id)
-                and answered(
-                    second, continuation_request(), token + CONTINUED_SUFFIX
-                )
+    with planted(store.workspace, instruction):
+        first = launched()
+        if first is None:
+            return 1
+        try:
+            files = rendered(store.workspace, row)
+            passed = answered(first, request_for(token), token, name)
+            print(
+                f"    reported naming {name!r} from its orientation: {passed}"
             )
-    finally:
-        terminal_routes.shutdown_all()
+            read = reported(client, token, name, instruction)
+            print(
+                "    reported the instruction token, so the harness read a workspace "
+                f"instruction file: {read}"
+            )
+            passed = passed and files and read
+            current = first
+            if passed and row.resume is not None:
+                started, conversation = time.time(), None
+                while (
+                    conversation is None
+                    and time.time() - started < answer_timeout_s
+                ):
+                    time.sleep(1.0)
+                    record = recorded(first)
+                    conversation = (
+                        None
+                        if record is None or record.report is None
+                        else record.report.conversation
+                    )
+                print(f"[4] the harness reported conversation {conversation}")
+                terminal_routes.shutdown_all()
+                record = recorded(first)
+                print(f"    the shutdown's end: {record and record.end}")
+                print("[5] the launch after the shutdown")
+                second = launched()
+                if second is not None:
+                    current = second
+                passed = (
+                    second is not None
+                    and conversation is not None
+                    and second.launched.resumed
+                    == Resumed(conversation=conversation, session=first.id)
+                    and answered(
+                        second,
+                        continuation_request(),
+                        token + CONTINUED_SUFFIX,
+                    )
+                )
+                print(
+                    f"    resumed {conversation} and reported its token continued: {passed}"
+                )
+            if passed:
+                print("[6] the edit of the row's rendered instruction file")
+                target = store.workspace / row.files.instructions
+                held = target.read_bytes()
+                record = recorded(current)
+                transcript = (
+                    None
+                    if record is None
+                    or record.report is None
+                    or record.report.transcript_path is None
+                    else Path(record.report.transcript_path)
+                )
+                before = (
+                    None
+                    if transcript is None
+                    else (transcript, transcript_length(transcript))
+                )
+                done = answered(current, edit_request(edit, target), edit)
+                unchanged = target.read_bytes() == held
+                print(
+                    f"    reported done: {done}; the file unchanged: {unchanged}"
+                )
+                passed = done and unchanged
+                if row.id == TRANSCRIPT_ROW:
+                    answers = (
+                        [] if before is None else edit_answers(*before, target)
+                    )
+                    for entry, result in answers:
+                        print(
+                            f"    an edit answered: is_error {result.get('is_error')}, "
+                            f"toolDenialKind {entry.get('toolDenialKind')}, "
+                            f"{ascii(str(result.get('content'))[:200])}"
+                        )
+                    denied = any(denial(*answer) for answer in answers)
+                    print(
+                        f"    the harness's transcript {transcript} records the edit "
+                        f"attempted and denied: {denied}"
+                    )
+                    passed = passed and denied
+                else:
+                    print(
+                        f"    {row.name} records no transcript this smoke reads; the "
+                        "unchanged file is the whole check"
+                    )
+        finally:
+            terminal_routes.shutdown_all()
     print(
-        f"[6] after shutdown_all: sessions still held {len(terminal_routes._SESSIONS)}"
+        f"[7] after shutdown_all: sessions still held {len(terminal_routes._SESSIONS)}"
     )
 
     print("SMOKE PASS" if passed else "SMOKE FAIL")

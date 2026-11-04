@@ -1,18 +1,11 @@
 {
   "permissions": {
     "deny": [
-      "Edit(packages/**)",
-      "Edit(tests/**)",
-      "Edit(.github/**)",
-      "Edit(tools/**)",
-      "Edit(.claude/**)",
+      "Edit(.tcip/**)",
       "Edit(CLAUDE.md)",
-      "Edit(.mcp.json)",
-      "Edit(pyproject.toml)",
-      "Edit(package.json)",
-      "Edit(tsconfig.json)",
-      "Edit(.gitignore)",
-      "Edit(README.md)",
+      "Edit(.claude/**)",
+      "Edit(.agents/**)",
+      "Edit(AGENTS.md)",
       "Bash(rm:*)",
       "Bash(rmdir:*)",
       "Bash(git push:*)",
