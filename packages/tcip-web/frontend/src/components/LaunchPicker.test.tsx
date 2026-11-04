@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { readRefusalText } from "@/api/http";
 import { ADMITTED, BLOCKED, type ChoiceCheck, READ, UNREAD } from "@/api/types.generated";
 import { LaunchPicker, NO_OTHER_PARTITION, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { thrown } from "@/test/refusals";
@@ -18,10 +19,11 @@ const [ENABLED] = SPLIT_CHOICES.selections.flatMap((c) =>
   c.kind === READ && c.check.kind === ADMITTED ? [c] : [],
 );
 
-/** The reason a produced check refuses for; an admitting check throws. */
+/** The reason a produced check refuses for, as the refusal renderer reads it; an admitting check
+ * throws. */
 function reasonOf(check: ChoiceCheck): string {
   if (check.kind !== BLOCKED) throw new Error("the produced choice is admitted");
-  return check.reason;
+  return readRefusalText(check.reason);
 }
 
 /** The disabled partition's reason as the page shows it: its one issue, at the record whole. */
@@ -146,6 +148,7 @@ describe("LaunchPicker", () => {
 
   it("disables Start while the checked As recorded choice is disabled, showing its reason once, in the status region", () => {
     const reason = reasonOf(MOVED_SPLIT_CHOICES.as_recorded.check);
+    expect(reason).toContain("Not found: data.images_dir");
     renderRow({ data: MOVED_SPLIT_CHOICES });
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
     expect(screen.getAllByText(reason)).toHaveLength(1);
