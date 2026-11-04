@@ -60,7 +60,7 @@ from tcip_mcp.traits import (
     PER_PLANT_ORDINAL_AGGREGATE,
     STATE_CROSSING_DATES,
 )
-from tcip_store import Key, RecordInvalidError, validated
+from tcip_store import Key, ReadRefusedError, validated
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -1388,7 +1388,7 @@ def _read_reference_csv(
         for line_no, raw in enumerate(csv.DictReader(f), start=2):
             try:
                 row = validated(_ReferenceRow, raw, f"{csv_path}:{line_no}")
-            except RecordInvalidError as exc:
+            except ReadRefusedError as exc:
                 raise AssessmentRefusedError(str(exc)) from exc
             if row.image_stem in out:
                 raise AssessmentRefusedError(

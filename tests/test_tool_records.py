@@ -71,7 +71,7 @@ def test_a_friction_report_missing_its_category_is_refused_naming_it(
     del stored["category"]
     ts.replace(key, stored)
 
-    with pytest.raises(ts.RecordInvalidError, match="category"):
+    with pytest.raises(ts.ReadRefusedError, match="category"):
         read_memory(FrictionReport, str(tmp_path), result["id"])
 
 
@@ -135,7 +135,7 @@ def test_a_retrospective_missing_a_section_is_refused_naming_it(
     del stored["worked"]
     ts.replace(key, stored)
 
-    with pytest.raises(ts.RecordInvalidError, match="worked"):
+    with pytest.raises(ts.ReadRefusedError, match="worked"):
         read_memory(Retrospective, str(tmp_path), result["id"])
 
 

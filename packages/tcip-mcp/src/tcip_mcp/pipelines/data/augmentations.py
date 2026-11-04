@@ -459,7 +459,7 @@ def _stated_transforms(
 
     Each is the transform its stated values validate to. Refuses (``ValueError``) an unknown
     transform, and, naming the entry, one whose values its transform's type refuses
-    (``tcip_store.RecordInvalidError``).
+    (``tcip_store.ReadRefusedError``).
     """
     from tcip_mcp.pipelines.model_build import resolve_named
     from tcip_store import validated

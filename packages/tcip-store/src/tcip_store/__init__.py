@@ -5,7 +5,7 @@ from tcip_store.errors import (
     BadKeyError,
     DecodeError,
     NotFoundError,
-    RecordInvalidError,
+    ReadRefusedError,
     StoreBusyError,
     StoreError,
     StoreNotBoundError,
@@ -32,6 +32,7 @@ from tcip_store.refusal import (
     Issue,
     ReadRefusal,
     Unreadable,
+    unreadable,
     validated,
 )
 from tcip_store.sqlite_backend import Txn
@@ -82,7 +83,7 @@ __all__ = [
     "NotFoundError",
     "ReadDefault",
     "ReadRefusal",
-    "RecordInvalidError",
+    "ReadRefusedError",
     "StoreBusyError",
     "StoreError",
     "StoreNotBoundError",
@@ -121,5 +122,6 @@ __all__ = [
     "stores",
     "transaction",
     "unbind",
+    "unreadable",
     "validated",
 ]

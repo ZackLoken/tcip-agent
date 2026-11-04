@@ -84,7 +84,7 @@ def test_view_gui_state_refuses_a_snapshot_that_does_not_decode(
 
     tcip_store.replace(gui_snapshot_key(project), {"active_tab": "annotate"})
 
-    with pytest.raises(tcip_store.RecordInvalidError):
+    with pytest.raises(tcip_store.ReadRefusedError):
         view_gui_state(project)
 
 

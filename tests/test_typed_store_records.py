@@ -73,7 +73,7 @@ def test_a_sweep_record_reads_back_as_written_and_one_missing_a_field_refuses(
     stored = json.loads(path.read_text(encoding="utf-8"))
     del stored["input"]
     path.write_text(json.dumps(stored), encoding="utf-8")
-    with pytest.raises(ts.RecordInvalidError, match="input: Field required"):
+    with pytest.raises(ts.ReadRefusedError, match="input: Field required"):
         observe_sweep(sweep_dir)
 
 
@@ -94,7 +94,7 @@ def test_a_run_record_reads_back_as_its_launch_wrote_it_and_one_missing_a_field_
     stored = json.loads(path.read_text(encoding="utf-8"))
     del stored["dataset"]
     path.write_text(json.dumps(stored), encoding="utf-8")
-    with pytest.raises(ts.RecordInvalidError, match="dataset: Field required"):
+    with pytest.raises(ts.ReadRefusedError, match="dataset: Field required"):
         read_run(run_dir)
 
 
@@ -113,7 +113,7 @@ def test_a_run_record_whose_partition_sample_states_no_member_refuses_at_the_rea
     del stored["resolved"]["partition"]["samples"][0]["member"]
     path.write_text(json.dumps(stored), encoding="utf-8")
 
-    with pytest.raises(ts.RecordInvalidError) as refused:
+    with pytest.raises(ts.ReadRefusedError) as refused:
         observe_run(run_dir)
 
     (issue,) = refused.value.refusal.issues
@@ -247,7 +247,7 @@ def test_a_registry_index_missing_a_field_refuses_naming_it(
     )
 
     with pytest.raises(
-        ts.RecordInvalidError, match=r"entries\.0\.sha256: Field required"
+        ts.ReadRefusedError, match=r"entries\.0\.sha256: Field required"
     ):
         read_registry_index(tmp_path)
 
@@ -414,7 +414,7 @@ def test_a_final_status_missing_a_field_refuses_naming_it(
     del stored["ended"]
     path.write_text(json.dumps(stored), encoding="utf-8")
 
-    with pytest.raises(ts.RecordInvalidError, match="ended: Field required"):
+    with pytest.raises(ts.ReadRefusedError, match="ended: Field required"):
         observe(run_dir)
 
 

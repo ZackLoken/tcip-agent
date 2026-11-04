@@ -38,7 +38,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 from tcip_mcp.pipelines.derivations import DetectorGeometryDerivation
 from tcip_mcp.pipelines.execution import MaskCut
 from tcip_mcp.pipelines.raster_source import RasterIdentity
-from tcip_store import RecordInvalidError, validated
+from tcip_store import ReadRefusedError, validated
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -989,8 +989,10 @@ def checked_train_config(
             "the training config",
             context={"project": project},
         ), []
-    except RecordInvalidError as e:
-        return None, [str(issue) for issue in e.refusal.issues]
+    except ReadRefusedError as e:
+        refusal = e.refusal
+        issues = refusal.issues if refusal.kind == "invalid" else [refusal]
+        return None, [str(issue) for issue in issues]
 
 
 def train_config(

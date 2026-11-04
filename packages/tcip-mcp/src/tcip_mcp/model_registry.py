@@ -45,7 +45,7 @@ from tcip_store import (
     FINITE_JSON_OBJECT,
     FiniteJsonObject,
     Key,
-    RecordInvalidError,
+    ReadRefusedError,
     finite_number,
     validated,
 )
@@ -110,7 +110,7 @@ def read_registry_index(project_path: str | Path) -> list[RegistryEntry]:
     """Return every foreign checkpoint the project has registered, in registration order.
 
     A project that has registered nothing reads as an empty list; an index that does not decode
-    raises ``DecodeError``, and one that does not validate ``tcip_store.RecordInvalidError``.
+    raises ``DecodeError``, and one that does not validate ``tcip_store.ReadRefusedError``.
     """
     return _index_entries(
         tcip_store.read(
@@ -376,10 +376,10 @@ class VerifiedCheckpoint:
         """
         try:
             return validated(CheckpointStamp, self.payload, self.path)
-        except RecordInvalidError as exc:
-            keys = ", ".join(
-                sorted({repr(i.loc[0]) for i in exc.refusal.issues})
-            )
+        except ReadRefusedError as exc:
+            refusal = exc.refusal
+            issues = refusal.issues if refusal.kind == "invalid" else []
+            keys = ", ".join(sorted({repr(i.loc[0]) for i in issues}))
             raise ValueError(
                 f"{self.path} carries no {keys} as generic_trainer.checkpoint_stamp writes "
                 "it, as the default trainer and ctx.save_checkpoint save it, so it was written "

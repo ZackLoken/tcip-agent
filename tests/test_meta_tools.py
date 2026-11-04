@@ -429,7 +429,7 @@ def test_a_report_that_is_not_a_json_object_will_not_decode(
 ) -> None:
     ts.replace(memory_key(FrictionReport, str(tmp_path), "unreadable"), "text")
 
-    with pytest.raises(ts.RecordInvalidError, match="FrictionReport"):
+    with pytest.raises(ts.ReadRefusedError, match="FrictionReport"):
         read_memory(FrictionReport, str(tmp_path), "unreadable")
 
 
