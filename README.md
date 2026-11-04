@@ -239,9 +239,9 @@ that leaves the machine, the one phone-home you can disable, and the trust bound
 bind rests on.
 
 Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) says how to report a problem or ask for a feature,
-and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) the standards contributors are held to. What an adopter can
-build against today is [STABILITY.md](STABILITY.md)'s; [VERSIONING.md](VERSIONING.md) explains what
-the version number does and doesn't promise.
+and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) the standards contributors are held to. What an
+adopter can build against today is [STABILITY.md](STABILITY.md)'s; [VERSIONING.md](VERSIONING.md)
+explains what the version number does and doesn't promise.
 
 ## License
 
