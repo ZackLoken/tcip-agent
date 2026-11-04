@@ -24,7 +24,7 @@ from pydantic import (
 
 import tcip_store
 from tcip_annotation.text import Text
-from tcip_mcp.read_refusal import ReadRefusal, read_refusal
+from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -32,7 +32,7 @@ from tcip_mcp.registry_paths import (
     within,
 )
 from tcip_mcp.subject_registry import Attribute, named
-from tcip_store import Key, encode_record
+from tcip_store import Key, ReadRefusal, encode_record
 
 if TYPE_CHECKING:
     from pydantic import JsonValue

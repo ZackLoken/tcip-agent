@@ -40,10 +40,11 @@ from tcip_mcp.pipelines.image_utils import (
 )
 from tcip_mcp.pipelines.raster_source import RasterIdentity, SourceHeader
 from tcip_mcp.project_paths import viz_output_path
-from tcip_mcp.read_refusal import Invalid, read_refusal
+from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import PathSegment
+from tcip_store import Invalid
 
 if TYPE_CHECKING:
     import numpy as np

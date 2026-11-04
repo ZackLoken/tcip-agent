@@ -42,9 +42,10 @@ from tcip_mcp.pipelines.delivery_events_schema import (
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 from tcip_mcp.pipelines.postprocessing.segment_attribution import PositionError
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
-from tcip_mcp.read_refusal import Invalid, read_refusal
+from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.tools.model_tools import RegisteredModels
 from tcip_mcp.traits import TraitRevision
+from tcip_store import Invalid
 from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
 

@@ -462,7 +462,7 @@ def _stated_transforms(
     transform, and, naming the entry, one whose values its transform's type refuses.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
-    from tcip_mcp.read_refusal import Invalid
+    from tcip_store import Invalid
 
     stated = []
     for name, params in (config.model_extra or {}).items():

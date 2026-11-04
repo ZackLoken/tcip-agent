@@ -17,7 +17,6 @@ from typing import Any, Literal, NamedTuple, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from tcip_mcp.agent_identity import RecordedIdentity
-from tcip_mcp.read_refusal import Invalid
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
     DatasetSelection,
@@ -27,6 +26,7 @@ from tcip_mcp.web_client import (
     read_gui_snapshot,
     write_gui_snapshot,
 )
+from tcip_store import Invalid
 
 logger = logging.getLogger(__name__)
 

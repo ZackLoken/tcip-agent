@@ -20,8 +20,15 @@ from pydantic import (
 
 import tcip_store
 from tcip_annotation.text import Text
-from tcip_mcp.read_refusal import Invalid, ReadRefusal, read_refusal
-from tcip_store import Key, StoreError, Version, VersionConflictError
+from tcip_mcp.read_refusal import read_refusal
+from tcip_store import (
+    Invalid,
+    Key,
+    ReadRefusal,
+    StoreError,
+    Version,
+    VersionConflictError,
+)
 
 PROJECT_RECORD_STORE = "project_record"
 _PROJECT_RECORD_PARTS = ("project",)

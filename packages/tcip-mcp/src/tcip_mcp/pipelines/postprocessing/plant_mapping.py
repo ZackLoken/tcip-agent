@@ -381,7 +381,7 @@ class MappingBuild:
         """
         from pydantic import ValidationError
 
-        from tcip_mcp.read_refusal import Invalid
+        from tcip_store import Invalid
 
         try:
             build = _MAPPING_RECORD.validate_json(encode_record(raw))

@@ -339,7 +339,7 @@ def test_record_or_problem_names_the_absent_record(tmp_path: Path) -> None:
 
     assert reading.kind == "unread"
     assert not isinstance(reading.problem, str)
-    from tcip_mcp.read_refusal import Unreadable
+    from tcip_store import Unreadable
 
     assert isinstance(reading.problem, Unreadable)
     assert "initialize_project" in reading.problem.message
@@ -360,7 +360,7 @@ def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
 
     assert reading.kind == "unread"
     assert not isinstance(reading.problem, str)
-    from tcip_mcp.read_refusal import Unreadable
+    from tcip_store import Unreadable
 
     assert isinstance(reading.problem, Unreadable)
     assert "does not decode" in reading.problem.message
@@ -391,7 +391,7 @@ def test_record_or_problem_serves_a_record_its_model_refuses_by_the_models_issue
 
     assert reading.kind == "unread"
     assert not isinstance(reading.problem, str)
-    from tcip_mcp.read_refusal import Invalid
+    from tcip_store import Invalid
 
     assert isinstance(reading.problem, Invalid)
     assert [issue.loc for issue in reading.problem.issues] == [["site"]]
