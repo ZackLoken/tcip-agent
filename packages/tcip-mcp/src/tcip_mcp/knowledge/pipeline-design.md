@@ -317,7 +317,6 @@ mechanics are identical for one stage or four, and there is no fixed phase vocab
 
 ## Design principles
 
-- Start with the simplest thing that could measure the trait, and add complexity only when the
-  data or the metrics justify it.
-- Write a retrospective (`write_retrospective`) when you finish; what it holds, and what it never
-  holds, is the `self-improvement` skill's.
+The `operating-contract` document's posture sets how complexity grows and when work ends in a
+retrospective; what a retrospective holds, and what it never holds, is the `self-improvement`
+document's.

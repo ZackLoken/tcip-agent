@@ -7,11 +7,13 @@ cannot launch.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from tcip_web import terminal as pty_host
+from tests.fake_terminal_app import transcript_entry
 from tools import smoke_terminal_e2e
 
 if TYPE_CHECKING:
@@ -119,15 +121,20 @@ def test_the_first_signal_carries_the_display_name_its_request_never_states(
     assert smoke_terminal_e2e.reported(opened_client, named, name)
 
 
-def test_the_resume_smoke_passes_against_a_harness_whose_hook_reaches_the_served_backend(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_the_smoke_against_a_harness_no_deny_list_binds_fails_on_the_edit_alone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The smoke's resume case passes against the fake harness standing in for Claude's row.
+    """Against the fake harness standing in for Claude's row, every check passes but the edit's.
 
     The fake runs its launch's ``SessionStart`` hook, whose command reaches the backend the smoke
-    serves, reports the token with the display name the hook's orientation states, then,
-    resumed after the backend's shutdown, the token continued from its own memory of the
-    conversation; the second launch resumed the conversation the hook reported.
+    serves, reports the token with the display name the hook's orientation states and the
+    instruction token its workspace ``CLAUDE.md`` states, then, resumed after the backend's
+    shutdown, the token continued from its own memory of the conversation; the second launch
+    resumed the conversation the hook reported. Asked to edit its ``CLAUDE.md``, it appends to it
+    through its own process, which no deny list binds, and its transcript records the edit made:
+    the smoke finds the file changed and no denial in the transcript the hook named, and fails.
     """
     from tests._terminal_fixtures import fake_executable
 
@@ -149,9 +156,112 @@ def test_the_resume_smoke_passes_against_a_harness_whose_hook_reaches_the_served
         answer_timeout_s=90,
     )
 
-    assert result == 0
-    (conversation,) = [path.name for path in memory.iterdir()]
-    assert conversation
+    checks = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.endswith((": True", ": False"))
+    ]
+    assert result == 1
+    assert len(checks) == 7, checks
+    assert all(check.endswith(": True") for check in checks[:5]), checks
+    assert checks[5].endswith("reported done: True; the file unchanged: False")
+    assert checks[6].endswith("records the edit attempted and denied: False")
+    conversation, transcript = sorted(memory.iterdir())
+    assert transcript.name == f"{conversation.name}.jsonl"
+
+
+OBSERVED_DENIAL = (
+    "File is in a directory that is denied by your permission settings"
+)
+"""The error text Claude Code 2.1.316 records for an edit its settings deny."""
+
+
+def _append(transcript: Path, *entries: dict) -> None:
+    """Append ``entries`` to ``transcript``, one JSON line each."""
+    with transcript.open("a", encoding="utf-8") as file:
+        file.writelines(json.dumps(entry) + "\n" for entry in entries)
+
+
+def _edit(target: Path, use: str) -> dict:
+    """Return the transcript entry of the ``Edit`` use ``use`` of ``target``."""
+    return transcript_entry(
+        "assistant",
+        {
+            "type": "tool_use",
+            "id": use,
+            "name": "Edit",
+            "input": {"file_path": str(target)},
+        },
+    )
+
+
+def _answer(use: str, content: str, **fields: object) -> dict:
+    """Return the transcript entry of the error result ``content`` of ``use``."""
+    return transcript_entry(
+        "user",
+        {
+            "type": "tool_result",
+            "tool_use_id": use,
+            "content": content,
+            "is_error": True,
+        },
+        **fields,
+    )
+
+
+def test_only_an_edit_after_the_request_answered_after_it_is_read(
+    tmp_path: Path,
+) -> None:
+    """The smoke reads an edit's answer past the request's boundary, written after its use.
+
+    A denied edit written before the transcript's length was read is not the request's, and a
+    result written before the use its id names answers nothing; an edit and its denial both
+    past the boundary, in that order, are the one answer read.
+    """
+    target = tmp_path / "CLAUDE.md"
+    transcript = tmp_path / "conversation.jsonl"
+    _append(
+        transcript,
+        _edit(target, "toolu_earlier"),
+        _answer("toolu_earlier", OBSERVED_DENIAL),
+    )
+    start = smoke_terminal_e2e.transcript_length(transcript)
+
+    assert smoke_terminal_e2e.edit_answers(transcript, start, target) == []
+
+    _append(
+        transcript,
+        _answer("toolu_reversed", OBSERVED_DENIAL),
+        _edit(target, "toolu_reversed"),
+    )
+    assert smoke_terminal_e2e.edit_answers(transcript, start, target) == []
+
+    _append(
+        transcript,
+        _edit(target, "toolu_current"),
+        _answer("toolu_current", OBSERVED_DENIAL),
+    )
+    answers = smoke_terminal_e2e.edit_answers(transcript, start, target)
+    assert [result["tool_use_id"] for _, result in answers] == [
+        "toolu_current"
+    ]
+    assert smoke_terminal_e2e.denial(*answers[0])
+
+
+def test_a_denial_is_an_error_with_a_kind_or_the_settings_text() -> None:
+    """An error result is a denial when its entry's denial kind is set or it states the text.
+
+    One whose ``toolDenialKind`` is null and states no settings text is not.
+    """
+
+    def read(entry: dict) -> bool:
+        (result,) = entry["message"]["content"]
+        return smoke_terminal_e2e.denial(entry, result)
+
+    refused = "the edit was not made"
+    assert not read(_answer("toolu_a", refused, toolDenialKind=None))
+    assert read(_answer("toolu_a", refused, toolDenialKind="a kind"))
+    assert read(_answer("toolu_a", OBSERVED_DENIAL))
 
 
 def test_the_resumed_signal_is_the_token_continued_no_request_names(
@@ -190,6 +300,31 @@ def test_the_resumed_signal_is_the_token_continued_no_request_names(
     )
     assert smoke_terminal_e2e.reported(opened_client, continued)
     assert not smoke_terminal_e2e.reported(opened_client, token)
+
+
+def test_the_instruction_token_is_added_to_each_instruction_file_and_each_restored(
+    tmp_path: Path,
+) -> None:
+    """``planted`` adds the token's line to both instruction files and restores both after.
+
+    A file that held text gets that text back; one that did not exist is removed again.
+    """
+    from tcip_mcp.knowledge.harness_files import AGENTS, CLAUDE_CODE
+
+    claude = tmp_path / CLAUDE_CODE.instructions
+    agents = tmp_path / AGENTS.instructions
+    claude.write_text("the person's own text\n", encoding="utf-8")
+    token = "instruction-0a1b2c"
+    line = smoke_terminal_e2e.INSTRUCTION_TOKEN.format(token=token)
+
+    with smoke_terminal_e2e.planted(tmp_path, token):
+        assert claude.read_text(encoding="utf-8") == (
+            f"the person's own text\n{line}\n"
+        )
+        assert agents.read_text(encoding="utf-8") == f"{line}\n"
+
+    assert claude.read_text(encoding="utf-8") == "the person's own text\n"
+    assert not agents.exists()
 
 
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(

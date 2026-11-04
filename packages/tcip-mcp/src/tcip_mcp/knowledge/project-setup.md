@@ -18,24 +18,26 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 ## 0. Orient
 
 A conversation the agent terminal starts new (and one cleared or forked in Claude Code or Codex)
-begins with its orientation in context, put there by the terminal's session hook, which says what
-it holds and how many entries each part was cut from; `load_project_memory` reads past it. A
-resumed conversation is told nothing new, since it already holds what it was told. After a
-compaction, Claude Code's and Codex's sessions launched for a project are told its memory again,
-and those launched for none are told so again; Antigravity's are told nothing. A session launched
-for none holds no project in the terminal whatever project its tools go on to create, and reads
-that project's memory through `load_project_memory`. A session with no orientation reads the
+begins with its orientation in context, put there by the terminal's session hook: the operating
+contract's posture, then the project's parts, saying what each holds and how many entries it was
+cut from; `load_project_memory` reads past it. A resumed conversation is told nothing new, since
+it already holds what it was told. After a compaction, Claude Code's and Codex's sessions launched
+for a project are told the posture and its memory again, and those launched for none are told the
+posture and that they have none again; Antigravity's are told nothing, its always-on rule carrying
+the contract into every turn. A session launched for none holds no project in the terminal
+whatever project its tools go on to create, and reads that project's memory through
+`load_project_memory`. A session with no orientation reads the
 project's memory through `load_project_memory` (kind='reports' and kind='retrospectives') and its
 overview through `inspect_project` and its data-state findings through `diagnose_project`. A
 session resuming a project after a long wait reads
 the hand-off written before it (the newest retrospective), the record of the run it names
 (`monitor_training` or `get_experiment`) and the knowledge documents for the stage it resumes.
-Surface friction with `report_friction` the moment you hit it (ambiguous goal, unconfirmed format).
+An ambiguous goal or an unconfirmed format is friction the `operating-contract` document's posture
+reports.
 
-Everything you write for a project lives in that project's own directory, never in your harness's
-session scratchpad, a temporary directory or the platform's repository: its scripts and model
-sources, a scoring pass among them, under `code/`, and the tables, masks, images and notes they
-write under `outputs/` beside it, never under `code/`.
+Within the project's own directory, where the `operating-contract` document places what you write
+for a project, its scripts and model sources, a scoring pass among them, go under `code/`, and the
+tables, masks, images and notes they write under `outputs/` beside it, never under `code/`.
 
 ## 1. Create the project
 
@@ -132,9 +134,8 @@ it. `crop` is required and is never inferred from the path or a slug.
 
 Turn the breeder's sentence into a trait and the subjects they distinguish. Propose the trait with
 `propose_trait` and have the breeder confirm it in the Setup tab before any annotation or training;
-what its entry holds is the meaning door in `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`.
-The CV task is yours to derive from the data, not from the phrasing (see
-`packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`):
+what its entry holds is the meaning door in the `delivery` document. The CV task is yours to
+derive from the data, not from the phrasing (see the `pipeline-design` document):
 
 - Task: the task string is an input to `build_dataset`, which routes a known set; a bespoke
   `dataset_source` is the seam for a task it does not route. A breeder saying "detect the
@@ -143,7 +144,7 @@ The CV task is yours to derive from the data, not from the phrasing (see
   the trait actually counts; their verb is vocabulary, not the answer.
 - Subject: the object class the annotations isolate (e.g. `catkin`, `bush`), not a path
   segment. Labels are one document per image, a record in the dataset root's database keyed by
-  the image's capture and stem (see `dataset_layout.py`), holding every subject's annotation
+  the image's capture and stem, holding every subject's annotation
   records for that image; `subject` is a field inside each record, resolved through the dataset's
   `subjects.json` registry. Multiple subjects coexist in the same document (a bush isolated
   alongside its catkins).
@@ -152,20 +153,17 @@ The CV task is yours to derive from the data, not from the phrasing (see
   breeder actually distinguishes: it validates the nested subject/attribute shape and writes the
   file plus an audit record. A run over a subject reads every attribute declared for it, one
   per-instance head each. Keep it minimal first (progressive disclosure); subject semantics
-  live in `subjects.json`, never in filenames. Verify crop traits against
-  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/` before asserting them.
+  live in `subjects.json`, never in filenames.
 
 ## 4. Bootstrap annotation (engine-assisted)
 
-There must be something to train on. Three paths (see
-`packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`):
+There must be something to train on. Three paths (see the `annotation` document):
 
 - Agent/MCP path, one image per call: `propose_annotations` → `stage_proposals` →
   `focus_human_attention` → `capture_live_canvas`, a rendered image (`visualize`)
   only for what the canvas cannot draw. The engines and their parameters, grid passes, the run's
   identity, choosing an engine by what survives review and the review on the breeder's canvas
-  are `packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`'s, and so is when an empty label
-  document is a negative.
+  are the `annotation` document's, and so is when an empty label document is a negative.
 - Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
 - Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date, vertex_spacing, rationale)`
   converts them into per-image documents over the images `ingest_images` placed under that date.
@@ -200,14 +198,14 @@ own floor.
 
 - Write an `nn.Module` (from scratch or importing the plain blocks) + a `train(ctx)` loop,
   build via `model_source` → `build_from_model_source`, pre-flight with `model_contract`; see
-  `packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`.
+  the `pipeline-design` document.
 - `launch_training` (immutable experiment per run) → watch metrics.
 - `run_inference` to produce predictions for the review loop.
 
 ## 7. Prioritize review + deliver
 
 `prioritize_review_queue` to focus the breeder's attention on the model's weakest
-predictions, then deliver per `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`.
+predictions, then deliver per the `delivery` document.
 
 ## Reading the live session: `view_gui_state`
 

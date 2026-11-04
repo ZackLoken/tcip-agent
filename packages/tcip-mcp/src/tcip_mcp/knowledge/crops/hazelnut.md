@@ -30,8 +30,8 @@ time; derive their overlap per site-year from data rather than assuming an order
 
 ## Trait authority
 
-`crops.yml` is the trait authority (58 hazelnut traits). Verify every trait there; never assert one
-it does not list. This skill does not reproduce the catalog; it grounds how the traits appear in
+`crops.yml` is the trait authority (58 hazelnut traits), served whole by
+`serve_domain_knowledge(name='crops')`. Verify every trait there; never assert one it does not list. This skill does not reproduce the catalog; it grounds how the traits appear in
 imagery and which can come from pixels at all.
 
 ## Field-imageable vs lab/destructive

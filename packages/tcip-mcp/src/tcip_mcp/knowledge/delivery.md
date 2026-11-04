@@ -43,7 +43,8 @@ under the confirmed statistic, so nothing outside the delivery picks one. The ta
 starting reference for that conversation, never the answer (a skewed count may want a median; a
 date wants a crossing, whose rule is the entry's `crossing_rule`).
 
-Examples use real `crops.yml` trait names; verify any trait against `crops.yml` before use.
+Examples use real `crops.yml` trait names; verify any trait against `crops.yml`, served whole by
+`serve_domain_knowledge(name='crops')`, before use.
 
 | Trait Type | Common choice | Example |
 |-----------|-------------|---------|

@@ -32,7 +32,16 @@ import psutil
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
-from tcip_mcp.project_paths import repo_root_from_here
+from tcip_mcp.knowledge import read_document
+from tcip_mcp.knowledge.harness_files import (
+    AGENTS,
+    CLAUDE_CODE,
+    CONTRACT,
+    HarnessFiles,
+    write_block,
+    write_skills,
+    write_text,
+)
 from tcip_mcp.read_refusal import Invalid
 from tcip_web.state import OpenProject, store
 
@@ -70,22 +79,21 @@ ANTIGRAVITY_SETTINGS = (
 """Antigravity's own settings file, whose ``permissions.allow`` list its tool approvals persist
 to as ``mcp(<server>/<tool>)`` entries."""
 
-ANTIGRAVITY_HOOKS = Path(".agents") / "hooks.json"
-"""The workspace's Antigravity hooks file, relative to the workspace."""
+ANTIGRAVITY_HOOKS = AGENTS.skills.parent / "hooks.json"
+"""The workspace's Antigravity hooks file, relative to the workspace, beside its skills."""
 ANTIGRAVITY_HOOK_ENTRY = "tcip-session-start"
 """The entry of :data:`ANTIGRAVITY_HOOKS` an Antigravity launch's session hook is set under."""
-ANTIGRAVITY_RULE = ANTIGRAVITY_HOOKS.parent / "rules" / "tcip-orientation.md"
-"""The always-on rule an Antigravity launch writes, relative to the workspace."""
+ANTIGRAVITY = HarnessFiles(
+    ANTIGRAVITY_HOOKS.parent / "rules" / "tcip-orientation.md", AGENTS.skills
+)
+"""The always-on rule an Antigravity launch writes and the skills directory it reads."""
 
 
-class PreparationFailedError(Exception):
-    """A row's launch preparation did not complete; the message names the step and why."""
-
-
-PrepareFn = Callable[[str, OpenProject | None, str], list[str]]
-"""A row's launch preparation: given the resolved executable, the launch's project (``None`` for
-no project) and the id of the terminal session it launches for, it runs to completion and returns
-one line per step it took, or raises :class:`PreparationFailedError`."""
+PrepareFn = Callable[[HarnessFiles, str, OpenProject | None, str], list[str]]
+"""A row's launch preparation: given where its harness reads its instructions and skills, the
+resolved executable, the launch's project (``None`` for no project) and the id of the terminal
+session it launches for, it runs to completion and returns one line per step it took, or raises
+``ValueError`` naming the step and why, or the filesystem's ``OSError``."""
 
 
 @dataclass(frozen=True)
@@ -127,8 +135,9 @@ class Provider:
     arguments and, for a harness whose conversations are resumed, its :class:`Resume` where
     the resumed conversation goes, the output sequence every composer frame the harness was
     recorded writing carries and none of its screens recorded before a composer carries, what
-    the harness's own enforcement restricts under those arguments and leaves open, and the
-    preparation the launch runs first, ``None`` for none.
+    the harness's own enforcement restricts under those arguments and leaves open, where the
+    harness reads its instructions and skills in the workspace, and the preparation the launch
+    runs first, which writes them there.
     """
 
     id: str
@@ -137,7 +146,8 @@ class Provider:
     args: tuple[str | Resume, ...]
     composer_ready: str
     confinement: str
-    prepare: PrepareFn | None = None
+    files: HarnessFiles
+    prepare: PrepareFn
 
     @property
     def resume(self) -> Resume | None:
@@ -299,13 +309,13 @@ def codex_overrides(
     ]
 
 
-def run_to_completion(argv: list[str], step: str) -> str:
+def run_to_completion(argv: list[str]) -> str:
     """Run ``argv`` to completion, stdin closed and time bounded, and return it as one line.
 
-    The line is ``argv`` as one command line. Raises :class:`PreparationFailedError` naming
-    ``step`` when it cannot start, times out or exits non-zero, with the tail of what it
-    printed.
+    The line is ``argv`` as one command line. Raises ``ValueError`` naming that line when it
+    cannot start, times out or exits non-zero, with the tail of what it printed.
     """
+    line = subprocess.list2cmdline(argv)
     try:
         done = subprocess.run(
             argv,
@@ -316,13 +326,11 @@ def run_to_completion(argv: list[str], step: str) -> str:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise PreparationFailedError(f"{step} did not run: {exc}") from exc
+        raise ValueError(f"{line} did not run: {exc}") from exc
     if done.returncode != 0:
         detail = (done.stderr or done.stdout).strip()[-400:]
-        raise PreparationFailedError(
-            f"{step} exited {done.returncode}: {detail}"
-        )
-    return subprocess.list2cmdline(argv)
+        raise ValueError(f"{line} exited {done.returncode}: {detail}")
+    return line
 
 
 _JSON_OBJECT: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
@@ -331,8 +339,8 @@ _JSON_OBJECT: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
 def _json_object(path: Path) -> dict[str, Any]:
     """Return the JSON object the file at ``path`` holds, an empty one when there is no file.
 
-    Raises :class:`PreparationFailedError` when the file does not read, or when it does not hold
-    a JSON object (:data:`_JSON_OBJECT` refusing it).
+    Raises ``ValueError`` naming ``path`` when it does not hold a JSON object
+    (:data:`_JSON_OBJECT` refusing it), and the filesystem's ``OSError`` when it does not read.
     """
     try:
         return (
@@ -340,23 +348,15 @@ def _json_object(path: Path) -> dict[str, Any]:
             if path.is_file()
             else {}
         )
-    except OSError as exc:
-        raise PreparationFailedError(f"reading {path} failed: {exc}") from exc
     except ValidationError as exc:
-        raise PreparationFailedError(
+        raise ValueError(
             f"{path} does not hold a JSON object: {Invalid.of(exc)}"
         ) from exc
 
 
-def _write_text(path: Path, text: str) -> None:
-    """Write ``text`` to ``path`` as UTF-8 with LF line ends, making its directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
-
-
 def _write_json(path: Path, body: dict) -> None:
     """Write ``body`` as indented JSON to ``path``, making its directory."""
-    _write_text(path, json.dumps(body, indent=2) + "\n")
+    write_text(path, json.dumps(body, indent=2) + "\n")
 
 
 def allow_tcip_tools(settings: Path) -> str:
@@ -381,21 +381,52 @@ def allow_tcip_tools(settings: Path) -> str:
     return f"allowed {len(missing)} tcip entries in {settings}"
 
 
+def _skills_written(skills: Path) -> str:
+    """Write every knowledge skill under the workspace's ``skills``; return the step's line."""
+    written = write_skills(store.workspace / skills)
+    return f"wrote {len(written)} knowledge skills under {store.workspace / skills}"
+
+
+def prepare_harness_files(
+    files: HarnessFiles,
+    executable: str,
+    project: OpenProject | None,
+    session: str,
+) -> list[str]:
+    """Write the operating contract and the knowledge skills into the workspace as ``files`` says.
+
+    The contract is :func:`~tcip_mcp.knowledge.harness_files.write_block`'s block of the
+    instruction file, replacing an earlier launch's and keeping the file's other text, and the
+    skills replace an earlier launch's of the same names. Returns one line per step, raising
+    what ``write_block`` and the filesystem raise; the executable, the project and the session
+    are not read.
+    """
+    contract = write_block(store.workspace / files.instructions)
+    return [
+        f"wrote the operating contract into {contract}",
+        _skills_written(files.skills),
+    ]
+
+
 def prepare_antigravity(
-    executable: str, project: OpenProject | None, session: str
+    files: HarnessFiles,
+    executable: str,
+    project: OpenProject | None,
+    session: str,
 ) -> list[str]:
     """Prepare an Antigravity launch of ``executable`` for ``project`` and ``session``.
 
     It registers :func:`mcp_server` as ``tcip`` through ``agy mcp add``, runs
     :func:`allow_tcip_tools` on agy's settings file, sets the :data:`ANTIGRAVITY_HOOK_ENTRY`
     entry of the workspace's :data:`ANTIGRAVITY_HOOKS` to :func:`session_hook_argv` naming
-    ``session``'s start route, as :func:`shell_line`, and writes the always-on rule
-    :data:`ANTIGRAVITY_RULE` naming :func:`orientation_tools`; the entry and the rule replace an
-    earlier launch's, leaving the rest of the hooks file and the rules directory.
-    Returns one line per step.
-    Raises :class:`PreparationFailedError` naming why, before anything is written, for a hook
-    that cannot be spelled, a backend that recorded no port or a hooks file
-    :func:`_json_object` refuses.
+    ``session``'s start route, as :func:`shell_line`, writes the knowledge skills under the
+    workspace's ``files.skills`` and writes the always-on rule ``files.instructions``, the
+    operating contract followed by a sentence naming :func:`orientation_tools`; the entry, the
+    skills and the rule replace an earlier launch's, leaving the rest of the hooks file, the
+    skills directory and the rules directory. Returns one line per step.
+    Raises ``ValueError`` naming why, before anything is written, for a hook that cannot be
+    spelled, a backend that recorded no port or a hooks file :func:`_json_object` refuses, and
+    the filesystem's ``OSError`` for a file that will not read or write.
     """
     from tcip_web.cli.session_hook import session_start_url
 
@@ -407,7 +438,7 @@ def prepare_antigravity(
             ]
         )
     except (ValueError, LookupError) as exc:
-        raise PreparationFailedError(
+        raise ValueError(
             f"the session hook was not registered: {exc}"
         ) from exc
     hooks = store.workspace / ANTIGRAVITY_HOOKS
@@ -417,15 +448,14 @@ def prepare_antigravity(
     }
     server = mcp_server(project)
     add = run_to_completion(
-        [executable, "mcp", "add", "tcip", "--", server.command, *server.args],
-        step="`agy mcp add`",
+        [executable, "mcp", "add", "tcip", "--", server.command, *server.args]
     )
     allowed = allow_tcip_tools(ANTIGRAVITY_SETTINGS)
     _write_json(hooks, body)
-    rule = store.workspace / ANTIGRAVITY_RULE
-    _write_text(
-        rule,
-        "---\ntrigger: always_on\n---\n"
+    skills = _skills_written(files.skills)
+    rule = write_text(
+        store.workspace / files.instructions,
+        f"---\ntrigger: always_on\n---\n{read_document(CONTRACT)}\n"
         "This session's orientation is read from the tcip tools "
         f"{', '.join(tool.__name__ for tool in orientation_tools())}; when this "
         "conversation's earlier turns have been summarized, read it again through them.\n",
@@ -434,7 +464,8 @@ def prepare_antigravity(
         add,
         allowed,
         f"registered the session hook in {hooks}",
-        f"wrote the orientation rule {rule}",
+        skills,
+        f"wrote the operating contract and the orientation rule {rule}",
     ]
 
 
@@ -462,8 +493,6 @@ PROVIDERS: tuple[Provider, ...] = (
             CLAUDE_SETTINGS_ARG,
             "--setting-sources",
             "project",
-            "--add-dir",
-            str(repo_root_from_here()),
             "--permission-mode",
             "default",
             "--mcp-config",
@@ -474,10 +503,13 @@ PROVIDERS: tuple[Provider, ...] = (
         composer_ready="\x1b[?1049h",
         confinement=(
             "Claude Code enforces the deny and allow lists of "
-            "agent_terminal.settings.json, merged with the workspace's own project "
-            "settings only, the user's own settings and instruction files not loaded; "
-            "a tool call neither list decides asks first."
+            "agent_terminal.settings.json, resolved against the workspace it runs in "
+            "and merged with the workspace's own project settings only, the user's own "
+            "settings and instruction files not loaded; a tool call neither list "
+            "decides asks first."
         ),
+        files=CLAUDE_CODE,
+        prepare=prepare_harness_files,
     ),
     Provider(
         id="antigravity",
@@ -489,6 +521,7 @@ PROVIDERS: tuple[Provider, ...] = (
             "agy's --sandbox turns on its terminal restrictions, whose extent agy "
             "defines; every tcip tool is allowed in agy's own settings file."
         ),
+        files=ANTIGRAVITY,
         prepare=prepare_antigravity,
     ),
     Provider(
@@ -511,6 +544,8 @@ PROVIDERS: tuple[Provider, ...] = (
             "write nothing and never ask to leave it; the tcip server is not one of "
             "them, so its tools run, without a prompt, and write the project's records."
         ),
+        files=AGENTS,
+        prepare=prepare_harness_files,
     ),
 )
 
@@ -651,26 +686,6 @@ class NotStarted(BaseModel):
     why: str
 
 
-def prepare_launch(
-    executable: str,
-    provider: Provider,
-    project: OpenProject | None,
-    session: str,
-) -> Prepared | NotStarted:
-    """Run ``provider.prepare`` with the resolved ``executable``, ``project`` and ``session``.
-
-    Returns the steps it took, or why it failed, prefixed with the row's name.
-    """
-    if provider.prepare is None:
-        return Prepared(steps=[])
-    try:
-        return Prepared(steps=provider.prepare(executable, project, session))
-    except PreparationFailedError as exc:
-        return NotStarted(
-            why=f"{provider.name}'s launch preparation failed: {exc}"
-        )
-
-
 _PRIVATE_MODE = re.compile(r"\x1b\[\?([0-9;]*)([hl])")
 _BRACKETED_PASTE = "2004"
 
@@ -702,6 +717,12 @@ ORIENTATION_CAP = 10_000
 """The most characters an orientation is cut to: the cap Claude Code's hooks page states for a
 hook's plain stdout and its ``additionalContext``, which no setting raises
 (code.claude.com/docs/en/hooks, "JSON output")."""
+
+POSTURE = "## Operating posture\n"
+"""The heading of the operating contract's section every orientation but a resume's tells."""
+
+_UNWRAPPED = re.compile(r"(?<!\n)\n(?!\n|- )\s*")
+"""A line break inside a paragraph or list item, which the orientation tells as a space."""
 
 
 class _Part(NamedTuple):
@@ -792,8 +813,9 @@ def orientation(
 ) -> SessionOrientation:
     """Return what the agent of a session for ``project`` started by ``source`` is told.
 
-    It is nothing for a ``resume``; otherwise the parts read from :func:`orientation_tools`
-    that the start calls for, fit by :func:`_fitted`.
+    It is nothing for a ``resume``; otherwise the operating contract's :data:`POSTURE` section
+    followed by the parts read from :func:`orientation_tools` that the start calls for, fit by
+    :func:`_fitted`. Raises ``ValueError`` for a contract carrying no :data:`POSTURE` heading.
     """
     from tcip_mcp.knowledge import list_documents
     from tcip_mcp.tools.meta_tools import MemoryKind
@@ -803,6 +825,12 @@ def orientation(
         return NothingTold()
     overview, diagnose, memory, serve = orientation_tools()
     served_by = serve.__name__
+    contract = read_document(CONTRACT)
+    section = contract[contract.index(POSTURE) :].partition("\n## ")[0]
+    posture = _whole(
+        _UNWRAPPED.sub(" ", section.rstrip()),
+        f"The operating contract's posture is served by {served_by}(name='{CONTRACT}').",
+    )
     knowledge = _whole(
         "The platform's domain knowledge is the documents "
         f"{', '.join(d.name for d in list_documents())}, each served whole by "
@@ -811,14 +839,18 @@ def orientation(
         "names them.",
     )
     if project is None:
+        created = initialize_project.__name__
         no_project = (
             "This session was launched with no project open in the GUI. Its project tools "
-            f"refuse until {initialize_project.__name__} creates a project, and act on that "
-            "project from then on; that project's memory is read through "
-            f"{memory.__name__}. An existing project is worked on by opening it "
-            "in the GUI, then ending this agent from the rail and starting another."
+            f"refuse until {created} creates a project, and act on that project from then on; "
+            f"that project's memory is read through {memory.__name__}. Until {created} has "
+            "created it, hold each friction report and retrospective, then file it in the "
+            "project it lands in. An existing project is worked on by opening it in the GUI, "
+            "then ending this agent from the rail and starting another."
         )
-        return Told(text=_fitted([_whole(no_project, no_project), knowledge]))
+        return Told(
+            text=_fitted([posture, _whole(no_project, no_project), knowledge])
+        )
     parts = [_memory_part(kind, project.root, memory) for kind in MemoryKind]
     if source != "compact":
         found = diagnose(project.root)["findings"]
@@ -841,7 +873,7 @@ def orientation(
                 f"{counted}.",
             ),
         ]
-    return Told(text=_fitted([*parts, knowledge]))
+    return Told(text=_fitted([posture, *parts, knowledge]))
 
 
 def _memory_part(
@@ -907,26 +939,34 @@ WITHHELD_ENV_PREFIXES = (
     "CLAUDE",
     "FORCE_PROMPT_CACHING_5M",
     "DISABLE_PROMPT_CACHING",
+    "PYTHONPATH",
 )
 """The prefixes of the variables no child inherits: every variable a Claude Code session sets,
-among them ``CLAUDE_CODE_PROMPT_CACHE_TTL``, and the controls Claude Code's prompt-caching page
+among them ``CLAUDE_CODE_PROMPT_CACHE_TTL``; the controls Claude Code's prompt-caching page
 ranks above ``promptCacheTtl`` ("``FORCE_PROMPT_CACHING_5M=1``, which forces five minutes for
 both buckets") or that turn its caching off (``DISABLE_PROMPT_CACHING`` and its ``_HAIKU``,
 ``_SONNET``, ``_OPUS`` and ``_FABLE`` variants), so the lifetime Claude's row requests is the one
-its harness runs with (code.claude.com/docs/en/prompt-caching)."""
+its harness runs with (code.claude.com/docs/en/prompt-caching); and ``PYTHONPATH``, this
+process's own import roots, a repository's on a development machine; the MCP server and the
+session hook import through the packages :func:`backend_interpreter` has installed."""
 
 
 def spawn_env(session_id: str) -> dict[str, str]:
-    """Return the child's environment: this process's own plus the terminal session id.
+    """Return the child's environment for the terminal session ``session_id``.
 
-    Every variable named by one of :data:`WITHHELD_ENV_PREFIXES` is left out.
+    It is this process's own less every variable one of :data:`WITHHELD_ENV_PREFIXES` names, its
+    ``PWD`` the workspace the child runs in and :data:`TERMINAL_SESSION_ENV` the session id.
     """
     kept = {
         k: v
         for k, v in os.environ.items()
         if not k.startswith(WITHHELD_ENV_PREFIXES)
     }
-    return {**kept, TERMINAL_SESSION_ENV: session_id}
+    return {
+        **kept,
+        "PWD": str(store.workspace),
+        TERMINAL_SESSION_ENV: session_id,
+    }
 
 
 def _prewarm_blocking() -> None:
