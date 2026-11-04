@@ -84,8 +84,7 @@ or schema currently serves one, that implementation is replaceable and the guara
   by area (`python tools/line_delta.py <repo> main..`) is reported on every pull request as the
   signal that prompts the code reviewer's look, never the test. The merge stops, on any issue, when
   the code reviewer names in the touched mechanism a second implementation of a fact or machinery
-  kept beside its replacement: a hand-written version of what a maintained library provides, a
-  vocabulary or key declared twice, a per-shape copy of a reader.
+  kept beside its replacement: a vocabulary or key declared twice, a per-shape copy of a reader.
 - Before changing how a shared fact is spelled, produced or read, enumerate its producers and
   readers in the touched mechanism and change them together; a convention changed at one site and
   not its siblings leaves the fact spelled two ways.
