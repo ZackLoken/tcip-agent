@@ -391,7 +391,7 @@ def write_subject_registry(
     try:
         registry = subject_registry.registry_from_dict(subjects)
     except ReadRefusedError as exc:
-        return {"error": f"invalid registry: {exc}"}
+        return {"error": str(exc)}
 
     try:
         result = subject_registry.replace_registry(

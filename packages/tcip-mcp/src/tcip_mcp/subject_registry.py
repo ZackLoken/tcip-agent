@@ -42,7 +42,6 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from tcip_annotation.state import Attribute
 
 if TYPE_CHECKING:
-    from pydantic import JsonValue
     from pydantic.json_schema import JsonSchemaValue
     from pydantic_core import CoreSchema
 
@@ -152,7 +151,7 @@ _REGISTRY = TypeAdapter(SubjectRegistry)
 
 
 class RegistryError(ValueError):
-    """A registry whose bytes do not decode, a write it refuses, or a scope it lacks."""
+    """A write the stored registry refuses, or a scope the registry lacks."""
 
 
 def registry_from_dict(data: object) -> SubjectRegistry:
@@ -176,17 +175,17 @@ def registry_to_dict(registry: SubjectRegistry) -> dict:
     return _REGISTRY.dump_python(registry, mode="json")["subjects"]
 
 
-def _checked_registry_document(data: bytes, *, path: str | Path) -> JsonValue:
-    """Return the stored registry's decoded document.
+def _stored_registry(data: bytes, *, path: str | Path) -> SubjectRegistry:
+    """Return the registry the stored ``data`` at ``path`` spell.
 
-    Raises :class:`RegistryError` for bytes that do not decode as JSON.
+    Bytes that do not decode as JSON and a document that is no valid registry raise
+    ``tcip_store.ReadRefusedError`` (:func:`registry_from_dict`).
     """
     import tcip_store
 
-    try:
-        return tcip_store.decode_value(data)
-    except ValueError as exc:
-        raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
+    with tcip_store.unreadable(f"the subject registry at {path}", ValueError):
+        document = tcip_store.decode_value(data)
+    return registry_from_dict(document)
 
 
 def read_versioned_registry(
@@ -196,9 +195,8 @@ def read_versioned_registry(
 
     Both come from one read; the registry is a :class:`SubjectRegistry`.
 
-    No registry raises ``FileNotFoundError``, a registry whose bytes are present but will not
-    decode raises :class:`RegistryError`, and one that decodes but is no valid registry raises
-    ``tcip_store.ReadRefusedError`` (:func:`registry_from_dict`).
+    No registry raises ``FileNotFoundError``; a registry whose bytes are present but will not
+    decode, or decode to no valid registry, raises ``tcip_store.ReadRefusedError``.
     """
     import tcip_store
     from tcip_mcp.dataset_layout import subjects_path
@@ -208,8 +206,7 @@ def read_versioned_registry(
         versioned = tcip_store.read_blob_versioned(path)
     except tcip_store.NotFoundError as exc:
         raise FileNotFoundError(f"no subject registry at {path}") from exc
-    document = _checked_registry_document(versioned.value, path=path)
-    return registry_from_dict(document), versioned.version
+    return _stored_registry(versioned.value, path=path), versioned.version
 
 
 def read_registry(dataset_root: str | Path) -> SubjectRegistry:
@@ -290,9 +287,7 @@ def replace_registry(
     outgoing: SubjectRegistry | None = None
     if versioned.value is not None:
         try:
-            outgoing = registry_from_dict(
-                _checked_registry_document(versioned.value, path=path)
-            )
+            outgoing = _stored_registry(versioned.value, path=path)
         except ValueError as exc:
             if not allow_removals:
                 raise RegistryError(
