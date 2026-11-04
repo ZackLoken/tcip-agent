@@ -703,7 +703,7 @@ def redrawn_selection(
         )
     except ValueError as exc:
         raise ValueError(
-            f"redrawing train and val inside the selection at {selection_dir!r}: "
+            f"redrawing train and val inside {selection_place(selection_dir)}: "
             f"{exc} Drop data.split.seed to bind the selection's recorded partition "
             "instead."
         ) from exc
