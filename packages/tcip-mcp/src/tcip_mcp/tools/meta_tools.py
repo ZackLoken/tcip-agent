@@ -24,6 +24,7 @@ from pydantic import (
 import tcip_store
 from tcip_mcp.audit import audited, now
 from tcip_mcp.pipelines.training.hpo import Count
+from tcip_mcp.read_refusal import ReadRefusal, read_refusal
 from tcip_mcp.server import tool
 from tcip_store import DecodeError, Key, Version
 
@@ -133,7 +134,7 @@ class UnreadEntry(BaseModel):
 
     kind: Literal["unread"] = "unread"
     id: str
-    reason: str
+    reason: ReadRefusal
 
 
 type MemoryEntry[M: MemoryRecord] = Annotated[
@@ -164,7 +165,7 @@ def memory_entries[M: MemoryRecord](
         try:
             read = read_memory(record, project_path, name)
         except (DecodeError, ValidationError) as exc:
-            unread.append(UnreadEntry(id=name, reason=str(exc)))
+            unread.append(UnreadEntry(id=name, reason=read_refusal(exc)))
         else:
             stated.append((read.timestamp, ReadEntry(id=name, record=read)))
     stated.sort(key=lambda pair: pair[0], reverse=True)

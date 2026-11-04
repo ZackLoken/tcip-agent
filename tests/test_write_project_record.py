@@ -117,5 +117,6 @@ def test_a_record_that_does_not_read_is_refused(project: Path) -> None:
     )
 
     assert result.returncode == 2
-    assert "is not a project record" in result.stdout
+    assert "names no readable project: " in result.stdout
+    assert "not_site: Extra inputs are not permitted" in result.stdout
     assert tcip_store.read(key) == {"not_site": "x"}

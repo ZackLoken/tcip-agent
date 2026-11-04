@@ -24,8 +24,8 @@ function reasonOf(check: ChoiceCheck): string {
   return check.reason;
 }
 
-/** The disabled partition's reason as the page shows it, its whitespace collapsed. */
-const DISABLED_REASON = DISABLED.reason.replace(/\s+/g, " ").trim();
+/** The disabled partition's reason as the page shows it: its one issue, at the record whole. */
+const DISABLED_REASON = "Input should be a dictionary or an instance of Selection";
 
 /** The radio of the partition under `dir` itself, never of one in a directory beneath it. */
 function radioOf(dir: string): HTMLElement {

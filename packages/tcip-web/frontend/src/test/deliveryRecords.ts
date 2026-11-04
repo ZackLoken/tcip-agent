@@ -11,6 +11,7 @@ import {
   type OperationalizationRefusal,
   type PhenologyAnswer,
   type PlantMapping,
+  type ReadRefusal,
   type RegisteredModels,
   type SavedExport,
   type ServedDeliveryEvent,
@@ -117,7 +118,7 @@ export const RESULTS_ANSWERS = produced.answers as unknown as {
   no_mapping_names: MappingNames;
   admitted_operating_point: OperatingPoint;
   count_export_audit_gap: Refusal<AuditGapRefusal & { committed: SavedExport }>;
-  unreadable_deliveries: Refusal<string>;
+  unreadable_deliveries: Refusal<ReadRefusal>;
   unknown_mapping: Refusal<string>;
   export_audit_gap: Refusal<AuditGapRefusal & { committed: SavedExport }>;
   delivery_refusal: Refusal<DeliveryRefusal>;

@@ -295,7 +295,19 @@
       "unreadable": [
         {
           "trait": "stem",
-          "reason": "2 validation errors for TraitRecord\nrevisions.0.entry.localization\n  Input should be '', 'center_match' or 'iou_match' [type=literal_error, input_value='anywhere', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/literal_error\nrevisions\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=[{'number': 1, 'entry': {...: {'kind': 'proposed'}}], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short"
+          "reason": {
+            "kind": "invalid",
+            "issues": [
+              {
+                "loc": ["revisions", 0, "entry", "localization"],
+                "msg": "Input should be '', 'center_match' or 'iou_match'"
+              },
+              {
+                "loc": ["revisions"],
+                "msg": "Tuple should have at least 1 item after validation, not 0"
+              }
+            ]
+          }
         }
       ],
       "definitions": {}

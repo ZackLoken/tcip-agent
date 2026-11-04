@@ -16,6 +16,7 @@ from tests._web_fixtures import INVARIANCES
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from tcip_mcp.read_refusal import ReadRefusal
     from tcip_web.state import OpenProject
 
 
@@ -252,6 +253,36 @@ def test_the_open_answer_names_the_project_as_the_state_snapshot_names_it(
     assert answer.json()["project"] == snapshot["project"]
 
 
+def test_opening_a_project_whose_gui_state_its_model_refuses_answers_the_models_issues(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    """Opening a project whose persisted GUI state its model refuses answers 409 with why.
+
+    The detail is the model's issues, each by its place and message, and carries no library
+    documentation link; nothing is opened.
+    """
+    import tcip_store
+    from tcip_mcp.web_client import gui_snapshot_key
+
+    made = _make_project(workspace_dir, "hill_block")
+    tcip_store.replace(
+        gui_snapshot_key(made.root),
+        {"active_tab": "not-a-real-tab"},
+        expect=tcip_store.Version.ABSENT,
+    )
+
+    resp = client.post(
+        "/api/projects/open", json={"id": made.id, "user": "grower"}
+    )
+
+    assert resp.status_code == 409
+    assert "errors.pydantic.dev" not in resp.text
+    detail = resp.json()["detail"]
+    assert isinstance(detail, dict) and detail["kind"] == "invalid"
+    assert ["active_tab"] in [issue["loc"] for issue in detail["issues"]]
+    assert client.get("/api/projects").json()["open_id"] is None
+
+
 def test_opening_an_id_no_project_holds_is_404(
     client: TestClient, workspace_dir: Path
 ) -> None:
@@ -325,15 +356,16 @@ def test_list_reports_the_record_across_four_project_states(
     assert len(good.id) == 12
     assert good.invariances == INVARIANCES
 
-    def problem(project: Path) -> str:
+    def problem(project: Path) -> ReadRefusal:
         return UnreadProject.model_validate(
             by_path[str(project.resolve())]
         ).problem
 
-    assert "initialize_project" in problem(recordless)
+    assert isinstance(by_path[str(invalid.resolve())]["problem"], dict)
+    assert "initialize_project" in str(problem(recordless))
     assert not database_file(str(recordless)).is_file()
-    assert "does not decode" in problem(undecodable)
-    assert "is not a project record" in problem(invalid)
+    assert "does not decode" in str(problem(undecodable))
+    assert problem(invalid).kind == "invalid"
 
 
 def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(

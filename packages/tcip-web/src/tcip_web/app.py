@@ -102,13 +102,22 @@ async def _bad_request_handler(
 ) -> JSONResponse:
     """Answer 400 with the reason.
 
-    For an invalid GUI mutation, a request on the selected capture while none is, a directory
-    read as a bucket it is not, or an act naming no person.
+    For a request on the selected capture while none is, a directory read as a bucket it is not,
+    or an act naming no person.
     """
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
-app.add_exception_handler(GuiMutationInvalidError, _bad_request_handler)
+@app.exception_handler(GuiMutationInvalidError)
+async def _invalid_mutation_handler(
+    _request: Request, exc: GuiMutationInvalidError
+) -> JSONResponse:
+    """Answer an invalid GUI mutation 400 with the model's issues as the detail."""
+    return JSONResponse(
+        status_code=400, content={"detail": exc.refusal.model_dump()}
+    )
+
+
 app.add_exception_handler(NoSelectionError, _bad_request_handler)
 app.add_exception_handler(NotABucketError, _bad_request_handler)
 app.add_exception_handler(NoActorError, _bad_request_handler)

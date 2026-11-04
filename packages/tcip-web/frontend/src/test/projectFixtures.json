@@ -127,7 +127,10 @@
         },
         "image_count": 0,
         "kind": "unread",
-        "problem": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
+        "problem": {
+          "kind": "unreadable",
+          "message": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
+        }
       },
       {
         "modified": 946684802.0,
@@ -245,7 +248,10 @@
         },
         "image_count": 0,
         "kind": "unread",
-        "problem": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
+        "problem": {
+          "kind": "unreadable",
+          "message": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
+        }
       },
       {
         "modified": 946684802.0,
