@@ -42,10 +42,11 @@ from tcip_mcp.pipelines.schemas import (  # noqa: E402
     train_config,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext
-from tests import REPO_ROOT
+from tests import REPO_ROOT, bespoke_models
 from tests._chain_fixtures import (
     FRAME_STATISTICS,
     built_model,
+    detector_values,
     training_config,
     weights_statistics,
 )
@@ -729,15 +730,49 @@ def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
     assert entries[-1] == "/already/set/path"
 
 
-@pytest.mark.parametrize(("seen", "placed"), [(True, "cuda"), (False, "cpu")])
-def test_an_unstated_device_places_on_cuda_only_when_torch_sees_one(
-    monkeypatch: pytest.MonkeyPatch, seen: bool, placed: str
+@pytest.mark.parametrize(
+    ("accelerator", "placed"),
+    [("mps", "mps"), ("cuda", "cuda"), (None, "cpu")],
+)
+def test_an_unstated_device_places_on_the_accelerator_torch_sees_else_the_cpu(
+    monkeypatch: pytest.MonkeyPatch, accelerator: str | None, placed: str
 ) -> None:
     from tcip_mcp.pipelines.model_build import placement
 
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: seen)
+    monkeypatch.setattr(
+        torch.accelerator, "is_available", lambda: accelerator is not None
+    )
+    monkeypatch.setattr(
+        torch.accelerator,
+        "current_accelerator",
+        lambda: torch.device(accelerator or "cpu"),
+    )
 
     assert placement(None) == torch.device(placed)
+
+
+def test_leaving_a_placed_model_releases_the_accelerator_cache_and_returns_it_to_the_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.pipelines.proposal_engines import _placed
+
+    model = bespoke_models.build_bespoke_detection(
+        num_classes=1, **detector_values()
+    )
+    released: list[str] = []
+    monkeypatch.setattr(torch.accelerator, "is_available", lambda: True)
+    monkeypatch.setattr(
+        torch.accelerator, "current_accelerator", lambda: torch.device("cpu")
+    )
+    monkeypatch.setattr(
+        torch.accelerator, "empty_cache", lambda: released.append("released")
+    )
+
+    with _placed(model):
+        pass
+
+    assert released == ["released"]
+    assert {p.device for p in model.parameters()} == {torch.device("cpu")}
 
 
 def test_a_stated_device_is_placed_as_stated_while_torch_sees_cuda(
