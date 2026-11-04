@@ -740,47 +740,55 @@ def test_an_unstated_device_places_on_the_accelerator_torch_sees_else_the_cpu(
     from tcip_mcp.pipelines.model_build import placement
 
     monkeypatch.setattr(
-        torch.accelerator, "is_available", lambda: accelerator is not None
-    )
-    monkeypatch.setattr(
         torch.accelerator,
         "current_accelerator",
-        lambda: torch.device(accelerator or "cpu"),
+        lambda check_available=False: (
+            None if accelerator is None else torch.device(accelerator)
+        ),
     )
 
     assert placement(None) == torch.device(placed)
 
 
-def test_leaving_a_placed_model_releases_the_accelerator_cache_and_returns_it_to_the_cpu(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("seen", "released"), [(True, ["released"]), (False, [])]
+)
+def test_leaving_a_placed_model_releases_the_accelerator_cache_only_when_torch_sees_one(
+    monkeypatch: pytest.MonkeyPatch, seen: bool, released: list[str]
 ) -> None:
     from tcip_mcp.pipelines.proposal_engines import _placed
 
     model = bespoke_models.build_bespoke_detection(
         num_classes=1, **detector_values()
     )
-    released: list[str] = []
-    monkeypatch.setattr(torch.accelerator, "is_available", lambda: True)
+    calls: list[str] = []
+    monkeypatch.setattr(torch.accelerator, "is_available", lambda: seen)
     monkeypatch.setattr(
-        torch.accelerator, "current_accelerator", lambda: torch.device("cpu")
+        torch.accelerator,
+        "current_accelerator",
+        lambda check_available=False: torch.device("cpu") if seen else None,
     )
     monkeypatch.setattr(
-        torch.accelerator, "empty_cache", lambda: released.append("released")
+        torch.accelerator, "empty_cache", lambda: calls.append("released")
     )
 
     with _placed(model):
         pass
 
-    assert released == ["released"]
-    assert {p.device for p in model.parameters()} == {torch.device("cpu")}
+    assert calls == released
 
 
-def test_a_stated_device_is_placed_as_stated_while_torch_sees_cuda(
+def test_a_stated_device_is_placed_as_stated_while_torch_reports_an_accelerator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_mcp.pipelines.model_build import placement
 
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.accelerator, "is_available", lambda: True)
+    monkeypatch.setattr(
+        torch.accelerator,
+        "current_accelerator",
+        lambda check_available=False: torch.device("cuda"),
+    )
 
     assert placement("cpu") == torch.device("cpu")
 

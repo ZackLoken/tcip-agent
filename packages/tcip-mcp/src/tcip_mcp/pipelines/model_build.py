@@ -677,12 +677,9 @@ def placement(device: str | None) -> torch.device:
     import torch
 
     if device is None:
-        accelerator = (
-            torch.accelerator.current_accelerator()
-            if torch.accelerator.is_available()
-            else None
-        )
-        return accelerator or torch.device("cpu")
+        return torch.accelerator.current_accelerator(
+            check_available=True
+        ) or torch.device("cpu")
     return torch.device(device)
 
 
