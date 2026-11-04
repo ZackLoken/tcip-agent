@@ -89,7 +89,6 @@ def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(
     tmp_path: Path,
 ) -> None:
     import pytest
-    from pydantic import ValidationError
 
     import tcip_store as ts
     from tcip_mcp import traits
@@ -101,7 +100,7 @@ def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(
     del stored.value["revisions"][0]["entry"]["positive_state"]
     ts.replace(key, stored.value, expect=stored.version)
 
-    with pytest.raises(ValidationError, match="positive_state"):
+    with pytest.raises(ts.RecordInvalidError, match="positive_state"):
         traits.read_trait("fruit", tmp_path)
 
 

@@ -591,13 +591,13 @@ def _record(trait: str, project: str | Path, value: JsonValue) -> TraitRecord:
     """Return ``trait``'s stored ``value`` read through its schema.
 
     An absent value raises :class:`TraitUnknownError` naming the project's traits; a value the
-    schema refuses raises.
+    schema refuses raises ``tcip_store.RecordInvalidError`` naming the trait.
     """
     if value is None:
         raise TraitUnknownError(
             f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}"
         )
-    return TraitRecord.model_validate(value)
+    return ts.validated(TraitRecord, value, f"the record of trait {trait!r}")
 
 
 def read_trait(trait: str, project: str | Path) -> TraitRecord:

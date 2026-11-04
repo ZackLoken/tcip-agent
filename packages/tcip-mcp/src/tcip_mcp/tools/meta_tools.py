@@ -26,7 +26,7 @@ from tcip_mcp.audit import audited, now
 from tcip_mcp.pipelines.training.hpo import Count
 from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.server import tool
-from tcip_store import DecodeError, Key, ReadRefusal, Version
+from tcip_store import DecodeError, Key, ReadRefusal, Version, validated
 
 FrictionCategory = Literal[
     "missing_tool",
@@ -103,10 +103,13 @@ def read_memory[M: MemoryRecord](
     """Read one record of ``record``'s corpus.
 
     Raises ``NotFoundError`` when nothing is recorded under that id, ``DecodeError`` for a record
-    that will not decode, and ``ValidationError`` for one that is not a ``record``.
+    that will not decode, and ``RecordInvalidError`` naming the id for one that is not a
+    ``record``.
     """
-    return record.model_validate(
-        tcip_store.read(memory_key(record, project_path, record_id))
+    return validated(
+        record,
+        tcip_store.read(memory_key(record, project_path, record_id)),
+        f"the {_store(record)} record {record_id}",
     )
 
 
