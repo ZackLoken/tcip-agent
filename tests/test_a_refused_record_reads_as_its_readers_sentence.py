@@ -157,7 +157,9 @@ def test_opening_a_project_whose_snapshot_names_no_capture_folder_answers_its_is
     )
     write_gui_snapshot(
         made.root,
-        GUI_STATE_DEFAULTS.model_copy(update={"dataset": selection_for(choice)}),
+        GUI_STATE_DEFAULTS.model_copy(
+            update={"dataset": selection_for(choice)}
+        ),
     )
     key = gui_snapshot_key(made.root)
     stored = cast("dict[str, Any]", tcip_store.read(key))

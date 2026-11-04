@@ -571,7 +571,9 @@ def read_selection(
     document = _read_selection_document(selection_dir, project)
     if document is None:
         raise ReadRefusedError(
-            Unreadable(message="no selection recorded there; run draw_splits first."),
+            Unreadable(
+                message="no selection recorded there; run draw_splits first."
+            ),
             f"the selection at {selection_dir}",
         )
     return as_selection(document, where=str(selection_dir))
