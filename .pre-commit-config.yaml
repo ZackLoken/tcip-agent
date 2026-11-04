@@ -1,5 +1,5 @@
-# Every gate CI runs, on the staged files: `pre-commit install` once, then each commit runs
-# them; `pre-commit run --all-files` is the whole tree. The revs pin the versions CI installs.
+# A subset of CI's gates, run by each commit after `pre-commit install`; CI alone runs ruff's
+# format check, the test suites, the frontend build, the audits and the docker and environment jobs.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.8
