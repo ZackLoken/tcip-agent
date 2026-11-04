@@ -19,7 +19,7 @@ import tcip_store
 from tcip_annotation.flags import FlagRequest, ProposalTarget
 from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.workspace import PathSegment
-from tcip_store import Key, decode_value
+from tcip_store import Key
 
 if TYPE_CHECKING:
     from tcip_annotation.json_io import LabelDocument
@@ -262,16 +262,15 @@ def decode_dataset_identity_document(
 ) -> DatasetRecord:
     """Decode a dataset identity document's bytes as its :class:`DatasetRecord`.
 
-    Bytes that do not decode, or decode to no :class:`DatasetRecord`, raise ``ValueError`` naming
-    the document and ``register_dataset``.
+    Bytes that do not decode, or decode to no :class:`DatasetRecord`, raise
+    ``tcip_store.ReadRefusedError`` naming the document and ``register_dataset``.
     """
-    try:
-        return DatasetRecord.model_validate(decode_value(data))
-    except ValueError as exc:
-        raise ValueError(
-            f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
-            f"identity ({exc}); re-register with register_dataset"
-        ) from exc
+    return tcip_store.validated(
+        DatasetRecord,
+        data,
+        f"the dataset identity at {dataset_identity_path(dataset_root)} "
+        "(re-register with register_dataset)",
+    )
 
 
 def read_dataset_identity(dataset_root: str | Path) -> DatasetRecord | None:
