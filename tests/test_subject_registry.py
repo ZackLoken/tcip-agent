@@ -7,6 +7,7 @@ survives a file round-trip.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -225,14 +226,14 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(
 ) -> None:
     """An undecodable registry refuses, and an absent one says it is absent.
 
-    An undecodable registry raises ``RegistryError`` and an absent one ``FileNotFoundError``.
+    An undecodable registry raises ``ReadRefusedError`` and an absent one ``FileNotFoundError``.
     """
     path = tmp_path / "subjects.json"
     path.write_bytes(
         b'{"bud": {"description": "a currant bud"'
     )  # truncated mid-object
 
-    with pytest.raises(RegistryError):
+    with pytest.raises(ReadRefusedError, match=re.escape(str(path))):
         read_registry(tmp_path)
     with pytest.raises(FileNotFoundError):
         read_registry(tmp_path / "absent")

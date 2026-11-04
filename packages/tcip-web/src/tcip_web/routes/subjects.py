@@ -79,10 +79,7 @@ class SubjectsLoad(BaseModel):
 def load_subjects(dataset_root: str, date: str) -> SubjectsLoad:
     """Load the subject registry of the dataset at ``dataset_root`` (:class:`SubjectsLoad`)."""
     from tcip_mcp.dataset_layout import capture_subjects
-    from tcip_mcp.subject_registry import (
-        RegistryError,
-        read_versioned_registry,
-    )
+    from tcip_mcp.subject_registry import read_versioned_registry
     from tcip_store import ReadRefusedError
 
     root = allowed_path(dataset_root)
@@ -95,10 +92,8 @@ def load_subjects(dataset_root: str, date: str) -> SubjectsLoad:
             discovered=discovered,
             unreadable=unreadable,
         )
-    except (OSError, RegistryError, ReadRefusedError) as exc:
-        raise HTTPException(
-            500, f"could not parse the subject registry: {exc}"
-        ) from exc
+    except (OSError, ReadRefusedError) as exc:
+        raise HTTPException(500, str(exc)) from exc
     return SubjectsLoad(
         registry=StoredRegistry(
             subjects=registry.subjects, version=version.token

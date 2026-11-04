@@ -389,9 +389,7 @@ def test_writing_a_registry_its_model_refuses_answers_its_readers_sentence_as_an
     )
 
     assert LIBRARY_LINK not in refused["error"]
-    assert refused["error"].startswith(
-        "invalid registry: the subject registry: "
-    )
+    assert refused["error"].startswith("the subject registry: ")
     assert "subjects.0.description" in refused["error"]
     assert "error" not in written
 
@@ -432,8 +430,8 @@ def test_a_check_of_a_dataset_identity_its_model_refuses_states_the_issues(
     """A check of an identity its model refuses states the issues, with no library link.
 
     The identity ``register_dataset`` wrote has its crop changed to no text; the reason
-    ``check_dataset_identity`` answers names the document, ``register_dataset`` and that one
-    field. Bytes that do not decode refuse naming the document too.
+    ``check_dataset_identity`` answers names the document and that one field. Bytes that do not
+    decode refuse naming the document too.
     """
     from tcip_mcp.dataset_layout import dataset_identity_path
     from tcip_mcp.tools.project_tools import check_dataset_identity
@@ -448,7 +446,6 @@ def test_a_check_of_a_dataset_identity_its_model_refuses_states_the_issues(
     assert checked.reason is not None
     assert LIBRARY_LINK not in checked.reason
     assert str(path) in checked.reason
-    assert "register_dataset" in checked.reason
     assert "crop:" in checked.reason
 
     tcip_store.put_blob(

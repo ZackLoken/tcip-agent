@@ -19,7 +19,8 @@ from tcip_mcp.dataset_layout import (
     list_subjects,
     subjects_path,
 )
-from tcip_mcp.subject_registry import RegistryError, Subject, SubjectRegistry
+from tcip_mcp.subject_registry import Subject, SubjectRegistry
+from tcip_store import ReadRefusedError
 from tests._producer_fixtures import label_image, registry_over
 
 
@@ -105,12 +106,12 @@ def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
 def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(
     tmp_path: Path,
 ) -> None:
-    """A subject registry that will not decode raises ``RegistryError`` from ``list_subjects``."""
+    """A subject registry that will not decode refuses (``ReadRefusedError``) in listing."""
     root = tmp_path
     _registry(root)
     subjects_path(root).write_bytes(b"{ this is not a registry")
 
-    with pytest.raises(RegistryError):
+    with pytest.raises(ReadRefusedError):
         list_subjects(root)
 
 
