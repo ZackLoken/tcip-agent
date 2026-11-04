@@ -303,6 +303,45 @@ def test_opening_another_project_ends_every_unended_session_of_the_one_it_replac
     _assert_departed(valley, started)
 
 
+def test_an_open_whose_departing_lines_cannot_be_written_answers_the_audit_gap_with_the_open(
+    tmp_path: Path,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The open committed, so its 409 carries the open's own answer and the new project is open."""
+    from tcip_web.routes.audit_gap import AuditGapRefusal
+    from tcip_web.routes.projects import OpenAnswer
+    from tcip_web.state import SnapshotProject, store
+    from tests._audit_fixtures import refuse_audit_appends
+    from tests._web_fixtures import named_project
+
+    ws = tmp_path.parent
+    valley = named_project(ws / "valley_block", "Valley block")
+    hill = named_project(ws / "hill_block", "Hill block")
+    assert (
+        client.post(
+            "/api/projects/open", json={"id": valley.id, "user": "g"}
+        ).status_code
+        == 200
+    )
+    _open_session(client, valley.id)
+
+    refuse_audit_appends(monkeypatch)
+    resp = client.post("/api/projects/open", json={"id": hill.id, "user": "g"})
+    monkeypatch.undo()
+
+    assert resp.status_code == 409, resp.text
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+    opened = store.opened
+    assert opened is not None and opened.id == hill.id
+    assert refusal.committed == OpenAnswer(
+        project=SnapshotProject.of(opened)
+    ).model_dump(mode="json")
+    (session,) = _sessions(valley.root)
+    assert session.state.kind == "ended"
+    assert audit_rows(valley.root, "session_ended") == []
+
+
 def test_an_open_while_the_departing_stats_record_is_held_answers_409_and_opens_nothing(
     tmp_path: Path,
     client: TestClient,

@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter
 
 from tcip_mcp import workspace
+from tcip_mcp.audit import AuditEntryNotWrittenError
 from tcip_mcp.identity import actor
 from tcip_mcp.project_record import (
     CaptureInvariances,
@@ -29,6 +30,7 @@ from tcip_mcp.project_record import (
     rename_project,
     replace_invariances,
 )
+from tcip_web.routes.audit_gap import audit_gap_409
 from tcip_web.routes.dataset import DatasetTree, tree_of
 from tcip_web.state import OpenProject, SnapshotProject, store
 
@@ -149,19 +151,24 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
     """Open the project ``req.id`` names and return it (:class:`OpenAnswer`).
 
     400 for a request naming no one, 404 when the workspace holds no single project with it (a
-    project whose record will not read is not found by its id), 409 when its persisted GUI
-    state will not read, its detail the :data:`~tcip_store.ReadRefusal` saying why.
+    project whose record will not read is not found by its id), 409 when a record the open
+    reads will not read, its detail the :data:`~tcip_store.ReadRefusal` saying why, and 409
+    carrying the answer when the open committed and a departed session's audit line could not
+    be written (:class:`~tcip_web.routes.audit_gap.AuditGapRefusal`).
     """
     from tcip_store import ReadRefusedError
 
     actor(req.user)
     root, record = workspace_project(req.id)
     project = OpenProject(root, record.id)
+    answer = OpenAnswer(project=SnapshotProject.of(project))
     try:
         await store.open_project(project)
     except ReadRefusedError as exc:
         raise HTTPException(409, exc.refusal.model_dump()) from exc
-    return OpenAnswer(project=SnapshotProject.of(project))
+    except AuditEntryNotWrittenError as exc:
+        raise audit_gap_409(exc, answer) from exc
+    return answer
 
 
 def _job_conflict(target: Path) -> str | None:
