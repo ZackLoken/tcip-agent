@@ -23,7 +23,6 @@ from tcip_web.routes.sessions import (
     SessionsEnded,
     SessionsListing,
     SessionWrite,
-    stored_stats,
 )
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
@@ -107,6 +106,8 @@ def _load(client: TestClient) -> dict:
 
 def _sessions(root: Path) -> list[Session]:
     """Return the sessions ``root``'s annotation-stats record holds, latest first."""
+    from tcip_web.routes.sessions import stored_stats
+
     return stored_stats(
         tcip_store.read, annotation_stats_key(str(root))
     ).sessions
@@ -145,7 +146,7 @@ def test_throughput_is_derived_from_the_stored_entries(
     (raw_session,) = raw_sessions
     assert isinstance(raw_session, dict)
     assert set(raw_session) == {"user", "started", "state", "entries"}
-    (stored,) = stored_stats(tcip_store.read, key).sessions
+    (stored,) = _sessions(opened.root)
     assert [e.activity for e in stored.entries] == [
         "new_annotation",
         "review",
