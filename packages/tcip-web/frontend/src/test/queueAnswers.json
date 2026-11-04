@@ -1,39 +1,4 @@
 {
-  "scorers": {
-    "scorers": [
-      {
-        "name": "uncertainty",
-        "values_schema": {
-          "additionalProperties": false,
-          "properties": {},
-          "title": "ScorerValues",
-          "type": "object"
-        }
-      },
-      {
-        "name": "diversity",
-        "values_schema": {
-          "additionalProperties": false,
-          "properties": {},
-          "title": "ScorerValues",
-          "type": "object"
-        }
-      },
-      {
-        "name": "combined",
-        "values_schema": {
-          "additionalProperties": false,
-          "properties": {
-            "uncertainty_weight": { "title": "Uncertainty Weight", "type": "number" },
-            "diversity_weight": { "title": "Diversity Weight", "type": "number" }
-          },
-          "required": ["uncertainty_weight", "diversity_weight"],
-          "title": "ScorerValues",
-          "type": "object"
-        }
-      }
-    ]
-  },
   "typed_scorers": {
     "scorers": [
       {
