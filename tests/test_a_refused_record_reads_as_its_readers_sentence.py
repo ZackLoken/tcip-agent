@@ -8,7 +8,7 @@ sentence, and a door answering the refusal as a record answers the issues the se
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -99,15 +99,21 @@ def test_opening_a_project_whose_gui_snapshot_is_refused_answers_its_readers_iss
 ) -> None:
     """Opening a project whose GUI snapshot its model refuses answers 409 with the issues.
 
-    The sentence ``read_gui_snapshot`` raises names the project, and the route's detail holds the
-    issues it states.
+    The snapshot ``write_gui_snapshot`` wrote has its tab changed to one outside the vocabulary.
+    The sentence ``read_gui_snapshot`` raises names the project and that one field, and the
+    route's detail holds the issues it states.
     """
-    from tcip_mcp.web_client import gui_snapshot_key, read_gui_snapshot
+    from tcip_mcp.web_client import (
+        GUI_STATE_DEFAULTS,
+        gui_snapshot_key,
+        read_gui_snapshot,
+        write_gui_snapshot,
+    )
 
+    write_gui_snapshot(made.root, GUI_STATE_DEFAULTS)
+    key = gui_snapshot_key(made.root)
     tcip_store.replace(
-        gui_snapshot_key(made.root),
-        {"active_tab": "not-a-real-tab"},
-        expect=tcip_store.Version.ABSENT,
+        key, tcip_store.read(key) | {"active_tab": "not-a-real-tab"}
     )
 
     with pytest.raises(ValueError) as refused:
@@ -120,7 +126,56 @@ def test_opening_a_project_whose_gui_snapshot_is_refused_answers_its_readers_iss
     assert LIBRARY_LINK not in sentence
     assert str(made.root) in sentence
     assert resp.status_code == 409
-    assert _states(sentence, resp.json()["detail"])
+    detail = resp.json()["detail"]
+    assert [issue["loc"] for issue in detail["issues"]] == [["active_tab"]]
+    assert _states(sentence, detail)
+
+
+def test_opening_a_project_whose_snapshot_names_no_capture_folder_answers_its_issues(
+    client: TestClient, made: OpenProject
+) -> None:
+    """Opening a project whose snapshot's capture is no path segment answers 409, invalid.
+
+    The snapshot ``write_gui_snapshot`` wrote over a real capture has its date changed to one
+    holding a separator. The sentence ``read_gui_snapshot`` raises carries no library link, and
+    the route's detail is the ``invalid`` refusal of the issues it states.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.web_client import (
+        GUI_STATE_DEFAULTS,
+        DatasetChoice,
+        gui_snapshot_key,
+        read_gui_snapshot,
+        selection_for,
+        write_gui_snapshot,
+    )
+    from tests._producer_fixtures import write_image
+
+    write_image(image_dir(made.root, "2026-02-11") / "img.png", (8, 8))
+    choice = DatasetChoice(
+        dataset_root=str(made.root), date="2026-02-11", current_image_index=0
+    )
+    write_gui_snapshot(
+        made.root,
+        GUI_STATE_DEFAULTS.model_copy(update={"dataset": selection_for(choice)}),
+    )
+    key = gui_snapshot_key(made.root)
+    stored = cast("dict[str, Any]", tcip_store.read(key))
+    stored["dataset"]["date"] = "2026/02/11"
+    tcip_store.replace(key, stored)
+
+    with pytest.raises(ValueError) as refused:
+        read_gui_snapshot(made.root)
+    resp = client.post(
+        "/api/projects/open", json={"id": made.id, "user": "grower"}
+    )
+
+    sentence = str(refused.value)
+    assert LIBRARY_LINK not in sentence
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "invalid"
+    assert _states(sentence, detail)
 
 
 def test_opening_a_project_whose_gui_snapshot_its_writer_wrote_opens_it(
@@ -183,12 +238,19 @@ def test_a_refused_delivery_event_refuses_the_listing_with_its_readers_issues(
 ) -> None:
     """A delivery event its model refuses refuses the listing (400) with the issues it raises.
 
-    The sentence ``read_delivery_events`` raises names the event's id.
+    The event a real delivery recorded has its time changed to no instant. The sentence
+    ``read_delivery_events`` raises names the event's id and that one field.
     """
     from tcip_mcp import delivery
+    from tests._trait_fixtures import seed_confirmed_count
+    from tests.test_delivery_events import _record
 
+    event_id = _record(opened_project, seed_confirmed_count(opened_project))[
+        "delivery_event_id"
+    ]
+    key = delivery.delivery_event_key(opened_project, event_id)
     tcip_store.replace(
-        delivery.delivery_event_key(opened_project, "e1"), {"event_id": "e1"}
+        key, tcip_store.read(key) | {"produced_at": "not an instant"}
     )
 
     with pytest.raises(ValueError) as refused:
@@ -197,6 +259,53 @@ def test_a_refused_delivery_event_refuses_the_listing_with_its_readers_issues(
 
     sentence = str(refused.value)
     assert LIBRARY_LINK not in sentence
-    assert "e1" in sentence
+    assert event_id in sentence
     assert resp.status_code == 400
-    assert _states(sentence, resp.json()["detail"])
+    detail = resp.json()["detail"]
+    assert [issue["loc"] for issue in detail["issues"]] == [["produced_at"]]
+    assert _states(sentence, detail)
+
+
+def test_a_preflight_over_a_detector_whose_objects_span_no_pixel_names_the_geometry(
+    project: Path,
+) -> None:
+    """A preflight whose detector geometry cannot derive states why, naming the geometry.
+
+    Every box the labels hold is half a pixel across, so the finest anchor size floors to
+    nothing; the preflight's issue names the derived detector geometry and the refused field,
+    and carries no library link.
+    """
+    pytest.importorskip("torch")
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests._producer_fixtures import (
+        label_image,
+        painted_frame,
+        registry_of,
+        registry_over,
+        small_detection_config,
+    )
+
+    registry_over(project, registry_of("bud"))
+    images = image_dir(project, UNDATED_BUCKET)
+    images.mkdir(parents=True)
+    for i in range(4):
+        image = images / f"img{i}.png"
+        painted_frame(
+            64, 64, (90, 90, 90), [((20, 20, 40, 40), (250, 250, 250))]
+        ).save(image)
+        label_image(
+            image,
+            [Annotation(subject="bud", geometry=BBox(10, 10, 10.5, 10.5))],
+            64,
+            64,
+        )
+
+    issues = preflight_config(
+        project, small_detection_config(images, project=project)
+    )["issues"]
+
+    (issue,) = [i for i in issues if "anchor_base_size" in i]
+    assert LIBRARY_LINK not in issue
+    assert "detector geometry" in issue
