@@ -374,7 +374,6 @@ def _segment_counts(
         plants_without_segment=tie.plants_without_segment,
         plants_within_position_error=tie.plants_within_position_error,
         plants_with_ambiguous_detections=ambiguous,
-        detections_unattributed=sum(by_source.values()),
         detections_unattributed_by_source=by_source,
         plant_attribution=SegmentAssignment.plant_attribution,
     )

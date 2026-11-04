@@ -392,7 +392,6 @@
               "plants_without_segment": ["plot1"],
               "plants_within_position_error": ["plot3"],
               "plants_with_ambiguous_detections": ["plot4"],
-              "detections_unattributed": 2,
               "detections_unattributed_by_source": {
                 "outside_segments": 1,
                 "overlapping_segments": 1,

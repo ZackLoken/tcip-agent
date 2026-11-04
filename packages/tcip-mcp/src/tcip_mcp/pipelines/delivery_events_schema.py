@@ -101,10 +101,9 @@ class CanopySegmentDisclosure(BaseModel):
     plants_without_segment: list[str]
     plants_within_position_error: list[str]
     plants_with_ambiguous_detections: list[str]
-    detections_unattributed: int
     detections_unattributed_by_source: dict[UnattributedSegmentSource, int]
-    """The unattributed detections by the segment source that left each one unattributed; their
-    sum is ``detections_unattributed``, a count over the delivered raster."""
+    """The unattributed detections over the delivered raster, by the segment source that left each
+    one unattributed."""
     plant_attribution: str
 
 
