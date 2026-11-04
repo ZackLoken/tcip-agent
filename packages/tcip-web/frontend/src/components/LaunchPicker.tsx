@@ -11,7 +11,6 @@ import { messageOf, readRefusalText, StructuredRefusalError } from "@/api/http";
 import {
   ADMITTED,
   BLOCKED,
-  type Blocked,
   type ChoiceCheck,
   type SelectionChoice,
   type SplitChoices,
@@ -42,11 +41,6 @@ function choiceLabel(s: SelectionChoice | UnreadSelectionChoice): ReactNode {
  * one that read answers by its check. */
 function checkOf(s: SelectionChoice | UnreadSelectionChoice): ChoiceCheck | UnreadSelectionChoice {
   return s.kind === UNREAD ? s : s.check;
-}
-
-/** Why a choice cannot be bound: its check's reason, or why its selection will not read. */
-function refusedText(refused: Blocked | UnreadSelectionChoice): string {
-  return refused.kind === UNREAD ? readRefusalText(refused.reason) : refused.reason;
 }
 
 export interface LaunchPickerRow {
@@ -199,7 +193,7 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
                                   {row.data.as_recorded.check.kind === BLOCKED &&
                                     selectedDataDir !== null && (
                                       <span className="block tcip-problem">
-                                        {row.data.as_recorded.check.reason}
+                                        {readRefusalText(row.data.as_recorded.check.reason)}
                                       </span>
                                     )}
                                 </span>
@@ -234,7 +228,7 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
                                           {check.kind !== ADMITTED &&
                                             choice.selection_dir !== selectedDataDir && (
                                               <span className="block tcip-problem">
-                                                {refusedText(check)}
+                                                {readRefusalText(check.reason)}
                                               </span>
                                             )}
                                         </span>
@@ -265,7 +259,7 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
                         </div>
                       ) : current !== undefined && current.kind !== ADMITTED ? (
                         <div className="mt-1 text-[12px] tcip-problem" role="status">
-                          {refusedText(current)}
+                          {readRefusalText(current.reason)}
                         </div>
                       ) : refusal?.key === row.key ? (
                         <ul role="status" className="mt-1 text-[13px] tcip-problem list-disc pl-4">
