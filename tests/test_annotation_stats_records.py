@@ -36,7 +36,7 @@ def _contribute(
 def test_the_record_the_session_routes_write_reads_back_through_its_model_unchanged(
     client: TestClient, opened: OpenProject
 ) -> None:
-    from tcip_web.routes.sessions import ImageEntry, read_stats
+    from tcip_web.routes.sessions import ImageEntry, stored_stats
 
     alice = _contribute(client, opened.id, "alice", "c-alice")
     bob = _contribute(client, opened.id, "bob", "c-bob")
@@ -46,8 +46,9 @@ def test_the_record_the_session_routes_write_reads_back_through_its_model_unchan
     )
     assert ended.status_code == 200, ended.text
 
-    raw = tcip_store.read(annotation_stats_key(str(opened.root)))
-    stats = read_stats(raw, "the stats record")
+    key = annotation_stats_key(str(opened.root))
+    raw = tcip_store.read(key)
+    stats = stored_stats(tcip_store.read, key)
 
     stored = stats.model_dump(mode="json")
     assert stored == raw
