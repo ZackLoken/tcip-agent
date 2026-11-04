@@ -852,7 +852,7 @@ export interface Banner {
 
 export interface Blocked {
   kind: "blocked";
-  reason: string;
+  reason: ReadRefusal;
 }
 
 export interface BoundColumn {

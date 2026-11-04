@@ -761,10 +761,9 @@ Reader: `read_gui_snapshot`, `tcip_mcp/web_client.py`, run by `StateStore.open_p
 (`tcip_web/state.py`) each time a project is opened and by the MCP `view_gui_state` tool; a snapshot
 that does not decode as its whole shape raises.
 
-`StateStore.mutate` validates the merged mutation through `GuiState` before holding it, raising
-`GuiMutationInvalidError` (`tcip_web/state.py`) on a field that does not validate or a key
-`GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler` answers a route that raises
-it with 400 and the validation message rather than the 500 an unhandled `ValueError` would produce.
+`StateStore.mutate` validates the merged mutation through `GuiState` (`tcip_store.validated`)
+before holding it, raising `tcip_store.ReadRefusedError` on a field that does not validate or a key
+`GuiState` does not declare. Every caller hands it typed values, so no route answers that refusal.
 
 Seam S10 ("Live GUI state snapshot"): one writer and one reader, both in `tcip_mcp/web_client.py`;
 `tests/test_active_context.py` persists through the backend's own `StateStore` and reads the

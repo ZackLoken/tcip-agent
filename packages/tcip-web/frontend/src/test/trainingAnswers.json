@@ -2248,7 +2248,15 @@
       "line": "draws its split again with seed 0 over the labels as they are now",
       "check": {
         "kind": "blocked",
-        "reason": "Not found: data.images_dir = '/scratch/workspace/moved-data/images/undated'"
+        "reason": {
+          "kind": "invalid",
+          "issues": [
+            {
+              "loc": [],
+              "msg": "Not found: data.images_dir = '/scratch/workspace/moved-data/images/undated'"
+            }
+          ]
+        }
       }
     },
     "selections": []

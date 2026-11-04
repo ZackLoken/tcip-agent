@@ -15,6 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import JsonValue
     from starlette.testclient import httpx
 
@@ -265,21 +267,90 @@ def test_read_selection_checked_tells_absence_apart_from_a_broken_record(
     assert ["group_by"] in [issue.loc for issue in broken_error.issues]
 
 
-def _bound_to_a_selection_damaged_after_binding(tmp_path: Path) -> dict:
-    """Return a config of ``tmp_path`` bound to a selection whose record was then refused.
-
-    The selection is a real draw, a run binding it opened as ``exp-bound``; its record is then
-    replaced by one the selection's model refuses.
-    """
-    from tcip_mcp.pipelines.data.selection import selection_key
-
+def _bound_to_a_draw(tmp_path: Path) -> dict:
+    """Return a config of ``tmp_path`` bound to a real draw, opened as the run ``exp-bound``."""
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     bound = tmp_path / "bound"
     _draw(tmp_path, root, bound)
     config = _bound_config(root, bound, tmp_path)
     opened_run(tmp_path, config, experiment_id="exp-bound")
-    ts.replace(selection_key(bound), {"seed": 1, "samples": []})
     return config
+
+
+def _bound_to_a_selection_damaged_after_binding(tmp_path: Path) -> dict:
+    """Return :func:`_bound_to_a_draw`'s config, its selection's record then refused.
+
+    The record is replaced by one the selection's model refuses.
+    """
+    from tcip_mcp.pipelines.data.selection import selection_key
+
+    config = _bound_to_a_draw(tmp_path)
+    ts.replace(
+        selection_key(config["data"]["split"]["selection_dir"]),
+        {"seed": 1, "samples": []},
+    )
+    return config
+
+
+def _bound_to_a_selection_deleted_after_binding(tmp_path: Path) -> dict:
+    """Return :func:`_bound_to_a_draw`'s config, its selection's record then deleted."""
+    from tcip_mcp.pipelines.data.selection import selection_key
+
+    config = _bound_to_a_draw(tmp_path)
+    ts.delete(selection_key(config["data"]["split"]["selection_dir"]))
+    return config
+
+
+@pytest.mark.parametrize(
+    ("bound_to", "kind"),
+    [
+        (_bound_to_a_selection_damaged_after_binding, "invalid"),
+        (_bound_to_a_selection_deleted_after_binding, "unreadable"),
+    ],
+)
+def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+    bound_to: Callable[[Path], dict],
+    kind: str,
+) -> None:
+    """The split route serves a bound run's refused selection as the record its reader raises.
+
+    The "As recorded" check is blocked and its reason is ``read_selection``'s refusal as a
+    record: the selection model's issues for a record it refuses, the absence's sentence for one
+    no longer recorded.
+    """
+    from tcip_mcp.pipelines.data.selection import read_selection
+
+    config = bound_to(tmp_path)
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        read_selection(
+            config["data"]["split"]["selection_dir"], project=tmp_path
+        )
+
+    check = client.get("/api/training/runs/exp-bound/splits").json()[
+        "as_recorded"
+    ]["check"]
+
+    assert check["kind"] == "blocked"
+    assert check["reason"] == refused.value.refusal.model_dump(mode="json")
+    assert check["reason"]["kind"] == kind
+
+
+def test_the_split_route_admits_a_bound_run_over_the_selection_it_drew(
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+) -> None:
+    """The split route admits "As recorded" for a bound run over the draw it bound, untouched."""
+    _bound_to_a_draw(tmp_path)
+
+    check = client.get("/api/training/runs/exp-bound/splits").json()[
+        "as_recorded"
+    ]["check"]
+
+    assert check == ADMITTED
 
 
 def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_does(
@@ -287,9 +358,9 @@ def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_
 ) -> None:
     """The preflight and the split picker state one unreadable bound selection alike.
 
-    The preflight's issue for it and the "As recorded" row's reason are each the sentence
-    ``read_selection`` raises: the selection model's issues behind the selection's place,
-    carrying no library documentation link.
+    The "As recorded" row's reason is the refusal ``read_selection`` raises, and the preflight's
+    issue for it is that refusal behind the selection's place, as the reader's error states
+    them; neither carries a library documentation link.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.training_tools import (
@@ -300,19 +371,19 @@ def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_
 
     config = _bound_to_a_selection_damaged_after_binding(tmp_path)
 
-    with pytest.raises(ValueError) as refused:
+    with pytest.raises(ts.ReadRefusedError) as refused:
         read_selection(
             config["data"]["split"]["selection_dir"], project=tmp_path
         )
     issues = preflight_config(tmp_path, config)["issues"]
     check = list_split_choices(tmp_path, "exp-bound").as_recorded.check
 
-    sentence = str(refused.value)
+    assert isinstance(check, Blocked)
+    assert check.reason == refused.value.refusal
+    sentence = str(ts.ReadRefusedError(check.reason, refused.value.where))
     assert "errors.pydantic.dev" not in sentence
     assert "group_by: " in sentence
     assert sentence in issues
-    assert isinstance(check, Blocked)
-    assert check.reason == sentence
 
 
 def test_a_trial_over_an_unreadable_bound_selection_records_the_models_issues(
@@ -585,19 +656,17 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
     The row's reason names ``data.images_dir`` as not found.
     """
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import list_split_choices
+    from tcip_mcp.tools.training_tools import Blocked, list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     cfg = _bespoke_config(tmp_path, image_dir(root, DATES[0]))
     opened_run(tmp_path, cfg, experiment_id="exp-moved-dirs")
     shutil.rmtree(image_dir(root, DATES[0]))
 
-    result = list_split_choices(tmp_path, "exp-moved-dirs").model_dump()
+    check = list_split_choices(tmp_path, "exp-moved-dirs").as_recorded.check
 
-    assert (
-        "Not found: data.images_dir"
-        in result["as_recorded"]["check"]["reason"]
-    )
+    assert isinstance(check, Blocked)
+    assert "Not found: data.images_dir" in str(check.reason)
 
 
 def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces(

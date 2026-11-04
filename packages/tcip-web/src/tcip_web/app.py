@@ -40,7 +40,6 @@ from tcip_mcp.web_client import (
 from tcip_store import bind
 from tcip_web.routes import register_all as _register_routes
 from tcip_web.state import (
-    GuiMutationInvalidError,
     NoProjectOpenError,
     NoSelectionError,
     PanelEnvelope,
@@ -106,16 +105,6 @@ async def _bad_request_handler(
     or an act naming no person.
     """
     return JSONResponse(status_code=400, content={"detail": str(exc)})
-
-
-@app.exception_handler(GuiMutationInvalidError)
-async def _invalid_mutation_handler(
-    _request: Request, exc: GuiMutationInvalidError
-) -> JSONResponse:
-    """Answer an invalid GUI mutation 400 with the model's issues as the detail."""
-    return JSONResponse(
-        status_code=400, content={"detail": exc.refusal.model_dump()}
-    )
 
 
 app.add_exception_handler(NoSelectionError, _bad_request_handler)
