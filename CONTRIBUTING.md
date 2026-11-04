@@ -41,9 +41,10 @@ CI's jobs, whose module docstring says which steps it leaves to CI.
   done-criterion and the invariants, and a test-engineering read of every guard's fail-before
   verdict and of whether each test reaches the boundary a breeder or the agent touches; their
   verdicts are recorded on the pull request.
-- The crop trait vocabulary is controlled: it lives in `crops.yml` and
-  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`. Do not invent a trait name, state, or column
-  prefix anywhere else; thread a real trait through as data read from the project's own registry.
+- The crop trait vocabulary is controlled. It lives in `crops.yml` and
+  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`, and the operating contract
+  (`packages/tcip-mcp/src/tcip_mcp/knowledge/operating-contract.md`) states the rule the suite
+  holds a change to.
 - The platform has one maintainer, and every change lands through the maintainer's own review.
   A pull request from outside is read as a report of what its author needs: it is reviewed,
   what it asks for is re-implemented under these rules when the roadmap takes it, and the pull
