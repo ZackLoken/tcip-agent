@@ -218,6 +218,8 @@ describe("LaunchPicker", () => {
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
     fireEvent.click(radioOf(ENABLED.selection_dir));
     expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
+    // As recorded is no longer the checked choice, so its own reason shows inline, once.
+    expect(screen.getAllByText(reasonOf(MOVED_SPLIT_CHOICES.as_recorded.check))).toHaveLength(1);
   });
 
   it("shows the recorded split keys a candidate would replace beside its own row", () => {
