@@ -135,11 +135,11 @@ is applied before the renderer is chosen; the live smoke is what shows the pin h
 shipped file's academic WebFetch grants are generated from the `cv-research` document by
 `tools/generate_harness_discovery.py`, as are its `Edit` denials, from the harness files and the
 state directory `tcip_store` names. Its deny list's relative patterns resolve against the
-workspace the agent runs in (Claude Code's permissions page; a `/path` pattern anchors at the temporary settings file's
-directory instead): every project's `.tcip` store, written through the tools alone, and the
-instruction files and skills the launches write. Every row's agent runs in the backend's
-workspace and reads the operating contract and the skills its row's preparation wrote there,
-never the repository's. Claude's row loads project settings only (`--setting-sources project`),
+workspace the agent runs in (Claude Code's permissions page; a `/path` pattern anchors at the
+temporary settings file's directory instead): every project's `.tcip` store, written through the
+tools alone, and the instruction files and skills the launches write. Every row's agent runs in
+the backend's workspace and reads the operating contract and the skills its row's preparation
+wrote there, never the repository's. Claude's row loads project settings only (`--setting-sources project`),
 so neither the user's own settings, hooks and `CLAUDE.md` nor the developer's auto-memory reach
 the breeder's agent.
 
