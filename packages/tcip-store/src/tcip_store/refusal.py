@@ -1,10 +1,11 @@
-"""Why a record or value will not read, and the two boundaries that state it.
+"""Why a record or value will not read or a check refuses it, and the two read boundaries.
 
 :func:`validated` validates a raw value against its model and, when the model refuses it, raises
 :class:`~tcip_store.errors.ReadRefusedError` carrying every error the model raised, each by its
 place and message (:class:`Invalid`), behind where the value lives. :func:`unreadable` raises the
-same error carrying :class:`Unreadable`, the sentence of any other error that stops a read. Each
-reads as text where a sentence carries it.
+same error carrying :class:`Unreadable`, the sentence of any other error that stops a read. A
+check that refuses a value states each objection as an issue of an :class:`Invalid`, its place
+empty when it names none. Each reads as text where a sentence carries it.
 """
 
 from __future__ import annotations
@@ -19,17 +20,17 @@ from tcip_store.errors import ReadRefusedError
 
 
 class Issue(BaseModel):
-    """One error a model's validation raised, or one objection a check states, and what (``msg``).
+    """One error a model's validation raised, or one objection a check states.
 
     ``loc`` is where in the input it lies, empty for the input as a whole or an objection that
-    names no place.
+    names no place, and ``msg`` is what it is.
     """
 
     loc: list[str | int]
     msg: str
 
     def __str__(self) -> str:
-        """Return the message behind its dotted place, or alone for the input as a whole."""
+        """Return the message behind its dotted place, or alone when its place is empty."""
         return (
             f"{'.'.join(map(str, self.loc))}: {self.msg}"
             if self.loc
@@ -68,7 +69,7 @@ class Invalid(BaseModel):
         )
 
     def __str__(self) -> str:
-        """Return each issue as text, in the order the model raised them."""
+        """Return each issue as text, in the order the model raised or the check stated them."""
         return "; ".join(map(str, self.issues))
 
 
@@ -84,7 +85,7 @@ class Unreadable(BaseModel):
 
 
 type ReadRefusal = Annotated[Invalid | Unreadable, Field(discriminator="kind")]
-"""Why a record will not read, told apart by its ``kind``."""
+"""Why a record will not read or a check refuses a value, told apart by its ``kind``."""
 
 
 @overload
