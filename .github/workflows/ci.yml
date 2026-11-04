@@ -133,7 +133,6 @@ jobs:
         working-directory: packages/tcip-web/frontend
         run: npm ci --no-fund --no-audit
 
-      # Both ruff steps read the whole tree, here the Commands block's roots (ruff.toml says why).
       - name: Lint (ruff)
         run: ruff check .
 
