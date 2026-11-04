@@ -151,10 +151,10 @@ def test_a_detector_built_at_the_derived_geometry_sees_a_small_tile_at_its_nativ
 
 def test_regions_holding_no_object_leave_a_geometry_its_type_refuses() -> None:
     """Regions holding no object derive no anchor base, which the geometry's type refuses."""
-    from pydantic import ValidationError
+    from tcip_store import ReadRefusedError
 
     empty = [Region(np.zeros((0, 4), np.float32), np.zeros(0, np.int64), 64.0)]
-    with pytest.raises(ValidationError, match="anchor_base_size"):
+    with pytest.raises(ReadRefusedError, match="anchor_base_size"):
         derive_detector_geometry((8, 8), empty)
 
 

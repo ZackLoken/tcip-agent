@@ -77,13 +77,12 @@ def is_bucket_name(name: str) -> bool:
     It is legal as a :data:`~tcip_mcp.workspace.PathSegment` that does not start with a dot, so a
     hidden directory (an editor's swap file, platform cruft) is never mistaken for one.
     """
-    from pydantic import ValidationError
-
     from tcip_mcp.workspace import path_segment
+    from tcip_store import ReadRefusedError
 
     try:
         path_segment(name)
-    except ValidationError:
+    except ReadRefusedError:
         return False
     return not name.startswith(".")
 
@@ -693,8 +692,6 @@ def admitted(
     each such fault naming the subject once with the images that name it. Each fault names what
     to do instead; an image named no image is given no key.
     """
-    from pydantic import ValidationError
-
     from tcip_annotation.flags import flags_of
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
@@ -707,8 +704,8 @@ def admitted(
         stem_of,
     )
     from tcip_mcp.pipelines.raster_source import SourceHeader
-    from tcip_mcp.read_refusal import read_refusal
     from tcip_mcp.subject_registry import registry_for_dataset_root
+    from tcip_store import ReadRefusedError
 
     keys: dict[Key, ImageClaim] = {}
     claimed: dict[Key, str] = {}
@@ -742,10 +739,8 @@ def admitted(
                 try:
                     document = label_document(item.document)
                     flags_of(item.flags)
-                except (UnreadableLabelDocumentError, ValidationError) as exc:
-                    faults.append(
-                        f"{where} does not read: {read_refusal(exc)}"
-                    )
+                except (UnreadableLabelDocumentError, ReadRefusedError) as exc:
+                    faults.append(f"{where} does not read: {exc}")
                     continue
                 labeled = (document.width, document.height)
                 for subject in {a.subject for a in document.annotations} | set(

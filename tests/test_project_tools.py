@@ -1118,7 +1118,7 @@ def test_initialize_project_refuses_a_present_but_invalid_record(
     )
 
     assert "error" in result
-    assert "is not a project record" in result["error"]
+    assert f"the project record of {tmp_path}" in result["error"]
 
 
 def test_initialize_project_refuses_an_undecodable_record(

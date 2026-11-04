@@ -125,7 +125,9 @@ describe("a read refusal's text", () => {
   it("issuesText joins each issue's dotted place and message, a placeless one by its message", () => {
     const delivery = UNREADABLE_DELIVERIES.body.detail;
     if (delivery.kind !== INVALID) throw new Error("the produced refusal is not a model's");
-    expect(issuesText(UNREADABLE_TRAIT.reason.issues)).toBe(
+    const trait = UNREADABLE_TRAIT.reason;
+    if (trait.kind !== INVALID) throw new Error("the produced trait refusal is not a model's");
+    expect(issuesText(trait.issues)).toBe(
       "revisions.0.entry.localization: Input should be '', 'center_match' or 'iou_match'; " +
         "revisions: Tuple should have at least 1 item after validation, not 0",
     );

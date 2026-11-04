@@ -10,7 +10,10 @@ root `CLAUDE.md` and the operating contract it imports, which apply here and are
 src/tcip_store/
   __init__.py          # the public surface, re-exported
   model.py             # Key, Version, Versioned, LogPage, canonical_path
-  errors.py            # every refusal the seam raises
+  errors.py            # every refusal the seam raises, a record that will not read among them
+  refusal.py           # why a record will not read, as served (a model's issues by place and
+                        #   message, or the error's sentence), and its two boundaries: validated,
+                        #   the one validation, and unreadable, any other error stopping a read
   values.py            # what a value must be to be stored, and its two spellings: a record
                         #   (encode_record) and a log line (encode_log_line), read by decode_value
   store.py             # the module functions over the one backend a process binds

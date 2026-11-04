@@ -2113,7 +2113,7 @@ export interface Unreadable {
 
 export interface UnreadableTrait {
   trait: string;
-  reason: Invalid;
+  reason: ReadRefusal;
 }
 
 export interface UnvalidatedBucket {

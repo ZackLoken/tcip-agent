@@ -18,15 +18,21 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    ValidationError,
 )
 
 import tcip_store
 from tcip_mcp.audit import audited, now
 from tcip_mcp.pipelines.training.hpo import Count
-from tcip_mcp.read_refusal import ReadRefusal, read_refusal
 from tcip_mcp.server import tool
-from tcip_store import DecodeError, Key, Version
+from tcip_store import (
+    Key,
+    ReadRefusal,
+    ReadRefusedError,
+    StoreError,
+    Version,
+    unreadable,
+    validated,
+)
 
 FrictionCategory = Literal[
     "missing_tool",
@@ -102,12 +108,14 @@ def read_memory[M: MemoryRecord](
 ) -> M:
     """Read one record of ``record``'s corpus.
 
-    Raises ``NotFoundError`` when nothing is recorded under that id, ``DecodeError`` for a record
-    that will not decode, and ``ValidationError`` for one that is not a ``record``.
+    Raises ``tcip_store.ReadRefusedError`` naming the id: for one that is not a ``record``, its
+    issues; for nothing recorded under that id or a record that will not decode, that error's
+    sentence.
     """
-    return record.model_validate(
-        tcip_store.read(memory_key(record, project_path, record_id))
-    )
+    where = f"the {_store(record)} record {record_id}"
+    with unreadable(where, StoreError):
+        raw = tcip_store.read(memory_key(record, project_path, record_id))
+    return validated(record, raw, where)
 
 
 def _write_memory(project: Path, record: MemoryRecord) -> str:
@@ -164,8 +172,8 @@ def memory_entries[M: MemoryRecord](
         name = key.parts[0]
         try:
             read = read_memory(record, project_path, name)
-        except (DecodeError, ValidationError) as exc:
-            unread.append(UnreadEntry(id=name, reason=read_refusal(exc)))
+        except ReadRefusedError as exc:
+            unread.append(UnreadEntry(id=name, reason=exc.refusal))
         else:
             stated.append((read.timestamp, ReadEntry(id=name, record=read)))
     stated.sort(key=lambda pair: pair[0], reverse=True)

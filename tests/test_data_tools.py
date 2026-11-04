@@ -1558,7 +1558,7 @@ def test_read_selection_refuses_a_sample_missing_its_own_ground_truth(
     samples[0].pop("ground_truth")
     ts.replace(selection_key(out), document)
 
-    with pytest.raises(ValueError, match=r"ground_truth\s+Field required"):
+    with pytest.raises(ValueError, match="ground_truth: Field required"):
         read_selection(out, project=tmp_path)
 
 

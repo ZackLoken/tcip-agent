@@ -36,6 +36,7 @@ from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.text import Text
 from tcip_mcp.pipelines.execution import NoPass, cross_tile_merge_of
 from tcip_mcp.pipelines.model_build import placement
+from tcip_store import validated
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -316,14 +317,17 @@ class PromptableSegmenter:
         The proposal is :class:`~tcip_mcp.pipelines.execution.NoPass`'s: a prompt window is no
         tiled pass.
 
-        ``params`` is :class:`SegmenterParams`, refused as that model refuses it. Each prompt runs
-        on its :func:`prompt_window` at the processor's own ``longest_edge``, prompts sharing a
-        window sharing one image embedding. Each candidate is :func:`mask_candidate`'s moved into
-        the frame (:func:`shifted_candidate`), its ``score`` the mask's predicted IoU and its
-        ``engine_meta`` the ``prompt``'s index over ``points`` then ``boxes``, the mask's
-        ``rank`` among that prompt's masks and the ``window`` the model saw.
+        ``params`` is :class:`SegmenterParams`, refused (``tcip_store.ReadRefusedError``) as
+        that model refuses it. Each prompt runs on its :func:`prompt_window` at the processor's
+        own ``longest_edge``, prompts sharing a window sharing one image embedding. Each candidate
+        is :func:`mask_candidate`'s moved into the frame (:func:`shifted_candidate`), its
+        ``score`` the mask's predicted IoU and its ``engine_meta`` the ``prompt``'s index over
+        ``points`` then ``boxes``, the mask's ``rank`` among that prompt's masks and the
+        ``window`` the model saw.
         """
-        stated = SegmenterParams.model_validate(params)
+        stated = validated(
+            SegmenterParams, params, f"{self.name} engine_params"
+        )
         import numpy as np
         import torch
 
@@ -506,11 +510,14 @@ class TextPromptedDetector:
     def propose(self, image_path: str, **params: JsonValue) -> Proposal:
         """Return a box candidate per detection over the frame, through the platform's tiled pass.
 
-        ``params`` is :class:`DetectorParams`, refused as that model refuses it. The frame runs
-        through :class:`PhraseDetectionModel` by :func:`detected_proposal`, the processor's own
-        ``shortest_edge`` the model's input edge, whose refusals propagate.
+        ``params`` is :class:`DetectorParams`, refused (``tcip_store.ReadRefusedError``) as that
+        model refuses it. The frame runs through :class:`PhraseDetectionModel` by
+        :func:`detected_proposal`, the processor's own ``shortest_edge`` the model's input edge,
+        whose refusals propagate.
         """
-        stated = DetectorParams.model_validate(params)
+        stated = validated(
+            DetectorParams, params, f"{self.name} engine_params"
+        )
         pixels = upright_pixels(image_path)
         with _MODEL_CALLS:
             model, processor = _detector(stated.checkpoint)

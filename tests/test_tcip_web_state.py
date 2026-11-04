@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import pytest
-from pydantic import ValidationError
 
 import tcip_store
 from tcip_mcp.agent_identity import RecordedIdentity
@@ -289,7 +288,7 @@ def test_opening_a_project_whose_snapshot_does_not_decode_refuses_and_leaves_the
         expect=tcip_store.Version.ABSENT,
     )
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(tcip_store.ReadRefusedError, match="active_tab"):
         asyncio.run(store.open_project(proj_b))
     assert store.opened == proj_a
 

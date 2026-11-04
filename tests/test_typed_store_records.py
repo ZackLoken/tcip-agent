@@ -73,7 +73,7 @@ def test_a_sweep_record_reads_back_as_written_and_one_missing_a_field_refuses(
     stored = json.loads(path.read_text(encoding="utf-8"))
     del stored["input"]
     path.write_text(json.dumps(stored), encoding="utf-8")
-    with pytest.raises(ValidationError, match=r"input\s+Field required"):
+    with pytest.raises(ts.ReadRefusedError, match="input: Field required"):
         observe_sweep(sweep_dir)
 
 
@@ -94,7 +94,7 @@ def test_a_run_record_reads_back_as_its_launch_wrote_it_and_one_missing_a_field_
     stored = json.loads(path.read_text(encoding="utf-8"))
     del stored["dataset"]
     path.write_text(json.dumps(stored), encoding="utf-8")
-    with pytest.raises(ValidationError, match=r"dataset\s+Field required"):
+    with pytest.raises(ts.ReadRefusedError, match="dataset: Field required"):
         read_run(run_dir)
 
 
@@ -113,11 +113,11 @@ def test_a_run_record_whose_partition_sample_states_no_member_refuses_at_the_rea
     del stored["resolved"]["partition"]["samples"][0]["member"]
     path.write_text(json.dumps(stored), encoding="utf-8")
 
-    with pytest.raises(ValidationError) as refused:
+    with pytest.raises(ts.ReadRefusedError) as refused:
         observe_run(run_dir)
 
-    (error,) = refused.value.errors()
-    assert error["loc"][-4:] == ("partition", "samples", 0, "member")
+    (issue,) = refused.value.refusal.issues
+    assert issue.loc[-4:] == ["partition", "samples", 0, "member"]
 
 
 def test_an_execution_record_stating_no_sources_refuses_naming_them() -> None:
@@ -247,7 +247,7 @@ def test_a_registry_index_missing_a_field_refuses_naming_it(
     )
 
     with pytest.raises(
-        ValidationError, match=r"entries\.0\.sha256\s+Field required"
+        ts.ReadRefusedError, match=r"entries\.0\.sha256: Field required"
     ):
         read_registry_index(tmp_path)
 
@@ -414,7 +414,7 @@ def test_a_final_status_missing_a_field_refuses_naming_it(
     del stored["ended"]
     path.write_text(json.dumps(stored), encoding="utf-8")
 
-    with pytest.raises(ValidationError, match=r"ended\s+Field required"):
+    with pytest.raises(ts.ReadRefusedError, match="ended: Field required"):
         observe(run_dir)
 
 
@@ -479,7 +479,7 @@ def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
     del entry["by"]
     ts.replace(flag_key(key), {"flags": [entry]})
     with pytest.raises(
-        ValidationError, match=r"flags\.0\.by\s+Field required"
+        ts.ReadRefusedError, match=r"flags\.0\.by: Field required"
     ):
         read_flags(flag_key(key))
 

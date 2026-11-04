@@ -639,12 +639,11 @@ def test_the_door_refuses_an_unknown_trait_and_a_revision_that_does_not_exist(
     missing = opened_client.post(CONFIRM_ROUTE, json={**body, "revision": 2})
 
     assert unknown.status_code == 400
-    assert isinstance(unknown.json()["detail"], dict)
-    assert unknown.json()["detail"]["kind"] == "unreadable"
-    assert "not_a_trait" in unknown.json()["detail"]["message"]
+    assert isinstance(unknown.json()["detail"], str)
+    assert "not_a_trait" in unknown.json()["detail"]
     assert missing.status_code == 400
-    assert isinstance(missing.json()["detail"], dict)
-    assert "not 2" in missing.json()["detail"]["message"]
+    assert isinstance(missing.json()["detail"], str)
+    assert "not 2" in missing.json()["detail"]
 
 
 def test_a_committed_confirmation_returns_its_audit_failure_as_a_warning(

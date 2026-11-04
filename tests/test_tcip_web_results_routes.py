@@ -78,40 +78,30 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
-def test_a_confirmation_over_a_record_its_schema_refuses_answers_the_schemas_issues(
+def test_list_traits_names_a_record_that_will_not_decode_by_the_stores_sentence(
     client: TestClient, opened_project: Path
 ) -> None:
-    """A confirmation of a trait whose stored record its schema refuses answers 400 with why.
+    """The trait listing names a record whose bytes do not decode, with the store's sentence.
 
-    The detail is the schema's issues, each by its place in the record and its message, and
-    carries no library documentation link.
+    The trait's record its proposal and confirmation wrote is damaged past its writer with bytes
+    that are not JSON; it is listed under ``unreadable`` with an ``unreadable`` reason.
     """
     from tcip_mcp import traits
+    from tests._record_damage_fixtures import damage_record
 
-    record = traits.read_trait("bud_opening", opened_project)
-    revision = record.latest
-    stored = record.model_dump(mode="json")
-    stored["revisions"][0]["entry"]["localization"] = "unicorn_match"
-    tcip_store.replace(traits.trait_key(opened_project, "bud_opening"), stored)
-
-    resp = client.post(
-        "/api/results/traits/confirm",
-        json={
-            "trait": "bud_opening",
-            "revision": revision.number,
-            "entry_sha256": revision.entry_sha256,
-            "user": "tester",
-            "confirmed": True,
-        },
+    damage_record(
+        traits.trait_key(opened_project, "bud_opening"), b"{not valid json"
     )
 
-    assert resp.status_code == 400
-    assert "errors.pydantic.dev" not in resp.text
-    detail = resp.json()["detail"]
-    assert isinstance(detail, dict) and detail["kind"] == "invalid"
-    assert ["revisions", 0, "entry", "localization"] in [
-        issue["loc"] for issue in detail["issues"]
-    ]
+    resp = client.get("/api/results/traits")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["traits"] == []
+    (entry,) = body["unreadable"]
+    assert entry["trait"] == "bud_opening"
+    assert entry["reason"]["kind"] == "unreadable"
+    assert "does not decode" in entry["reason"]["message"]
 
 
 def test_plant_mapping_build_requires_a_registered_dataset(
