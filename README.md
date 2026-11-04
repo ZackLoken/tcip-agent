@@ -133,7 +133,8 @@ environment replaces it with the CUDA 13.2 build, the one PyTorch's install page
 pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu132
 ```
 
-On a Mac the environment's torch runs on Apple's GPU as installed, and the CUDA line is not run there.
+On macOS the CUDA line is not run, and an unstated device places on the accelerator torch
+reports there.
 
 The build writes the bundle inside the `tcip-web` package, so the environment's editable install
 serves it at once; a wheel or the Docker image carries the bundle built before it was made.

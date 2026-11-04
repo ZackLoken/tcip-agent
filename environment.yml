@@ -4,10 +4,8 @@
 # with the dependencies and extras each declares. Run it from the
 # repository root so the editable paths resolve.
 #
-# torch is the CPU build on Linux and Windows while the CPU index and PyPI carry the same newest
-# release, whose +cpu build outranks PyPI's (a CUDA build on Linux); macOS takes its own arm64 wheel.
-
-# README.md's Setup names the CUDA line.
+# torch is the +cpu build while the CPU index and PyPI carry the same newest release; on macOS pip
+# resolved torch-2.15.0-cp313-cp313-macosx_14_0_arm64.whl, no +cpu tag. CUDA: README.md's Setup.
 name: tcip-agent
 channels:
   - conda-forge
