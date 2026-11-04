@@ -73,8 +73,8 @@ or schema currently serves one, that implementation is replaceable and the guara
 - Gates before a pull request: the Commands block's lines for what the change touched (the ruff
   and mypy lines for Python, the markdown line for a markdown file, the five frontend lines for a
   frontend file), and the change's own test files, each run to its end and its output read before
-  the pull request opens. CI is the full gate. A test touching the filesystem outside `tmp_path` is the first reread on a break that
-  only shows in CI.
+  the pull request opens. CI is the full gate. A test touching the filesystem outside `tmp_path` is
+  the first reread on a break that only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
   as proof a change was safe, check that some fixture could have come out differently.
 - A guard test reads what the agent or the breeder receives through its producer (the hook's
