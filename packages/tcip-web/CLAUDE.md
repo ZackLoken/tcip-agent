@@ -71,15 +71,15 @@ project stays without one, whatever project its agent's MCP server creates and a
 but a resume is told the operating contract's posture section first, read from the contract itself.
 For a new conversation the rest is the project as `inspect_project` answers for it, the findings
 `diagnose_project` answers (beside how many there are) and each memory corpus's newest entries as
-`load_project_memory` pages them; after a compaction the memory alone; for a session launched for
-none, that it has none and to hold each report until `initialize_project` creates the project it
-lands in; on a resume nothing; with where the knowledge documents are served beside each.
-Antigravity documents no hook after a compaction and injects an always-on rule into every turn, so
-its row's rule carries the contract and names the tools the orientation's parts come from, for the
-agent to call again once the conversation's earlier turns are summarized. The parts are fit to
-`ORIENTATION_CAP`, Claude Code's documented cap: whole while all fit together, otherwise sharing the
-room so a part needing less than an equal share keeps all of it, each cut part stating how many it
-was cut from and a part that does not fit standing as a short fixed statement of it; Codex's hook
+`load_project_memory` pages them; after a compaction the memory alone; for a session launched for no
+project, that it was launched with none and to hold each report until `initialize_project` creates
+the project it lands in; on a resume nothing; with where the knowledge documents are served beside
+each. Antigravity documents no hook after a compaction and injects an always-on rule into every
+turn, so its row's rule carries the contract and names the tools the orientation's parts come from,
+for the agent to call again once the conversation's earlier turns are summarized. The parts are fit
+to `ORIENTATION_CAP`, Claude Code's documented cap: whole while all fit together, otherwise sharing
+the room so a part needing less than an equal share keeps all of it, each cut part stating how many
+it was cut from and a part that does not fit standing as a short fixed statement of it; Codex's hook
 passes its whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness
 reads from a hook's stdout, so it reaches the agent as context, never as a pasted message, and
 `diagnose_project` runs in the backend, outside every harness's sandbox. `TerminalSession.deliver`
