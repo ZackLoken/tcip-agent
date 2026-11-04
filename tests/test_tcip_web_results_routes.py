@@ -77,6 +77,33 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
     ]
 
 
+@pytest.mark.usefixtures("seed_bud_operationalization")
+def test_list_traits_names_a_record_that_will_not_decode_by_the_stores_sentence(
+    client: TestClient, opened_project: Path
+) -> None:
+    """The trait listing names a record whose bytes do not decode, with the store's sentence.
+
+    The trait's record its proposal and confirmation wrote is damaged past its writer with bytes
+    that are not JSON; it is listed under ``unreadable`` with an ``unreadable`` reason.
+    """
+    from tcip_mcp import traits
+    from tests._record_damage_fixtures import damage_record
+
+    damage_record(
+        traits.trait_key(opened_project, "bud_opening"), b"{not valid json"
+    )
+
+    resp = client.get("/api/results/traits")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["traits"] == []
+    (entry,) = body["unreadable"]
+    assert entry["trait"] == "bud_opening"
+    assert entry["reason"]["kind"] == "unreadable"
+    assert "does not decode" in entry["reason"]["message"]
+
+
 def test_plant_mapping_build_requires_a_registered_dataset(
     client: TestClient,
     opened_project: Path,
