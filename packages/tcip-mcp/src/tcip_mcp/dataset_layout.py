@@ -263,13 +263,12 @@ def decode_dataset_identity_document(
     """Decode a dataset identity document's bytes as its :class:`DatasetRecord`.
 
     Bytes that do not decode, or decode to no :class:`DatasetRecord`, raise
-    ``tcip_store.ReadRefusedError`` naming the document and ``register_dataset``.
+    ``tcip_store.ReadRefusedError`` naming the document.
     """
     return tcip_store.validated(
         DatasetRecord,
         data,
-        f"the dataset identity at {dataset_identity_path(dataset_root)} "
-        "(re-register with register_dataset)",
+        f"the dataset identity at {dataset_identity_path(dataset_root)}",
     )
 
 
