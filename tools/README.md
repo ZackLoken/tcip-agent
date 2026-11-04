@@ -4,18 +4,17 @@ Not a Python package (no `__init__.py`); each file is an entry point run with
 `python tools/<name>.py`, or from the repository root as `python -m tools.<name>` when it imports
 the test suite's helpers or another tool. Read a script's own module docstring and `--help` for
 exact usage; this index only says what each does. CI and development tooling only; the operator
-commands a breeder or an operator runs against a project are documented in `README.md` and
-`CONTRIBUTING.md` instead.
+commands a breeder or an operator runs against a project are documented in `README.md`'s Running
+section instead.
 
 - `gate_baseline.py` - runs CI's own jobs locally; its module docstring says which jobs and steps
   it leaves out.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
   current test tree so conftest and helpers travel with the test, proves the baseline's own source
   is what gets imported, and reads pytest's per-test outcome to say whether a test actually fails
-  without its fix. Four verdicts on four exit codes: `GUARDS` (0), `VACUOUS` (1), `INDETERMINATE`
-  (2) when the baseline is not shown to precede the change, and `REFUSED` (3) when nothing was
-  selected, everything was skipped, collection failed, or every failure was a missing import. Only
-  `GUARDS` is evidence. The default baseline is `HEAD` for uncommitted work and the merge-base
+  without its fix. Four verdicts, `GUARDS`, `VACUOUS`, `INDETERMINATE` and `REFUSED`, each its own
+  exit code, whose meanings its module docstring states; only `GUARDS` is evidence. The default
+  baseline is `HEAD` for uncommitted work and the merge-base
   against the integration branch otherwise; a change spans one commit per concern, so the previous
   commit is not its baseline, and `--baseline` is passed when neither default applies. `--test-rev`
   checks a guard claim already in the history.

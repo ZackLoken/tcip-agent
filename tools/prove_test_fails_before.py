@@ -27,7 +27,8 @@ Four verdicts, each its own exit code:
                        the verdict, so a hung baseline is told apart from a merely slow one
     REFUSED (3)        no verdict is available: nothing was selected, everything was skipped, the
                        baseline could not collect the file, the baseline's own source was not what
-                       got imported, pytest never reported an outcome, or every failure is
+                       got imported, pytest hit an internal error or never reported an outcome,
+                       every failure rests on a missing import or file, or every failure is
                        fixture-shaped so the code under test was never reached. A setup or
                        teardown failure that is neither a missing import or file nor a
                        pytest-timeout report is fixture-shaped, whatever raised it; a call-phase
