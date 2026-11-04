@@ -115,8 +115,8 @@ app.add_exception_handler(NoActorError, _bad_request_handler)
 async def _conflict_handler(_request: Request, exc: Exception) -> JSONResponse:
     """Answer 409 with the reason.
 
-    For a request made while no project is open, or whose store transaction found its record
-    held by another writer or changed since it was read.
+    For a request made while no project is open, or whose store write found its record locked
+    by another writer or at a version other than the one it expected.
     """
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
