@@ -43,8 +43,8 @@ CI's jobs, whose module docstring says which steps it leaves to CI.
   verdicts are recorded on the pull request.
 - The crop trait vocabulary is controlled. It lives in `crops.yml` and
   `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`, and the operating contract
-  (`packages/tcip-mcp/src/tcip_mcp/knowledge/operating-contract.md`) states the rule the suite
-  holds a change to.
+  (`packages/tcip-mcp/src/tcip_mcp/knowledge/operating-contract.md`) states the rule a change
+  is read against.
 - The platform has one maintainer, and every change lands through the maintainer's own review.
   A pull request from outside is read as a report of what its author needs: it is reviewed,
   what it asks for is re-implemented under these rules when the roadmap takes it, and the pull
