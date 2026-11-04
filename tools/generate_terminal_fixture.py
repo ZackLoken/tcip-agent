@@ -20,15 +20,15 @@ sequence a second after it starts, is given :data:`HELD_REQUEST` once its socket
 holds, and the count frames its socket sends until the request is pasted are kept (``held``).
 Then, with no override and every row's executable running the fake
 (``tests._terminal_fixtures.fake_executable``), a second project is opened, the first row is
-launched (``row_launch``), its hook's report of :data:`CONVERSATION` is posted through
-``POST .../session-start`` once its agent wrote its banner, the backend's sessions are ended by
-its shutdown (``shutdown_all``), and the row launched again (``resumed_launch``). Last, the
-status of those rows but the third, which names ``tests._terminal_fixtures.ABSENT``
+launched (``row_launch``), its hook's report of :data:`CONVERSATION`, naming no transcript, is
+posted through ``POST .../session-start`` once its agent wrote its banner, the backend's sessions
+are ended by its shutdown (``shutdown_all``), and the row launched again (``resumed_launch``).
+Last, the status of those rows but the third, which names ``tests._terminal_fixtures.ABSENT``
 (``status_mixed``), and of rows all naming it (``status_absent``), are listed. The answers, each
 refusal with its status, are written, normalized (``fixture_session.normalized``) with each
 session id minted read as its order, the interpreter as ``<python>``, the fake as
 ``<fake agent>``, the executable running it as ``<fake executable>`` and each path a row launch
-names after ``--settings``, ``--mcp-config`` and ``--add-dir`` as that flag's name, to
+names after ``--settings`` and ``--mcp-config`` as that flag's name, to
 :data:`GENERATED_PATH`.
 
     python -m tools.generate_terminal_fixture
@@ -74,7 +74,7 @@ HELD_REQUEST = "held"
 CONVERSATION = "conv-1"
 """The conversation a row launch's hook reports, which the next launch of the row resumes."""
 
-LAUNCH_FILES = ("--settings", "--mcp-config", "--add-dir")
+LAUNCH_FILES = ("--settings", "--mcp-config")
 """The flags of a row launch's argv whose paths each launch or checkout names differently."""
 
 
@@ -226,7 +226,11 @@ def produce() -> dict[str, JsonValue]:
             client,
             "session_start",
             200,
-            SessionStartReport(conversation=CONVERSATION, source="startup"),
+            SessionStartReport(
+                conversation=CONVERSATION,
+                source="startup",
+                transcript_path=None,
+            ),
             path=first_row,
         )
         terminal_routes.shutdown_all()

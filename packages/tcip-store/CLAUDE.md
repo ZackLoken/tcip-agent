@@ -2,7 +2,7 @@
 
 The storage seam: a root's records and logs in one SQLite database, and the files the platform
 writes by path. Bottom of the stack, depending on nothing else in the platform. Loads on top of the
-root `CLAUDE.md`; invariants and operating posture there apply here and aren't restated.
+root `CLAUDE.md` and the operating contract it imports, which apply here and aren't restated.
 
 ## Layout
 

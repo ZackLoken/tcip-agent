@@ -3,4 +3,4 @@ name: project-setup
 description: 'The front-door arc: turn a breeder''s raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers creating the project (its id, display name, site and capture invariances), ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, model-proposed bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset.'
 ---
 
-The content is at `packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md`. Read it in full before acting in its domain.
+Read it whole through the tcip tool `serve_domain_knowledge(name='project-setup')` before acting in its domain.

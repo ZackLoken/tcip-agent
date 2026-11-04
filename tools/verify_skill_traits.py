@@ -23,6 +23,7 @@ from pathlib import Path
 import yaml
 
 from tcip_mcp import traits as registry
+from tcip_mcp.knowledge import CROPS
 
 
 def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
@@ -38,7 +39,7 @@ def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
         crops = trait.get("crops")
         if not isinstance(crops, list) or not crops:
             raise ValueError(
-                f"trait {trait['name']!r} in {registry.crops_yml_path()} declares no crops, so "
+                f"trait {trait['name']!r} in {CROPS.path} declares no crops, so "
                 "its per-crop assignment cannot be checked"
             )
         allnames.add(trait["name"])

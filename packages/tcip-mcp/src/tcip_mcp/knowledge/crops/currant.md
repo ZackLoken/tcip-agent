@@ -27,8 +27,8 @@ resistance, late-frost tolerance, high yield, and high sugar / low acid.
 
 ## Trait authority
 
-crops.yml is the trait authority (86 currant traits). Verify every trait there;
-never assert one it does not list. This skill does not reproduce the catalog.
+crops.yml is the trait authority (86 currant traits), served whole by
+`serve_domain_knowledge(name='crops')`. Verify every trait there; never assert one it does not list. This skill does not reproduce the catalog.
 
 ## Field-imageable vs lab / destructive
 

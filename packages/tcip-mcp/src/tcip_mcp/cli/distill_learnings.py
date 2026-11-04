@@ -109,7 +109,8 @@ def build_workspace_worksheet(workspace: Path) -> str:
     cross_themes = _cross_project_themes(per_project_tokens)
     if cross_themes:
         lines.append(
-            "\n## Cross-project recurring themes (candidates for a skill line or a CLAUDE.md rule)"
+            "\n## Cross-project recurring themes (candidates for a skill line or an "
+            "operating-contract rule)"
         )
         lines.append(
             "A theme here appeared in reports/retrospectives from multiple distinct projects, a "
@@ -196,7 +197,8 @@ def build_worksheet(project: Path) -> str:
     themes = _themes(text)
     if themes:
         lines.append(
-            "\n## Recurring themes (candidates for a skill line or a CLAUDE.md rule)"
+            "\n## Recurring themes (candidates for a skill line or an operating-contract "
+            "rule)"
         )
         for word, n in themes:
             lines.append(f"- {word} ×{n}")
@@ -224,9 +226,9 @@ def build_worksheet(project: Path) -> str:
 
     lines.append(
         "\n---\nNow (per the self-improvement skill) draft the concrete artifacts, a new/updated "
-        "`packages/tcip-mcp/src/tcip_mcp/knowledge/<name>.md`, a proposed CLAUDE.md diff, or a "
-        "tool proposal, for the owner to approve. This script gathers; the judgment is yours. "
-        "Nothing here is applied."
+        "`packages/tcip-mcp/src/tcip_mcp/knowledge/<name>.md`, a proposed diff of the "
+        "operating-contract document, or a tool proposal, for the owner to approve. This "
+        "script gathers; the judgment is yours. Nothing here is applied."
     )
     return "\n".join(lines) + "\n"
 
