@@ -133,7 +133,7 @@ def save_subjects(payload: SaveSubjectsPayload) -> RegistrySave:
         SubjectRegistry,
         replace_registry,
     )
-    from tcip_store import Version, VersionConflictError
+    from tcip_store import Version
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
@@ -150,8 +150,6 @@ def save_subjects(payload: SaveSubjectsPayload) -> RegistrySave:
         )
     except RegistryError as exc:
         raise HTTPException(400, str(exc)) from exc
-    except VersionConflictError as exc:
-        raise HTTPException(409, str(exc)) from exc
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(
             exc, RegistrySave.model_validate(exc.arguments)
