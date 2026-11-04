@@ -71,9 +71,9 @@ or schema currently serves one, that implementation is replaceable and the guara
   platform only to itself proves nothing about the number. A change replacing a hand-written
   implementation with a library call lands with that test as its gate.
 - Gates before a pull request: the Commands block's lines for what the change touched (the ruff
-  and mypy lines for Python, the five frontend lines for a frontend file), and the change's own
-  test files, each run to its end and its output read before the pull request opens. CI is the
-  full gate. A test touching the filesystem outside `tmp_path` is the first reread on a break that
+  and mypy lines for Python, the markdown line for a markdown file, the five frontend lines for a
+  frontend file), and the change's own test files, each run to its end and its output read before
+  the pull request opens. CI is the full gate. A test touching the filesystem outside `tmp_path` is the first reread on a break that
   only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
   as proof a change was safe, check that some fixture could have come out differently.
@@ -113,6 +113,7 @@ ruff check packages tests tools
 ruff format --check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
+npx --yes markdownlint-cli2@0.23.3   # the markdown gate, run from the repo root
 npm --prefix packages/tcip-web/frontend run format:check   # the frontend gate, whole and in order
 npm --prefix packages/tcip-web/frontend run lint
 npm --prefix packages/tcip-web/frontend run typecheck
