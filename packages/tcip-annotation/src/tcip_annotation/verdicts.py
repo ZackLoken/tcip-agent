@@ -87,16 +87,20 @@ def read_verdicts(key: Key) -> list[Verdict]:
     """Return every verdict the shard ``key`` names holds, oldest first.
 
     Each goes through :func:`decode_verdict`, naming the shard and the entry's position; an absent
-    shard holds none. Entries that will not decode refuse (``ValueError``) naming their positions.
+    shard holds none. A shard that will not read, or holds entries that will not decode (named by
+    their positions), raises ``tcip_store.ReadRefusedError``.
     """
-    page = tcip_store.read_log(key)
+    shard = f"the verdict shard {'/'.join(key.parts)}"
+    with tcip_store.unreadable(shard, tcip_store.StoreError):
+        page = tcip_store.read_log(key)
     if page.corrupt:
-        raise ValueError(
-            f"verdict shard {key.parts} holds entries at {page.corrupt} that will "
-            "not decode"
+        raise tcip_store.ReadRefusedError(
+            tcip_store.Unreadable(
+                message=f"entries at {page.corrupt} will not decode"
+            ),
+            shard,
         )
-    shard = "/".join(key.parts)
     return [
-        decode_verdict(entry, f"entry {i} of the verdict shard {shard}")
+        decode_verdict(entry, f"entry {i} of {shard}")
         for i, entry in enumerate(page.records)
     ]

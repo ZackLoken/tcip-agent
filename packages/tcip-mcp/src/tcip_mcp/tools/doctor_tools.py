@@ -247,7 +247,7 @@ def check_state(
     import tcip_store
     from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
-    from tcip_store import StoreError
+    from tcip_store import ReadRefusedError, StoreError
 
     for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(root)):
         try:
@@ -263,10 +263,8 @@ def check_state(
         name, stem = key.parts
         try:
             read_verdicts(key)
-        except (ValueError, StoreError) as exc:
-            findings.append(
-                ("warn", f"verdict shard {name}/{stem} will not read: {exc}")
-            )
+        except ReadRefusedError as exc:
+            findings.append(("warn", str(exc)))
             continue
         bucket = buckets.get(name)
         if bucket is None:
