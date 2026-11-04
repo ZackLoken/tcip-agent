@@ -42,7 +42,6 @@ from tcip_mcp.pipelines.delivery_events_schema import (
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 from tcip_mcp.pipelines.postprocessing.segment_attribution import PositionError
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
-from tcip_mcp.read_refusal import read_refusal
 from tcip_mcp.tools.model_tools import RegisteredModels
 from tcip_mcp.traits import TraitRevision
 from tcip_store import Invalid
@@ -814,9 +813,8 @@ def confirm_trait_revision(
     Both go through ``traits.confirm_revision``.
 
     Refused with 409 when the hash is not the revision's own (:class:`RevisionMovedRefusal`),
-    and with 400 for every other refusal, its detail the
-    :data:`~tcip_mcp.read_refusal.ReadRefusal` saying why. Records the name the request
-    supplied, refusing a blank one; it is not authentication.
+    and with 400 for every other refusal, its detail the refusal's sentence. Records the name
+    the request supplied, refusing a blank one; it is not authentication.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.identity import actor
@@ -853,7 +851,7 @@ def confirm_trait_revision(
             ),
         ) from e
     except (TraitUnknownError, ValueError) as e:
-        raise HTTPException(400, read_refusal(e).model_dump()) from e
+        raise HTTPException(400, str(e)) from e
     return ConfirmedRevision(
         revision=revision,
         audit_warning=audit_warning,
