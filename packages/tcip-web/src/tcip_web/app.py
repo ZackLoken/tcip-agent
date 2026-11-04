@@ -37,7 +37,7 @@ from tcip_mcp.web_client import (
     PanelPost,
     ProjectNotOpenRefusal,
 )
-from tcip_store import bind
+from tcip_store import StoreBusyError, VersionConflictError, bind
 from tcip_web.routes import register_all as _register_routes
 from tcip_web.state import (
     NoProjectOpenError,
@@ -112,12 +112,18 @@ app.add_exception_handler(NotABucketError, _bad_request_handler)
 app.add_exception_handler(NoActorError, _bad_request_handler)
 
 
-@app.exception_handler(NoProjectOpenError)
-async def _no_project_open_handler(
-    _request: Request, exc: NoProjectOpenError
-) -> JSONResponse:
-    """Answer 409 with the no-project exception's detail."""
+async def _conflict_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """Answer 409 with the reason.
+
+    For a request made while no project is open, or whose store transaction found its record
+    held by another writer or changed since it was read.
+    """
     return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+app.add_exception_handler(NoProjectOpenError, _conflict_handler)
+app.add_exception_handler(StoreBusyError, _conflict_handler)
+app.add_exception_handler(VersionConflictError, _conflict_handler)
 
 
 @app.exception_handler(ProjectNotOpenError)
