@@ -286,16 +286,19 @@ def derive_detector_geometry(
     characteristic sizes (:func:`char_sizes`) floored to a pixel, so the levels doubling it cover
     the spread upward from there, and the aspect ratios :func:`gt_aspect_ratios` derives from
     their boxes. The percentile is this method's own setting, not measured. Regions holding no
-    object, or none a pixel across at that percentile, leave a value the record's type refuses.
+    object, or none a pixel across at that percentile, leave a value the record's type refuses
+    (``tcip_store.ReadRefusedError`` naming the geometry and the frame).
     """
     import math
 
     import numpy as np
 
     from tcip_mcp.pipelines.schemas import DetectorGeometry
+    from tcip_store import validated
 
     sizes = char_sizes(r.boxes for r in regions)
-    return DetectorGeometry.model_validate(
+    return validated(
+        DetectorGeometry,
         {
             "min_size": min(frame),
             "max_size": max(frame),
@@ -310,7 +313,8 @@ def derive_detector_geometry(
                 ]
             ),
             "source": DETECTOR_GEOMETRY_DERIVATION,
-        }
+        },
+        f"the detector geometry derived at the frame {frame}",
     )
 
 

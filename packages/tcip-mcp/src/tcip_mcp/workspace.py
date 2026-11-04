@@ -84,8 +84,11 @@ _SEGMENT = TypeAdapter(PathSegment)
 
 
 def path_segment(name: str) -> str:
-    """Return ``name`` once it is a :data:`PathSegment`; refuses (``ValidationError``) otherwise."""
-    return _SEGMENT.validate_python(name)
+    """Return ``name`` once it is a :data:`PathSegment`.
+
+    Refuses otherwise (``tcip_store.ReadRefusedError`` naming ``name``).
+    """
+    return tcip_store.validated(_SEGMENT, name, f"the path segment {name!r}")
 
 
 def project_dirs(workspace: Path) -> list[Path]:
