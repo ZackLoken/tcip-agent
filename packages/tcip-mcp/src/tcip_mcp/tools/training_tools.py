@@ -50,7 +50,14 @@ from tcip_mcp.pipelines.training.tensorboard_manager import (
 )
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
-from tcip_store import ReadRefusal, StoreError, canonical_path
+from tcip_store import (
+    Invalid,
+    Issue,
+    ReadRefusal,
+    ReadRefusedError,
+    StoreError,
+    canonical_path,
+)
 
 tool()(available_search_algs)
 tool()(available_schedulers)
@@ -788,10 +795,14 @@ class Admitted(BaseModel):
 
 
 class Blocked(BaseModel):
-    """A relaunch choice its compatibility check refuses, and why."""
+    """A relaunch choice its compatibility check refuses, and why.
+
+    ``reason`` is the refusal of a selection that will not read, or each of the check's
+    objections as an issue of its own.
+    """
 
     kind: Literal["blocked"] = "blocked"
-    reason: str
+    reason: ReadRefusal
 
 
 type ChoiceCheck = Annotated[Admitted | Blocked, Field(discriminator="kind")]
@@ -799,8 +810,12 @@ type ChoiceCheck = Annotated[Admitted | Blocked, Field(discriminator="kind")]
 
 
 def _checked(reasons: list[str]) -> ChoiceCheck:
-    """Return the check that refuses for ``reasons`` joined, or admits when there are none."""
-    return Blocked(reason="; ".join(reasons)) if reasons else Admitted()
+    """Return the check that refuses with each of ``reasons`` as an issue, or admits for none."""
+    return (
+        Blocked(reason=Invalid(issues=[Issue(loc=[], msg=r) for r in reasons]))
+        if reasons
+        else Admitted()
+    )
 
 
 class AsRecordedChoice(BaseModel):
@@ -862,11 +877,12 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
 
     Every check is :func:`selection_compatibility` over a selection this reader read itself: the
     run's own through :func:`~tcip_mcp.pipelines.data.selection.read_selection`, whose refusal
-    is the "As recorded" reason as a launch states it, and each candidate through
+    alone is the "As recorded" reason, with no candidate listed, and each candidate through
     :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
     selection is checked against the data block :func:`data_with_selection` builds
     (``data.split`` replaced wholesale); "As recorded" is checked against the stated config
-    unchanged, plus the directory-presence issues :func:`preflight_config` would raise.
+    unchanged, and an unbound one also for the directory-presence issues
+    :func:`preflight_config` would raise.
 
     The listing: the selection directories other runs of this project bound (the picked run's
     own excluded, since it is "As recorded"), plus, when
@@ -911,10 +927,14 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
             own_selection = read_selection(
                 split.selection_dir, project=project
             )
-        except ValueError as exc:
-            reasons = [str(exc)]
-        else:
-            reasons = selection_compatibility(data, split, own_selection)
+        except ReadRefusedError as exc:
+            return SplitChoices(
+                as_recorded=AsRecordedChoice(
+                    case=case, line=line, check=Blocked(reason=exc.refusal)
+                ),
+                selections=[],
+            )
+        reasons = selection_compatibility(data, split, own_selection)
     elif own.record.resolved is None:
         case, line = "drawn", "resolved to nothing at its launch"
         reasons = [
