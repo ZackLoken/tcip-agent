@@ -51,9 +51,12 @@ def encode_verdict(verdict: Verdict) -> dict[str, JsonValue]:
     return _VERDICT.dump_python(verdict, mode="json")
 
 
-def decode_verdict(entry: JsonValue) -> Verdict:
-    """Return one stored entry as a :class:`Verdict`, refusing as :class:`Verdict` does."""
-    return _VERDICT.validate_python(entry)
+def decode_verdict(entry: JsonValue, where: str) -> Verdict:
+    """Return one stored entry, which lives at ``where``, as a :class:`Verdict`.
+
+    An entry the model refuses raises ``tcip_store.ReadRefusedError`` behind ``where``.
+    """
+    return tcip_store.validated(_VERDICT, entry, where)
 
 
 REVIEW_VERDICTS_STORE = "review_verdicts"
@@ -83,8 +86,8 @@ def record_verdicts(
 def read_verdicts(key: Key) -> list[Verdict]:
     """Return every verdict the shard ``key`` names holds, oldest first.
 
-    Each goes through :func:`decode_verdict`; an absent shard holds none. Entries that will not
-    decode refuse (``ValueError``) naming their positions.
+    Each goes through :func:`decode_verdict`, naming the shard and the entry's position; an absent
+    shard holds none. Entries that will not decode refuse (``ValueError``) naming their positions.
     """
     page = tcip_store.read_log(key)
     if page.corrupt:
@@ -92,4 +95,8 @@ def read_verdicts(key: Key) -> list[Verdict]:
             f"verdict shard {key.parts} holds entries at {page.corrupt} that will "
             "not decode"
         )
-    return [decode_verdict(entry) for entry in page.records]
+    shard = "/".join(key.parts)
+    return [
+        decode_verdict(entry, f"entry {i} of the verdict shard {shard}")
+        for i, entry in enumerate(page.records)
+    ]

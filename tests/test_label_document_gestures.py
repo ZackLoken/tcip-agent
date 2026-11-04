@@ -246,7 +246,7 @@ def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_rea
     )
 
     ts.append(key, {**encode_verdict(decided), "action": "maybe"})
-    with pytest.raises(ValueError, match="maybe"):
+    with pytest.raises(ValueError, match="entry 1 .*action"):
         read_verdicts(key)
 
 
@@ -276,7 +276,10 @@ def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(
 
     (decided,) = read_verdicts(verdict_key_of(image_label_key(image), bucket))
     with pytest.raises(ValueError, match="a person"):
-        decode_verdict(encode_verdict(replace(decided, by="save_annotations")))
+        decode_verdict(
+            encode_verdict(replace(decided, by="save_annotations")),
+            "the shard",
+        )
     stored = ts.read(image_label_key(image))
     assert isinstance(stored, dict)
     marks = stored[json_io.COMPLETION_KEY]
@@ -759,6 +762,48 @@ def test_a_bucket_document_that_will_not_read_answers_400_at_the_proposals_route
     resp = client.get("/api/annotate/proposals", params=params)
     assert resp.status_code == 400, resp.text
     assert "record 0" in resp.text
+
+
+def test_a_verdict_entry_its_model_refuses_answers_400_with_its_readers_sentence(
+    tmp_path: Path, client: TestClient
+) -> None:
+    """A verdict shard entry its model refuses answers 400 with the sentence its reader raises.
+
+    The shard ``label_image`` recorded a verdict in has a second entry, the first with its action
+    changed to none the model admits. The sentence names the shard, the entry's position and that
+    one field, and carries no library link.
+    """
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj").root
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
+    label_image(
+        image,
+        project=root,
+        labels=[],
+        gestures=Gestures(
+            decide=Decisions(bucket=bucket, verdicts={0: "accepted"})
+        ),
+    )
+    key = verdict_key_of(image_label_key(image), bucket)
+    (decided,) = read_verdicts(key)
+    ts.append(key, {**encode_verdict(decided), "action": "maybe"})
+
+    with pytest.raises(ValueError) as refused:
+        read_verdicts(key)
+    resp = client.get(
+        "/api/annotate/proposals",
+        params={"image_path": str(image), "bucket": bucket},
+    )
+
+    sentence = str(refused.value)
+    assert "errors.pydantic.dev" not in sentence
+    assert f"{bucket}/{image.stem}" in sentence
+    assert "entry 1" in sentence
+    assert "action:" in sentence
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == sentence
 
 
 def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(
