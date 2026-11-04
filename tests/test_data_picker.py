@@ -173,11 +173,13 @@ def test_preflight_config_flags_a_selection_that_leaves_an_empty_side(
     tmp_path: Path,
 ) -> None:
     """``preflight_config`` flags a bound selection that leaves an empty side."""
+    from tcip_mcp.pipelines.data.selection import selection_place
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _selection_with_an_empty_val_side(tmp_path, root, out)
+    place = selection_place(out)
 
     result = preflight_config(
         tmp_path,
@@ -190,6 +192,7 @@ def test_preflight_config_flags_a_selection_that_leaves_an_empty_side(
     )
 
     assert any("empty side" in i for i in result["issues"])
+    assert any(i.startswith(place) for i in result["issues"])
 
 
 def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_side(
@@ -265,6 +268,55 @@ def test_read_selection_checked_tells_absence_apart_from_a_broken_record(
 
     assert isinstance(broken_error, Invalid)
     assert ["group_by"] in [issue.loc for issue in broken_error.issues]
+
+
+def test_every_refusal_of_the_selection_reader_names_the_selection_place(
+    tmp_path: Path,
+) -> None:
+    """An absent, a damaged, an unlisting and an unresolvable record each name one place.
+
+    The four records are an absence, a drawn selection's record replaced by one its model refuses,
+    one that validates but lists no samples, and one whose sample path will not resolve. Each
+    ``read_selection`` refusal's ``where`` is :func:`selection_place`'s sentence for its directory.
+    """
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        selection_key,
+        selection_place,
+    )
+    from tcip_store import ReadRefusedError
+
+    drawn = tmp_path / "drawn"
+    _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "ds"), drawn)
+    stored = ts.read(selection_key(drawn))
+    assert isinstance(stored, dict)
+    unlisting = tmp_path / "unlisting"
+    ts.replace(selection_key(unlisting), {**stored, "samples": []})
+    unresolvable = tmp_path / "unresolvable"
+    samples = stored["samples"]
+    assert isinstance(samples, list)
+    first, *rest = samples
+    assert isinstance(first, dict)
+    ts.replace(
+        selection_key(unresolvable),
+        {**stored, "samples": [{**first, "source": "../escape.jpg"}, *rest]},
+    )
+    damaged = tmp_path / "damaged"
+    ts.replace(
+        selection_key(damaged),
+        {k: v for k, v in stored.items() if k != "group_by"},
+    )
+
+    reached = {}
+    for directory in (tmp_path / "absent", damaged, unlisting, unresolvable):
+        with pytest.raises(ReadRefusedError) as refused:
+            read_selection(directory, project=tmp_path)
+        assert refused.value.where == selection_place(directory)
+        reached[directory.name] = str(refused.value.refusal)
+    assert "no selection recorded" in reached["absent"]
+    assert "group_by" in reached["damaged"]
+    assert "lists no samples" in reached["unlisting"]
+    assert "carries a '..' segment" in reached["unresolvable"]
 
 
 def _bound_to_a_draw(tmp_path: Path) -> dict:

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from tcip_mcp.pipelines.data.selection import Sample
+from tcip_mcp.pipelines.data.selection import Sample, selection_place
 from tcip_mcp.pipelines.schemas import SpatialManifest
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ def selection_compatibility(
     counts = selection.counts()
     if not counts["train"] or not counts["val"]:
         issues.append(
-            f"the selection at {split.selection_dir} leaves an empty side "
+            f"{selection_place(split.selection_dir)} leaves an empty side "
             f"(train={counts['train']}, val={counts['val']}); a run needs both."
         )
     return issues
@@ -703,7 +703,7 @@ def redrawn_selection(
         )
     except ValueError as exc:
         raise ValueError(
-            f"redrawing train and val inside the selection at {selection_dir!r}: "
+            f"redrawing train and val inside {selection_place(selection_dir)}: "
             f"{exc} Drop data.split.seed to bind the selection's recorded partition "
             "instead."
         ) from exc

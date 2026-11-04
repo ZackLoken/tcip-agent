@@ -491,6 +491,11 @@ it in and written back to that form (:func:`ground_truth_record`)."""
 _SELECTION = TypeAdapter(Selection)
 
 
+def selection_place(selection_dir: str | Path) -> str:
+    """Return the sentence naming the selection recorded under ``selection_dir``."""
+    return f"the selection at {selection_dir}"
+
+
 def as_selection(document: JsonValue, *, where: str) -> Selection:
     """Read a held document back as a :class:`Selection`, refusing anything a draw never writes.
 
@@ -503,7 +508,7 @@ def as_selection(document: JsonValue, *, where: str) -> Selection:
     """
     from tcip_mcp.dataset_layout import image_capture
 
-    place = f"the selection at {where}"
+    place = selection_place(where)
     selection = tcip_store.validated(_SELECTION, document, place)
     with tcip_store.unreadable(place, ValueError):
         if not selection.samples:
@@ -574,7 +579,7 @@ def read_selection(
             Unreadable(
                 message="no selection recorded there; run draw_splits first."
             ),
-            f"the selection at {selection_dir}",
+            selection_place(selection_dir),
         )
     return as_selection(document, where=str(selection_dir))
 
@@ -604,7 +609,7 @@ def _read_selection_document(
     from tcip_store import DecodeError
 
     with tcip_store.unreadable(
-        f"the selection at {selection_dir}", DecodeError, ValueError
+        selection_place(selection_dir), DecodeError, ValueError
     ):
         document = tcip_store.read(selection_key(selection_dir), default=None)
         resolved = (
