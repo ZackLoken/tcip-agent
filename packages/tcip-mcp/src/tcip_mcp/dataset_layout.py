@@ -77,13 +77,12 @@ def is_bucket_name(name: str) -> bool:
     It is legal as a :data:`~tcip_mcp.workspace.PathSegment` that does not start with a dot, so a
     hidden directory (an editor's swap file, platform cruft) is never mistaken for one.
     """
-    from pydantic import ValidationError
-
     from tcip_mcp.workspace import path_segment
+    from tcip_store import ReadRefusedError
 
     try:
         path_segment(name)
-    except ValidationError:
+    except ReadRefusedError:
         return False
     return not name.startswith(".")
 
