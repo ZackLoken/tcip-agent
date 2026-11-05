@@ -2,7 +2,8 @@
 
 Each record is written by the platform's own producer, then damaged through the store's own
 write (a wrong shape) or through ``damage_record`` (bytes that will not decode), and read back
-through ``tcip_store.read_record`` and through the doors of two readers that call it.
+through ``tcip_store.read_record`` and through the doors of readers built on it: the memory
+reader and the trait reader call ``read_record``, the flags reader its raw half, ``read_raw``.
 """
 
 from __future__ import annotations
@@ -169,3 +170,39 @@ def test_an_undecodable_memory_record_and_flags_record_answer_one_refusal_at_the
     }
     assert loaded.status_code == 400, loaded.text
     assert loaded.json()["detail"].endswith(f": {_decode_sentence(flags)}")
+
+
+@pytest.mark.usefixtures("seed_bud_operationalization")
+def test_a_confirmation_over_an_undecodable_trait_record_answers_the_readers_sentence(
+    client: TestClient, opened_project: Path
+) -> None:
+    """Confirming a trait whose record does not decode answers 400 with the reader's sentence.
+
+    ``confirm_revision`` reads the record inside its transaction; the detail is the sentence
+    ``read_trait`` raises outside one, the trait's place before the store's decode sentence.
+    """
+    from tcip_mcp import traits
+
+    revision = traits.read_trait("bud_opening", opened_project).latest
+    key = traits.trait_key(opened_project, "bud_opening")
+    damage_record(key, b"{not valid json")
+
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
+        traits.read_trait("bud_opening", opened_project)
+    resp = client.post(
+        "/api/results/traits/confirm",
+        json={
+            "trait": "bud_opening",
+            "revision": revision.number,
+            "entry_sha256": revision.entry_sha256,
+            "user": "tester",
+            "confirmed": True,
+        },
+    )
+
+    assert refused.value.served.refusal == tcip_store.Unreadable(
+        message=_decode_sentence(key)
+    )
+    assert "'bud_opening'" in refused.value.served.where
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == str(refused.value)
