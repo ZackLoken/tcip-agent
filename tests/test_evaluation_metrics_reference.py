@@ -23,6 +23,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     ordinal_metrics,
     quadratic_weighted_kappa,
     r_squared,
+    regression_metrics,
 )
 from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_CLASSIFIER,
@@ -179,13 +180,58 @@ def test_quadratic_weighted_kappa_agrees_with_scikit_learn(
     )
 
 
-def test_r_squared_agrees_with_scikit_learn(tmp_path: Path) -> None:
+def test_a_rank_outside_the_run_rank_count_refuses_naming_it(
+    tmp_path: Path,
+) -> None:
+    pred, gt, num_ranks = _ranked(tmp_path)
+    assert quadratic_weighted_kappa(pred, gt, num_ranks) is not None
+
+    beyond = pred.clone()
+    beyond[0] = num_ranks + 0.4
+    below = gt.clone()
+    below[1] = -1
+    with pytest.raises(ValueError, match=rf"\[{num_ranks}\].*{num_ranks} ranks"):
+        quadratic_weighted_kappa(beyond, gt, num_ranks)
+    with pytest.raises(ValueError, match=r"\[-1\].*ranks"):
+        quadratic_weighted_kappa(pred, below, num_ranks)
+
+
+def test_ordinal_mae_agrees_with_scikit_learn(tmp_path: Path) -> None:
+    pred, gt, num_ranks = _ranked(tmp_path)
+    ours = ordinal_metrics(pred, gt, num_ranks)["mae"]
+    assert _rounded(ours) == _rounded(
+        float(metrics.mean_absolute_error(gt.numpy(), pred.numpy()))
+    )
+
+
+def _regressed(tmp_path: Path) -> tuple[Tensor, Tensor]:
     pred, gt, _dims = _scored(
         tmp_path,
         BESPOKE_REGRESSOR,
         "regression",
         [round(0.1 + 0.8 * i / FRAMES, 3) for i in range(FRAMES)],
     )
+    return pred, gt
+
+
+def test_regression_mae_agrees_with_scikit_learn(tmp_path: Path) -> None:
+    pred, gt = _regressed(tmp_path)
+    ours = regression_metrics(pred, gt)["mae"]
+    assert _rounded(ours) == _rounded(
+        float(metrics.mean_absolute_error(gt.numpy(), pred.numpy()))
+    )
+
+
+def test_regression_rmse_agrees_with_scikit_learn(tmp_path: Path) -> None:
+    pred, gt = _regressed(tmp_path)
+    ours = regression_metrics(pred, gt)["rmse"]
+    assert _rounded(ours) == _rounded(
+        float(metrics.root_mean_squared_error(gt.numpy(), pred.numpy()))
+    )
+
+
+def test_r_squared_agrees_with_scikit_learn(tmp_path: Path) -> None:
+    pred, gt = _regressed(tmp_path)
     ours = r_squared(pred, gt)
     assert ours is not None
     assert _rounded(ours) == _rounded(
