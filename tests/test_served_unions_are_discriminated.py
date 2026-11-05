@@ -109,6 +109,7 @@ NULLABLE_SETS = {
         "best",
         "status_error",
     },
+    "StateSnapshotMessage": {"project", "bundle"},
     "TrialRun": {
         "relaunched_from",
         "images_dir",
