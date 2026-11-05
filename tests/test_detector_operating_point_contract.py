@@ -1,7 +1,9 @@
 """A detection model's two operating-point knobs, on the model itself and honored by its forward.
 
-The knobs are set on the model, a knob set on a model exposing none refuses naming it, and a
-module exposing both is assessed at its stated floor.
+The knobs are set on the model, a knob set on a model exposing none refuses naming it, the model
+contract refuses a model whose eval output ignores either knob or answers attribute ids of another
+dtype or shape than boxes by attributes, and a module exposing both is assessed at its stated
+floor.
 """
 
 from __future__ import annotations
@@ -23,7 +25,11 @@ from tests._training_values import drawn_split
 if TYPE_CHECKING:
     from torch import nn
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
+
+import torch  # noqa: E402
+
+from tests.bespoke_models import _KeepsItsOperatingPoint  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
@@ -128,6 +134,187 @@ def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(
         set_detector_operating_point(
             model, score_thresh=0.2, detections_per_img=3
         )
+
+
+# What the contract smokes below synthesize their batch at, the shape a run resolves for itself.
+_SMOKE_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
+
+
+def _contract(model: nn.Module, **dims: object) -> dict:
+    """Return ``check_model_contract``'s detection report on ``model`` at :data:`_SMOKE_DIMS`.
+
+    ``dims`` replaces any of its keys.
+    """
+    from tcip_mcp.pipelines.model_contract import check_model_contract
+
+    return dict(
+        check_model_contract(
+            model,
+            "detection",
+            device=torch.device("cpu"),
+            dims={**_SMOKE_DIMS, **dims},
+        )
+    )
+
+
+class _ThreeScoredBoxes(torch.nn.Module):
+    """A detection model offering three boxes per frame, scored 0.9, 0.5 and 0.2 in that order.
+
+    It holds both knobs on itself; its training forward answers a zero-gradient loss of its one
+    parameter. :meth:`offered` is each frame's three rows before any knob is applied.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(()))
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
+
+    def offered(self) -> dict[str, torch.Tensor]:
+        return {
+            "boxes": torch.tensor([[8.0, 8.0, 24.0, 24.0]] * 3),
+            "scores": torch.tensor([0.9, 0.5, 0.2]),
+            "labels": torch.ones(3, dtype=torch.int64),
+        }
+
+    def zero_loss(self) -> dict[str, torch.Tensor]:
+        return {"loss": self.weight * 0.0}
+
+
+class _IgnoresItsFloor(_ThreeScoredBoxes):
+    """A :class:`_ThreeScoredBoxes` keeping its first ``detections_per_img`` rows at any score."""
+
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> dict | list[dict]:
+        if self.training:
+            return self.zero_loss()
+        return [
+            {
+                k: v[: self.detections_per_img]
+                for k, v in self.offered().items()
+            }
+            for _ in images
+        ]
+
+
+class _IgnoresItsCap(_ThreeScoredBoxes):
+    """A :class:`_ThreeScoredBoxes` keeping every row scoring at least ``score_thresh``."""
+
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> dict | list[dict]:
+        if self.training:
+            return self.zero_loss()
+        out = []
+        for _ in images:
+            rows = self.offered()
+            keep = rows["scores"] >= self.score_thresh
+            out.append({k: v[keep] for k, v in rows.items()})
+        return out
+
+
+@pytest.mark.parametrize(
+    "model_type, knob, value",
+    [
+        (_IgnoresItsFloor, "score_thresh", 0.9),
+        (_IgnoresItsCap, "detections_per_img", 1),
+    ],
+    ids=["floor ignored", "cap ignored"],
+)
+def test_the_contract_refuses_a_detection_model_whose_eval_forward_ignores_a_set_knob(
+    model_type: type[_ThreeScoredBoxes], knob: str, value: float
+) -> None:
+    """The contract refuses a model whose eval output ignores a knob it set, naming the knob.
+
+    A model applying its cap but not its floor is refused naming ``score_thresh`` set above its
+    highest score, 0.9; one applying its floor but not its cap is refused naming
+    ``detections_per_img`` set to one. Each issue names the count the output kept.
+    """
+    report = _contract(model_type())
+
+    assert report["ok"] is False
+    (issue,) = [i for i in report["issues"] if f"ignores {knob}" in i]
+    assert f"set to {value}" in issue and "kept 3" in issue, issue
+    assert report["unfiltered_counts"] == [3]
+
+
+def test_a_built_detector_passes_the_contract_with_detections_its_cap_check_kept_to_one() -> (
+    None
+):
+    """A built detector passes the contract, its unfiltered pass returning detections.
+
+    The report's unfiltered counts show the floor and cap checks ran on detections, not
+    vacuously over an empty output, and the check leaves the model's own knobs as it found them.
+    """
+    from tests import bespoke_models
+    from tests._chain_fixtures import detector_values
+
+    model = bespoke_models.build_bespoke_detection(**detector_values())
+    built = (model.score_thresh, model.detections_per_img)
+
+    report = _contract(model)
+
+    assert report["ok"], report["issues"]
+    assert all(count >= 1 for count in report["unfiltered_counts"]), report
+    assert (model.score_thresh, model.detections_per_img) == built
+
+
+class _AnswersAttributes(_KeepsItsOperatingPoint, _ThreeScoredBoxes):
+    """A :class:`_ThreeScoredBoxes` kept to both knobs, each box carrying ``attributes``.
+
+    Each box's ``attributes`` row is ``width`` zeros as ``dtype``.
+    """
+
+    def __init__(self, dtype: torch.dtype, width: int) -> None:
+        super().__init__()
+        self.dtype, self.width = dtype, width
+
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> dict | list[dict]:
+        if self.training:
+            return self.zero_loss()
+        rows = {
+            **self.offered(),
+            "attributes": torch.zeros((3, self.width), dtype=self.dtype),
+        }
+        return [self.governed(rows) for _ in images]
+
+
+@pytest.mark.parametrize(
+    "dtype, width, refused",
+    [
+        (torch.int64, 2, False),
+        (torch.float32, 2, True),
+        (torch.int64, 3, True),
+    ],
+    ids=["int64 by two", "float", "a column too many"],
+)
+def test_the_contract_holds_the_attributes_output_to_int64_one_row_per_box_one_column_per_attribute(
+    dtype: torch.dtype, width: int, refused: bool
+) -> None:
+    """The contract refuses an ``attributes`` output that is not int64 of shape boxes by attributes.
+
+    Under two declared attributes, int64 rows of two columns pass; float rows, or a third column,
+    are refused naming the dtype and shape the output answered.
+    """
+    from tcip_mcp import subject_registry
+
+    attributes = (
+        subject_registry.Attribute("color", "categorical", ("red", "blue")),
+        subject_registry.Attribute("grade", "ordinal", ("low", "mid", "high")),
+    )
+
+    report = _contract(_AnswersAttributes(dtype, width), attributes=attributes)
+
+    issues = [i for i in report["issues"] if "attributes" in i]
+    if not refused:
+        assert report["ok"], report["issues"]
+        return
+    (issue,) = issues
+    assert str(dtype) in issue and f"[3, {width}]" in issue, issue
+    assert "[len(boxes), 2]" in issue, issue
 
 
 def _checkpoint(tmp_path: Path, builder: str) -> str:

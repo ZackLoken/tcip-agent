@@ -2,8 +2,8 @@
 
 * ``check_model_contract(model, task, *, device)``: a behavioral smoke on ``device``: a
 train-mode forward yields a finite loss with a gradient, and an eval-mode forward yields the
-documented shape for the task (``list[dict]`` per image for detection/instance_seg, a ``dict``
-of tensors otherwise).
+documented shape for the task (``list[dict]`` per image for detection/instance_seg, kept to the
+two operating-point knobs set on the model, a ``dict`` of tensors otherwise).
 * ``overfit_check(model, task, *, seed, deterministic, device)``: a few optimizer steps on one
 fixed tiny batch, seeded, on ``device``, must drive the loss down.
 """
@@ -11,7 +11,7 @@ fixed tiny batch, seeded, on ``device``, must drive the loss down.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, NamedTuple, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, Unpack, cast
 
 from pydantic import JsonValue
 
@@ -73,8 +73,10 @@ class ContractReport(TypedDict):
 
     ``ok`` is whether no issue was found and ``issues`` each one found; ``train_loss`` the
     train-mode loss, ``eval_output_type`` the output shape the eval pass was held to,
-    ``not_smokeable`` why nothing could be smoked, and ``gradient_magnitudes`` each parameter's
-    gradient norm; each is ``None`` when its pass did not produce it.
+    ``not_smokeable`` why nothing could be smoked, ``gradient_magnitudes`` each parameter's
+    gradient norm, and ``unfiltered_counts`` each image's detection count in a detection model's
+    eval pass at a floor of zero and its own cap, every one zero when the cap check held
+    vacuously; each is ``None`` when its pass did not produce it.
     """
 
     ok: bool
@@ -83,6 +85,7 @@ class ContractReport(TypedDict):
     eval_output_type: str | None
     not_smokeable: str | None
     gradient_magnitudes: dict[str, float] | None
+    unfiltered_counts: list[int] | None
 
 
 class OverfitReport(TypedDict):
@@ -349,6 +352,120 @@ def _forward_loss(model: torch.nn.Module, batch: Batch) -> torch.Tensor:
     return out  # already a scalar loss tensor
 
 
+def _detection_eval(
+    model: torch.nn.Module,
+    task: str,
+    images: list[torch.Tensor] | torch.Tensor,
+    targets: list[dict],
+    issues: list[str],
+) -> list[int] | None:
+    """Run a detection model's eval pass over ``images``, appending each issue to ``issues``.
+
+    With the knobs set on the model at a floor of zero and the cap it holds, the unfiltered
+    output answers one dict per image carrying ``boxes``, ``scores`` and ``labels``, ``masks``
+    for ``instance_seg``, and, on each image whose target carries an ``attributes`` row,
+    ``attributes`` as int64 of shape ``[len(boxes), width]``, the row's width. At a floor above
+    every score it returned the output keeps no detection, and at a floor of zero and a cap of
+    one at most one per image and exactly one where the unfiltered output returned any. A model
+    the setter refuses is that one issue, its output held to its keys alone. The model's own
+    knobs are put back. Returns the unfiltered per-image detection counts, ``None`` when the
+    knobs were not set or the output answered no keys.
+    """
+    import torch
+
+    from tcip_mcp.pipelines.operating_point import (
+        DETECTIONS_PER_IMG,
+        SCORE_THRESH,
+        set_detector_operating_point,
+    )
+
+    built: tuple[Any, Any] = (
+        getattr(model, SCORE_THRESH, None),
+        getattr(model, DETECTIONS_PER_IMG, None),
+    )
+
+    def forward(score_thresh: float, detections_per_img: int) -> list:
+        set_detector_operating_point(
+            model,
+            score_thresh=score_thresh,
+            detections_per_img=detections_per_img,
+        )
+        with torch.no_grad():
+            return model(images)
+
+    try:
+        set_detector_operating_point(
+            model, score_thresh=0.0, detections_per_img=built[1]
+        )
+        governed = True
+    except ValueError as exc:
+        issues.append(str(exc))
+        governed = False
+    try:
+        with torch.no_grad():
+            out = model(images)
+        required = {"boxes", "scores", "labels"}
+        if task == "instance_seg":
+            # A model dropping its masks would pass as a detector no mask measurement can reach.
+            required |= {"masks"}
+        if any("attributes" in t for t in targets):
+            required |= {"attributes"}
+        if not (
+            isinstance(out, list)
+            and out
+            and all(isinstance(o, dict) and required <= set(o) for o in out)
+        ):
+            issues.append(
+                f"detection eval output is not list[dict] with {sorted(required)}"
+            )
+            return None
+        for i, (o, t) in enumerate(zip(out, targets, strict=True)):
+            if "attributes" not in t:
+                continue
+            ids, width = o["attributes"], t["attributes"].shape[-1]
+            shape = [len(o["boxes"]), width]
+            if ids.dtype != torch.int64 or list(ids.shape) != shape:
+                issues.append(
+                    f"detection eval output's attributes on image {i} are {ids.dtype} of "
+                    f"shape {list(ids.shape)}; a detection model answers int64 of shape "
+                    f"[len(boxes), {width}], one id per attribute per box in declared order"
+                )
+        if not governed:
+            return None
+        counts = [len(o["boxes"]) for o in out]
+        scored = [o["scores"] for o in out if len(o["scores"])]
+        floor = 1.0
+        if scored:
+            # The next score up in the scores' own dtype, so no float32 score rounds onto it.
+            top = torch.cat(scored).max()
+            floor = float(torch.nextafter(top, top.new_tensor(math.inf)))
+        keeps = (
+            "a detection model's eval forward keeps only the detections scoring at least its "
+            "own score_thresh, at most detections_per_img of them, the highest first (the model "
+            "contract the toolkit-inventory document states)"
+        )
+        for i, o in enumerate(forward(floor, built[1])):
+            if n := len(o["boxes"]):
+                issues.append(
+                    f"the eval output ignores {SCORE_THRESH}: set to {floor}, above every "
+                    f"score its unfiltered pass returned, image {i} kept {n} detections; {keeps}"
+                )
+        for i, (o, before) in enumerate(
+            zip(forward(0.0, 1), counts, strict=True)
+        ):
+            if (n := len(o["boxes"])) > 1 or (before and n != 1):
+                issues.append(
+                    f"the eval output ignores {DETECTIONS_PER_IMG}: set to 1, image {i} kept "
+                    f"{n} detections of the {before} its unfiltered pass returned; {keeps}"
+                )
+        return counts
+    finally:
+        if governed:
+            set_detector_operating_point(
+                model, score_thresh=built[0], detections_per_img=built[1]
+            )
+
+
 def check_model_contract(
     model: torch.nn.Module,
     task: str,
@@ -362,11 +479,12 @@ def check_model_contract(
     raised. The ``keywords`` are :class:`ContractKeywords`.
 
     ``dims`` is :func:`~tcip_mcp.pipelines.model_build.resolve_contract_dims`' output, the
-    dimensions a batch is synthesized at when no ``sample_batch`` is given; a detector whose
-    ``dims`` carry ``attributes`` must also return ``attributes`` per image.
+    dimensions a batch is synthesized at when no ``sample_batch`` is given.
 
     ``sample_batch`` is a supplied ``(images, targets)`` pair; one from the run's own dataset is
     required where no batch can be synthesized (:func:`no_batch_reason`).
+
+    A detection or instance-segmentation model's eval pass is :func:`_detection_eval`'s.
     """
     import torch
 
@@ -382,6 +500,7 @@ def check_model_contract(
         eval_output_type=None,
         not_smokeable=no_batch_reason(task, dims, sample_batch),
         gradient_magnitudes=None,
+        unfiltered_counts=None,
     )
     if report["not_smokeable"] is not None:
         return report
@@ -429,29 +548,15 @@ def check_model_contract(
     # Eval pass: documented output shape.
     try:
         model.eval()
-        images, _ = _driving_batch(task, dims, sample_batch, device)
-        with torch.no_grad():
-            out = model(images)
+        images, targets = _driving_batch(task, dims, sample_batch, device)
         if task in DETECTOR_TASKS:
             report["eval_output_type"] = "list[dict]"
-            required = {"boxes", "scores", "labels"}
-            if task == "instance_seg":
-                # instance_seg trains on real masks (synth_batch above already supplies
-                # target["masks"]); a model whose eval output drops them passes as a detector
-                # while the platform's only sanctioned dimensional measurement can never reach it.
-                required = required | {"masks"}
-            if dims and dims.get("attributes"):
-                required = required | {"attributes"}
-            if not (
-                isinstance(out, list)
-                and out
-                and isinstance(out[0], dict)
-                and required <= set(out[0])
-            ):
-                issues.append(
-                    f"detection eval output is not list[dict] with {sorted(required)}"
-                )
+            report["unfiltered_counts"] = _detection_eval(
+                model, task, images, cast("list[dict]", targets), issues
+            )
         else:
+            with torch.no_grad():
+                out = model(images)
             report["eval_output_type"] = "dict"
             if not isinstance(out, dict):
                 issues.append(
