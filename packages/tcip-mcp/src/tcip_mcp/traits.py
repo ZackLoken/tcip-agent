@@ -589,22 +589,24 @@ def trait_names(project: str | Path) -> list[str]:
     )
 
 
-def _record(
-    trait: str, project: str | Path, read: Callable[..., JsonValue]
-) -> TraitRecord:
-    """Return ``trait``'s record read by ``read``, a store or transaction read, through its schema.
-
-    An absent record raises :class:`TraitUnknownError` naming the project's traits; a record the
-    schema refuses or the store will not read raises ``tcip_store.ReadRefusedError`` naming the
-    trait.
-    """
-    record = ts.read_record(
+def _stored(
+    read: Callable[..., JsonValue], trait: str, project: str | Path
+) -> TraitRecord | None:
+    """Return ``trait``'s record read by ``read`` (``tcip_store.read_record``), or ``None``."""
+    return ts.read_record(
         read,
         trait_key(project, trait),
         TraitRecord,
         _trait_place(trait),
         default=None,
     )
+
+
+def _record(
+    read: Callable[..., JsonValue], trait: str, project: str | Path
+) -> TraitRecord:
+    """Return :func:`_stored`'s record; an absent one raises :class:`TraitUnknownError`."""
+    record = _stored(read, trait, project)
     if record is None:
         raise TraitUnknownError(
             f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}"
@@ -619,7 +621,7 @@ def _trait_place(trait: str) -> str:
 
 def read_trait(trait: str, project: str | Path) -> TraitRecord:
     """Read one trait's record through its schema; refuses as :func:`_record` does."""
-    return _record(trait, project, ts.read)
+    return _record(ts.read, trait, project)
 
 
 # ── the proposal and the confirmation ────────────────────────────────────────
@@ -707,9 +709,7 @@ def propose_trait(
             )
     key = trait_key(project, entry.name)
     with ts.transaction(key) as txn:
-        stored = ts.read_record(
-            txn.read, key, TraitRecord, _trait_place(entry.name), default=None
-        )
+        stored = _stored(txn.read, entry.name, project)
         revisions = () if stored is None else stored.revisions
         number, sha256 = len(revisions) + 1, entry_sha256(entry)
         line = audit_line(
@@ -765,7 +765,7 @@ def confirm_revision(
     """
     key = trait_key(project, trait)
     with ts.transaction(key) as txn:
-        record = _record(trait, project, txn.read)
+        record = _record(txn.read, trait, project)
         revision = record.revision(number, entry_sha256)
         revisions = list(record.revisions)
         state = revision.state
