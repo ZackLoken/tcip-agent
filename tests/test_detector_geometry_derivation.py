@@ -144,7 +144,7 @@ def test_a_detector_built_at_the_derived_geometry_sees_a_small_tile_at_its_nativ
     )
     model.eval()
 
-    image_list, _ = model.detector.transform([torch.rand(3, 64, 64)])
+    image_list, _ = model.library.transform([torch.rand(3, 64, 64)])
 
     assert image_list.image_sizes == [(64, 64)]
 
@@ -244,9 +244,9 @@ def test_the_launch_builds_the_detector_at_the_geometry_its_resolution_recorded(
     assert geometry.native_size == (64, 48)
     detector = geometry.detector
     assert (detector.min_size, detector.max_size) == (48, 64)
-    transform = model.detector.transform
+    transform = model.library.transform
     assert (transform.min_size[0], transform.max_size) == (48, 64)
-    sizes = model.detector.rpn.anchor_generator.sizes
+    sizes = model.library.anchor_generator.sizes
     assert [level[0] for level in sizes] == [
         detector.anchor_base_size * 2**i for i in range(len(sizes))
     ]

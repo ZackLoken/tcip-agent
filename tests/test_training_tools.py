@@ -63,7 +63,6 @@ if TYPE_CHECKING:
         image_std: Required[list[float]]
         num_classes: int
         in_chans: int
-        detector: str
 
     class _AdmitKeywords(TypedDict, total=False):
         """The keywords ``label_queries.admit`` takes beside its directories."""
@@ -248,14 +247,13 @@ def _frozen_detection_builder(
 def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
     """Return a smoke config over the bespoke detector built by ``builder``.
 
-    The config states an ``fcos`` detector normalized by ``FRAME_STATISTICS``, over
-    :func:`_labeled`'s frames at three channels.
+    The config states the detector normalized by ``FRAME_STATISTICS``, over :func:`_labeled`'s
+    frames at three channels.
     """
     return training_config(
         tmp_path,
         {
             "builder": builder,
-            "builder_kwargs": {"detector": "fcos"},
             "source_files": [__file__, BESPOKE_MODELS],
             "task": "detection",
             "normalization": FRAME_STATISTICS,
