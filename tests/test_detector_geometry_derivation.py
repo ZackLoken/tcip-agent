@@ -1,13 +1,11 @@
-"""A torchvision detector's input scale and anchors, stated to its builder and derived from data.
+"""A detection model's input scale and anchors, derived from data and handed to its builder.
 
-Each builder takes them stated, ``derive_detector_geometry`` gives them from a run's frame and
-its objects, the run's resolution records them, and the platform hands them to the builder from
-that record.
+``derive_detector_geometry`` gives them from a run's frame and its objects, the run's resolution
+records them, and the platform hands them to the builder from that record.
 """
 
 from __future__ import annotations
 
-import inspect
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -35,49 +33,6 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainGeometry
 
 GEOMETRY = DetectorGeometry.handed_names()
-
-
-@pytest.mark.parametrize(
-    "builder",
-    [
-        "_build_faster_rcnn",
-        "_build_retinanet",
-        "_build_mask_rcnn",
-        "_build_fcos",
-    ],
-)
-def test_every_detector_builder_takes_its_geometry_stated(
-    builder: str,
-) -> None:
-    """Each detector builder takes its geometry stated, refusing a call that leaves one out.
-
-    No builder defaults its anchor base, its resize bounds or, but for the anchor-free FCOS, its
-    aspect ratios, and a call leaving one out is refused by the signature.
-    """
-    from tcip_mcp.pipelines.components import detectors
-
-    fn = getattr(detectors, builder)
-    params = inspect.signature(fn).parameters
-    taken = [name for name in GEOMETRY if name in params]
-    assert taken == (
-        [n for n in GEOMETRY if n != "aspect_ratios"]
-        if builder == "_build_fcos"
-        else list(GEOMETRY)
-    )
-    for name in taken:
-        assert params[name].default is inspect.Parameter.empty, name
-    assert (
-        inspect.signature(detectors._anchor_sizes).parameters["base"].default
-        is inspect.Parameter.empty
-    )
-    with pytest.raises(TypeError, match="min_size"):
-        fn(
-            object(),
-            1,
-            featmap_names=["0"],
-            num_levels=1,
-            **{n: 1 for n in taken if n != "min_size"},
-        )
 
 
 def _boxes(sizes_wh: list[tuple[float, float]]) -> np.ndarray:

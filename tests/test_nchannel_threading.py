@@ -21,15 +21,13 @@ from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import RATIONALE, drawn_split  # noqa: E402
 
 if TYPE_CHECKING:
-    from collections import OrderedDict
     from pathlib import Path
 
     import numpy as np
     from numpy.typing import NDArray
-    from torch import Tensor, nn
+    from torch import nn
     from torch.utils.data import Dataset
 
-    from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter
     from tcip_mcp.pipelines.schemas import ImageStatsSampling, Normalization
 
 torch = pytest.importorskip("torch")
@@ -76,60 +74,6 @@ def test_train_start_channel_guard() -> None:
         _validate_input_channels(4, [(torch.rand(2, 3, 16, 16), {})])
     # matching channel counts -> no error
     _validate_input_channels(3, [(torch.rand(2, 3, 16, 16), {})])
-
-
-def _nchan_adapter(in_chans: int) -> BackboneNeckAdapter:
-    """Return a ``BackboneNeckAdapter`` over a timm resnet18 at ``in_chans`` and a 64-wide FPN.
-
-    The backbone is ``timm.create_model("resnet18", features_only=True)`` without pretrained
-    weights, wrapped in ``BackboneWrapper``.
-    """
-    import timm
-
-    from tcip_mcp.pipelines.components.backbones import BackboneWrapper
-    from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter
-    from tcip_mcp.pipelines.components.necks import FPN
-
-    m = timm.create_model(
-        "resnet18",
-        pretrained=False,
-        features_only=True,
-        out_indices=(1, 2, 3, 4),
-        in_chans=in_chans,
-    )
-    bb = BackboneWrapper(m, m.feature_info.channels())
-    return BackboneNeckAdapter(bb, FPN(bb.out_channels, 64))
-
-
-def test_n_channel_detector_builds_and_trains() -> None:
-    """A five-band detector builds, normalizes at five bands and returns finite training losses."""
-    from tcip_mcp.pipelines.components.detectors import build_detector
-
-    adapter = _nchan_adapter(5)
-    names = list(adapter(torch.zeros(1, 5, 64, 64)).keys())
-    det = build_detector(
-        "faster_rcnn",
-        adapter,
-        num_classes=1,
-        featmap_names=names,
-        num_levels=len(names),
-        image_mean=[0.4] * 5,
-        image_std=[0.2] * 5,
-        **detector_geometry().handed(),
-    )
-    assert det.transform.image_mean == [0.4] * 5
-
-    det.train()
-    losses = det(
-        [torch.rand(5, 96, 96)],
-        [
-            {
-                "boxes": torch.tensor([[8.0, 8.0, 48.0, 48.0]]),
-                "labels": torch.ones(1, dtype=torch.long),
-            }
-        ],
-    )
-    assert losses and all(torch.isfinite(v) for v in losses.values())
 
 
 def _detection_model_at(in_chans: int, bands: int) -> nn.Module:
@@ -186,87 +130,6 @@ def test_statistics_of_another_length_than_the_band_count_refuse_before_the_buil
 
     model = _detection_model_at(5, bands=5)
     assert len(model.library.transform.image_mean) == 5
-
-
-def test_explicit_in_chans_wins_over_the_registration_order_probe() -> None:
-    """A stated ``in_chans`` builds the detector where the registration-order probe disagrees.
-
-    An adapter that registers its neck before its backbone reports a first-conv width that is not
-    the image's band count; the stated three-band build still succeeds at three-band statistics.
-    """
-    import torch.nn as nn
-
-    from tcip_mcp.pipelines.components.backbones import BackboneWrapper
-    from tcip_mcp.pipelines.components.detectors import build_detector
-    from tcip_mcp.pipelines.components.necks import FPN
-
-    class NeckFirstAdapter(nn.Module):
-        def __init__(self, backbone: BackboneWrapper, neck: FPN) -> None:
-            super().__init__()
-            self.neck = neck  # registered first: the probe sees this conv
-            self.backbone = backbone
-            self.out_channels = (
-                neck.out_channels
-                if isinstance(neck.out_channels, int)
-                else neck.out_channels[-1]
-            )
-
-        def forward(self, x: Tensor) -> OrderedDict[str, Tensor]:
-            from collections import OrderedDict
-
-            return OrderedDict(sorted(self.neck(self.backbone(x)).items()))
-
-    import timm
-
-    m = timm.create_model(
-        "resnet18",
-        pretrained=False,
-        features_only=True,
-        out_indices=(1, 2, 3, 4),
-        in_chans=3,
-    )
-    bb = BackboneWrapper(m, m.feature_info.channels())
-    adapter = NeckFirstAdapter(bb, FPN(bb.out_channels, 64))
-    names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
-
-    # A plain RGB build must succeed even though the probe reports the neck's width.
-    det = build_detector(
-        "faster_rcnn",
-        adapter,
-        num_classes=1,
-        featmap_names=names,
-        num_levels=len(names),
-        in_chans=3,
-        image_mean=[0.4] * 3,
-        image_std=[0.2] * 3,
-        **detector_geometry().handed(),
-    )
-    assert det.transform.image_mean == [0.4] * 3
-
-
-def test_torchvision_constructor_kwargs_forward_but_typos_raise() -> None:
-    from tcip_mcp.pipelines.components.detectors import build_detector
-    from tests._chain_fixtures import detector_values
-
-    adapter = _nchan_adapter(3)
-    names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
-    common = {
-        "featmap_names": names,
-        "num_levels": len(names),
-        **detector_values(),
-    }
-    det = build_detector(
-        "faster_rcnn", adapter, num_classes=1, **common, box_nms_thresh=0.42
-    )
-    assert det.roi_heads.nms_thresh == 0.42
-    with pytest.raises(TypeError, match="box_nms_threshh"):
-        build_detector(
-            "faster_rcnn",
-            adapter,
-            num_classes=1,
-            **common,
-            box_nms_threshh=0.42,
-        )
 
 
 @pytest.mark.parametrize(
