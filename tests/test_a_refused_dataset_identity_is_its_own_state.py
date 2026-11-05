@@ -4,7 +4,7 @@ The identity is damaged through the store's own writer after ``register_dataset`
 check answers ``refused`` for the root and for a registered path, ``unregistered`` and ``gone``
 staying the absent document; ``register_dataset`` repairs the document at a root the project's
 registry holds, from the registry's id, and refuses at one it does not; ``launch_training`` over
-a refused identity answers the repair.
+a refused identity answers the error naming the document.
 """
 
 from __future__ import annotations
@@ -167,13 +167,12 @@ def test_the_check_answers_an_os_error_at_the_roots_identity_read(
     assert "device not ready" in checked.reason
 
 
-def test_a_launch_over_a_refused_dataset_identity_names_the_repair_door(
+def test_a_launch_over_a_refused_dataset_identity_answers_the_error_naming_its_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A launch over a dataset identity its model refuses answers an error naming path and repair.
+    """A launch over a dataset identity its model refuses answers the error dict naming its path.
 
-    The project is the dataset root, so the registry holds it and the repair is
-    ``register_dataset``; no run directory is opened.
+    No run directory is opened.
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -201,6 +200,6 @@ def test_a_launch_over_a_refused_dataset_identity_names_the_repair_door(
     )
 
     assert isinstance(result, dict)
+    assert result["error"].startswith("launch_training: ")
     assert str(path) in result["error"]
-    assert "register_dataset" in result["error"]
     assert run_dirs(tmp_path) == []

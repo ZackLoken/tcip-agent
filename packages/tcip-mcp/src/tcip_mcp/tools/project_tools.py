@@ -246,11 +246,11 @@ class DatasetIdentityCheck(BaseModel):
     ``state`` is ``unchanged`` when the fingerprint recomputed now (``fingerprint``) equals the
     one its identity records, ``changed`` when it differs (a number reproduced from the dataset is
     no longer valid), ``never_recorded`` when the identity records none (``register_dataset``
-    stamps one), ``unregistered`` when the root carries no identity (``reason`` says why),
-    ``refused`` when its ``dataset.json`` is present and its model refuses it (``reason`` is the
-    refusal and the repair), and ``no_fingerprint`` when the root yields none (no images or
-    labels, bespoke or empty). ``registered`` is every path the project's registry holds for the
-    identity's id.
+    stamps one), ``unregistered`` when the root holds no identity document or one that could not
+    be read (``reason`` says which), ``refused`` when its ``dataset.json`` is present and its
+    model refuses it (``reason`` is the refusal and the repair), and ``no_fingerprint`` when the
+    root yields none (no images or labels, bespoke or empty). ``registered`` is every path the
+    project's registry holds for the identity's id.
     """
 
     dataset_root: str

@@ -654,10 +654,7 @@ def launch_training(
             launched_as=experiments.Standalone(),
         )
     except (StoreError, ValueError, OSError) as exc:
-        return {
-            "error": f"launch_training: {exc}"
-            f"{_identity_repair(project, resolution.spec.data, exc)}"
-        }
+        return {"error": f"launch_training: {exc}"}
     append_or_raise(line, scope=project)
 
     proc = _start_worker(run_dir, _child_env_for_launch(resolution.spec))
@@ -677,24 +674,6 @@ def launch_training(
         overfit_check=rendered_overfit_report,
         warnings=validation["warnings"],
     )
-
-
-def _identity_repair(project: Path, data: DataSpec, exc: Exception) -> str:
-    """Return ``"; "`` and the repair when ``exc`` is the refusal of ``data``'s dataset identity.
-
-    The repair is ``project_tools.identity_repair_door``'s; any other ``exc`` returns ``""``.
-    """
-    from tcip_mcp.dataset_layout import dataset_identity_where, dataset_root_of
-    from tcip_mcp.tools.project_tools import identity_repair_door
-
-    root = dataset_root_of(data.images_dir) if data.images_dir else None
-    if (
-        root is None
-        or not isinstance(exc, ReadRefusedError)
-        or exc.where != dataset_identity_where(root)
-    ):
-        return ""
-    return f"; {identity_repair_door(project, root)}"
 
 
 def _worker_env() -> dict[str, str]:
