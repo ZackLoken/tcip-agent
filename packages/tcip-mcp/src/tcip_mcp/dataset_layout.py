@@ -257,18 +257,21 @@ class DatasetRecord(BaseModel):
     fingerprint: str | None
 
 
+def dataset_identity_where(dataset_root: str | Path) -> str:
+    """Return the place a refusal of the dataset's identity document names (its ``where``)."""
+    return f"the dataset identity at {dataset_identity_path(dataset_root)}"
+
+
 def decode_dataset_identity_document(
     data: bytes, *, dataset_root: str | Path
 ) -> DatasetRecord:
     """Decode a dataset identity document's bytes as its :class:`DatasetRecord`.
 
     Bytes that do not decode, or decode to no :class:`DatasetRecord`, raise
-    ``tcip_store.ReadRefusedError`` naming the document.
+    ``tcip_store.ReadRefusedError`` whose ``where`` is :func:`dataset_identity_where`.
     """
     return tcip_store.validated(
-        DatasetRecord,
-        data,
-        f"the dataset identity at {dataset_identity_path(dataset_root)}",
+        DatasetRecord, data, dataset_identity_where(dataset_root)
     )
 
 
