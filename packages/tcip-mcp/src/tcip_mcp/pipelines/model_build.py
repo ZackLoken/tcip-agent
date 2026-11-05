@@ -668,16 +668,18 @@ def capture_env() -> Environment:
 
 
 def placement(device: str | None) -> torch.device:
-    """Return the torch device a model runs on: ``device`` as stated, else ``cuda`` or ``cpu``.
+    """Return the torch device a model runs on: ``device`` as stated, else the accelerator.
 
-    An unstated ``device`` (``None``) places on ``cuda`` when torch sees one and on ``cpu``
-    otherwise. A stated one, empty included, is ``torch.device``'s as given, refused as torch
+    An unstated ``device`` (``None``) places on the accelerator torch sees and on the CPU when
+    it sees none. A stated one, empty included, is ``torch.device``'s as given, refused as torch
     refuses it (``RuntimeError``).
     """
     import torch
 
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        return torch.accelerator.current_accelerator(
+            check_available=True
+        ) or torch.device("cpu")
     return torch.device(device)
 
 

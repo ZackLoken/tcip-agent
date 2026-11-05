@@ -1271,7 +1271,7 @@ def test_an_evaluation_metric_sharing_an_identity_key_refuses_naming_it(
 def test_a_tile_level_evaluation_scores_on_the_device_its_pass_model_sits_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The evaluation is handed the pass's own predictor device, while torch sees CUDA."""
+    """The evaluation is handed the pass's own predictor device."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
@@ -1299,7 +1299,6 @@ def test_a_tile_level_evaluation_scores_on_the_device_its_pass_model_sits_on(
         return {"precision": 0.9}
 
     monkeypatch.setattr(evaluation, "evaluate", _observed)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
     run_test_evaluation(pass_, None, iou_threshold=IOU_THRESHOLD, trait=None)
 
