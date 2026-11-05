@@ -75,8 +75,6 @@ READS_SCRIPT = SCRIPTS / "routeReads.mjs"
 """The script printing the frontend's non-test sources and what they read and declare."""
 VITE_CONFIG = SCRIPTS / "viteConfig.mjs"
 """The script printing the frontend's Vite configuration as Vite resolves it."""
-BUNDLE_SOURCE = SCRIPTS / "bundleSource.mjs"
-"""The script printing the build record the frontend's source would be built with."""
 
 
 def printed_json(script: Path, argument: Path) -> dict:

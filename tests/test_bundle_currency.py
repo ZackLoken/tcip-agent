@@ -16,7 +16,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tcip_web.app as web_app
-from tests import BUNDLE_SOURCE, FRONTEND, printed_json
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,15 +44,22 @@ def _started_frame(caplog: pytest.LogCaptureFixture) -> tuple[dict, list[str]]:
 
 
 def test_a_bundle_built_from_other_source_is_logged_and_named_on_the_first_frame(
-    static: Path, caplog: pytest.LogCaptureFixture
+    static: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    record = printed_json(BUNDLE_SOURCE, FRONTEND)
+    other = tmp_path / "other-frontend"
+    (other / "src").mkdir(parents=True)
+    (other / "tsconfig.json").write_text(
+        json.dumps({"include": ["src"]}), encoding="utf-8"
+    )
+    (other / "src" / "main.ts").write_text("export {};\n", encoding="utf-8")
+    record = web_app.bundle_record(other)
     (static / record["record"]).write_text(
-        json.dumps({**record, "source": "0" * 64}), encoding="utf-8"
+        json.dumps(record), encoding="utf-8"
     )
 
     frame, warnings = _started_frame(caplog)
 
+    assert record != web_app.bundle_record(web_app.FRONTEND_DIR)
     assert frame.get("bundle") is not None
     assert [w for w in warnings if REBUILD in w] == [frame["bundle"]]
 
@@ -70,7 +76,7 @@ def test_a_bundle_with_no_build_record_is_logged_and_named_on_the_first_frame(
 def test_a_bundle_built_from_the_source_says_nothing(
     static: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    record = printed_json(BUNDLE_SOURCE, FRONTEND)
+    record = web_app.bundle_record(web_app.FRONTEND_DIR)
     (static / record["record"]).write_text(
         json.dumps(record), encoding="utf-8"
     )
