@@ -275,7 +275,7 @@ def test_a_range_test_of_the_chain_detector_is_its_own_listed_run(
         list_experiments,
     )
     from tests._chain_fixtures import (
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         draw_reference_selection,
         run_config,
         synthetic_capture,
@@ -288,7 +288,7 @@ def test_a_range_test_of_the_chain_detector_is_its_own_listed_run(
     ramp = {"ramp_low": 1e-5, "ramp_high": 10.0, "batches": 20}
     answer = _completed(
         _derived(
-            bound, run_config(project, selection_dir, DETECTION_SOURCE), **ramp
+            bound, run_config(project, selection_dir, BUILT_DETECTOR), **ramp
         )
     )
 
