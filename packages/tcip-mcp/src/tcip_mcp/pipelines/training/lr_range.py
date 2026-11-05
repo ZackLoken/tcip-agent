@@ -136,7 +136,12 @@ def run_range_test(ctx: TrainContext, test: RangeTest) -> None:
 
     import torch
 
-    from tcip_mcp.experiments import LR_RANGE_FILE, require_open, write_record
+    from tcip_mcp.experiments import (
+        BATCH_LOSS_KEY,
+        LR_RANGE_FILE,
+        require_open,
+        write_record,
+    )
     from tcip_mcp.pipelines.training.generic_trainer import (
         apply_stage_freeze,
         batch_loss,
@@ -230,7 +235,7 @@ def run_range_test(ctx: TrainContext, test: RangeTest) -> None:
         ctx.log_batch(
             step,
             epoch,
-            {"batch_loss": loss_value, "smoothed_loss": value, "lr": rate},
+            {BATCH_LOSS_KEY: loss_value, "smoothed_loss": value, "lr": rate},
         )
         rates.append(rate)
         smoothed.append(value)

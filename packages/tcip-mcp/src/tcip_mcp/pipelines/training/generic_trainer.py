@@ -24,6 +24,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from tcip_mcp.experiments import BATCH_LOSS_KEY
 from tcip_mcp.pipelines.data.datasets import (
     indexed_sample_keys,
     instance_targets,
@@ -1230,7 +1231,7 @@ def train(
                         batch_callback(
                             global_step,
                             run.current_epoch,
-                            {"batch_loss": loss_value},
+                            {BATCH_LOSS_KEY: loss_value},
                         )
 
                     if math.isfinite(loss_value):
