@@ -384,8 +384,8 @@ def test_writing_a_registry_its_model_refuses_answers_its_readers_sentence_as_an
 ) -> None:
     """Writing a registry its model refuses answers an error holding the sentence.
 
-    The subject states no description; the error names the registry and that one field, and a
-    registry that states one is written.
+    The subject states no description; the error names the dataset the subjects were stated for
+    and that one field, and a registry that states one is written.
     """
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
@@ -397,7 +397,7 @@ def test_writing_a_registry_its_model_refuses_answers_its_readers_sentence_as_an
     )
 
     assert LIBRARY_LINK not in refused["error"]
-    assert refused["error"].startswith("the subject registry: ")
+    assert refused["error"].startswith(f"the subjects stated for {project}: ")
     assert "subjects.0.description" in refused["error"]
     assert "error" not in written
 
@@ -408,7 +408,7 @@ def test_loading_a_registry_its_model_refuses_answers_500_with_its_readers_sente
     """Loading a stored registry its model refuses answers 500 with the sentence.
 
     The registry ``write_subject_registry`` wrote has its subject's description changed to no
-    text; the detail names the registry and that one field.
+    text; the detail names the registry's path and that one field.
     """
     from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.tools.annotation_tools import write_subject_registry
@@ -429,7 +429,10 @@ def test_loading_a_registry_its_model_refuses_answers_500_with_its_readers_sente
     assert resp.status_code == 500
     detail = resp.json()["detail"]
     assert LIBRARY_LINK not in detail
-    assert "the subject registry: subjects.0.description" in detail
+    assert (
+        f"the subject registry at {subjects_path(opened_project)}: "
+        "subjects.0.description"
+    ) in detail
 
 
 def test_a_check_of_a_dataset_identity_its_model_refuses_states_the_issues(
