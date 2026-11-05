@@ -1459,7 +1459,6 @@ def evaluate(
     per_image: list[dict] = []
     cls_p, cls_g, ord_p, ord_g, reg_p, reg_g = [], [], [], [], [], []
     seg_p, seg_g = [], []
-    detector = getattr(model, "detector", None)
 
     for batch in loader:
         if is_detection:
@@ -1479,27 +1478,19 @@ def evaluate(
             from tcip_mcp.pipelines.data.datasets import instance_targets
 
             head_targets = instance_targets(targets)
-            if detector is not None:
-                detector.train()
-                for m in detector.modules():
-                    if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-                        m.eval()
-                ld = detector(images, head_targets)
-                total_loss += float(sum(ld.values()).item())
-                n_loss += 1
-            else:
-                model.training = True
-                for head in getattr(model, "heads", []):
-                    head.training = True
-                ld = model(images, head_targets)
-                # sum() over an untyped model's loss dict resolves, by mypy's overload matching on
-                # Any, to its int overload rather than the runtime Tensor the values actually are.
-                total_loss += (
-                    float(cast(Any, sum(ld.values())).item())
-                    if isinstance(ld, dict)
-                    else float(ld)
-                )
-                n_loss += 1
+            model.train()
+            for layer in model.modules():
+                if isinstance(layer, torch.nn.modules.batchnorm._BatchNorm):
+                    layer.eval()
+            ld = model(images, head_targets)
+            # sum() over an untyped model's loss dict resolves, by mypy's overload matching on
+            # Any, to its int overload rather than the runtime Tensor the values actually are.
+            total_loss += (
+                float(cast(Any, sum(ld.values())).item())
+                if isinstance(ld, dict)
+                else float(ld)
+            )
+            n_loss += 1
             # Prediction pass.
             model.eval()
             frames = [
