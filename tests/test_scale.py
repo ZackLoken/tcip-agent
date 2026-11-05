@@ -77,7 +77,7 @@ def test_predict_batch_detection_uses_one_forward_per_batch(
         ),
         batch_size=2,
     )
-    assert [r["count"] for r in results] == [0] * 5  # one result per image
+    assert [len(r.detections) for r in results] == [0] * 5  # one per image
     assert calls["n"] == 3  # ceil(5/2) forwards, not 5
     assert calls["sizes"] == [2, 2, 1]
 

@@ -200,18 +200,15 @@ def _raster_bucket(
     The bucket holds one detection per box and is published through the platform's own
     publication (``_chain_fixtures.published``).
     """
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     height, width = tifffile.imread(str(raster_path)).shape[:2]
-    result = {
-        "image": str(raster_path),
-        "width": width,
-        "height": height,
-        "boxes": [list(b) for b in boxes],
-        "scores": [0.9] * len(boxes),
-        "labels": [1] * len(boxes),
-        "cap": len(boxes) + 1,
-    }
+    result = detection_pass(
+        raster_path,
+        (width, height),
+        [detected(b, 0.9) for b in boxes],
+        cap=len(boxes) + 1,
+    )
     return published(
         project,
         f"{name}/2026-01-01",

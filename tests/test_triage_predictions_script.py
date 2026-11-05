@@ -49,6 +49,7 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
 ) -> None:
     import tcip_mcp.pipelines.inference.generic_predictor as predmod
     from tcip_web.cli import main
+    from tests._chain_fixtures import detected, detection_pass
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(project)
@@ -56,7 +57,9 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")
 
-    predictions = [{"image": "a.jpg", "scores": [0.9]}]
+    predictions = [
+        detection_pass("a.jpg", (8, 8), [detected((0, 0, 1, 1), 0.9)], cap=2)
+    ]
     monkeypatch.setattr(
         predmod,
         "GenericPredictor",

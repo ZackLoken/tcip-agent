@@ -5,44 +5,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
-
 if TYPE_CHECKING:
     from pathlib import Path
 
     from tcip_annotation.state import BBox, Polygon
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
 logger = logging.getLogger(__name__)
-
-
-class DetectionMask(BaseModel):
-    """One detection's mask: its flat ``[x0, y0, x1, y1, ...]`` polygons in full-image pixels."""
-
-    model_config = ConfigDict(frozen=True)
-
-    segmentation: list[list[float]]
-
-
-class DetectionResult(BaseModel):
-    """One frame's detections as a detector's pass hands them to publication.
-
-    It holds the source ``image``, its ``width`` and ``height``, the pixel-xyxy ``boxes`` with
-    their ``scores``, the frame's detection ``cap``, and, where the pass carries them, one
-    ``attributes`` id row and one ``masks`` entry per detection. Any other key the pass returns
-    is no part of the published document.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    image: str
-    width: int
-    height: int
-    boxes: list[tuple[float, float, float, float]]
-    scores: list[float]
-    cap: int
-    attributes: list[list[int]] | None = None
-    masks: list[DetectionMask] | None = None
 
 
 def _clip(value: float, upper: float | None) -> float:
@@ -52,8 +22,8 @@ def _clip(value: float, upper: float | None) -> float:
     return max(0.0, min(float(value), float(upper)))
 
 
-def stored_geometries(result: DetectionResult) -> dict[int, BBox | Polygon]:
-    """Return the geometry stored for each kept detection of one result, by index.
+def stored_geometries(result: DetectionPass) -> dict[int, BBox | Polygon]:
+    """Return the geometry stored for each kept detection of one pass, by index.
 
     A detection's geometry is its mask's rings when it carries one
     (:func:`_mask_geometry_for_export`), else its box, kept only when that geometry has extent on
@@ -62,38 +32,39 @@ def stored_geometries(result: DetectionResult) -> dict[int, BBox | Polygon]:
     from tcip_annotation.json_io import geometry_extent_ok
     from tcip_annotation.state import BBox
 
-    masks = result.masks
     size = (result.width, result.height)
     kept: dict[int, BBox | Polygon] = {}
-    for i, box in enumerate(result.boxes):
-        geometry: BBox | Polygon = BBox(*box)
-        if masks is not None and i < len(masks):
-            geometry = _mask_geometry_for_export(
-                masks[i], box, f"detection {i}", image_size=size
+    for i, d in enumerate(result.detections):
+        geometry: BBox | Polygon = (
+            BBox(*d.box)
+            if d.mask is None
+            else _mask_geometry_for_export(
+                d.mask, d.box, f"detection {i}", image_size=size
             )
+        )
         if geometry_extent_ok(geometry):
             kept[i] = geometry
     return kept
 
 
 def encode_predictions(
-    result: DetectionResult,
+    result: DetectionPass,
     created_by: str,
     *,
     scope: ClassScope,
 ) -> tuple[dict, int]:
-    """Encode a detection result as its name-based per-image prediction document.
+    """Encode a detector pass as its name-based per-image prediction document.
 
     Returns the document (:func:`~tcip_annotation.json_io.document_payload`), carrying the frame's
     ``cap``, and the number of detections dropped.
 
     A ``scope`` naming no subject or attributes refuses (``ValueError``)
     (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.document_attributes`), and so does a
-    result whose scores, and attribute rows where the scope declares attributes, are not one per
-    box. Every prediction's ``subject`` is ``scope``'s, and its ``attributes`` each attribute's
-    value its row names (:func:`~tcip_annotation.json_io.attribute_values`), none for a scope
-    declaring none. An image with no detection encodes ``{"annotations": []}``. ``created_by``
-    stamps every prediction.
+    detection whose attribute ids are not one per attribute the scope declares. Every
+    prediction's ``subject`` is ``scope``'s, and its ``attributes`` each attribute's value its ids
+    name (:func:`~tcip_annotation.json_io.attribute_values`), none for a scope declaring none. An
+    image with no detection encodes ``{"annotations": []}``. ``created_by`` stamps every
+    prediction.
 
     Each mask becomes one ``Polygon`` ring per polygon; a mask that binarized to nothing stores the
     detection's ``BBox`` (logged). A detection whose stored geometry has no extent is dropped.
@@ -104,15 +75,10 @@ def encode_predictions(
 
     read = scope.document_attributes("this bucket's scope")
     attributes = read.attributes
-    rows = (
-        (result.attributes or []) if attributes else [[]] * len(result.boxes)
-    )
     created_at = now().isoformat()
     stored = stored_geometries(result)
     preds: list[Annotation] = []
-    for i, (_box, score, ids) in enumerate(
-        zip(result.boxes, result.scores, rows, strict=True)
-    ):
+    for i, d in enumerate(result.detections):
         geometry = stored.get(i)
         if geometry is None:
             continue
@@ -120,8 +86,10 @@ def encode_predictions(
             Annotation(
                 subject=read.subject,
                 geometry=geometry,
-                score=score,
-                attributes=json_io.attribute_values(ids, attributes),
+                score=d.score,
+                attributes=json_io.attribute_values(
+                    d.attributes if attributes else [], attributes
+                ),
                 created_by=created_by,
                 created_at=created_at,
             )
@@ -129,36 +97,31 @@ def encode_predictions(
     data = json_io.document_payload(
         preds, result.width, result.height, cap=result.cap
     )
-    return data, len(result.boxes) - len(preds)
+    return data, len(result.detections) - len(preds)
 
 
-def encode_head_output(result: dict, *, task: str) -> tuple[dict, int]:
-    """Encode a classification, ordinal, regression or semantic segmentation result.
+def encode_head_output(result: HeadPass, *, task: str) -> tuple[dict, int]:
+    """Encode a classification, ordinal, regression or semantic segmentation pass.
 
     Returns the document and a dropped count of zero: the document holds the source image's
     ``width`` and ``height``, the head's ``task`` and every output the head returned under
-    ``outputs``, as returned. A result carrying no output refuses (``ValueError``).
+    ``outputs``, as returned. A pass carrying no output refuses (``ValueError``).
     """
-    outputs = {
-        k: v
-        for k, v in result.items()
-        if k not in ("image", "width", "height")
-    }
-    if not outputs:
+    if not result.outputs:
         raise ValueError(
-            f"the {task} result for {result['image']!r} carries no output, so "
+            f"the {task} result for {result.image!r} carries no output, so "
             "nothing here is publishable."
         )
     return {
-        "width": int(result["width"]),
-        "height": int(result["height"]),
+        "width": result.width,
+        "height": result.height,
         "task": task,
-        "outputs": outputs,
+        "outputs": result.outputs,
     }, 0
 
 
 def _mask_geometry_for_export(
-    mask: DetectionMask,
+    mask: list[list[float]],
     bbox_xyxy: tuple[float, float, float, float],
     subject: str,
     *,
@@ -177,7 +140,7 @@ def _mask_geometry_for_export(
             (_clip(flat[i], max_x), _clip(flat[i + 1], max_y))
             for i in range(0, len(flat) - 1, 2)
         ]
-        for flat in mask.segmentation
+        for flat in mask
     ]
     if rings:
         return Polygon(rings=rings)

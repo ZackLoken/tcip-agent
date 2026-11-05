@@ -739,11 +739,11 @@ class TestInferenceToolOutputSchema:
         """
         pytest.importorskip("torch")
         from tcip_annotation import json_io
-        from tests._chain_fixtures import published
+        from tests._chain_fixtures import detected, detection_pass, published
 
-        def _boxes(n: int) -> list[list[float]]:
+        def _boxes(n: int) -> list[tuple[float, float, float, float]]:
             return [
-                [10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0]
+                (10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0)
                 for i in range(1, n + 1)
             ]
 
@@ -753,15 +753,12 @@ class TestInferenceToolOutputSchema:
             tmp_path,
             "baseline/2026-01-01",
             [
-                {
-                    "image": str(images / f"{stem}.jpg"),
-                    "width": 800,
-                    "height": 600,
-                    "boxes": _boxes(n),
-                    "scores": [0.9] * n,
-                    "labels": [1] * n,
-                    "cap": n + 1,
-                }
+                detection_pass(
+                    images / f"{stem}.jpg",
+                    (800, 600),
+                    [detected(box, 0.9) for box in _boxes(n)],
+                    cap=n + 1,
+                )
                 for stem, n in counts.items()
             ],
             scope={"subject": "bud"},

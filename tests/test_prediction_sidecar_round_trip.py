@@ -27,7 +27,8 @@ def _publish(
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._predictor_fixtures import StubPredictor, install
+    from tests._chain_fixtures import detected
+    from tests._predictor_fixtures import BOX, StubPredictor, install
     from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
@@ -36,7 +37,11 @@ def _publish(
     install(
         monkeypatch,
         StubPredictor(
-            width=160, height=120, scores=(0.95,), task="detection", in_chans=3
+            width=160,
+            height=120,
+            detections=[detected(BOX, 0.95)],
+            task="detection",
+            in_chans=3,
         ),
     )
     return run_inference(

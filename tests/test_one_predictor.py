@@ -47,7 +47,7 @@ def test_a_checkpoint_without_kind_predicts_and_ranks(tmp_path: Path) -> None:
             None,
         ),
     )
-    assert {"boxes", "scores", "labels", "count", "cap"} <= set(result)
+    assert len(result.detections) <= result.cap
 
     ranked = resolve_scorer(
         ScorerSpec(name="uncertainty"), checkpoint.task

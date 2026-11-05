@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Pass, Preparation
     from tcip_mcp.pipelines.raster_source import RasterSource
     from tcip_mcp.pipelines.schemas import TilingSpec
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
     from tcip_mcp.traits import TraitEntry, TraitRevision
 
 ASSESSMENTS_DIR = Path(".tcip/assessments")
@@ -723,11 +724,13 @@ def assess(
 def _count_fit(
     p: Pass,
     entry: TraitEntry,
-    collect: Callable[[Execution], tuple[list[dict], list[dict]]],
+    collect: Callable[
+        [Execution], tuple[list[EvaluationRecord], list[EvaluationRecord]]
+    ],
     *,
     equivalence_z: float,
     dispersion_quantile: float,
-) -> tuple[dict, list[str], list[dict], list[dict]]:
+) -> tuple[dict, list[str], list[EvaluationRecord], list[EvaluationRecord]]:
     """Fit the count criterion over a reference at ``equivalence_z`` and ``dispersion_quantile``.
 
     It reads the calibration and holdout records ``collect`` predicts under the pass's record, at
@@ -766,12 +769,13 @@ def _records(
     ds: DocumentDataset,
     digest_of: dict[str, str],
     execution: Execution,
-) -> list[dict]:
+) -> list[EvaluationRecord]:
     """Return one evaluation record per sample of the loader ``ds``, predicted under ``execution``.
 
     Each record is :func:`~tcip_mcp.pipelines.training.evaluation.result_record`'s, the sample's
     source digest as its ``image_id``.
     """
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_mcp.pipelines.training.evaluation import (
         gt_records,
         result_record,
@@ -782,14 +786,18 @@ def _records(
         if ds.stems
         else []
     )
-    return [
-        result_record(
-            r,
-            gt_records(ds.det_targets(ds.document(k))),
-            image_id=digest_of[k],
+    records = []
+    for k, r in zip(ds.stems, results, strict=True):
+        assert isinstance(r, DetectionPass), "a detector's pass"
+        records.append(
+            result_record(
+                r,
+                gt_records(ds.det_targets(ds.document(k))),
+                image_id=digest_of[k],
+                region=None,
+            )
         )
-        for k, r in zip(ds.stems, results, strict=True)
-    ]
+    return records
 
 
 def _detection(
@@ -864,7 +872,10 @@ def _detection(
 
 
 def _mask_fit(
-    execution: Execution, cal_records: list[dict], evidence: dict, held: dict
+    execution: Execution,
+    cal_records: list[EvaluationRecord],
+    evidence: dict,
+    held: dict,
 ) -> Execution:
     """Return ``execution`` with its ``mask_cut`` derived over the calibration records.
 
@@ -886,7 +897,7 @@ def _mask_fit(
     from tcip_mcp.pipelines.training.evaluation import matched
 
     pairs = [
-        (*rec["dt"][d]["soft_mask"], rec["gt"][g]["rings"])
+        (*rec.dt[d]["soft_mask"], rec.gt[g]["rings"])
         for rec, by_class in zip(
             cal_records,
             matched(
@@ -916,7 +927,7 @@ def _mask_fit(
 
 
 def _classification_items(
-    records: list[dict],
+    records: list[EvaluationRecord],
     state: tuple[int, int],
     criterion: dict,
     conf: float,
@@ -955,6 +966,7 @@ def _scalar(
     delivery is scored by the revision's own ``regression_criterion``.
     """
     from tcip_mcp.pipelines.data.datasets import table_values
+    from tcip_mcp.pipelines.inference.passes import HeadPass
     from tcip_mcp.pipelines.operating_point import (
         REGRESSION_CRITERIA,
         scalar_criterion,
@@ -974,9 +986,10 @@ def _scalar(
     for sample, truth, prediction in zip(
         hold, table_values(hold), predictions, strict=True
     ):
-        values = [
+        assert isinstance(prediction, HeadPass), "a head's pass"
+        values: list[list] = [
             v
-            for k, v in prediction.items()
+            for k, v in prediction.outputs.items()
             if k.endswith(suffix) and isinstance(v, list)
         ]
         if not values or not values[0]:
@@ -1191,7 +1204,9 @@ def assess_reserved_regions(
         Reference(regions=list(band_regions["calibration"].values()))
     )
 
-    def collect(execution: Execution) -> tuple[list[dict], list[dict]]:
+    def collect(
+        execution: Execution,
+    ) -> tuple[list[EvaluationRecord], list[EvaluationRecord]]:
         with open_raster(source, p.predictor.in_chans) as reader:
             if (reader.width, reader.height) != (
                 spatial.width,
@@ -1284,19 +1299,18 @@ def _band_records(
     gt: dict,
     digest_of: dict[str, str],
     source: str,
-) -> list[dict]:
+) -> list[EvaluationRecord]:
     """Return one evaluation record per band of ``side``, in band-name order.
 
-    Each is :func:`~tcip_mcp.pipelines.training.evaluation.result_record`'s over the tiled
-    prediction under ``execution`` over the band widened on every side (clipped to the mosaic) by
-    the overlap its lattice states between neighbors, the frame that forward ran on, keeping the
-    detections and the ground truth centered in the band itself, in that frame's coordinates, the
-    band as the record's scored ``region``, the band sample's source digest as its ``image_id``.
+    Each is :func:`~tcip_mcp.pipelines.training.evaluation.result_record`'s of the tiled pass
+    under ``execution`` over the band widened on every side (clipped to the mosaic) by the
+    overlap its lattice states between neighbors, the frame that pass ran on, the band itself in
+    that frame's coordinates as its ``region``: its ``frame_count`` the pass's over the whole
+    frame, its detections and ground truth those centered in the band, the band sample's source
+    digest as its ``image_id``.
     """
-    import numpy as np
-
     from tcip_mcp.pipelines import block_calibration as blocks
-    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.evaluation import (
@@ -1333,21 +1347,13 @@ def _band_records(
             tile_batch_size=p.tile_batch_size,
             source_label=name,
         )
+        assert isinstance(result, DetectionPass), "a detector's pass"
         region = (ix0 - hx0, iy0 - hy0, ix1 - hx0, iy1 - hy0)
-        kept = blocks.centered_in(
-            np.asarray(result["boxes"], dtype=np.float64).reshape(-1, 4),
-            region,
-        )
-        rows = {
-            key: [v for v, k in zip(result[key], kept) if k]
-            for key in PER_BOX_KEYS
-            if key in result
-        }
         band = blocks.select_gt_for_band(gt, inner)
         band["boxes"] += [region[0], region[1], region[0], region[1]]
         records.append(
             result_record(
-                {**result, **rows},
+                result,
                 gt_records(band),
                 image_id=digest_of[location],
                 region=region,

@@ -10,7 +10,7 @@ import logging
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -34,6 +34,7 @@ from tcip_store import (
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
     from tcip_mcp.pipelines.raster_source import RasterSource
 
 logger = logging.getLogger(__name__)
@@ -231,7 +232,7 @@ def infer(
                 "assessment_id": assessment_id,
             }
 
-        results: Any
+        results: list[DetectionPass | HeadPass]
         if raster is not None:
             try:
                 results = [
@@ -301,7 +302,7 @@ def _image_results(
     p: Pass,
     progress: Progress | None,
     canceled: Canceled | None,
-) -> Iterator[dict]:
+) -> Iterator[DetectionPass | HeadPass]:
     """Yield the pass's prediction per image, one image at a time.
 
     Reports each image's progress and stops at the image boundary a cancel is first seen at.
@@ -438,7 +439,7 @@ def _raster_pass(
     label: str,
     *,
     resumed: bool,
-) -> dict:
+) -> DetectionPass | HeadPass:
     """Run the tiled pass over the open raster ``reader``, ``label`` naming it.
 
     The pass's ``identity`` is recorded first on a fresh pass, each flushed tile batch recorded as
@@ -459,7 +460,7 @@ def _raster_pass(
         ]
         prior = SliceBatch(
             slices=[s for b in batches for s in b.slices],
-            predictions=[row for b in batches for row in b.predictions],
+            predictions=[d for b in batches for d in b.predictions],
         )
     else:
         store.replace(

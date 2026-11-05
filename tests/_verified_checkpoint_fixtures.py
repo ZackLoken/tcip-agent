@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.pipelines.derivations import Region
     from tcip_mcp.pipelines.execution import Execution, Pass
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
     from tcip_mcp.pipelines.schemas import ModelDims
     from tcip_mcp.subject_registry import SubjectRegistry
 
@@ -750,7 +751,7 @@ def predicted_over(
     *,
     device: str | None = None,
     **stated: object,
-) -> tuple[Pass, list[dict]]:
+) -> tuple[Pass, list[DetectionPass | HeadPass]]:
     """Prepare and run a pass of the detector registered at ``checkpoint_path``, publishing nothing.
 
     The pass reads ``images_dir`` (``execution.prepare`` under the ``stated`` execution values

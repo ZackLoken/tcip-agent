@@ -9,6 +9,7 @@ import pytest
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import AugmentationSpec
 from tcip_web.jobstore import Completed
+from tests._chain_fixtures import detected, detection_pass
 from tests._predictor_fixtures import BOX, StubPredictor, install
 from tests._training_values import RATIONALE, augmentation
 from tests._web_fixtures import inference_job
@@ -56,19 +57,14 @@ def _annotations(
 def test_encode_predictions_roundtrip_and_negative(tmp_path: Path) -> None:
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     scope = registry_scope(tmp_path, "bud")
     encoded, _dropped = encode_predictions(
-        DetectionResult(
-            image="img.jpg",
-            width=100,
-            height=100,
-            boxes=[(10.0, 10.0, 30.0, 30.0)],
-            scores=[0.9],
+        detection_pass(
+            "img.jpg",
+            (100, 100),
+            [detected((10.0, 10.0, 30.0, 30.0), 0.9)],
             cap=2,
         ),
         "model:fixture",
@@ -83,14 +79,7 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path: Path) -> None:
 
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     empty, _dropped = encode_predictions(
-        DetectionResult(
-            image="empty.jpg",
-            width=100,
-            height=100,
-            boxes=[],
-            scores=[],
-            cap=1,
-        ),
+        detection_pass("empty.jpg", (100, 100), [], cap=1),
         "model:fixture",
         scope=scope,
     )
@@ -176,7 +165,10 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
         registry=registry_of("bud", opening),
     )
 
-    install(monkeypatch, StubPredictor(attributes=[[1]]))
+    install(
+        monkeypatch,
+        StubPredictor(detections=[detected(BOX, 0.9, attributes=[1])]),
+    )
 
     job = inference_job(
         images_dir,
@@ -265,8 +257,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     predictor = install(
         monkeypatch,
         StubPredictor(
-            boxes=(),
-            scores=(),
+            detections=(),
             task="detection",
             train_tile_size=None,
             train_native_size=(64, 64),
@@ -386,8 +377,10 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
     install(
         monkeypatch,
         StubPredictor(
-            boxes=(BOX, (50.0, 50.0, 50.0, 60.0)),
-            scores=(0.9, 0.4),
+            detections=[
+                detected(BOX, 0.9),
+                detected((50.0, 50.0, 50.0, 60.0), 0.4),
+            ],
             train_tile_size=640,
         ),
     )

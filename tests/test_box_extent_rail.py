@@ -37,40 +37,30 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(
     box is 0.004 px wide are dropped: the document holds the 0.8-scored one, two counted dropped.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionMask,
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tests._chain_fixtures import detected, detection_pass
     from tests._producer_fixtures import painted_array
     from tests._training_values import VERTEX_SPACING
 
     solid = painted_array(40, 40, [((5, 5, 30, 30), 1)])
-    blob = DetectionMask(
-        segmentation=[
-            [c for point in ring for c in point]
-            for ring in mask_to_polygon_rings(
-                solid, threshold=None, vertex_spacing=VERTEX_SPACING
-            )
-        ]
-    )
+    blob = [
+        [c for point in ring for c in point]
+        for ring in mask_to_polygon_rings(
+            solid, threshold=None, vertex_spacing=VERTEX_SPACING
+        )
+    ]
     # A merged sliced polygon wholly past the right edge clips to one column.
-    past_the_edge = DetectionMask(
-        segmentation=[[105.0, 5.0, 130.0, 5.0, 130.0, 30.0, 105.0, 30.0]]
-    )
+    past_the_edge = [[105.0, 5.0, 130.0, 5.0, 130.0, 30.0, 105.0, 30.0]]
 
     data, dropped = encode_predictions(
-        DetectionResult(
-            image="a.jpg",
-            width=40,
-            height=40,
-            scores=[0.9, 0.8, 0.7],
-            boxes=[
-                (5.0, 5.0, 30.0, 30.0),
-                (5.0, 5.0, 30.0, 30.0),
-                (10.0, 5.0, 10.004, 30.0),
+        detection_pass(
+            "a.jpg",
+            (40, 40),
+            [
+                detected((5.0, 5.0, 30.0, 30.0), 0.9, mask=past_the_edge),
+                detected((5.0, 5.0, 30.0, 30.0), 0.8, mask=blob),
+                detected((10.0, 5.0, 10.004, 30.0), 0.7),
             ],
-            masks=[past_the_edge, blob],
             cap=4,
         ),
         "model:fixture",
@@ -306,7 +296,7 @@ def _seed_review_dataset(
     )
     label_image(img, gt_annotations, 200, 150)
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     x1, y1, x2, y2 = pred_box
     ordered = x2 > x1 and y2 > y1
@@ -314,15 +304,12 @@ def _seed_review_dataset(
         dataset_root,
         "m",
         [
-            {
-                "image": str(img),
-                "width": 200,
-                "height": 150,
-                "boxes": [list(pred_box) if ordered else [10, 10, 20, 20]],
-                "scores": [0.9],
-                "labels": [1],
-                "cap": 2,
-            }
+            detection_pass(
+                img,
+                (200, 150),
+                [detected(pred_box if ordered else (10, 10, 20, 20), 0.9)],
+                cap=2,
+            )
         ],
         scope={"subject": "leaf"},
     )
@@ -474,20 +461,16 @@ LEAF = registry_scope(Path(__file__).parent, "leaf")
 def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count() -> (
     None
 ):
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tests._chain_fixtures import detected, detection_pass
 
-    result = DetectionResult(
-        image="preds.jpg",
-        width=200,
-        height=150,
-        boxes=[
-            (10, 10, 20, 20),
-            (30, 30, 30, 40),
-        ],  # the second has zero width
-        scores=[0.9, 0.8],
+    result = detection_pass(
+        "preds.jpg",
+        (200, 150),
+        [
+            detected((10, 10, 20, 20), 0.9),
+            detected((30, 30, 30, 40), 0.8),  # zero width
+        ],
         cap=3,
     )
 
@@ -502,17 +485,16 @@ def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent() -> None:
 
     A box 0.003 px across is dropped and counted, and the other box, 10 px across, is encoded.
     """
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tests._chain_fixtures import detected, detection_pass
 
-    result = DetectionResult(
-        image="preds.jpg",
-        width=200,
-        height=150,
-        boxes=[(10, 10, 20, 20), (30, 30, 30.003, 30.003)],
-        scores=[0.9, 0.8],
+    result = detection_pass(
+        "preds.jpg",
+        (200, 150),
+        [
+            detected((10, 10, 20, 20), 0.9),
+            detected((30, 30, 30.003, 30.003), 0.8),
+        ],
         cap=3,
     )
 

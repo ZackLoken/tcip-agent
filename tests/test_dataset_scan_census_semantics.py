@@ -79,22 +79,19 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(
     """
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import bucket_key
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     root, _images_dir, images = _lopsided_dataset(tmp_path / "ds")
     published(
         tmp_path,
         f"run_a/{DATE}",
         [
-            {
-                "image": str(image),
-                "width": 96,
-                "height": 64,
-                "boxes": [[12.0, 8.0, 40.0, 52.0]],
-                "scores": [0.8],
-                "labels": [1],
-                "cap": 2,
-            }
+            detection_pass(
+                image,
+                (96, 64),
+                [detected((12.0, 8.0, 40.0, 52.0), 0.8)],
+                cap=2,
+            )
             for image in (images[0], images[2])
         ],
         scope={"subject": SUBJECT},

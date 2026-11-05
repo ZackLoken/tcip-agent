@@ -83,19 +83,21 @@ def _publish(project: Path, bucket: str, images: list[Path]) -> str:
     The bucket is published unassessed under ``project`` (``_chain_fixtures.published``) from a
     checkpoint whose scope declares the bloom state. Return its name.
     """
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     results = [
-        {
-            "image": str(p),
-            "width": 8,
-            "height": 8,
-            "boxes": [[1.0, 1.0, 3.0, 3.0]],
-            "scores": [0.9],
-            "labels": [1],
-            "cap": 2,
-            "attributes": [[BLOOM_STATE.values.index("open")]],
-        }
+        detection_pass(
+            p,
+            (8, 8),
+            [
+                detected(
+                    (1.0, 1.0, 3.0, 3.0),
+                    0.9,
+                    attributes=[BLOOM_STATE.values.index("open")],
+                )
+            ],
+            cap=2,
+        )
         for p in images
     ]
     return published(

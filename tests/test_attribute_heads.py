@@ -228,7 +228,8 @@ def test_a_scope_with_no_attribute_writes_no_attribute_row(
     _p, results = predicted_over(
         tmp_path, checkpoint, str(images_dir), tile=False, conf=0.0
     )
-    assert results and all("attributes" not in r for r in results), results
+    assert results and all(r.detections for r in results), results
+    assert all(d.attributes == [] for r in results for d in r.detections)
 
     published = run_inference(
         tmp_path,
@@ -512,8 +513,12 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
         tile_batch_size=p.tile_batch_size,
     )
 
-    assert result["boxes"] == [[100.0, 20.0, 150.0, 60.0]], result
-    assert result["attributes"] == [[WHOLE.values.index("whole")]], result
+    assert [d.box for d in result.detections] == [
+        (100.0, 20.0, 150.0, 60.0)
+    ], result
+    assert [d.attributes for d in result.detections] == [
+        [WHOLE.values.index("whole")]
+    ], result
 
 
 # --- per-attribute agreement ------------------------------------------------

@@ -384,6 +384,6 @@ def triage_predictions(
         "total_images": len(predictions),
         "reviewed_skipped": reviewed_skipped,
         "needs_review": len(all_review),
-        "review_images": [r.get("image", "") for r in all_review],
-        "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
+        "review_images": [r.image for r in all_review],
+        "unscoreable_images": [p.image for p in unscoreable_preds],
     }

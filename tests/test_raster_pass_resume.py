@@ -314,6 +314,56 @@ def test_resume_completes_an_interrupted_pass_with_the_same_detections_and_clear
     )
 
 
+def test_a_resumed_pass_reads_its_rows_back_as_the_detections_a_fresh_pass_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resumed pass reads its recorded rows back as the detection records a fresh pass makes.
+
+    The prior the resume hands the predictor holds the rows a fresh pass records for the same
+    tiles, each the same record a pass result's detection is, and the resumed pass's detections
+    equal the fresh pass's.
+    """
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    ckpt, raster_path = _setup(tmp_path)
+    interrupted = "interrupted/2026-01-01"
+    _interrupted(tmp_path, monkeypatch, interrupted, ckpt, raster_path)
+
+    seen: list = []
+    real = GenericPredictor.predict_sliced
+
+    def recording(
+        predictor: GenericPredictor, source: RasterSource, **kwargs: object
+    ) -> object:
+        batches: list = []
+        progress = kwargs["progress"]
+
+        def record(start: int, end: int, batch: object) -> None:
+            batches.append(batch)
+            progress(start, end, batch)
+
+        result = real(predictor, source, **{**kwargs, "progress": record})
+        seen.append((kwargs["prior"], batches, result))
+        return result
+
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", recording)
+    assert "error" not in _run(
+        tmp_path, ckpt, raster_path, interrupted, resume=True
+    )
+    assert "error" not in _run(
+        tmp_path, ckpt, raster_path, "uninterrupted/2026-01-01"
+    )
+
+    (prior, _, resumed), (_, fresh_batches, fresh) = seen
+    assert prior.predictions, "the interrupted pass recorded detections"
+    assert prior.predictions == fresh_batches[0].predictions
+    assert {type(d) for d in prior.predictions} == {
+        type(d) for d in fresh.detections
+    }
+    assert resumed.detections == fresh.detections
+
+
 def test_a_fresh_pass_over_recorded_progress_refuses_and_leaves_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

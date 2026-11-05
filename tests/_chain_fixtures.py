@@ -7,7 +7,7 @@ publish its predictions under the assessment.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.data.selection import Selection
     from tcip_mcp.pipelines.data.split_construction import Partition
+    from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.inference.passes import Detection, DetectionPass
     from tcip_mcp.pipelines.schemas import DetectorGeometry
     from tcip_mcp.subject_registry import SubjectRegistry
     from tcip_mcp.traits import TraitRevision
@@ -635,54 +637,87 @@ def deliver_acknowledged(
     )
 
 
-def predicted(image: Path, values: list[str], attributes: tuple = ()) -> dict:
-    """Return one predictor result for the image at ``image``.
-
-    The result holds one 3 px box labeled 1 and scored 0.9 per entry of ``values``, each
-    carrying that value's index under the first of ``attributes`` (the scope's attribute
-    records) and 0 under every other; no ``attributes`` row for none. Its count is the number
-    of boxes and its cap one more.
-    """
-    result = {
-        "image": str(image),
-        "width": IMG,
-        "height": IMG,
-        "boxes": [
-            [4.0 * k, 0.0, 4.0 * k + 3.0, 3.0] for k in range(len(values))
-        ],
-        "scores": [0.9] * len(values),
-        "labels": [1] * len(values),
-        "count": len(values),
-        "cap": len(values) + 1,
-    }
-    if attributes:
-        result["attributes"] = [
-            [attributes[0].values.index(v)] + [0] * (len(attributes) - 1)
-            for v in values
-        ]
-    return result
-
-
-def published(
-    project: Path,
-    name: str,
-    results: list[dict],
+def detected(
+    box: Sequence[float],
+    score: float,
     *,
-    scope: dict,
-    registry: SubjectRegistry | None = None,
-    raster_path: Path | None = None,
-) -> Bucket:
-    """Publish ``results`` as the bucket named ``name`` and return the bucket.
+    mask: list[list[float]] | None = None,
+    attributes: Sequence[int] = (),
+    label: int = 1,
+) -> Detection:
+    """Return one detection labeled ``label`` at the xyxy ``box``, scored ``score``.
 
-    :func:`~tcip_mcp.buckets.publish` writes it under their images' dataset root, under an
-    untiled pass prepared, not run, for a registered checkpoint stating ``scope`` (its frames'
-    dataset declaring ``registry``), over the raster ``raster_path`` when one is named.
+    It carries ``mask``'s flat polygons and the ``attributes`` value ids.
     """
-    from tcip_mcp.buckets import pass_documents, publish, source_root
+    from tcip_mcp.pipelines.inference.passes import Detection
+
+    x0, y0, x1, y1 = box
+    return Detection(
+        box=(x0, y0, x1, y1),
+        score=score,
+        label=label,
+        attributes=list(attributes),
+        mask=mask,
+    )
+
+
+def detection_pass(
+    image: str | Path,
+    frame: tuple[int, int],
+    detections: list[Detection],
+    *,
+    cap: int,
+) -> DetectionPass:
+    """Return a detector pass over ``image``'s ``(width, height)`` ``frame`` kept to ``cap``."""
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
+
+    width, height = frame
+    return DetectionPass(
+        image=str(image),
+        width=width,
+        height=height,
+        cap=cap,
+        detections=detections,
+        soft_masks=None,
+    )
+
+
+def predicted(
+    image: Path, values: list[str], attributes: tuple = ()
+) -> DetectionPass:
+    """Return one detector pass over the image at ``image``.
+
+    The pass holds one 3 px box scored 0.9 per entry of ``values`` (:func:`detected`), each
+    carrying that value's index under the first of ``attributes`` (the scope's attribute records)
+    and 0 under every other, no attribute id for none. Its cap is one more than its detections.
+    """
+    return detection_pass(
+        image,
+        (IMG, IMG),
+        [
+            detected(
+                (4.0 * k, 0.0, 4.0 * k + 3.0, 3.0),
+                0.9,
+                attributes=[attributes[0].values.index(v)]
+                + [0] * (len(attributes) - 1)
+                if attributes
+                else [],
+            )
+            for k, v in enumerate(values)
+        ],
+        cap=len(values) + 1,
+    )
+
+
+def detector_pass(
+    project: Path, *, scope: dict, registry: SubjectRegistry | None = None
+) -> Pass:
+    """Return an untiled pass at the sample conf for a checkpoint registered in ``project``.
+
+    The checkpoint states ``scope``, its frames' dataset declaring ``registry``.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.execution import prepare
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         project_checkpoint,
@@ -696,18 +731,41 @@ def published(
         ),
         project=project,
     )
+    return prepare(
+        checkpoint, Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE)
+    ).runnable()
+
+
+def published(
+    project: Path,
+    name: str,
+    results: list[DetectionPass],
+    *,
+    scope: dict,
+    registry: SubjectRegistry | None = None,
+    raster_path: Path | None = None,
+) -> Bucket:
+    """Publish ``results`` as the bucket named ``name`` and return the bucket.
+
+    :func:`~tcip_mcp.buckets.publish` writes it under their images' dataset root, under
+    :func:`detector_pass`'s pass for ``scope`` and ``registry``, over the raster ``raster_path``
+    when one is named.
+    """
+    from tcip_mcp.buckets import pass_documents, publish, source_root
+    from tcip_mcp.pipelines.data.split_construction import raster_identity
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+
     identity = (
         raster_identity(resolve_image_path(raster_path))
         if raster_path is not None
         else None
     )
-    p = prepare(
-        checkpoint, Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE)
-    ).runnable()
+    p = detector_pass(project, scope=scope, registry=registry)
+    checkpoint = p.checkpoint
     root = source_root(
         [raster_path]
         if raster_path is not None
-        else [r["image"] for r in results]
+        else [r.image for r in results]
     )
     return publish(
         project,

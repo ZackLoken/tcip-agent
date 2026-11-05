@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.derivations import Region
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
     from tcip_mcp.pipelines.slicing import TileGeometry
 
 logger = logging.getLogger(__name__)
@@ -264,7 +265,7 @@ class Pass:
 
     def predict(
         self, sources: list[Any], execution: Execution | None = None
-    ) -> list[dict]:
+    ) -> list[DetectionPass | HeadPass]:
         """Predict one result per source under the pass's own execution record.
 
         Under ``execution`` instead where one is given.

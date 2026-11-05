@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import copy
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from tcip_mcp.pipelines.execution import (
     DEFAULT_IMAGE_BATCH_SIZE,
     DEFAULT_TILE_BATCH_SIZE,
 )
 from tcip_mcp.pipelines.image_utils import source_path_of
+from tests._chain_fixtures import detected, detection_pass
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -21,8 +21,10 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution
     from tcip_mcp.pipelines.image_utils import BandGroupRef
     from tcip_mcp.pipelines.inference.generic_predictor import (
+        SliceBatch,
         WindowedRasterReader,
     )
+    from tcip_mcp.pipelines.inference.passes import Detection, DetectionPass
     from tcip_mcp.pipelines.schemas import AugmentationSpec
 
 BOX = (10.0, 10.0, 30.0, 30.0)
@@ -32,8 +34,8 @@ BOX = (10.0, 10.0, 30.0, 30.0)
 class StubPredictor:
     """A predictor answering the same detections for every image it is handed.
 
-    The detections are ``boxes`` scored ``scores``, each labeled 1, on a ``width`` by ``height``
-    frame, with ``attributes`` when given and the frame ``cap`` as stated (one above the count
+    The detections are ``detections`` (one at :data:`BOX` scored 0.9 unless given) on a
+    ``width`` by ``height`` frame under the frame ``cap`` as stated (one above their number
     unless given). It carries a recorded training geometry (none unless given), and every other
     keyword becomes an attribute of its own (``task``, ``in_chans``). It counts its calls and
     keeps each execution it ran under and the checkpoint it was built for.
@@ -44,9 +46,7 @@ class StubPredictor:
         *,
         width: int = 100,
         height: int = 100,
-        boxes: Sequence[Sequence[float]] = (BOX,),
-        scores: Sequence[float] = (0.9,),
-        attributes: list[list[int]] | None = None,
+        detections: Sequence[Detection] | None = None,
         cap: int | None = None,
         train_tile_size: int | None = None,
         train_overlap: float | None = None,
@@ -58,17 +58,11 @@ class StubPredictor:
         self.train_overlap = train_overlap
         self.train_native_size = train_native_size
         self.train_augmentation = train_augmentation
-        self.record: dict[str, Any] = {
-            "width": width,
-            "height": height,
-            "boxes": [list(b) for b in boxes],
-            "scores": list(scores),
-            "labels": [1] * len(boxes),
-            "count": len(boxes),
-            "cap": len(boxes) + 1 if cap is None else cap,
-        }
-        if attributes is not None:
-            self.record["attributes"] = attributes
+        self.frame = (width, height)
+        self.detections = (
+            [detected(BOX, 0.9)] if detections is None else list(detections)
+        )
+        self.cap = len(self.detections) + 1 if cap is None else cap
         for name, value in traits.items():
             setattr(self, name, value)
         self.calls = 0
@@ -82,6 +76,12 @@ class StubPredictor:
         self.checkpoint = getattr(checkpoint, "path", checkpoint)
         return self
 
+    def answer(self, label: str) -> DetectionPass:
+        """Return the stub's detections as the pass over the image ``label``."""
+        return detection_pass(
+            label, self.frame, list(self.detections), cap=self.cap
+        )
+
     def predict_batch(
         self,
         image_paths: list[str | Path | BandGroupRef],
@@ -89,13 +89,10 @@ class StubPredictor:
         *,
         tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
         batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
-    ) -> list[dict]:
+    ) -> list[DetectionPass]:
         self.calls += 1
         self.executions.append(execution)
-        return [
-            {"image": source_path_of(p), **copy.deepcopy(self.record)}
-            for p in image_paths
-        ]
+        return [self.answer(source_path_of(p)) for p in image_paths]
 
     def predict_sliced(
         self,
@@ -104,17 +101,16 @@ class StubPredictor:
         execution: Execution,
         tile_batch_size: int,
         source_label: str = "",
-        prior: dict | None = None,
-        progress: Callable[[int, int, dict], None] | None = None,
-    ) -> dict:
+        prior: SliceBatch | None = None,
+        progress: Callable[[int, int, SliceBatch], None] | None = None,
+    ) -> DetectionPass:
         self.calls += 1
         self.executions.append(execution)
-        label = (
+        return self.answer(
             source_label
             if hasattr(source, "read_window")
             else source_path_of(cast("str | Path | BandGroupRef", source))
         )
-        return {"image": label, **copy.deepcopy(self.record)}
 
 
 def install(

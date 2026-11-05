@@ -11,13 +11,17 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
 from tests import _trait_fixtures as fx, csv_rows
-from tests._chain_fixtures import digest_of
+from tests._chain_fixtures import detected, detection_pass, digest_of
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
 
 SCOPE = {"subject": fx.COUNT_SUBJECT}
 
@@ -32,7 +36,9 @@ def _image(project: Path, stem: str) -> Path:
     return image_dir(project / "ds", "2026-01-01") / f"{stem}.png"
 
 
-def _bucket(project: Path, results: list[dict], name: str = "m") -> str:
+def _bucket(
+    project: Path, results: list[DetectionPass], name: str = "m"
+) -> str:
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -330,15 +336,15 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(
     bucket = _bucket(
         tmp_path,
         [
-            {
-                "image": str(_image(tmp_path, "a")),
-                "width": 200,
-                "height": 150,
-                "boxes": [[10, 10, 20, 20], [30, 30, 30, 40]],
-                "scores": [0.9, 0.5],
-                "labels": [1, 1],
-                "cap": 3,
-            }
+            detection_pass(
+                _image(tmp_path, "a"),
+                (200, 150),
+                [
+                    detected((10, 10, 20, 20), 0.9),
+                    detected((30, 30, 30, 40), 0.5),
+                ],
+                cap=3,
+            )
         ],
     )
     from tcip_mcp.buckets import read_bucket
@@ -361,15 +367,15 @@ def test_a_non_finite_score_refuses_the_publication_so_no_average_ever_reads_it(
         _bucket(
             tmp_path,
             [
-                {
-                    "image": str(_image(tmp_path, "a")),
-                    "width": 64,
-                    "height": 64,
-                    "boxes": [[1, 1, 5, 5], [10, 10, 15, 15]],
-                    "scores": [float("nan"), 0.5],
-                    "labels": [1, 1],
-                    "cap": 3,
-                }
+                detection_pass(
+                    _image(tmp_path, "a"),
+                    (64, 64),
+                    [
+                        detected((1, 1, 5, 5), float("nan")),
+                        detected((10, 10, 15, 15), 0.5),
+                    ],
+                    cap=3,
+                )
             ],
         )
 

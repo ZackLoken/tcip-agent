@@ -102,25 +102,19 @@ def test_a_publication_states_the_one_capture_its_documents_are_of(
 ) -> None:
     """A bucket over one capture's images states that capture; one over two captures refuses."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.postprocessing.export import DetectionResult
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import write_image
 
     first, second = "2026-03-02", "2026-03-09"
     results = [
-        DetectionResult(
-            image=str(
-                write_image(
-                    image_dir(tmp_path / "ds", capture) / f"{capture}.jpg",
-                    (8, 8),
-                )
+        detection_pass(
+            write_image(
+                image_dir(tmp_path / "ds", capture) / f"{capture}.jpg", (8, 8)
             ),
-            width=8,
-            height=8,
-            boxes=[(1.0, 1.0, 4.0, 4.0)],
-            scores=[0.9],
+            (8, 8),
+            [detected((1.0, 1.0, 4.0, 4.0), 0.9)],
             cap=2,
-        ).model_dump()
+        )
         for capture in (first, second)
     ]
 

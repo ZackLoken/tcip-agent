@@ -23,6 +23,7 @@ from tests._training_values import RATIONALE
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
 
 
 def _write_group(
@@ -358,7 +359,6 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     ckpt = registered_checkpoint(tmp_path)
 
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.image_utils import source_path_of
     from tests._predictor_fixtures import StubPredictor, install
 
     seen = []
@@ -376,25 +376,19 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
             *,
             tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
             batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
-        ) -> list[dict]:
+        ) -> list[DetectionPass]:
             seen.extend(image_paths)
-            return [
-                {**result, "image": source_path_of(p)}
-                for p, result in zip(
-                    image_paths,
-                    super().predict_batch(
-                        image_paths,
-                        execution,
-                        tile_batch_size=tile_batch_size,
-                        batch_size=batch_size,
-                    ),
-                )
-            ]
+            return super().predict_batch(
+                image_paths,
+                execution,
+                tile_batch_size=tile_batch_size,
+                batch_size=batch_size,
+            )
 
     install(
         monkeypatch,
         ObservingPredictor(
-            width=20, height=24, boxes=(), scores=(), task="detection"
+            width=20, height=24, detections=(), task="detection"
         ),
     )
 

@@ -157,7 +157,7 @@ class TestFullClassificationPipeline:
 
         assert len(results) == 4
         for r in results:
-            assert "image" in r
+            assert r.image and r.outputs
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +285,5 @@ class TestDetectionPipelineRealData:
 
         assert len(results) == len(test_images)
         for r in results:
-            assert "image" in r
-            assert "boxes" in r
-            assert "scores" in r
-            assert "count" in r
+            assert r.image
+            assert len(r.detections) <= r.cap
