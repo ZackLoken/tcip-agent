@@ -122,8 +122,18 @@ def test_a_built_detector_holds_both_knobs_on_itself_and_its_eval_forward_honors
         (SimpleNamespace(unrelated=1), "score_thresh"),
         (SimpleNamespace(score_thresh=0.5), "detections_per_img"),
         (SimpleNamespace(detections_per_img=100), "score_thresh"),
+        (
+            SimpleNamespace(
+                detector=SimpleNamespace(
+                    roi_heads=SimpleNamespace(
+                        score_thresh=0.5, detections_per_img=100
+                    )
+                )
+            ),
+            "score_thresh",
+        ),
     ],
-    ids=["no knob", "no cap knob", "no score knob"],
+    ids=["no knob", "no cap knob", "no score knob", "knobs on a child alone"],
 )
 def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(
     model: SimpleNamespace, missing: str
@@ -258,15 +268,63 @@ def test_a_built_detector_passes_the_contract_with_detections_its_cap_check_kept
     assert all(count >= 1 for count in report["unfiltered_counts"]), report
 
 
+class _KnobHolder(_KeepsItsOperatingPoint, torch.nn.Module):
+    """A module holding both operating-point knobs, at a floor of zero and a cap of 100."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
+
+
+class _KnobsOnAChild(_ThreeScoredBoxes):
+    """A :class:`_ThreeScoredBoxes` whose knobs live only on its ``.detector.roi_heads``.
+
+    Its eval output is kept to that child's knobs (:meth:`_KnobHolder.governed`).
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        del self.score_thresh, self.detections_per_img
+        self.detector = torch.nn.Module()
+        self.detector.roi_heads = _KnobHolder()
+
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> dict | list[dict]:
+        if self.training:
+            return self.zero_loss()
+        heads = self.detector.roi_heads
+        return [heads.governed(self.offered()) for _ in images]
+
+
+def test_the_contract_refuses_a_detection_model_holding_its_knobs_on_a_child_alone() -> (
+    None
+):
+    """The contract refuses a model whose knobs live on a child module, not on itself.
+
+    Knobs on ``.detector.roi_heads`` that the model's output honors are not knobs the platform
+    sets, so the report names the knob the model itself lacks and runs no knob check.
+    """
+    report = _contract(_KnobsOnAChild())
+
+    assert report["ok"] is False
+    assert any(
+        "exposes no score_thresh on itself" in i for i in report["issues"]
+    ), report["issues"]
+    assert report["unfiltered_counts"] is None
+
+
 class _AnswersAttributes(_KeepsItsOperatingPoint, _ThreeScoredBoxes):
     """A :class:`_ThreeScoredBoxes` kept to both knobs, each box carrying ``attributes``.
 
-    Each box's ``attributes`` row is ``width`` zeros as ``dtype``.
+    Each kept box's ``attributes`` row is ``width`` zeros as ``dtype``, the last ``short`` rows
+    dropped.
     """
 
-    def __init__(self, dtype: torch.dtype, width: int) -> None:
+    def __init__(self, dtype: torch.dtype, width: int, short: int) -> None:
         super().__init__()
-        self.dtype, self.width = dtype, width
+        self.dtype, self.width, self.short = dtype, width, short
 
     def forward(
         self, images: list[torch.Tensor], targets: list[dict] | None = None
@@ -277,25 +335,34 @@ class _AnswersAttributes(_KeepsItsOperatingPoint, _ThreeScoredBoxes):
             **self.offered(),
             "attributes": torch.zeros((3, self.width), dtype=self.dtype),
         }
-        return [self.governed(rows) for _ in images]
+        out = []
+        for _ in images:
+            kept = self.governed(rows)
+            kept["attributes"] = kept["attributes"][
+                : len(kept["boxes"]) - self.short
+            ]
+            out.append(kept)
+        return out
 
 
 @pytest.mark.parametrize(
-    "dtype, width, refused",
+    "dtype, width, short, refused",
     [
-        (torch.int64, 2, False),
-        (torch.float32, 2, True),
-        (torch.int64, 3, True),
+        (torch.int64, 2, 0, False),
+        (torch.float32, 2, 0, True),
+        (torch.int64, 3, 0, True),
+        (torch.int64, 2, 1, True),
     ],
-    ids=["int64 by two", "float", "a column too many"],
+    ids=["int64 by two", "float", "a column too many", "a row too few"],
 )
 def test_the_contract_holds_the_attributes_output_to_int64_one_row_per_box_one_column_per_attribute(
-    dtype: torch.dtype, width: int, refused: bool
+    dtype: torch.dtype, width: int, short: int, refused: bool
 ) -> None:
     """The contract refuses an ``attributes`` output that is not int64 of shape boxes by attributes.
 
-    Under two declared attributes, int64 rows of two columns pass; float rows, or a third column,
-    are refused naming the dtype and shape the output answered.
+    Under two declared attributes, int64 rows of two columns, one per box, pass; float rows, a
+    third column, or one row fewer than the boxes kept are refused naming the dtype and shape the
+    output answered.
     """
     from tcip_mcp import subject_registry
 
@@ -304,14 +371,16 @@ def test_the_contract_holds_the_attributes_output_to_int64_one_row_per_box_one_c
         subject_registry.Attribute("grade", "ordinal", ("low", "mid", "high")),
     )
 
-    report = _contract(_AnswersAttributes(dtype, width), attributes=attributes)
+    report = _contract(
+        _AnswersAttributes(dtype, width, short), attributes=attributes
+    )
 
     issues = [i for i in report["issues"] if "attributes" in i]
     if not refused:
         assert report["ok"], report["issues"]
         return
     (issue,) = issues
-    assert str(dtype) in issue and f"[3, {width}]" in issue, issue
+    assert str(dtype) in issue and f"[{3 - short}, {width}]" in issue, issue
     assert "[len(boxes), 2]" in issue, issue
 
 
