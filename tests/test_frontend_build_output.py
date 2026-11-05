@@ -34,6 +34,11 @@ def test_the_build_writes_its_bundle_where_the_backend_serves_it(
     ).resolve() == ASSETS_DIR.resolve()
 
 
+def test_the_build_writes_the_bundles_build_record(vite_config: dict) -> None:
+    """The plugin that has ``vite build`` emit the bundle's record is one the build runs."""
+    assert "bundle-record" in vite_config["plugins"]
+
+
 @pytest.mark.parametrize(
     "ignore_file", [".gitignore", "packages/tcip-web/Dockerfile.dockerignore"]
 )

@@ -164,6 +164,23 @@ describe("StateSocket state_snapshot dispatch", () => {
     socket.close();
   });
 
+  it("holds an envelope's stale-bundle sentence even when mergeSnapshot throws on the envelope", () => {
+    vi.spyOn(useStore.getState(), "mergeSnapshot").mockImplementation(() => {
+      throw new TypeError("an envelope shape this bundle was not built for");
+    });
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().open();
+
+    expect(() =>
+      lastSocket().message(JSON.stringify({ ...PRODUCED_ENVELOPE, bundle: "rebuild the bundle" })),
+    ).toThrow(TypeError);
+    expect(useStore.getState().staleBundle).toBe("rebuild the bundle");
+
+    useStore.getState().setStaleBundle(null);
+    socket.close();
+  });
+
   it("resync stops and re-starts the socket, forcing a fresh connect-time replay", () => {
     const socket = new StateSocket();
     socket.connect();
