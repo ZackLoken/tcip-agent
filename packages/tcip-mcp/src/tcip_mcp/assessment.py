@@ -479,7 +479,7 @@ def _reference_sides(
     ]
     if empty:
         raise AssessmentRefusedError(
-            f"{selection_place(selection_dir)} holds no {empty} side: an "
+            f"{selection_place(selection_dir)} holds no {' or '.join(empty)} side: an "
             "assessment fits on the calibration side and checks on the "
             "holdout side. Draw a selection with both (draw_splits)."
         )
