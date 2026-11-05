@@ -1278,7 +1278,9 @@ def ordinal_metrics(
     if gt.numel() == 0:
         return {"mae": 0.0, "rank_acc": 0.0, "quadratic_weighted_kappa": None}
     with _scores_non_finite():
-        mae = float(mean_absolute_error(gt.double().numpy(), pred.double().numpy()))
+        mae = float(
+            mean_absolute_error(gt.double().numpy(), pred.double().numpy())
+        )
     return {
         "mae": mae,
         "rank_acc": float(

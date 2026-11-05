@@ -190,7 +190,9 @@ def test_a_rank_outside_the_run_rank_count_refuses_naming_it(
     beyond[0] = num_ranks + 0.4
     below = gt.clone()
     below[1] = -1
-    with pytest.raises(ValueError, match=rf"\[{num_ranks}\].*{num_ranks} ranks"):
+    with pytest.raises(
+        ValueError, match=rf"\[{num_ranks}\].*{num_ranks} ranks"
+    ):
         quadratic_weighted_kappa(beyond, gt, num_ranks)
     with pytest.raises(ValueError, match=r"\[-1\].*ranks"):
         quadratic_weighted_kappa(pred, below, num_ranks)
