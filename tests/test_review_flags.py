@@ -403,6 +403,7 @@ def test_each_served_flag_names_the_annotation_whose_rings_hold_its_point(
 def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does(
     tmp_path: Path,
 ) -> None:
+    """A flags record its model refuses is one warning: the flags reader's sentence, once."""
     import tcip_store as ts
     from tcip_mcp.tools.doctor_tools import _buckets, check_state
 
@@ -417,12 +418,13 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
     check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))
     assert findings == []
 
-    ts.replace(flag_key(image_label_key(image)), {"flags": [{"id": "x"}]})
+    key = flag_key(image_label_key(image))
+    ts.replace(key, {"flags": [{"id": "x"}]})
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        read_flags(key)
     check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))
-    assert [level for level, _ in findings] == ["warn"]
-    assert (
-        "flags record" in findings[0][1] and "will not read" in findings[0][1]
-    )
+    assert findings == [("warn", str(refused.value))]
+    assert findings[0][1].count("/".join(key.parts)) == 1
 
 
 def test_a_save_that_touches_no_flag_writes_no_flags_record(

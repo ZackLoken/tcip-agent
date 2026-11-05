@@ -18,11 +18,9 @@ from tcip_store import (
     Key,
     ReadRefusedError,
     RefusedRead,
-    StoreError,
     Unreadable,
     Version,
     VersionConflictError,
-    unreadable,
     validated,
 )
 
@@ -124,9 +122,15 @@ def read_record(project_path: str | Path) -> ProjectRecord:
     root the store refuses or a database that does not read from disk, that error's sentence.
     Never creates a store.
     """
-    with unreadable(_record_place(project_path), StoreError, OSError):
-        raw = tcip_store.read(project_record_key(project_path), default=None)
-    return _checked(project_path, raw)
+    return _checked(
+        project_path,
+        tcip_store.read_raw(
+            tcip_store.read,
+            project_record_key(project_path),
+            _record_place(project_path),
+            default=None,
+        ),
+    )
 
 
 def existing_project(value: str | Path) -> tuple[Path, ProjectRecord]:
@@ -239,7 +243,12 @@ def _update(
 
     key = project_record_key(project_path)
     while True:
-        stored = tcip_store.read_versioned(key, default=None)
+        stored = tcip_store.read_raw(
+            tcip_store.read_versioned,
+            key,
+            _record_place(project_path),
+            default=None,
+        )
         current = _checked(project_path, stored.value)
         updated = validated(
             ProjectRecord,

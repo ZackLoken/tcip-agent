@@ -20,12 +20,14 @@ from pydantic import (
 )
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
+import tcip_store
 from tcip_annotation.json_io import Person
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_annotation.text import Text
 from tcip_store import Key, validated
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
     from pydantic import JsonValue
@@ -133,7 +135,7 @@ _FLAGS_RECORD = TypeAdapter(FlagsRecord)
 
 
 def flags_of(record: JsonValue) -> list[Flag]:
-    """Return the flags a stored record holds, oldest first; an absent record holds none.
+    """Return the flags a flags record in hand holds, oldest first; an absent record holds none.
 
     A record that does not validate as a :class:`FlagsRecord` refuses
     (``tcip_store.ReadRefusedError``) naming the flags record and each field.
@@ -148,11 +150,23 @@ def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
     return _FLAGS_RECORD.dump_python({"flags": flags}, mode="json")
 
 
-def read_flags(key: Key) -> list[Flag]:
-    """Return every flag the record ``key`` names holds (:func:`flags_of`)."""
-    import tcip_store
+def read_flags(
+    key: Key, *, read: Callable[..., JsonValue] = tcip_store.read
+) -> list[Flag]:
+    """Return every flag the record ``key`` names holds, oldest first, read by ``read``.
 
-    return flags_of(tcip_store.read(key, default=None))
+    ``read`` is a store or a transaction read; an absent record holds none. A record the store
+    will not read or that is no :class:`FlagsRecord` refuses (``tcip_store.ReadRefusedError``)
+    naming the record by the image's key.
+    """
+    record = tcip_store.read_record(
+        read,
+        key,
+        _FLAGS_RECORD,
+        f"the flags record of {'/'.join(key.parts)}",
+        default=None,
+    )
+    return [] if record is None else record["flags"]
 
 
 def covers(

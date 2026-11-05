@@ -1,20 +1,25 @@
-"""Why a record or value will not read or a check refuses it, and the two read boundaries.
+"""Why a record or value will not read or a check refuses it, the two read boundaries, the reader.
 
 :func:`validated` validates a raw value against its model and, when the model refuses it, raises
 :class:`ReadRefusedError` carrying every error the model raised, each by its place and message
 (:class:`Invalid`), at where the value lives (:class:`RefusedRead`). :func:`unreadable` raises
-the same error carrying :class:`Unreadable`, the sentence of any other error that stops a read. A
-check that refuses a value states each objection as an issue of an :class:`Invalid`, its place
-empty when it names none. Each reads as text where a sentence carries it.
+the same error carrying :class:`Unreadable`, the sentence of any other error that stops a read.
+:func:`read_raw` reads a record under the one set of errors that stops a store read, and
+:func:`read_record` validates what it read. A check that refuses a value states each objection as
+an issue of an :class:`Invalid`, its place empty when it names none. Each reads as text where a
+sentence carries it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Annotated, Any, Literal, overload
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
+
+from tcip_store.errors import StoreError
+from tcip_store.model import REQUIRED, Key, ReadDefault
 
 
 class Issue(BaseModel):
@@ -168,3 +173,61 @@ def unreadable(where: str, *errors: type[Exception]) -> Iterator[None]:
         raise
     except errors as exc:
         raise ReadRefusedError(Unreadable(message=str(exc)), where) from exc
+
+
+def read_raw[T](
+    read: Callable[..., T],
+    key: Key,
+    where: str,
+    *,
+    default: ReadDefault = REQUIRED,
+) -> T:
+    """Return what ``read(key, default=default)`` answers, read under :func:`unreadable`.
+
+    ``read`` is a store read or a transaction's (``tcip_store.read``, ``Txn.read``,
+    ``tcip_store.read_versioned``). Any ``StoreError`` (an absent record with no ``default``, bytes
+    that do not decode, each sentence naming the key) and any ``OSError`` (a database that does
+    not read from disk) raises :class:`ReadRefusedError` carrying its sentence behind ``where``.
+    """
+    with unreadable(where, StoreError, OSError):
+        return read(key, default=default)
+
+
+@overload
+def read_record[M](
+    read: Callable[..., JsonValue],
+    key: Key,
+    model: type[M] | TypeAdapter[M],
+    where: str,
+) -> M: ...
+
+
+@overload
+def read_record[M](
+    read: Callable[..., JsonValue],
+    key: Key,
+    model: type[M] | TypeAdapter[M],
+    where: str,
+    *,
+    default: None,
+) -> M | None: ...
+
+
+def read_record(
+    read: Callable[..., JsonValue],
+    key: Key,
+    model: type[Any] | TypeAdapter[Any],
+    where: str,
+    *,
+    default: None = REQUIRED,
+) -> Any:
+    """Return the record at ``key`` read by ``read`` (:func:`read_raw`) and :func:`validated`.
+
+    ``model`` is a model or the adapter of a type, ``where`` the place a refusal names. With
+    ``default=None`` an absent record answers ``None``; without it, absence refuses as
+    :func:`read_raw` does. Every refusal is :class:`ReadRefusedError` behind ``where``.
+    """
+    raw = read_raw(read, key, where, default=default)
+    if raw is None and default is None:
+        return None
+    return validated(model, raw, where)

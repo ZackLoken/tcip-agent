@@ -33,6 +33,8 @@ from tcip_store.refusal import (
     ReadRefusedError,
     RefusedRead,
     Unreadable,
+    read_raw,
+    read_record,
     unreadable,
     validated,
 )
@@ -115,6 +117,8 @@ __all__ = [
     "read",
     "read_blob_versioned",
     "read_log",
+    "read_raw",
+    "read_record",
     "read_versioned",
     "release_root",
     "replace",
