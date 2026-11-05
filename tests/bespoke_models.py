@@ -19,9 +19,11 @@ from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
 if TYPE_CHECKING:
     from torchvision.models.detection.anchor_utils import AnchorGenerator
 
-    from tcip_mcp.pipelines.components.detectors import DetectorOutput
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.subject_registry import Attribute
+
+DetectorOutput = dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]
+"""A detection model's forward: its losses in train mode, one prediction per image in eval."""
 
 # ---------------------------------------------------------------------------
 # (a) architecture with modified internals: GroupNorm backbone/FPN + GT anchors
