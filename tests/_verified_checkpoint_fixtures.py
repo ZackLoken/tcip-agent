@@ -23,15 +23,21 @@ from tests._chain_fixtures import (
 from tests._training_values import (
     MASK_CUT,
     RATIONALE,
+    adamw_optimizer,
     drawn_split,
     sweep_space,
 )
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+    from torch import Tensor
+
+    from tcip_mcp.experiments import RunObservation
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.pipelines.derivations import Region
     from tcip_mcp.pipelines.execution import Execution, Pass
+    from tcip_mcp.pipelines.schemas import ModelDims
     from tcip_mcp.subject_registry import SubjectRegistry
 
 torch = pytest.importorskip("torch")
@@ -398,6 +404,138 @@ def worker_run(
     run_dir = opened_run(root, config, experiment_id=experiment_id)
     run_directory(run_dir)
     return run_dir
+
+
+def bespoke_source(builder: str, task: str, **kwargs: JsonValue) -> dict:
+    """Return the ``model_source`` of the bespoke ``builder`` at ``task`` over ``kwargs``.
+
+    The builder is normalized by the statistics of the config's own frames.
+    """
+    return {
+        "builder": builder,
+        "builder_kwargs": kwargs,
+        "source_files": [BESPOKE_MODELS],
+        "task": task,
+        "normalization": FRAME_STATISTICS,
+    }
+
+
+def train_config(
+    project: Path,
+    model_source: dict,
+    data: dict,
+    batch_size: int,
+    **overrides: object,
+) -> dict:
+    """Return a one-epoch AdamW run config of ``project`` over ``model_source`` and ``data``.
+
+    It selects on loss, the one metric coherent without a validation side; ``overrides``' keys
+    take the place of the config's own.
+    """
+    config = training_config(
+        project,
+        model_source,
+        data,
+        **{
+            "optimizer": adamw_optimizer(),
+            "batch_size": batch_size,
+            **overrides,
+        },
+    )
+    config["evaluation"]["selection_metric"] = "loss"
+    return config
+
+
+def trained_run(
+    model_source: dict,
+    data: dict,
+    tmp_path: Path,
+    *,
+    batch_size: int = 2,
+    **overrides: object,
+) -> RunObservation:
+    """Train a run of ``tmp_path`` over :func:`train_config` and return its observation.
+
+    The run trains at ``batch_size``, opened by the launcher's own producer over the places
+    ``data`` names with no validation side and trained to its end by the child's own entry;
+    ``overrides`` are :func:`train_config`'s.
+    """
+    from tcip_mcp.experiments import observe
+
+    return observe(
+        worker_run(
+            tmp_path,
+            train_config(
+                tmp_path,
+                model_source,
+                {**data, "split": drawn_split(val_ratio=0.0)},
+                batch_size,
+                **overrides,
+            ),
+        )
+    )
+
+
+def scored_tensors(
+    project: Path, observation: RunObservation
+) -> tuple[Tensor, Tensor, ModelDims]:
+    """Return a trained classification, ordinal or regression run's predictions and targets.
+
+    The checkpoint the run completed is evaluated as ``evaluate_model`` evaluates it: its
+    untiled pass's model in eval mode over the loader of the data the run trained on. Returns
+    the head's predictions (``head0_labels``, ``head0_ranks`` or ``head0_values``) and the
+    targets (``labels``, ``ranks`` or ``values``) concatenated over the loader, with the dims
+    the model was built at.
+    """
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.experiments import observe_run
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.split_construction import predictor_dataset
+    from tcip_mcp.pipelines.execution import Stated, prepare
+    from tcip_mcp.pipelines.training.collation import task_collate
+
+    completed = observe_run(observation.directory).checkpoint
+    assert completed is not None, observation.final
+    checkpoint = load_registered_checkpoint(completed.path, project=project)
+    task = checkpoint.task
+    prediction_key, target_key = {
+        "classification": ("head0_labels", "labels"),
+        "ordinal": ("head0_ranks", "ranks"),
+        "regression": ("head0_values", "values"),
+    }[task]
+    data = observation.record.resolution.data
+    admitted = admit(
+        str(data.images_dir),
+        str(data.labels_dir),
+        scope=checkpoint.spec.data.recorded_scope,
+    )
+    predictor = (
+        prepare(checkpoint, Stated().model_copy(update={"tile": False}))
+        .runnable()
+        .predictor
+    )
+    loader = DataLoader(
+        predictor_dataset(
+            task,
+            admitted.every_sample(),
+            checkpoint.spec.data.recorded_scope,
+            predictor,
+            None,
+        ),
+        batch_size=4,
+        collate_fn=task_collate(task),
+    )
+    model = predictor.model.eval()
+    predicted, truth = [], []
+    with torch.no_grad():
+        for images, targets in loader:
+            predicted.append(
+                model(images.to(predictor.device))[prediction_key].cpu()
+            )
+            truth.append(targets[target_key].cpu())
+    return torch.cat(predicted), torch.cat(truth), predictor.dims
 
 
 def run_to_end(
