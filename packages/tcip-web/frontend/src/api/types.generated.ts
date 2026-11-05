@@ -2189,6 +2189,7 @@ export interface StateSnapshotMessage {
   type: "state_snapshot";
   project: SnapshotProject | null;
   epoch: string;
+  bundle: string | null;
 }
 
 export interface SnapshotProject {

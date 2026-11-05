@@ -226,12 +226,13 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
     def land(root: Path) -> tuple[Path, SessionWrite]:
         return root, _land(root, payload.started, entry, person)
 
+    def land_in_named_project() -> tuple[Path, SessionWrite]:
+        return land(workspace_project(payload.project_id)[0])
+
     if payload.started is None:
         root, written = await store.admitted(payload.project_id, land)
     else:
-        root, written = await asyncio.to_thread(
-            land, workspace_project(payload.project_id)[0]
-        )
+        root, written = await asyncio.to_thread(land_in_named_project)
     if written.kind == "landed":
         await asyncio.to_thread(
             _answering,

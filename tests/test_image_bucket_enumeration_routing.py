@@ -13,7 +13,7 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 from tests._chain_fixtures import (
-    DETECTION_SOURCE,
+    BUILT_DETECTOR,
     training_config,
     weights_statistics,
 )
@@ -91,7 +91,7 @@ def test_preflight_refuses_a_stem_collision(tmp_path: Path) -> None:
 
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
     )
     r = preflight_config(tmp_path, cfg)
@@ -195,7 +195,7 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path: Path) -> None:
 
     cfg = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},
@@ -220,7 +220,7 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
 
     cfg = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},
@@ -247,7 +247,7 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
 
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},

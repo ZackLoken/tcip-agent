@@ -20,7 +20,7 @@ from tcip_mcp.tools.project_tools import (
 )
 from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import lock_file_for
-from tests._chain_fixtures import BESPOKE_DETECTION, FRAME_STATISTICS
+from tests._chain_fixtures import BUILT_DETECTOR
 from tests._producer_fixtures import one_labeled_capture
 from tests._training_values import drawn_split
 
@@ -479,7 +479,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     ) -> None:
         kw["objective_fn"]({"optimizer.head_lr": 0.1}, lambda value: None)
 
-    from tests._chain_fixtures import BESPOKE_MODELS, training_config
+    from tests._chain_fixtures import training_config
     from tests._training_values import fifo_search, sweep_space
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
@@ -490,12 +490,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         root,
         base_config=training_config(
             root,
-            {
-                "builder": BESPOKE_DETECTION,
-                "source_files": [BESPOKE_MODELS],
-                "task": "detection",
-                "normalization": FRAME_STATISTICS,
-            },
+            BUILT_DETECTOR,
             {
                 "images_dir": str(image_dir(root, "2026-03-04")),
                 "scope": {"subject": "bud"},

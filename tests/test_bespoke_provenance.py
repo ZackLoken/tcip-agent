@@ -261,10 +261,8 @@ def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
     import sys
 
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        detection_config,
-    )
+    from tests._chain_fixtures import BUILT_DETECTOR
+    from tests._verified_checkpoint_fixtures import detection_config
 
     (tmp_path / "agent_model.py").write_text(
         "from tests.bespoke_models import build_bespoke_detection as build\n",
@@ -302,8 +300,8 @@ def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(
     A declared file that cannot be read refuses the run, and no run directory exists after.
     """
     from tcip_mcp.experiments import experiment_dir
+    from tests._chain_fixtures import BUILT_DETECTOR
     from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
         detection_config,
         opened_run,
     )
@@ -335,8 +333,8 @@ def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_op
     the snapshot refuses it and no run directory is left.
     """
     from tcip_mcp.experiments import experiment_dir
+    from tests._chain_fixtures import BUILT_DETECTOR
     from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
         detection_config,
         opened_run,
     )

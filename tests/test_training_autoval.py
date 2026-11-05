@@ -18,7 +18,11 @@ pytest.importorskip("torchvision")
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
-from tests._chain_fixtures import BLOB_BUILDER, training_config  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BLOB_BUILDER,
+    BUILT_DETECTOR,
+    training_config,
+)
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     big_single_source,
@@ -531,7 +535,7 @@ def _within_image_context(
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
     )
-    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
+    from tests._verified_checkpoint_fixtures import opened_run
 
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -543,7 +547,7 @@ def _within_image_context(
     observation = observe_run(
         opened_run(
             tmp_path,
-            training_config(tmp_path, unbuilt_source("detection"), data_cfg),
+            training_config(tmp_path, BUILT_DETECTOR, data_cfg),
         )
     )
     return (
@@ -729,7 +733,6 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
     The run is a single tiled source with val, holdout and calibration shares.
     """
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(
@@ -780,12 +783,9 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(
     assert resolved.num_channels == train_ds.expected_channels == 5
     from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.schemas import train_config
-    from tests._verified_checkpoint_fixtures import unbuilt_source
 
     spec = train_config(
-        training_config(
-            tmp_path, unbuilt_source("detection"), resolved.record()
-        )
+        training_config(tmp_path, BUILT_DETECTOR, resolved.record())
     )
     assert recorded_model_dims(spec)["in_chans"] == 5
 

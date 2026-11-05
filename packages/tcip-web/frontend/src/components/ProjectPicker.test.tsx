@@ -3,7 +3,12 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
-import { type OpenAnswer, type SnapshotProject, UNREAD } from "@/api/types.generated";
+import {
+  type OpenAnswer,
+  type ProjectsListing,
+  type SnapshotProject,
+  UNREAD,
+} from "@/api/types.generated";
 import { LISTING_REFRESH_MS, ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -120,6 +125,64 @@ describe("ProjectPicker", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("a listing read in flight", () => {
+    /** Show the first listing, then let the loop's second read start and stay pending. */
+    async function withSecondReadPending() {
+      const slow = Promise.withResolvers<ProjectsListing>();
+      vi.mocked(api.projects.list)
+        .mockResolvedValueOnce(LISTING)
+        .mockReturnValueOnce(slow.promise)
+        .mockResolvedValue(LISTING);
+      render(<ProjectPicker />);
+      fireEvent.click(await screen.findByText(VALLEY.record.display_name));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LISTING_REFRESH_MS);
+      });
+      expect(api.projects.list).toHaveBeenCalledTimes(2);
+      return slow;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("is not followed by another read until it answers and the interval passes again", async () => {
+      const slow = await withSecondReadPending();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2 * LISTING_REFRESH_MS);
+      });
+      expect(api.projects.list).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        slow.resolve(LISTING);
+        await vi.advanceTimersByTimeAsync(LISTING_REFRESH_MS);
+      });
+      expect(api.projects.list).toHaveBeenCalledTimes(3);
+    });
+
+    it("is joined by the refresh a rename asks for, which issues no read of its own", async () => {
+      vi.mocked(api.projects.rename).mockResolvedValue(PROJECT_FIXTURES.renamed);
+      useStore.setState({ user: "grower" });
+      await withSecondReadPending();
+
+      fireEvent.click(screen.getByText("Rename…"));
+      fireEvent.change(screen.getByLabelText("New name"), {
+        target: { value: PROJECT_FIXTURES.renamed.record.display_name },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+      await waitFor(() => expect(api.projects.rename).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(api.projects.list).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("opens a project with no dated images and selects no dataset", async () => {

@@ -18,6 +18,7 @@ from tests._chain_fixtures import (
     BARE_NO_KNOB_DETECTOR,
     BARE_SCORE_THRESH_DETECTOR,
     BESPOKE_MODELS,
+    BUILT_DETECTOR,
     FRAME_STATISTICS,
 )
 from tests._training_values import drawn_split
@@ -94,7 +95,6 @@ def test_a_built_detector_holds_both_knobs_on_itself_and_its_eval_forward_honors
     it keeps none.
     """
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     model = _built(BUILT_DETECTOR).eval()
     frame = [torch.rand(3, IMG, IMG)]

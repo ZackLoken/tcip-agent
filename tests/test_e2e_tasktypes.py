@@ -81,7 +81,7 @@ def test_detection_e2e(tmp_path: Path) -> None:
             IMG,
         )
 
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+    from tests._chain_fixtures import BUILT_DETECTOR
 
     _assert_trained(
         trained_run(

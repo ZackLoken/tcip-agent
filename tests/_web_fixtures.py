@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -113,6 +114,33 @@ def backend_session(workspace: Path) -> Iterator[TestClient]:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+
+class ObservedTurn:
+    """A lock that delegates to ``lock``, recording each thread's attempt, acquisition and release.
+
+    ``events`` holds ``(event, thread id)`` pairs in the order they happened, and ``changed`` is
+    notified at each one.
+    """
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self.lock = lock
+        self.events: list[tuple[str, int]] = []
+        self.changed = threading.Condition()
+
+    def _record(self, event: str) -> None:
+        with self.changed:
+            self.events.append((event, threading.get_ident()))
+            self.changed.notify_all()
+
+    def __enter__(self) -> None:
+        self._record("attempted")
+        self.lock.acquire()
+        self._record("acquired")
+
+    def __exit__(self, *exc: object) -> None:
+        self._record("released")
+        self.lock.release()
 
 
 def bound_to(project: OpenProject) -> BoundProject:

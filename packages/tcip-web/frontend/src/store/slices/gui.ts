@@ -50,6 +50,9 @@ export interface GuiSlice {
   /** This backend process's launch identity, from the envelope; a change accepts a lower
    *  wsVersion instead of dropping it as a stale replay (a restarted backend's own snapshot). */
   wsEpoch: string | null;
+  /** The sentence the backend's latest envelope states for a bundle not built from its source,
+   *  `null` when it states none. */
+  staleBundle: string | null;
 
   patchGui: (partial: Partial<GuiState>) => void;
   /** Clear the dataset selection, returning the GUI to the project front door. */
@@ -69,6 +72,7 @@ export interface GuiSlice {
    */
   mergeSnapshot: (envelope: StateSnapshotMessage) => void;
   setWsStatus: (s: "disconnected" | "connecting" | "connected" | "error") => void;
+  setStaleBundle: (sentence: string | null) => void;
   setActiveTab: (tab: TabName) => void;
   setView: (view: ViewState) => void;
   setMode: (mode: Mode) => void;
@@ -81,6 +85,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   wsStatus: "disconnected",
   wsVersion: 0,
   wsEpoch: null,
+  staleBundle: null,
 
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
   clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: null } })),
@@ -183,6 +188,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   },
 
   setWsStatus: (wsStatus) => set({ wsStatus }),
+  setStaleBundle: (staleBundle) => set({ staleBundle }),
   setActiveTab: (active_tab) =>
     set((s) => {
       // Write-through so the next open of this project resumes on the tab last worked in.

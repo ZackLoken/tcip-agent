@@ -32,9 +32,7 @@ from tcip_mcp.pipelines.schemas import (
 )
 from tests import REPO_ROOT
 from tests._chain_fixtures import (
-    BESPOKE_DETECTION,
-    BESPOKE_MODELS,
-    FRAME_STATISTICS,
+    BUILT_DETECTOR,
     training_config,
     weights_statistics,
 )
@@ -352,12 +350,7 @@ def test_a_runs_record_names_every_value_its_training_reads(
 
     config = training_config(
         tmp_path,
-        {
-            "builder": BESPOKE_DETECTION,
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": FRAME_STATISTICS,
-        },
+        BUILT_DETECTOR,
         {
             **detection_images(
                 fixture_data_dir(tmp_path, "least"), SCOPED_DATA["scope"], n=4
@@ -524,7 +517,7 @@ def test_the_trainer_reads_the_flat_config_as_given(
     The record holds the configured stages and no ``training`` key.
     """
     monkeypatch.chdir(tmp_path)
-    from tests._chain_fixtures import DETECTION_SOURCE, own_statistics
+    from tests._chain_fixtures import own_statistics
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         detection_images,
@@ -536,7 +529,7 @@ def test_the_trainer_reads_the_flat_config_as_given(
         **SCOPED_DATA,
     }
     config = own_statistics(
-        {**FLAT_CONFIG, "model_source": DETECTION_SOURCE, "data": data},
+        {**FLAT_CONFIG, "model_source": BUILT_DETECTOR, "data": data},
         tmp_path,
     )
     run = run_context(tmp_path, config).run

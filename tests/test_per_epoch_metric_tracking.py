@@ -57,13 +57,10 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.experiments import board_of, run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
     from tests._producer_fixtures import seed_labeled_images
     from tests._training_values import drawn_split, schedule, stage
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        opened_sweep,
-    )
+    from tests._verified_checkpoint_fixtures import opened_sweep
 
     images_dir = seed_labeled_images(
         image_dir(tmp_path / "ds", "train"),

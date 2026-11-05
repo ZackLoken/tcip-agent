@@ -59,12 +59,15 @@ class SnapshotProject(BaseModel):
 class StateSnapshotMessage(StateNotification):
     """The state-snapshot envelope: a notification with the open project and the backend's epoch.
 
-    ``project`` is ``None`` when no project is open.
+    ``project`` is ``None`` when no project is open. ``bundle`` is the sentence saying the
+    frontend bundle served was not built from its source, ``None`` when it was or nothing was
+    compared.
     """
 
     type: Literal["state_snapshot"]
     project: SnapshotProject | None
     epoch: str
+    bundle: str | None
 
 
 type Subscriber = Callable[[StateNotification], Awaitable[None]]

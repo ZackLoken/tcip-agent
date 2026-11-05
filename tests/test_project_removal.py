@@ -22,7 +22,7 @@ from tcip_web.jobstore import Completed, Running
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
-from tests._web_fixtures import named_project
+from tests._web_fixtures import ObservedTurn, named_project
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -48,33 +48,6 @@ def _deny_moves(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(workspace, "RENAME_BUDGET_S", 0.0)
     monkeypatch.setattr(os, "rename", _denied)
-
-
-class _ObservedTurn:
-    """A lock that delegates to ``lock``, recording each thread's attempt, acquisition and release.
-
-    ``events`` holds ``(event, thread id)`` pairs in the order they happened, and ``changed`` is
-    notified at each one.
-    """
-
-    def __init__(self, lock: threading.Lock) -> None:
-        self.lock = lock
-        self.events: list[tuple[str, int]] = []
-        self.changed = threading.Condition()
-
-    def _record(self, event: str) -> None:
-        with self.changed:
-            self.events.append((event, threading.get_ident()))
-            self.changed.notify_all()
-
-    def __enter__(self) -> None:
-        self._record("attempted")
-        self.lock.acquire()
-        self._record("acquired")
-
-    def __exit__(self, *exc: object) -> None:
-        self._record("released")
-        self.lock.release()
 
 
 def test_removal_archives_moves_and_records_one_line(
@@ -336,7 +309,7 @@ def test_a_listing_waits_for_a_removal_whose_move_is_denied_at_first(
     from tcip_web.routes import projects
 
     made = _project(tmp_path.parent, "valley_block", "Valley block")
-    turn = _ObservedTurn(projects._WORKSPACE_TURN)
+    turn = ObservedTurn(projects._WORKSPACE_TURN)
     monkeypatch.setattr(projects, "_WORKSPACE_TURN", turn)
     real_rename = os.rename
     listing: list[tuple[int, Future[dict], bool]] = []
