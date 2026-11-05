@@ -558,10 +558,12 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
 
     Batch size 2 targets an effective batch of 2 in the first stage and 8 in the second, so the
     multiplier is (8/2)^0.5 == 2.0. Six samples make three batches, so the second stage's one
-    window holds three of the four batches it targets: one optimizer step against three.
+    window holds three of the four batches it targets: one optimizer step against three. Both
+    rates scale: the epoch rows report the head's, and the second stage's checkpoint keeps the
+    backbone group's base rate (``initial_lr``, the rate its schedule started from).
     """
     stages = [stage(-1), stage(0, gradient_accumulation_steps=4)]
-    run, _ = _trained(
+    run, run_dir = _trained(
         tmp_path,
         stages,
         lr_scaling={"scale_power": 0.5, "rationale": RATIONALE},
@@ -572,6 +574,18 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
     assert [m["optimizer_steps"] for m in run.metrics_history] == [3, 1]
     assert run.metrics_history[0]["lr"] == pytest.approx(BASE_HEAD_LR)
     assert run.metrics_history[1]["lr"] == pytest.approx(BASE_HEAD_LR * 2.0)
+
+    checkpoint = torch.load(
+        run_dir / "checkpoint_epoch_2.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    (backbone,) = [
+        group["settings"]
+        for group in checkpoint[GROUPS_KEY]
+        if group["settings"]["name"] == "backbone"
+    ]
+    assert backbone["initial_lr"] == pytest.approx(BASE_BB_LR * 2.0)
 
 
 def test_two_stage_handoff_smoke(tmp_path: Path) -> None:
