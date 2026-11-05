@@ -730,18 +730,14 @@ def _rows(values: RowValues) -> list:
     return values.tolist() if hasattr(values, "tolist") else list(values)
 
 
-def _with_attributes(
-    records: list[dict], values: RowValues | None
-) -> list[dict]:
-    """Return ``records``, each carrying its row of ``values`` under ``attributes``.
+def attribute_rows(values: RowValues | None, count: int) -> list[list[int]]:
+    """Return the attribute value ids of ``count`` rows, one id per attribute in each row.
 
-    A row holds one id per attribute; ``records`` come back unchanged when ``values`` is
-    ``None``.
+    The rows are ``values``' (a tensor's, array's or list's), every one empty for ``None``.
     """
-    if values is not None:
-        for record, row in zip(records, _rows(values), strict=True):
-            record["attributes"] = [int(v) for v in row]
-    return records
+    if values is None:
+        return [[] for _ in range(count)]
+    return [[int(v) for v in row] for row in _rows(values)]
 
 
 ImageId = int | str
@@ -835,17 +831,20 @@ def gt_records(target: Mapping[str, Any]) -> list[dict]:
 
     if not len(target["boxes"]):
         return []
-    records = _with_attributes(
-        [
-            gt_record(xywh(*box), lab, crowd)
-            for box, lab, crowd in zip(
-                _rows(target["boxes"]),
-                _rows(target["labels"]),
-                _rows(crowd_of(target)),
-            )
-        ],
-        target.get("attributes"),
-    )
+    boxes = _rows(target["boxes"])
+    records = [
+        gt_record(xywh(*box), lab, crowd)
+        for box, lab, crowd in zip(
+            boxes, _rows(target["labels"]), _rows(crowd_of(target))
+        )
+    ]
+    if target.get("attributes") is not None:
+        for record, ids in zip(
+            records,
+            attribute_rows(target["attributes"], len(boxes)),
+            strict=True,
+        ):
+            record["attributes"] = ids
     for record, geometry in zip(
         records, target.get("geometry", ()), strict="geometry" in target
     ):
@@ -874,23 +873,18 @@ def records_from_detector(
         output[key].detach().cpu().tolist()
         for key in ("boxes", "scores", "labels")
     )
-    ids = (
-        _rows(output["attributes"])
-        if output.get("attributes") is not None
-        else [[]] * len(boxes)
-    )
     gt = gt_records(target)
     dt = detection_records(
         [
             Detection(
-                box=box,
-                score=score,
-                label=label,
-                attributes=[int(v) for v in row],
-                mask=None,
+                box=box, score=score, label=label, attributes=ids, mask=None
             )
-            for box, score, label, row in zip(
-                boxes, scores, labels, ids, strict=True
+            for box, score, label, ids in zip(
+                boxes,
+                scores,
+                labels,
+                attribute_rows(output.get("attributes"), len(boxes)),
+                strict=True,
             )
         ],
         None,
