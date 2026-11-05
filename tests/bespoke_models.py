@@ -368,18 +368,21 @@ class BespokeComposed(_FreezesBackbone, nn.Module):
         head_params = [p for h in self.heads for p in h.parameters()]
         return [
             {
+                "name": "backbone",
                 "params": [
                     p for p in self.backbone.parameters() if p.requires_grad
                 ],
                 "lr": backbone_lr,
             },
             {
+                "name": "neck",
                 "params": [
                     p for p in self.neck.parameters() if p.requires_grad
                 ],
                 "lr": head_lr,
             },
             {
+                "name": "head",
                 "params": [p for p in head_params if p.requires_grad],
                 "lr": head_lr,
             },

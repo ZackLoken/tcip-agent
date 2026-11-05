@@ -32,8 +32,10 @@ exposing neither is refused by name rather than trained unfrozen, and a non-decr
 set is enforced across stages. Learning rate is not per-stage: the top-level `optimizer` block's
 `backbone_lr`/`head_lr` are stated for the first stage's target effective batch (a per-stage `lr`
 key is refused by name). The model's own `get_param_groups(backbone_lr, head_lr)` places them
-when it defines one; otherwise its `backbone` module's parameters train at `backbone_lr` and the
-rest at `head_lr`, and a model with neither is refused when the two rates differ. The physical batch is the loader's `batch_size` and stays fixed for the
+when it defines one, each group stating its own `lr` and a `name` no other group holds, exactly
+one named `head` (the group `head_lr` places), or the optimizer is refused; otherwise its
+`backbone` module's parameters train at `backbone_lr` in a group named `backbone` and the rest at
+`head_lr` in one named `head`, and a model with neither is refused when the two rates differ. The physical batch is the loader's `batch_size` and stays fixed for the
 run, so a later stage grows its effective batch through accumulation alone; an epoch's last
 accumulation window may hold fewer batches, and its loss is averaged over the batches it holds.
 Each epoch row records the stage's `target_eff_batch` (loader batch size times
@@ -51,6 +53,31 @@ from its last weights. `model_best.pt` is the run's best epoch across every stag
 `model_final.pt` is the weights the run ended at, carrying the metrics of the epoch row those
 weights were taken at (an epoch's end, the best epoch a stage started from, or a resumed
 checkpoint's), or none once a batch ran past that row.
+
+## Learning-Rate Range Test
+
+`derive_lr_range` runs a learning-rate range test of one stage of a config as a run of its own,
+listed with `kind` `range_test`: the stage's freeze applied, every group's rate ramped by one
+factor per optimizer step from `ramp_low` to `ramp_high` with the config's
+`backbone_lr / head_lr` ratio held, each step a per-batch row of its `batch_loss`, its
+`smoothed_loss` and its `lr` (the head group's rate). It stops at the first non-finite loss or
+smoothed loss past `divergence` times the least before it, and writes its reading once as the
+run's `lr_range.json`: the rate of least smoothed loss and the rate of steepest descent, from
+which the range `[low, high)` is derived. The rule is provisional until a validation on this
+project's data replaces it: `high` is the rate of least smoothed loss, `low` the lesser of a
+tenth of it and the rate of steepest descent. A curve with fewer than two rows, no descent, or
+no turning point before the ramp's end gives no reading, and the run fails naming which. The
+ramp's defaults (`ramp_low`, `ramp_high`, `batches`, `divergence`, `smoothing`) are two
+libraries' own, provisional, and recorded on the run as it ran them.
+
+A config naming the run as `optimizer.lr_range_run` is held to that range at every launch door
+and every sweep trial: a `head_lr` outside `[low, high)`, a stage whose `freeze_to` differs from
+the probed one, and a `backbone_lr / head_lr` ratio unlike the ramped one are refused, each
+naming the run. How far below `high` to state a constant rate is your judgment, with the run's
+curve as its evidence. A sweep over such a config samples `optimizer.head_lr` from the range
+(an axis of your own beside it is refused) and derives each trial's `backbone_lr` at the ramped
+ratio. A config naming no range test is checked against none, its `rationale` the rates' one
+source.
 
 ## Early Stopping
 
@@ -262,6 +289,7 @@ sampler there.
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `cancel_training` | Request graceful cancellation of a running run, trial or sweep by its id; a run stops at the next batch/epoch boundary and still saves `model_final.pt`; a sweep's running trials stop the same way and new trials start nothing, Ray's hard stop being only the fallback after the heartbeat window |
 | `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
+| `derive_lr_range` | Run a learning-rate range test of one stage of a config as its own run, answering the head-rate range its reading derives |
 | `render_failure_cases` | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 
 A run launched on its own is a run directory, `.tcip/experiments/<experiment_id>/`, beside the
@@ -287,8 +315,8 @@ skill's Orient step states.
 - `launch_training` automatically starts a TensorBoard process and returns where it serves: its
   `url` is the path it serves under on the loopback host at its `port`, the same path the web
   backend forwards to the TensorBoard the Training tab starts for the run
-- Scalars logged: every numeric key of each epoch row (`train_loss`, `lr`, `val_loss` and the
-  other `val_` metrics, `selection`, ...) at its epoch, tagged by the key, through the run's one
+- Scalars logged: every numeric key of each epoch row (`train_loss`, `lr` the head group's rate,
+  `val_loss` and the other `val_` metrics, `selection`, ...) at its epoch, tagged by the key, through the run's one
   writer (`ctx.log_metrics`, which the default trainer uses too); and `batch_loss` ten
   times an epoch, at batch ends spaced evenly over that epoch's own batch count, and after
   every batch of an epoch with fewer than ten (owner ruling), or every
@@ -334,7 +362,9 @@ run_hyperparameter_search(
   (`optimizer.head_lr`), each range or choice set from the data and the model in hand. The base
   config may leave a swept value unstated; every other value a training config requires it
   states. Before the sweep starts its config is checked once at the corner of every axis's first
-  value and once at each other choice and range end with the other axes held there; other
+  value and once at each other choice and range end with the other axes held there (an
+  `optimizer.head_lr` axis a range test derived is checked at its low end alone, its high end
+  refused at every point, the range excluding it); other
   combinations and a range's interior are checked as each trial applies its point: a trial whose
   config the schema refuses opens nothing and errors naming why, and one the launch door's other
   checks refuse (an unstated value the trainer reads, a source that will not import, a data
@@ -364,7 +394,7 @@ run_hyperparameter_search(
   trait revision it resolved once), a heartbeat, its final status once it ends, and one run
   directory per trial, `<sweep_id>_<ray trial id>`, a run like any other whose record is
   `launched_as` a trial at the sampled point (`params`), with the sweep's trait revision as its own.
-  A run's row is of `kind` `standalone` or `trial`, a trial's naming its `sweep_id` and `params`. Ray's own store sits in the same directory
+  A run's row is of `kind` `standalone`, `trial` or `range_test`, a trial's naming its `sweep_id` and `params`. Ray's own store sits in the same directory
   (also the TensorBoard logdir); auto-launches TensorBoard. Returns the ended sweep as
   `monitor_training` reads it, a detail of `kind` `sweep` beside its `tensorboard`: the sweep's
   trial rows and their outcome (its best point and value, or why none) under `sweep`, with

@@ -117,6 +117,13 @@ NULLABLE_SETS = {
         "best",
         "status_error",
     },
+    "RangeTestRun": {
+        "relaunched_from",
+        "images_dir",
+        "current_epoch",
+        "best",
+        "status_error",
+    },
     "UnvalidatedBucket": {"date", "assessment_id"},
     "Stated": {
         "tile",

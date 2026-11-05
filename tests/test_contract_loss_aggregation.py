@@ -15,6 +15,7 @@ from tcip_mcp.pipelines.model_contract import (
     check_model_contract,
     overfit_check,
 )  # noqa: E402
+from tests._training_values import overfit_optimizer  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
@@ -134,6 +135,7 @@ def test_overfit_check_judges_the_whole_objective_not_the_first_term() -> None:
     report = overfit_check(
         model,
         "classification",
+        optimizer=overfit_optimizer(),
         steps=15,
         dims=CLS_DIMS,
         seed=0,
@@ -151,6 +153,7 @@ def test_a_multi_term_model_that_optimizes_every_term_passes() -> None:
     report = overfit_check(
         _TwoOptimizableTerms(),
         "classification",
+        optimizer=overfit_optimizer(),
         steps=25,
         dims=CLS_DIMS,
         seed=0,

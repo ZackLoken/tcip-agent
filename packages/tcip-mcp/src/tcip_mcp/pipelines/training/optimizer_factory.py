@@ -1,7 +1,7 @@
 """Optimizer factory with differential learning rate support.
 
-Registered optimizers: SGD, Adam, AdamW, LAMB, each over a model's backbone and head parameter
-groups (:func:`param_groups`).
+Registered optimizers: SGD, Adam, AdamW, LAMB, each over a model's named parameter groups
+(:func:`param_groups`), one of which is the head group (:func:`head_group`).
 """
 
 from __future__ import annotations
@@ -16,29 +16,34 @@ from torch import nn
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
 from tcip_mcp.pipelines.schemas import OptimizerSpec
 
+HEAD_GROUP = "head"
+"""The name of the param group ``head_lr`` places, the rate a run's epoch rows report."""
+BACKBONE_GROUP = "backbone"
+"""The name of the param group a model's ``backbone`` module trains in at ``backbone_lr``."""
+
 
 def _build_sgd(
-    params: list[dict], *, lr: float, weight_decay: float, momentum: float
+    params: list[dict], *, weight_decay: float, momentum: float
 ) -> torch.optim.SGD:
     return torch.optim.SGD(
-        params, lr=lr, momentum=momentum, weight_decay=weight_decay
+        params, momentum=momentum, weight_decay=weight_decay
     )
 
 
 def _build_adam(
-    params: list[dict], *, lr: float, weight_decay: float
+    params: list[dict], *, weight_decay: float
 ) -> torch.optim.Adam:
-    return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
+    return torch.optim.Adam(params, weight_decay=weight_decay)
 
 
 def _build_adamw(
-    params: list[dict], *, lr: float, weight_decay: float
+    params: list[dict], *, weight_decay: float
 ) -> torch.optim.AdamW:
-    return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+    return torch.optim.AdamW(params, weight_decay=weight_decay)
 
 
 def _build_lamb(
-    params: list[dict], *, lr: float, weight_decay: float
+    params: list[dict], *, weight_decay: float
 ) -> torch.optim.Optimizer:
     """Build a LAMB optimizer, refusing when the optional ``torch_optimizer`` is absent."""
     try:
@@ -49,7 +54,7 @@ def _build_lamb(
             "installed. Install it with `pip install torch_optimizer`, or choose a "
             "different optimizer (sgd, adam, adamw)."
         ) from exc
-    return Lamb(params, lr=lr, weight_decay=weight_decay)
+    return Lamb(params, weight_decay=weight_decay)
 
 
 _OPTIMIZER_BUILDERS: dict[str, Callable[..., torch.optim.Optimizer]] = {
@@ -69,10 +74,9 @@ def build_optimizer(
 ) -> torch.optim.Optimizer:
     """Build the optimizer ``spec`` names over ``model``'s parameter groups.
 
-    The groups train at ``backbone_lr`` and ``head_lr`` (:func:`param_groups`), with the block's
-    weight decay and, for ``sgd``, its momentum; each registered builder takes the settings it
-    reads and no other.
-    :func:`param_groups`'s refusal propagates.
+    The groups train at the rates :func:`param_groups` places, with the block's weight decay
+    and, for ``sgd``, its momentum; each registered builder takes the settings it reads and no
+    other. :func:`param_groups`'s refusals propagate.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -80,7 +84,6 @@ def build_optimizer(
     settings = {} if spec.momentum is None else {"momentum": spec.momentum}
     return factory(
         param_groups(model, backbone_lr, head_lr),
-        lr=head_lr,
         weight_decay=spec.weight_decay,
         **settings,
     )
@@ -89,22 +92,45 @@ def build_optimizer(
 def param_groups(
     model: nn.Module, backbone_lr: float, head_lr: float
 ) -> list[dict]:
-    """Return ``model``'s parameter groups at ``backbone_lr`` and ``head_lr``.
+    """Return ``model``'s named parameter groups at ``backbone_lr`` and ``head_lr``.
 
     The groups are the model's own ``get_param_groups(backbone_lr, head_lr)`` when it defines
-    one, else the parameters of its ``backbone`` module at ``backbone_lr`` and every other at
-    ``head_lr``. A model exposing neither trains every parameter at the one rate when the two
-    are equal, and refuses (``ValueError``) naming both when they differ.
+    one, else the parameters of its ``backbone`` module at ``backbone_lr`` in
+    :data:`BACKBONE_GROUP` and every other at ``head_lr`` in :data:`HEAD_GROUP`. A model exposing
+    neither trains every parameter in :data:`HEAD_GROUP` when the two rates are equal, and
+    refuses (``ValueError``) naming both when they differ. A model's own groups are refused
+    (``ValueError``) unless each states its own ``lr`` and a ``name`` no other group holds, and
+    exactly one is named :data:`HEAD_GROUP`.
     """
     if hasattr(model, "get_param_groups"):
         # A bespoke model's own opt-in method, not part of nn.Module's stub.
-        return cast(Any, model).get_param_groups(backbone_lr, head_lr)
+        groups = cast(Any, model).get_param_groups(backbone_lr, head_lr)
+        names = [group.get("name") for group in groups]
+        unrated = [name for name, g in zip(names, groups) if "lr" not in g]
+        if (
+            unrated
+            or None in names
+            or len(set(names)) != len(names)
+            or names.count(HEAD_GROUP) != 1
+        ):
+            raise ValueError(
+                f"{type(model).__name__}.get_param_groups returned groups named {names}, "
+                f"{unrated} of them stating no lr: each group states its own lr and a name no "
+                f"other group holds, and exactly one is named {HEAD_GROUP!r}, the group "
+                "head_lr places."
+            )
+        return groups
     backbone = getattr(model, "backbone", None)
     if isinstance(backbone, nn.Module):
         held = {id(p) for p in backbone.parameters()}
         return [
-            {"params": list(backbone.parameters()), "lr": backbone_lr},
             {
+                "name": BACKBONE_GROUP,
+                "params": list(backbone.parameters()),
+                "lr": backbone_lr,
+            },
+            {
+                "name": HEAD_GROUP,
                 "params": [p for p in model.parameters() if id(p) not in held],
                 "lr": head_lr,
             },
@@ -116,7 +142,28 @@ def param_groups(
             "to train at backbone_lr; state the two rates equal, or build a model exposing "
             "one."
         )
-    return [{"params": list(model.parameters()), "lr": head_lr}]
+    return [
+        {"name": HEAD_GROUP, "params": list(model.parameters()), "lr": head_lr}
+    ]
+
+
+def head_group(optimizer: torch.optim.Optimizer) -> dict:
+    """Return ``optimizer``'s param group named :data:`HEAD_GROUP`.
+
+    Refuses (``ValueError``) an optimizer holding none or several, which :func:`build_optimizer`
+    never builds.
+    """
+    named = [
+        group
+        for group in optimizer.param_groups
+        if group.get("name") == HEAD_GROUP
+    ]
+    if len(named) != 1:
+        raise ValueError(
+            f"the optimizer holds {len(named)} param groups named {HEAD_GROUP!r}, not one; "
+            "build it through optimizer_factory.build_optimizer."
+        )
+    return named[0]
 
 
 def compute_lr_scale(

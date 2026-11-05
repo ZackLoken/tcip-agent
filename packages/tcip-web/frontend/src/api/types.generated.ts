@@ -105,6 +105,8 @@ export const PROJECT_NOT_OPEN = "project_not_open";
 
 export const PROPOSED = "proposed";
 
+export const RANGE_TEST = "range_test";
+
 export const RANKING = "ranking";
 
 export const RASTER = "raster";
@@ -436,7 +438,7 @@ export interface RelaunchPayload {
 }
 
 export interface TrainingListing {
-  runs: StandaloneRun[];
+  runs: OwnRun[];
   sweeps: SweepGroup[];
 }
 
@@ -1396,6 +1398,8 @@ export interface OverviewStats {
   overview_size: [number, number];
 }
 
+export type OwnRun = StandaloneRun | RangeTestRun;
+
 export interface Pending {
   status: "pending";
 }
@@ -1507,6 +1511,23 @@ export interface QueueEntry {
 export interface QueueRanked {
   status: "completed";
   ranked: ReviewQueue;
+}
+
+export interface RangeTestRun {
+  experiment_id: string;
+  state: string;
+  created: string;
+  relaunched_from: string | null;
+  builder: string;
+  task: string;
+  images_dir: string | null;
+  current_epoch: number | null;
+  best: RunBest | null;
+  output_dir: string;
+  status_error: string | null;
+  heartbeat: string;
+  launch: RunLaunch;
+  kind: "range_test";
 }
 
 export interface RasterIdentity {
@@ -1655,7 +1676,7 @@ export interface RunLaunched {
   warnings: string[];
 }
 
-export type RunRow = StandaloneRun | TrialRun;
+export type RunRow = StandaloneRun | TrialRun | RangeTestRun;
 
 export interface Running {
   status: "running";
