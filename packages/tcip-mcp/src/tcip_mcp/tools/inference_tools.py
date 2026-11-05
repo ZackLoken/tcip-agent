@@ -377,7 +377,7 @@ def run_inference(
             at, and ``vertex_spacing``, the pixels of each ring's perimeter per vertex its mask
             rings are simplified to), with the ``rationale`` for them, which the execution
             record carries.
-        device: cuda / cpu (auto if omitted).
+        device: A torch device name; omitted, placed as ``model_build.placement`` places it.
         tile_batch_size: Tiles per forward batch.
         dry_run: Resolve the execution record and the bucket and report them, with whether the
             bucket already exists, predicting and publishing nothing.
