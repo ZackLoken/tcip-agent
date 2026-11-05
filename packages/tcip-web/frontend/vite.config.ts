@@ -3,12 +3,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 // Relative: the config's own imports resolve before it applies tsconfig.json's paths.
+import { bundleRecord } from "./scripts/bundleSource.mjs";
 import { BACKEND_PORT, DEV_PROXY, LOOPBACK_HOST } from "./src/api/devProxy.generated";
 
 const BACKEND = process.env.TCIP_WEB_BACKEND ?? `http://${LOOPBACK_HOST}:${BACKEND_PORT}`;
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), bundleRecord()],
   resolve: { tsconfigPaths: true },
   server: {
     host: LOOPBACK_HOST,

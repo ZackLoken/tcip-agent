@@ -4,7 +4,7 @@
  * Run as `node scripts/viteConfig.mjs <root>`, it prints one JSON object for the configuration
  * under `<root>`: `proxy`, the dev server's proxy rules as `vite serve` resolves them; and
  * `outDir`, the absolute directory, and `assetsDir`, the subdirectory of it, the build writes as
- * `vite build` resolves them.
+ * `vite build` resolves them; and `plugins`, the names of the plugins the build runs.
  */
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -37,6 +37,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
       proxy: (await servedConfig(root)).server.proxy,
       outDir: resolve(built.root, built.build.outDir),
       assetsDir: built.build.assetsDir,
+      plugins: built.plugins.map((plugin) => plugin.name),
     }),
   );
 }

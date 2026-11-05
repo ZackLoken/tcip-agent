@@ -1,0 +1,42 @@
+name: Release
+
+# A version tag builds the frontend bundle, builds the tcip-web wheel with the bundle inside it, and
+# attaches the wheel to the GitHub release of the tag.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/tcip-web/frontend/package.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install frontend dependencies
+        working-directory: packages/tcip-web/frontend
+        run: npm ci --no-fund --no-audit
+
+      - name: Build the frontend bundle
+        working-directory: packages/tcip-web/frontend
+        run: npm run build
+
+      - name: Build the tcip-web wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel packages/tcip-web --outdir dist
+
+      - name: Attach the wheel to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.whl --verify-tag --generate-notes
