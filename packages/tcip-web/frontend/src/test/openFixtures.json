@@ -11,7 +11,8 @@
     "version": 0,
     "type": "state_snapshot",
     "project": { "id": "<valley id>", "path": "/scratch/workspace/valley" },
-    "epoch": "<epoch n0>"
+    "epoch": "<epoch n0>",
+    "bundle": null
   },
   "raw": {
     "selection": {

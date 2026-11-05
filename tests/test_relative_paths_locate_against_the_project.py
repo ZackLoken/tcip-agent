@@ -677,8 +677,8 @@ def test_a_runs_source_files_are_stored_against_its_project_like_its_data(
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import RUN_FILE, read_record, read_run
     from tcip_mcp.pipelines.schemas import train_config
+    from tests._chain_fixtures import BUILT_DETECTOR
     from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
         detection_config,
         opened_run,
     )
@@ -870,11 +870,8 @@ def _authored_checkpoint(
     import sys
     import uuid
 
-    from tests._chain_fixtures import BESPOKE_MODELS
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        registered_checkpoint,
-    )
+    from tests._chain_fixtures import BESPOKE_MODELS, BUILT_DETECTOR
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
     from tests._web_fixtures import new_project
 
     module = f"builder_{uuid.uuid4().hex[:8]}"

@@ -79,7 +79,7 @@ def test_train_start_channel_guard() -> None:
 def _detection_model_at(in_chans: int, bands: int) -> nn.Module:
     """Return the detection model a run at ``in_chans`` builds, normalized at ``bands`` bands.
 
-    The model source is :data:`~tests._chain_fixtures.DETECTION_SOURCE` stating the band
+    The model source is :data:`~tests._chain_fixtures.BUILT_DETECTOR` stating the band
     statistics of :func:`~tests._chain_fixtures.noise_frames` at ``bands``, validated in a run
     config over no data and built through ``build_from_model_source`` at :func:`detector_geometry`.
     """
@@ -90,7 +90,7 @@ def _detection_model_at(in_chans: int, bands: int) -> nn.Module:
     from tcip_mcp.pipelines.schemas import TrainGeometry, train_config
     from tests import REPO_ROOT
     from tests._chain_fixtures import (
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         frame_statistics,
         noise_frames,
     )
@@ -99,7 +99,7 @@ def _detection_model_at(in_chans: int, bands: int) -> nn.Module:
         training_config(
             REPO_ROOT,
             {
-                **DETECTION_SOURCE,
+                **BUILT_DETECTOR,
                 "normalization": frame_statistics(noise_frames(bands), bands),
             },
             {},

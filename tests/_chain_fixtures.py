@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.assessment import read_assessment
@@ -73,13 +73,14 @@ TRAIN_BESPOKE = "bespoke_models:train_bespoke"
 FRAME_STATISTICS = "the band statistics of the config's own frames"
 """A model source's ``normalization`` standing for the band statistics of the train side its
 config's data section resolves to."""
-DETECTION_SOURCE = {
+BUILT_DETECTOR: dict[str, Any] = {
     "builder": BESPOKE_DETECTION,
     "source_files": [BESPOKE_MODELS],
     "task": "detection",
     "normalization": FRAME_STATISTICS,
 }
-"""A ``model_source`` of :data:`BESPOKE_DETECTION` loading no weights."""
+"""A ``model_source`` of :data:`BESPOKE_DETECTION` loading no weights, normalizing by its own
+frames' statistics."""
 CLASSIFIER_SOURCE = {
     "builder": BESPOKE_CLASSIFIER,
     "source_files": [BESPOKE_MODELS],

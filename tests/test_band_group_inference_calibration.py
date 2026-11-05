@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 torch = pytest.importorskip("torch")
 
-from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
+from tests._chain_fixtures import BUILT_DETECTOR  # noqa: E402
 from tests._training_values import RATIONALE  # noqa: E402
 
 pytest.importorskip("torchvision")
@@ -55,22 +55,15 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
     The run, over grouped captures of its own, saves its built weights without a training step.
     """
-    from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import (
         fixture_data_dir,
         registered_checkpoint,
     )
 
-    model_source = {
-        "builder": BESPOKE_DETECTION,
-        "source_files": [BESPOKE_MODELS],
-        "task": "detection",
-        "normalization": FRAME_STATISTICS,
-    }
     images_dir = _grouped_dataset(fixture_data_dir(tmp_path, "grouped"))
     return registered_checkpoint(
         tmp_path,
-        model_source=model_source,
+        model_source=BUILT_DETECTOR,
         data={
             "images_dir": str(images_dir),
             "num_channels": 2,

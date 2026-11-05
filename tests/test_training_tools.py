@@ -19,8 +19,8 @@ from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
     BESPOKE_MODELS,
+    BUILT_DETECTOR,
     CLASSIFIER_SOURCE,
-    DETECTION_SOURCE,
     FRAME_STATISTICS,
     TRAIN_BESPOKE,
     training_config,
@@ -129,7 +129,7 @@ def test_preflight_config_accepts_trainer_canonical_stages(
 
     cfg = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         _labeled(tmp_path),
         stages=[stage(-1), stage(2)],
     )
@@ -159,7 +159,7 @@ def test_preflight_config_refuses_a_nested_training_section_by_name(
     """A preflight refuses a nested ``training`` section by name and admits its keys flat."""
     from tcip_mcp.tools.training_tools import preflight_config
 
-    flat = training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path))
+    flat = training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path))
     placed = ("model_source", "data")
     nested = {
         **{k: flat[k] for k in placed},
@@ -341,7 +341,7 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(
 
     cfg = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         _labeled(tmp_path),
         stages=[stage(-1, lr=1e-3)],
     )
@@ -373,7 +373,7 @@ def test_preflight_config_warns_when_most_candidates_wont_train(
     # One admitted image holds nothing out, so the run selects on its training loss.
     cfg = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
@@ -400,7 +400,7 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(
 
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
@@ -440,7 +440,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
         "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
     }
     cfg = training_config(
-        tmp_path, weights_statistics(DETECTION_SOURCE), dict(data_cfg)
+        tmp_path, weights_statistics(BUILT_DETECTOR), dict(data_cfg)
     )
     r = preflight_config(tmp_path, cfg)
     with pytest.raises(
@@ -469,7 +469,7 @@ def test_preflight_admits_the_run_once(tmp_path: Path) -> None:
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -533,7 +533,7 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
 
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
@@ -551,7 +551,7 @@ def test_preflight_config_training_source_shape_and_importability(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    base_cfg = training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path))
+    base_cfg = training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path))
 
     # A dict and an empty string are refused by the config's own schema.
     for stated in ({"train": BESPOKE_DETECTION}, ""):
@@ -588,7 +588,7 @@ def test_preflight_config_rejects_incoherent_selection_metric(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    base_cfg = training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path))
+    base_cfg = training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path))
 
     # A comparability-only metric for a center-match trait is rejected.
     cfg = dict(base_cfg)
@@ -625,7 +625,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
     imgs.mkdir(parents=True)
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
@@ -686,7 +686,7 @@ def test_preflight_calibration_ratio_multi_member_flags_issue(
         _bud_image(images_dir / f"{stem}.png")
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -713,7 +713,7 @@ def test_preflight_reserved_regions_infeasible_layout_refuses_under_smoke(
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -750,7 +750,7 @@ def test_preflight_reserved_regions_report_an_unreadable_label_by_name(
     _damaged(images_dir / "mosaic.png", b"{not json")
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -782,12 +782,7 @@ def test_preflight_reserved_regions_admit_a_feasible_layout(
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(
         tmp_path,
-        {
-            "builder": BESPOKE_DETECTION,
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": FRAME_STATISTICS,
-        },
+        BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -863,7 +858,7 @@ def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_ad
         {} if training_source is None else {"training_source": training_source}
     )
     config = training_config(
-        tmp_path, DETECTION_SOURCE, _labeled(tmp_path), **loop
+        tmp_path, BUILT_DETECTOR, _labeled(tmp_path), **loop
     )
     (config["evaluation"] if unstated == "conf_threshold" else config).pop(
         unstated
@@ -1038,7 +1033,7 @@ def test_a_trials_combined_point_is_admitted_as_the_launch_door_admits_it(
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
 
-    base = training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path))
+    base = training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path))
     sweep = opened_sweep(
         tmp_path,
         base,
@@ -1086,14 +1081,12 @@ class _FakeDataset:
 def _detection_base(project: Path) -> dict:
     """Return a detection base config over :func:`_labeled`'s frames, selecting on the loss.
 
-    Its model is :func:`~tests._verified_checkpoint_fixtures.unbuilt_source`'s detector,
-    normalized by its frames' own statistics, and its frames lie under ``project``.
+    Its model is :data:`~tests._chain_fixtures.BUILT_DETECTOR`, normalized by its frames' own
+    statistics, and its frames lie under ``project``.
     """
-    from tests._verified_checkpoint_fixtures import unbuilt_source
-
     return training_config(
         project,
-        unbuilt_source("detection"),
+        BUILT_DETECTOR,
         _labeled(project),
         evaluation=evaluation_block(selection_metric="loss"),
     )
@@ -1570,7 +1563,7 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     base = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -1749,7 +1742,7 @@ def test_an_ordinary_launch_config_reaches_preflight_admitted_with_no_issue(
         return {"valid": False, "issues": ["stub"]}, None
 
     monkeypatch.setattr(training_tools, "_preflight", stub_preflight)
-    config = training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path))
+    config = training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path))
 
     result = training_tools.launch_training(tmp_path, config, actor=None)
 
@@ -1779,7 +1772,7 @@ def test_a_space_not_in_the_search_space_shape_is_refused_before_any_trial(
 
     result = training_tools.run_hyperparameter_search(
         tmp_path,
-        training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path)),
+        training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path)),
         param_space={"optimizer.head_lr": [0.1, 0.01]},
         n_trials=1,
         **fifo_search(),
@@ -1804,9 +1797,7 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(
     monkeypatch.chdir(tmp_path)
     seen = _spaces_searched(monkeypatch)
 
-    base_config = training_config(
-        tmp_path, DETECTION_SOURCE, _labeled(tmp_path)
-    )
+    base_config = training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path))
     result = training_tools.run_hyperparameter_search(
         tmp_path,
         base_config,
@@ -1847,7 +1838,7 @@ def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an
     from tests._verified_checkpoint_fixtures import SWEEP_ARGUMENTS
 
     monkeypatch.chdir(tmp_path)
-    base = training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path))
+    base = training_config(tmp_path, BUILT_DETECTOR, _labeled(tmp_path))
     del base["optimizer"]["head_lr"]
     arguments = {
         k: v for k, v in SWEEP_ARGUMENTS.items() if k != "param_space"
@@ -2041,7 +2032,7 @@ def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_
     stated = read_record(tmp_path).invariances
     config = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         _labeled(tmp_path),
         augmentation=augmentation(**transforms),
     )
@@ -2117,7 +2108,7 @@ def test_preflight_refuses_an_augmentation_value_outside_its_range_naming_the_fi
     _project_answering(tmp_path)
     config = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         _labeled(tmp_path),
         augmentation=augmentation(**transforms),
     )
@@ -2148,7 +2139,7 @@ def test_a_sweep_refuses_the_point_its_augmentation_axis_samples_against_the_rec
     monkeypatch.chdir(tmp_path)
     base = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         _labeled(tmp_path),
         augmentation=augmentation(
             color_jitter={
@@ -2217,7 +2208,7 @@ def test_preflight_names_a_missing_task_where_the_config_is_validated(
         if issue.startswith("model_source.task")
     ]
 
-    stated = training_config(tmp_path, DETECTION_SOURCE, data, batch_size=1)
+    stated = training_config(tmp_path, BUILT_DETECTOR, data, batch_size=1)
     admitted = preflight_config(tmp_path, stated)
     assert admitted["valid"] is True, admitted["issues"]
 

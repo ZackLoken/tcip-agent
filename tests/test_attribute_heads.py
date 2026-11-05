@@ -31,6 +31,7 @@ from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     ATTRIBUTE,
+    BUILT_DETECTOR,
     FRAME_STATISTICS,
     PLANTS,
     VALUES,
@@ -43,7 +44,6 @@ from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
     RATIONALE,
 )
-from tests._verified_checkpoint_fixtures import BUILT_DETECTOR  # noqa: E402
 from tests.bespoke_models import _KeepsItsOperatingPoint  # noqa: E402
 
 UNFILTERED = Stated(tile=False, conf=0.0, rationale=RATIONALE)

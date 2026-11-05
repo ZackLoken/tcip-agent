@@ -33,7 +33,11 @@ from tcip_mcp.pipelines.data.selection import read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import resolve_run  # noqa: E402
 from tcip_mcp.pipelines.model_build import staged_sources  # noqa: E402
 from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
-from tests._chain_fixtures import DETECTION_SOURCE, run_config, training_config  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BUILT_DETECTOR,
+    run_config,
+    training_config,
+)
 from tests._training_values import (  # noqa: E402
     RATIONALE,
     drawn_split,
@@ -43,7 +47,6 @@ from tests._training_values import (  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     opened_run,
     resolved_run,
-    unbuilt_source,
 )
 from tests.test_selection_binding import (
     DATES,
@@ -72,7 +75,7 @@ def _real_drawn_experiment(
         project,
         training_config(
             project,
-            unbuilt_source("detection"),
+            BUILT_DETECTOR,
             {
                 "images_dir": str(images_dir),
                 "scope": {"subject": subject},
@@ -146,7 +149,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(
         assert ts.exists(sample.ground_truth)
 
     second = train_config(
-        run_config(tmp_path, Path(selection_dir), DETECTION_SOURCE)
+        run_config(tmp_path, Path(selection_dir), BUILT_DETECTOR)
     )
     assert (
         selection_compatibility(second.data, second.data.split, frozen) == []

@@ -13,9 +13,13 @@ import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.experiments import compare_experiments
-from tests._chain_fixtures import FRAME_STATISTICS, training_config
+from tests._chain_fixtures import (
+    BUILT_DETECTOR,
+    FRAME_STATISTICS,
+    training_config,
+)
 from tests._training_values import drawn_split
-from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_run
+from tests._verified_checkpoint_fixtures import opened_run
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -239,7 +243,6 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
     registered = register_dataset(
         tmp_path, str(tmp_path), crop="currant", actor=None
     )
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     launched = launch_training(
         tmp_path,

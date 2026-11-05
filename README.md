@@ -137,7 +137,11 @@ On Apple silicon with macOS 14 or later the environment's torch is PyPI's build,
 GPU, and the CUDA line is not run there.
 
 The build writes the bundle inside the `tcip-web` package, so the environment's editable install
-serves it at once; a wheel or the Docker image carries the bundle built before it was made.
+serves it at once, and records the source it was built from beside it: a backend started from a
+checkout whose bundle was not built from the source beside it logs the command that rebuilds it
+and shows a stale-bundle notice in the top bar. A wheel or the Docker image carries the bundle
+built before it was made; a `v*` tag's workflow (`.github/workflows/release.yml`) builds the
+bundle, then the wheel, and attaches the wheel to the tag's GitHub release.
 
 An existing editable checkout gains the `tcip` console script only on the next
 `pip install -e packages/tcip-web`.
