@@ -798,22 +798,40 @@ def detection_records(
 
 
 def result_record(
-    result: DetectionPass, gt: list[dict], *, image_id: ImageId | None
+    result: DetectionPass,
+    gt: list[dict],
+    *,
+    image_id: ImageId | None,
+    region: tuple[int, int, int, int] | None,
 ) -> EvaluationRecord:
     """Return a detector pass and its ground-truth records ``gt`` as one per-image record.
 
-    Its detections are the pass's (:func:`detection_records`), its frame the pass's own, and its
-    ``frame_count`` the number the pass kept; ``image_id`` names the image.
+    Its frame is the pass's own and its ``frame_count`` the number the pass kept over that whole
+    frame; its detections (:func:`detection_records`) are the pass's, or, given a ``region``
+    ``(x0, y0, x1, y1)`` of the frame, those centered in it
+    (:func:`~tcip_mcp.pipelines.block_calibration.centered_in`); a region dropping a detection
+    of a pass carrying soft masks refuses (``ValueError``). ``image_id`` names the image.
     """
+    from tcip_mcp.pipelines.block_calibration import centered_in
+
+    detections = result.detections
+    if region is not None:
+        kept = centered_in(
+            np.asarray([d.box for d in detections], dtype=np.float64).reshape(
+                -1, 4
+            ),
+            region,
+        )
+        detections = [d for d, k in zip(detections, kept) if k]
     return EvaluationRecord(
         gt=gt,
-        dt=detection_records(result.detections, result.soft_masks),
+        dt=detection_records(detections, result.soft_masks),
         width=result.width,
         height=result.height,
         cap=result.cap,
         frame_count=len(result.detections),
         image_id=image_id,
-        region=None,
+        region=region,
     )
 
 

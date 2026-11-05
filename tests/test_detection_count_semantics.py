@@ -315,7 +315,7 @@ def test_the_three_evaluation_record_producers_agree_on_a_frames_count(
     assert document is not None
 
     records = [
-        result_record(result, gt_records(target), image_id=None),
+        result_record(result, gt_records(target), image_id=None, region=None),
         records_from_detector(
             target,
             output,

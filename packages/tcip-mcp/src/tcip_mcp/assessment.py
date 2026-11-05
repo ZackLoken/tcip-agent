@@ -794,6 +794,7 @@ def _records(
                 r,
                 gt_records(ds.det_targets(ds.document(k))),
                 image_id=digest_of[k],
+                region=None,
             )
         )
     return records
@@ -1301,23 +1302,20 @@ def _band_records(
 ) -> list[EvaluationRecord]:
     """Return one evaluation record per band of ``side``, in band-name order.
 
-    Each is of the tiled pass under ``execution`` over the band widened on every side (clipped to
-    the mosaic) by the overlap its lattice states between neighbors, the frame that pass ran on:
-    its ``frame_count`` the detections the pass kept over that whole frame, and its detections
-    (:func:`~tcip_mcp.pipelines.training.evaluation.detection_records`) and ground truth those
-    centered in the band itself, in that frame's coordinates, the band as the record's scored
-    ``region``, the band sample's source digest as its ``image_id``.
+    Each is :func:`~tcip_mcp.pipelines.training.evaluation.result_record`'s of the tiled pass
+    under ``execution`` over the band widened on every side (clipped to the mosaic) by the
+    overlap its lattice states between neighbors, the frame that pass ran on, the band itself in
+    that frame's coordinates as its ``region``: its ``frame_count`` the pass's over the whole
+    frame, its detections and ground truth those centered in the band, the band sample's source
+    digest as its ``image_id``.
     """
-    import numpy as np
-
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.evaluation import (
-        EvaluationRecord,
-        detection_records,
         gt_records,
+        result_record,
     )
 
     tile_size = cast(int, execution.tile_size)
@@ -1351,24 +1349,12 @@ def _band_records(
         )
         assert isinstance(result, DetectionPass), "a detector's pass"
         region = (ix0 - hx0, iy0 - hy0, ix1 - hx0, iy1 - hy0)
-        kept = blocks.centered_in(
-            np.asarray(
-                [d.box for d in result.detections], dtype=np.float64
-            ).reshape(-1, 4),
-            region,
-        )
         band = blocks.select_gt_for_band(gt, inner)
         band["boxes"] += [region[0], region[1], region[0], region[1]]
         records.append(
-            EvaluationRecord(
-                gt=gt_records(band),
-                dt=detection_records(
-                    [d for d, k in zip(result.detections, kept) if k], None
-                ),
-                width=result.width,
-                height=result.height,
-                cap=result.cap,
-                frame_count=len(result.detections),
+            result_record(
+                result,
+                gt_records(band),
                 image_id=digest_of[location],
                 region=region,
             )
