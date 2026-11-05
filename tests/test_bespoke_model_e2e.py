@@ -134,7 +134,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
         device="cpu",
     ).runnable()
     predictor = p.predictor
-    anchor_gen = predictor.model.detector.rpn.anchor_generator
+    anchor_gen = predictor.model.library.anchor_generator
     assert anchor_gen.aspect_ratios == (
         expected_ratios,
     )  # anchors are the GT-derived ratios

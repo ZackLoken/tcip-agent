@@ -417,7 +417,7 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(
     ).runnable()
     assert (
         type(p.predictor.model).__qualname__
-        == bespoke_models.BespokeGNDetector.__qualname__
+        == bespoke_models.BespokeDetection.__qualname__
     )
     assert p.predictor.task == "detection"
     assert p.predictor.in_chans == 3

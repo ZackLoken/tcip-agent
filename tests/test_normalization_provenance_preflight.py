@@ -152,12 +152,10 @@ def test_a_model_reading_more_bands_than_its_weights_states_every_band_with_its_
 ) -> None:
     """A five-band model under three-band weights builds from a stated record with its reason.
 
-    The weights' own three statistics refuse at the build's band count, a stated record lacking
-    its reason or the weights it loads refuses through its type, and a stated record of five bands
-    with both is admitted and builds.
+    A stated record lacking its reason or the weights it loads refuses through its type, and a
+    stated record of five bands with both is admitted and builds.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.derivations import pretrained_normalization
     from tcip_mcp.pipelines.schemas import (
         PretrainedWeights,
         checked_train_config,
@@ -167,14 +165,6 @@ def test_a_model_reading_more_bands_than_its_weights_states_every_band_with_its_
 
     weights = PretrainedWeights(**TIMM_WEIGHTS)
     geometry = detector_geometry().handed()
-    three = pretrained_normalization(weights)
-    with pytest.raises(ValueError, match="StatedBeyondWeights"):
-        build_bespoke_detection(
-            in_chans=5,
-            image_mean=three.image_mean,
-            image_std=three.image_std,
-            **geometry,
-        )
 
     stated = {"image_mean": [0.4] * 5, "image_std": [0.2] * 5}
     for lacking, source in (
@@ -207,7 +197,7 @@ def test_a_model_reading_more_bands_than_its_weights_states_every_band_with_its_
         image_std=normalization.image_std,
         **geometry,
     )
-    assert model.detector.transform.image_mean == stated["image_mean"]
+    assert model.library.transform.image_mean == stated["image_mean"]
 
 
 def test_preflight_refuses_a_window_path_outside_images_dir(

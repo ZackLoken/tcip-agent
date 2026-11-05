@@ -70,10 +70,16 @@ DETECTOR_PASS = Stated(**SAMPLE_DETECTOR_PASS)
 
 
 class _StubDetector:
-    """A minimal detector recording each loss pass's image count and box count."""
+    """A minimal detector exposing both operating-point knobs.
+
+    Called with targets it records the loss pass's image count and box count and answers a loss
+    of 2.5; called without, it answers one empty prediction per image.
+    """
 
     def __init__(self) -> None:
         self.calls: list[tuple[int, int]] = []
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
 
     def train(self) -> None:  # noqa: D401
         pass
@@ -85,29 +91,15 @@ class _StubDetector:
         return []
 
     def __call__(
-        self, images: list[Tensor], targets: list[dict[str, Tensor]]
-    ) -> dict[str, Tensor]:
-        self.calls.append(
-            (len(images), sum(int(t["boxes"].numel()) for t in targets))
-        )
-        return {"loss": torch.tensor(2.5)}
-
-
-class _StubModel:
-    """Composed-model stand-in exposing ``.detector`` and both operating-point knobs.
-
-    Its forward returns one empty prediction per image.
-    """
-
-    def __init__(self, detector: _StubDetector) -> None:
-        self.detector = detector
-        self.score_thresh = 0.0
-        self.detections_per_img = 100
-
-    def eval(self) -> None:  # noqa: D401
-        pass
-
-    def __call__(self, images: list[Tensor]) -> list[dict[str, Tensor]]:
+        self,
+        images: list[Tensor],
+        targets: list[dict[str, Tensor]] | None = None,
+    ) -> dict[str, Tensor] | list[dict[str, Tensor]]:
+        if targets is not None:
+            self.calls.append(
+                (len(images), sum(int(t["boxes"].numel()) for t in targets))
+            )
+            return {"loss": torch.tensor(2.5)}
         return [
             {
                 "boxes": torch.zeros((0, 4)),
@@ -140,13 +132,12 @@ def _det_batch(
 
 def test_val_loss_forwards_all_negative_images() -> None:
     stub = _StubDetector()
-    model = _StubModel(stub)
     loader = [
         _det_batch([1, 0]),
         _det_batch([0]),
     ]  # mixed batch, then all-negative batch
     evaluate(
-        model,
+        stub,
         loader,
         torch.device("cpu"),
         "detection",
@@ -164,10 +155,9 @@ def test_val_loss_forwards_all_negative_images() -> None:
 
 def test_all_negative_only_loader_is_not_skipped() -> None:
     stub = _StubDetector()
-    model = _StubModel(stub)
     loader = [_det_batch([0, 0])]  # nothing but negatives
     result = evaluate(
-        model,
+        stub,
         loader,
         torch.device("cpu"),
         "detection",
@@ -372,11 +362,12 @@ def _detections_as_ground_truth(
     *,
     subject: str,
     limit: int = 20,
-) -> None:
+) -> list[float]:
     """Write up to ``limit`` of each png image's own detections back as its ground truth.
 
     The registered ``checkpoint``'s model, built from its own spec, is read with its score floor
-    removed, and only boxes wider and taller than 1 px are written.
+    removed, and only boxes wider and taller than 1 px are written. Returns the written boxes'
+    scores.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
@@ -398,10 +389,18 @@ def _detections_as_ground_truth(
     set_detector_operating_point(
         model, score_thresh=0.0, detections_per_img=limit
     )
+    written: list[float] = []
     for image in sorted(Path(images_dir).glob("*.png")):
         tensor = pil_to_tensor(load_image(image, 3))
         with torch.no_grad():
-            boxes = model([tensor])[0]["boxes"].tolist()
+            (out,) = model([tensor])
+        kept = [
+            (box, score)
+            for box, score in zip(
+                out["boxes"].tolist(), out["scores"].tolist(), strict=True
+            )
+            if box[2] - box[0] > 1 and box[3] - box[1] > 1
+        ]
         w, h = int(tensor.shape[-1]), int(tensor.shape[-2])
         label_image(
             image,
@@ -409,12 +408,13 @@ def _detections_as_ground_truth(
                 Annotation(
                     subject=subject, geometry=BBox(*(float(v) for v in box))
                 )
-                for box in boxes
-                if box[2] - box[0] > 1 and box[3] - box[1] > 1
+                for box, _score in kept
             ],
             w,
             h,
         )
+        written += [score for _box, score in kept]
+    return written
 
 
 def test_the_scored_model_is_the_one_the_door_already_built(
@@ -424,7 +424,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(
 
     A separately built copy of the checkpoint, counted at the reported record's conf under the
     cap it gives each frame, answers with the measured numbers over the measured loader; counted
-    at conf 0.6, the copy answers a different recall.
+    above every score, the copy answers a different recall. The pass counts midway between the
+    lowest and highest score the fixture's detections carry.
     """
     from typing import cast
 
@@ -442,10 +443,15 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     for i in range(2):
         write_image(images_dir / f"img{i}.png", (128, 128), (120, 120, 120))
-    # This seed's weights score just above 0.5, so a count at 0.6 keeps none of its detections.
     ckpt = registered_checkpoint(tmp_path, seed=0)
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
-    _detections_as_ground_truth(verified, images_dir, subject="bud")
+    scores = _detections_as_ground_truth(verified, images_dir, subject="bud")
+    # The pass counts midway between the fixture's lowest and highest score, so it keeps some
+    # detections and not all; the separating count sits above every score.
+    low, high = min(scores), max(scores)
+    assert low < high, scores
+    stated = Stated(**{**SAMPLE_DETECTOR_PASS, "conf": (low + high) / 2})
+    above_every_score = (high + 1.0) / 2
 
     build = model_build.build_from_model_source
     builds = []
@@ -480,18 +486,18 @@ def test_the_scored_model_is_the_one_the_door_already_built(
 
     monkeypatch.setattr(runners, "run_test_evaluation", _record)
 
-    # Both routes run from one seed: the loss pass samples proposals, so two unseeded passes over
-    # the same weights differ in that one metric by more than float noise.
+    # Both routes run from one seed, so any random stream their passes read draws alike.
     torch.manual_seed(777)
     measured = evaluate_model(
         tmp_path,
         ckpt,
         str(images_dir),
-        stated=DETECTOR_PASS,
+        stated=stated,
         iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in measured, measured
     assert len(builds) == 1
+    assert 0.0 < measured["recall"] < 1.0, measured
 
     torch.manual_seed(777)
     dims = model_build.recorded_model_dims(verified.spec)
@@ -533,9 +539,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(
             else value
         ), key
 
-    # What a count at a conf above every score reports instead, so the equality above is evidence
-    # about this fixture rather than a comparison nothing could separate.
-    assert _independent(0.6)["recall"] != measured["recall"]
+    # What a count above every score reports instead, so the equality above is evidence about
+    # this fixture rather than a comparison nothing could separate.
+    assert _independent(above_every_score)["recall"] != measured["recall"]
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
