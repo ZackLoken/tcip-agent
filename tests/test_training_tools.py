@@ -1004,7 +1004,7 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
         },
         "optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
     }
-    points = _preflight_points(space, "random")
+    points = _preflight_points(space, "random", open_above=frozenset())
 
     assert {p["model_source.builder"] for _, p in points} == {
         "a:b",
@@ -1016,7 +1016,9 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
     assert len(held) == len({repr(p) for p in held}) == 4, points
 
     repeated = _preflight_points(
-        {"batch_size": {"type": "categorical", "choices": [2, 4, 4]}}, "random"
+        {"batch_size": {"type": "categorical", "choices": [2, 4, 4]}},
+        "random",
+        open_above=frozenset(),
     )
     assert [p for _, p in repeated] == [
         {"batch_size": 2},

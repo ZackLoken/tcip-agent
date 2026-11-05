@@ -147,6 +147,9 @@ class OptimizerSpec(_Stated):
     head_lr: float = Field(gt=0)
     weight_decay: float = Field(ge=0)
     momentum: float | None = Field(None, ge=0)
+    lr_range_run: str | None = Field(None, min_length=1)
+    """The range test (``derive_lr_range``) whose derived range governs ``head_lr``; ``None``
+    leaves the block's ``rationale`` the rates' one source."""
 
     @model_validator(mode="after")
     def _momentum_belongs_to_sgd(self) -> OptimizerSpec:

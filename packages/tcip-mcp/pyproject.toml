@@ -60,6 +60,10 @@ dev = [
     # The permission tests match deny rules with its gitignore matcher, installed at 1.1.1
     # through mypy.
     "pathspec>=1.1.1",
+    # The outside reference the learning-rate range test's steepest descent is compared to, and
+    # the axes its suggestion is drawn onto.
+    "torch-lr-finder>=0.2.2",
+    "matplotlib",
 ]
 
 [build-system]

@@ -213,6 +213,51 @@ def build_backbone_regressor(
     return BackboneRegressor()
 
 
+class QuadraticBowl(MeanIntensityRegressor):
+    """A regressor whose training loss is ``curvature * weight**2 / 2``, whatever its batch.
+
+    Its one weight is float64. Under plain gradient descent at rate ``r`` the loss changes by
+    ``(1 - curvature * r) ** 2`` a step, so it falls while ``r`` is below ``2 / curvature`` and
+    rises from there.
+    """
+
+    def __init__(self, init_weight: float, curvature: float) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(
+            torch.tensor([init_weight], dtype=torch.float64)
+        )
+        self.curvature = curvature
+
+    def fit_loss(self, images: torch.Tensor, targets: dict) -> dict:
+        return {"bowl": self.curvature * (self.weight**2).sum() / 2}
+
+
+class WhollyFrozenRegressor(MeanIntensityRegressor):
+    """A :class:`MeanIntensityRegressor` whose ``freeze_backbone`` freezes every parameter."""
+
+    def freeze_backbone(self, stage: int) -> None:
+        for p in self.parameters():
+            p.requires_grad = False
+
+
+def build_wholly_frozen_regressor(
+    *, in_chans: int = 1, **_statistics: object
+) -> WhollyFrozenRegressor:
+    """Build a :class:`WhollyFrozenRegressor` as a ``model_source`` builder."""
+    return WhollyFrozenRegressor()
+
+
+def build_quadratic_bowl(
+    *,
+    in_chans: int = 1,
+    init_weight: float,
+    curvature: float,
+    **_statistics: object,
+) -> QuadraticBowl:
+    """Build a :class:`QuadraticBowl` as a ``model_source`` builder."""
+    return QuadraticBowl(init_weight=init_weight, curvature=curvature)
+
+
 class NanEvalRegressor(MeanIntensityRegressor):
     """A regressor answering its parent's loss in train mode and ``predict + nan`` in eval."""
 
@@ -465,6 +510,8 @@ ALWAYS_DIVERGED_MODEL = "tiny_trainer_fixtures:build_always_diverged_model"
 NAN_EVAL_REGRESSOR = "tiny_trainer_fixtures:build_nan_eval_regressor"
 TWO_RATE_REGRESSOR = "tiny_trainer_fixtures:build_two_rate_regressor"
 BACKBONE_REGRESSOR = "tiny_trainer_fixtures:build_backbone_regressor"
+QUADRATIC_BOWL = "tiny_trainer_fixtures:build_quadratic_bowl"
+WHOLLY_FROZEN_REGRESSOR = "tiny_trainer_fixtures:build_wholly_frozen_regressor"
 COUNTING_REGRESSOR = "tiny_trainer_fixtures:build_counting_regressor"
 TINY_TRAINER_FILE = str(REPO_ROOT / "tests" / "tiny_trainer_fixtures.py")
 """The file of ``tests.tiny_trainer_fixtures`` in this repository, which a config naming one of
