@@ -111,6 +111,9 @@ LR_RANGE_FILE = "lr_range.json"
 TENSORBOARD_DIR = "tensorboard"
 """A run directory's TensorBoard event directory."""
 
+BATCH_LOSS_KEY = "batch_loss"
+"""The key a per-batch metrics row carries its batch's training loss under."""
+
 
 class MetricsRow(BaseModel):
     """One metrics-log row: the stamps its writer lays beside its logged values.
