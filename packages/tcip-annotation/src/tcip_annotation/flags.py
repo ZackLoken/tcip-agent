@@ -134,15 +134,15 @@ class FlagsRecord(TypedDict):
 _FLAGS_RECORD = TypeAdapter(FlagsRecord)
 
 
-def flags_of(record: JsonValue) -> list[Flag]:
-    """Return the flags a flags record in hand holds, oldest first; an absent record holds none.
+def flags_of(record: JsonValue, where: str) -> list[Flag]:
+    """Return the flags a flags record holds, oldest first; an absent record holds none.
 
-    A record that does not validate as a :class:`FlagsRecord` refuses
-    (``tcip_store.ReadRefusedError``) naming the flags record and each field.
+    ``where`` names the record. One that does not validate as a :class:`FlagsRecord` refuses
+    (``tcip_store.ReadRefusedError``) behind ``where``, naming each field.
     """
     if record is None:
         return []
-    return validated(_FLAGS_RECORD, record, "the flags record")["flags"]
+    return validated(_FLAGS_RECORD, record, where)["flags"]
 
 
 def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
@@ -153,20 +153,13 @@ def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
 def read_flags(
     key: Key, *, read: Callable[..., JsonValue] = tcip_store.read
 ) -> list[Flag]:
-    """Return every flag the record ``key`` names holds, oldest first, read by ``read``.
+    """Return every flag the record ``key`` names holds (:func:`flags_of`), read by ``read``.
 
-    ``read`` is a store or a transaction read; an absent record holds none. A record the store
-    will not read or that is no :class:`FlagsRecord` refuses (``tcip_store.ReadRefusedError``)
-    naming the record by the image's key.
+    ``read`` is a store or a transaction read. A record the store will not read refuses
+    (``tcip_store.ReadRefusedError``) as :func:`flags_of` does, naming the image's key.
     """
-    record = tcip_store.read_record(
-        read,
-        key,
-        _FLAGS_RECORD,
-        f"the flags record of {'/'.join(key.parts)}",
-        default=None,
-    )
-    return [] if record is None else record["flags"]
+    where = f"the flags record of {'/'.join(key.parts)}"
+    return flags_of(tcip_store.read_raw(read, key, where, default=None), where)
 
 
 def covers(

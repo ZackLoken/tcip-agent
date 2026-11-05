@@ -736,7 +736,7 @@ def admitted(
             else:
                 try:
                     document = label_document(item.document)
-                    flags_of(item.flags)
+                    flags_of(item.flags, "the flags record")
                 except (UnreadableLabelDocumentError, ReadRefusedError) as exc:
                     faults.append(f"{where} does not read: {exc}")
                     continue
