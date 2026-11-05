@@ -809,7 +809,9 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(
     real_record = evaluation.result_record
 
     def recording(
-        result: DetectionPass, gt: list[dict], **kw: int | str | None
+        result: DetectionPass,
+        gt: list[dict],
+        **kw: int | str | tuple[int, int, int, int] | None,
     ) -> EvaluationRecord:
         record = real_record(result, gt, **kw)
         scored.append((record.gt, record.dt))

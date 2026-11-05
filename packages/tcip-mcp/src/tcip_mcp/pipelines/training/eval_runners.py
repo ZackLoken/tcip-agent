@@ -174,7 +174,10 @@ def run_full_frame_evaluation(
         assert isinstance(detected, DetectionPass), "a detector's pass"
         per_image.append(
             result_record(
-                detected, gt, image_id=measured.sample_of(key).member
+                detected,
+                gt,
+                image_id=measured.sample_of(key).member,
+                region=None,
             )
         )
 
