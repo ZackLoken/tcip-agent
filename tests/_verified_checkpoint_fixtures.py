@@ -16,6 +16,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
     BESPOKE_DETECTION,
     BESPOKE_MODELS,
+    BUILT_DETECTOR,
     FRAME_STATISTICS,
     SAVE_BUILT_WEIGHTS,
     training_config,
@@ -49,14 +50,6 @@ SCOPED_DATA = {
 }
 """A three-band detection run's data section, scoped to ``bud`` and drawing its own split at a
 0.15 validation ratio grouped by tile prefix."""
-
-BUILT_DETECTOR: dict[str, Any] = {
-    "builder": BESPOKE_DETECTION,
-    "source_files": [BESPOKE_MODELS],
-    "task": "detection",
-    "normalization": FRAME_STATISTICS,
-}
-"""A tiny detection builder's ``model_source``, normalizing by its own frames' statistics."""
 
 SAVE_A_SECOND_CHECKPOINT = (
     "bespoke_models:save_built_weights_and_a_second_checkpoint"

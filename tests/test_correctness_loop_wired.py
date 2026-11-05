@@ -338,8 +338,8 @@ def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._chain_fixtures import BUILT_DETECTOR
     from tests._producer_fixtures import seed_bud_images
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     imgs = seed_bud_images(
         image_dir(tmp_path / "ds", UNDATED_BUCKET),
@@ -381,9 +381,8 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
     monkeypatch.chdir(tmp_path)
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests._chain_fixtures import stated_detector_geometry
+    from tests._chain_fixtures import BUILT_DETECTOR, stated_detector_geometry
     from tests._producer_fixtures import label_image, write_image
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     imgs = _admitted_tree(tmp_path)
     label_image(
@@ -416,7 +415,7 @@ def test_preflight_smoke_passes_valid_builder(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+    from tests._chain_fixtures import BUILT_DETECTOR
 
     imgs = _admitted_tree(tmp_path)
     cfg = training_config(

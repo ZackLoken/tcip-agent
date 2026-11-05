@@ -261,12 +261,9 @@ def hpo_base_config_at(tmp_path: Path) -> Callable[[int], dict]:
     (``_verified_checkpoint_fixtures.detection_images``), at the sample regime and the statistics
     of the draw's train side (``_chain_fixtures.training_config``).
     """
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
     from tests._training_values import drawn_split
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        detection_images,
-    )
+    from tests._verified_checkpoint_fixtures import detection_images
 
     scope = {"subject": DATA_DIR_SUBJECT}
 

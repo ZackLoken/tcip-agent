@@ -614,7 +614,7 @@ def test_a_configs_statistics_are_its_resolved_train_side_whatever_its_route(
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import (
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         draw_reference_selection,
         synthetic_capture,
         training_config,
@@ -628,12 +628,12 @@ def test_a_configs_statistics_are_its_resolved_train_side_whatever_its_route(
     configs = {
         "exp-redrawn": training_config(
             tmp_path,
-            DETECTION_SOURCE,
+            BUILT_DETECTOR,
             {"split": {"selection_dir": str(selection_dir), "seed": 7}},
         ),
         "exp-drawn": training_config(
             tmp_path,
-            DETECTION_SOURCE,
+            BUILT_DETECTOR,
             {
                 "images_dir": str(images_dir),
                 "scope": {"subject": "bud"},
@@ -662,12 +662,12 @@ def test_own_statistics_refuses_a_config_whose_frames_carry_none(
     from pydantic import ValidationError
 
     from tcip_annotation.state import Annotation, BBox
-    from tests._chain_fixtures import DETECTION_SOURCE, training_config
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
     from tests._producer_fixtures import label_image, write_image
 
     with pytest.raises(ValueError, match="images_dir"):
         training_config(
-            tmp_path, DETECTION_SOURCE, {"scope": {"subject": "bud"}}
+            tmp_path, BUILT_DETECTOR, {"scope": {"subject": "bud"}}
         )
 
     imgs = image_dir(tmp_path, UNDATED_BUCKET)
@@ -681,7 +681,7 @@ def test_own_statistics_refuses_a_config_whose_frames_carry_none(
     with pytest.raises(ValidationError, match="image_std"):
         training_config(
             tmp_path,
-            DETECTION_SOURCE,
+            BUILT_DETECTOR,
             {
                 "images_dir": str(imgs),
                 "scope": {"subject": "bud"},

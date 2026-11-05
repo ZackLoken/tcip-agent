@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import training_config
+from tests._chain_fixtures import BUILT_DETECTOR, training_config
 from tests._training_values import drawn_split, evaluation_block
 
 pytest.importorskip("torch")
@@ -251,7 +251,6 @@ def test_a_detector_selecting_an_unweighted_objective_refuses_at_the_smoke(
     """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     config = training_config(
         tmp_path,

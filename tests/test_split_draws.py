@@ -13,7 +13,7 @@ import pytest
 
 from tests._chain_fixtures import (
     BESPOKE_INSTANCE_SEG,
-    DETECTION_SOURCE,
+    BUILT_DETECTOR,
     training_config,
     weights_statistics,
 )
@@ -188,7 +188,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     _root, selection_dir = one_foreground_group_selection(tmp_path)
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {"split": {"selection_dir": str(selection_dir), "seed": 0}},
     )
     result = tt.run_hyperparameter_search(
@@ -221,8 +221,6 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_zero_validation_sh
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
     )
-
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     cfg = _unheld(tmp_path, BUILT_DETECTOR, real_hpo_base_config["data"])
     result = tt.run_hyperparameter_search(
@@ -757,7 +755,7 @@ def _bound_hpo_config(project: Path, selection_dir: Path) -> dict:
     """Return a detection config bound to the selection at ``selection_dir``, redrawn at seed 42."""
     return training_config(
         project,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {"split": {"selection_dir": str(selection_dir), "seed": 42}},
     )
 
@@ -1007,10 +1005,7 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
     """A split-draws sweep over an instance_seg config on polygon ground truth is admitted."""
     import tcip_mcp.tools.training_tools as tt
     from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        detection_images,
-    )
+    from tests._verified_checkpoint_fixtures import detection_images
 
     scope = real_hpo_base_config["data"]["scope"]
     cfg = training_config(
@@ -1947,7 +1942,7 @@ def _tiled_cfg(
     shares beside it, at the statistics of the frames that split places on its training side
     (``_chain_fixtures.training_config``).
     """
-    source = {**DETECTION_SOURCE, "task": task}
+    source = {**BUILT_DETECTOR, "task": task}
     if task == "instance_seg":
         source["builder"] = BESPOKE_INSTANCE_SEG
     return training_config(
@@ -2095,7 +2090,7 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
     # nothing out, so the run selects on its training loss.
     cfg = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -2145,8 +2140,6 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
     )
-
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     # A config no run resolves: its statistics are the weights' it names.
     cfg = _unheld(

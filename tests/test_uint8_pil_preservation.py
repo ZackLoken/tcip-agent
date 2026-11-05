@@ -441,9 +441,8 @@ def _augmented_run(
     detection run of ``BUILT_DETECTOR``, or with ``bespoke`` one of task ``grape_bunch_count``
     naming a ``dataset_source`` builder.
     """
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
     from tests._training_values import evaluation_block
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
     from tests.test_dataset_source_seam import DATASET_SOURCE
 
     images_dir = _detection_project(tmp_path / "data", arr)

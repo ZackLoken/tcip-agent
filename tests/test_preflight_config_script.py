@@ -18,9 +18,8 @@ def _fixture_config(root: Path) -> Path:
     The config is of ``BUILT_DETECTOR`` over ``detection_images`` under ``root/data`` and
     ``SCOPED_DATA``.
     """
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
     from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
         SCOPED_DATA,
         detection_images,
     )
