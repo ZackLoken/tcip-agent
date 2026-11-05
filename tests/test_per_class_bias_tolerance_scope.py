@@ -15,6 +15,7 @@ from tests._training_values import COUNT_TEST
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.operating_point import count_criterion  # noqa: E402
+from tests._dense_op_fixtures import whole_frame_record  # noqa: E402
 
 ENTRY = fx.with_fields(
     fx.BUD_OPENING, count_bias_tolerance_frac=0.01, count_error_tolerance=100.0
@@ -58,15 +59,14 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
                     }
                 )
         recs.append(
-            {
-                "image_id": f"{prefix}{i}",
-                "width": 20000,
-                "height": 3000,
-                "gt": gt,
-                "dt": dt,
-                "count": len(dt),
-                "cap": len(dt) + 1,
-            }
+            whole_frame_record(
+                dt,
+                gt,
+                width=20000,
+                height=3000,
+                cap=len(dt) + 1,
+                image_id=f"{prefix}{i}",
+            )
         )
     return recs
 

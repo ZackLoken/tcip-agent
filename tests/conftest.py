@@ -341,21 +341,21 @@ def data_dir(tmp_path: Path) -> WrittenDataset:
         )
     # Predictions, published as one bucket: 1 matching (TP) + 1 elsewhere (FP) per image.
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     published(
         tmp_path,
         DATA_DIR_BUCKET,
         [
-            {
-                "image": str(image),
-                "width": 640,
-                "height": 480,
-                "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]],
-                "scores": [0.9, 0.7],
-                "labels": [1, 1],
-                "cap": 3,
-            }
+            detection_pass(
+                image,
+                (640, 480),
+                [
+                    detected((288, 216, 352, 264), 0.9),
+                    detected((496, 372, 528, 396), 0.7),
+                ],
+                cap=3,
+            )
             for image in images
         ],
         scope={"subject": subject},

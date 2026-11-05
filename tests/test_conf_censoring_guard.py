@@ -17,7 +17,11 @@ torch = pytest.importorskip(
 
 from tcip_mcp.pipelines.operating_point import _min_dt_score, count_criterion  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
-from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
+from tests._dense_op_fixtures import (  # noqa: E402
+    dense_records,
+    good_cal_holdout,
+    whole_frame_record,
+)
 from tests._training_values import COUNT_TEST  # noqa: E402
 
 
@@ -36,7 +40,12 @@ def _criterion(
 def test_min_dt_score() -> None:
     recs = dense_records(n_images=2, objects_per_image=3, score=0.9)
     assert _min_dt_score(recs) == pytest.approx(0.9)
-    assert _min_dt_score([{"gt": [], "dt": []}]) is None
+    assert (
+        _min_dt_score(
+            [whole_frame_record([], [], width=100, height=100, cap=None)]
+        )
+        is None
+    )
 
 
 # Correct detections score 0.9 and one spurious detection per image scores low, so the

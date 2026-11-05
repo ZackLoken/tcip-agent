@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.model_contract import TCIPModel
     from tcip_mcp.pipelines.schemas import ScoreWeights
     from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
     from tcip_mcp.traits import TraitEntry
 
 MOSAIC_WIDTH, MOSAIC_HEIGHT = 5000, 600
@@ -143,19 +144,19 @@ def compose_tiles(ctx: TrainContext) -> None:
 
 def _detector_records(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[dict, dict]]:
+) -> list[tuple[dict, EvaluationRecord]]:
     """Record each detector output ``evaluation.records_from_detector`` scores, with its record.
 
     Returns the list the calls append ``(output, record)`` to.
     """
     import tcip_mcp.pipelines.training.evaluation as evaluation
 
-    calls: list[tuple[dict, dict]] = []
+    calls: list[tuple[dict, EvaluationRecord]] = []
     real = evaluation.records_from_detector
 
     def recording(
         target: dict, output: dict, **kwargs: int | MaskCut | None
-    ) -> dict:
+    ) -> EvaluationRecord:
         calls.append((output, real(target, output, **kwargs)))
         return calls[-1][1]
 
@@ -211,9 +212,9 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
         density,
         "derived",
     )
-    assert [small["cap"], large["cap"]] == caps
-    assert large["cap"] / small["cap"] == (256 * 192) / (64 * 48)
-    assert small["count"] <= small["cap"] and large["count"] <= large["cap"]
+    assert [small.cap, large.cap] == caps
+    assert large.cap / small.cap == (256 * 192) / (64 * 48)
+    assert all(len(r.detections) <= r.cap for r in (small, large))
     assert sorted(forwards) == sorted(caps)
 
 
@@ -269,7 +270,7 @@ def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_pr
         device="cpu",
     ).runnable()
     (result,) = admitted.predict([str(frame)])
-    assert result["cap"] >= 1 and result["count"] <= result["cap"]
+    assert result.cap >= 1 and len(result.detections) <= result.cap
 
 
 def _mosaic(root: Path) -> Path:
@@ -384,8 +385,7 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
             in_chans=3,
             width=MOSAIC_WIDTH,
             height=MOSAIC_HEIGHT,
-            boxes=(),
-            scores=(),
+            detections=(),
         ),
     )
     execution = run_full_frame_evaluation(
@@ -631,7 +631,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
         mask_cut=None,
     )
 
-    assert [record["count"] for _output, record in calls] == [
+    assert [record.frame_count for _output, record in calls] == [
         len(out["boxes"]) for out in unfloored
     ]
 
@@ -991,7 +991,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
             sources={**p.execution.sources, "density": "explicit"},
         ),
     )
-    assert [(r["cap"], r["count"]) for r in rows] == [(1, 1), (1, 1)]
+    assert [(r.cap, len(r.detections)) for r in rows] == [(1, 1), (1, 1)]
 
     calls = _detector_records(monkeypatch)
     validate(
@@ -1053,7 +1053,7 @@ def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete
         restored=EXECUTION_RECORD.validate_python(record),
     ).runnable()
     (result,) = restored.predict(restored.paths)
-    assert result["tiles"] >= 1
+    assert restored.execution.tiled
 
 
 def test_the_published_cap_reaches_the_row_scoring_its_bucket(
@@ -1115,18 +1115,18 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
     )
     assert "error" not in staged, staged
 
-    scored: list[dict] = []
+    scored: list[EvaluationRecord] = []
     real = evaluation.records_from_annotation
 
     def recording(
         *args: list[Annotation], **kwargs: int | dict[str, int] | None
-    ) -> dict:
+    ) -> EvaluationRecord:
         scored.append(real(*args, **kwargs))
         return scored[-1]
 
     monkeypatch.setattr(evaluation, "records_from_annotation", recording)
 
-    def row(name: str) -> dict:
+    def row(name: str) -> EvaluationRecord:
         score_bucket(
             [SourceHeader(resolve_image_path(image))],
             read_bucket(tmp_path, name),
@@ -1139,6 +1139,6 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
     density = verified_checkpoint(tmp_path).geometry.object_density
     assert density is not None
     capped, proposed = row("capped"), row(staged.bucket)
-    assert capped["cap"] == detection_cap(density, 96 * 96)
-    assert capped["count"] == len(capped["dt"]) <= capped["cap"]
-    assert (proposed["cap"], proposed["count"]) == (None, 1)
+    assert capped.cap == detection_cap(density, 96 * 96)
+    assert capped.frame_count == len(capped.dt) <= capped.cap
+    assert (proposed.cap, proposed.frame_count) == (None, 1)

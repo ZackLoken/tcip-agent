@@ -376,7 +376,7 @@ def _published_frames(project: Path, images_dir: Path) -> list[Path]:
     Each frame has its predictions published as ``project``'s bucket ``published``.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import label_image, write_image
 
     frames = []
@@ -395,15 +395,15 @@ def _published_frames(project: Path, images_dir: Path) -> list[Path]:
         project,
         "published",
         [
-            {
-                "image": str(frame),
-                "width": 64,
-                "height": 48,
-                "boxes": [[8, 8, 24, 24], [40, 30, 50, 40]],
-                "scores": [0.9, 0.7],
-                "labels": [1, 1],
-                "cap": 3,
-            }
+            detection_pass(
+                frame,
+                (64, 48),
+                [
+                    detected((8, 8, 24, 24), 0.9),
+                    detected((40, 30, 50, 40), 0.7),
+                ],
+                cap=3,
+            )
             for frame in frames
         ],
         scope={"subject": "leaf"},

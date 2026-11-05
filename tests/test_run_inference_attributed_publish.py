@@ -22,6 +22,7 @@ torch = pytest.importorskip("torch")
 from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.dataset_layout import image_dir  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._chain_fixtures import detected  # noqa: E402
 from tests._predictor_fixtures import BOX, StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import registry_of, write_image  # noqa: E402
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
@@ -48,9 +49,10 @@ def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
 def _attributed_predictor() -> StubPredictor:
     """Return a ``StubPredictor`` of two boxes with attribute ids ``[0, 2]`` and ``[1, 0]``."""
     return StubPredictor(
-        boxes=(BOX, (40.0, 40.0, 60.0, 60.0)),
-        scores=(0.9, 0.8),
-        attributes=[[0, 2], [1, 0]],
+        detections=[
+            detected(BOX, 0.9, attributes=[0, 2]),
+            detected((40.0, 40.0, 60.0, 60.0), 0.8, attributes=[1, 0]),
+        ]
     )
 
 

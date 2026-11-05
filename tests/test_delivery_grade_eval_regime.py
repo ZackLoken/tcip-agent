@@ -22,12 +22,14 @@ if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.label_queries import Admission
     from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.inference.passes import Detection
     from tcip_mcp.traits import TraitEntry
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._chain_fixtures import detected  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
@@ -91,13 +93,13 @@ def _detector(
     monkeypatch: pytest.MonkeyPatch,
     *,
     in_chans: int = 3,
-    **answer: int | Sequence[Sequence[float]] | Sequence[float],
+    **answer: int | Sequence[Detection],
 ) -> StubPredictor:
     """Install one stub detector as each predictor the evaluation builds, and return it.
 
     The detector is ``in_chans``-band, three by default, recording 100px training tiles at 0.2
-    overlap, and answers a 128px frame holding no box, ``answer``'s :class:`StubPredictor` fields
-    laid over that.
+    overlap, and answers a 128px frame holding no detection, ``answer``'s :class:`StubPredictor`
+    fields laid over that.
     """
     return install(
         monkeypatch,
@@ -109,8 +111,7 @@ def _detector(
             **{
                 "width": 128,
                 "height": 128,
-                "boxes": (),
-                "scores": (),
+                "detections": (),
                 **answer,
             },
         ),
@@ -398,14 +399,12 @@ def test_a_frame_that_hits_its_cap_is_reported_saturated(
         width=200,
         height=200,
         cap=5,
-        boxes=(
-            (10, 10, 30, 30),
-            (50, 50, 70, 70),
-            (90, 90, 110, 110),
-            (130, 130, 150, 150),
-            (170, 170, 190, 190),
-        ),
-        scores=(0.9, 0.8, 0.7, 0.6, 0.5),
+        detections=[
+            detected((x, x, x + 20, x + 20), score)
+            for x, score in zip(
+                (10, 50, 90, 130, 170), (0.9, 0.8, 0.7, 0.6, 0.5), strict=True
+            )
+        ],
     )
     r = run_full_frame_evaluation(
         checkpoint,
@@ -451,7 +450,7 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(
     )
 
     _detector(
-        monkeypatch, in_chans=1, boxes=((10, 10, 40, 40),), scores=(0.9,)
+        monkeypatch, in_chans=1, detections=[detected((10, 10, 40, 40), 0.9)]
     )
     checkpoint = verified_checkpoint(tmp_path)
     r = run_full_frame_evaluation(

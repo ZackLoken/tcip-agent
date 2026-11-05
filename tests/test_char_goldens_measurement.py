@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.generic_predictor import (
         WindowedRasterReader,
     )
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
 
 torch = pytest.importorskip(
     "torch"
@@ -48,9 +50,10 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     pick_count_unbiased,
     pick_f1_max,
 )
-from tests._dense_op_fixtures import (
-    good_cal_holdout,  # noqa: E402
-    toy_records as _sweep_records,  # noqa: E402
+from tests._dense_op_fixtures import (  # noqa: E402
+    good_cal_holdout,
+    toy_records as _sweep_records,
+    whole_frame_record,
 )
 from tests._training_values import (  # noqa: E402
     COUNT_TEST,
@@ -172,14 +175,14 @@ def test_golden_count_criterion_over_a_dense_distinct_reference() -> None:
     # the p99 density over frames of one size, times that size, is the densest frame's count
     from tests._verified_checkpoint_fixtures import objects_over
 
-    frame = float(cal[0]["width"] * cal[0]["height"])
+    frame = float(cal[0].width * cal[0].height)
     regions = [
         objects_over(
             [
                 [x, y, x + w, y + h]
                 for x, y, w, h in (a["bbox"] for a in gt_objects(r))
             ],
-            r["width"] * r["height"],
+            r.width * r.height,
         )
         for r in cal + hold
     ]
@@ -442,6 +445,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from tcip_mcp.pipelines import execution as execution_mod
     from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.tools import training_tools as training_tools_mod
+    from tests._chain_fixtures import detection_pass
     from tests._producer_fixtures import label_image, write_image
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
@@ -478,16 +482,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
             | dict
             | Callable[[int, int, dict], None]
             | None,
-        ) -> dict:
-            return {
-                "width": 64,
-                "height": 64,
-                "boxes": [],
-                "scores": [],
-                "labels": [],
-                "count": 0,
-                "cap": 1,
-            }
+        ) -> DetectionPass:
+            return detection_pass("a.png", (64, 64), [], cap=1)
 
     # The checkpoint is built through the unpatched build_model before the stubs below go in.
     checkpoint = registered_checkpoint(tmp_path)
@@ -554,7 +550,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _iou_records() -> list[dict]:
+def _iou_records() -> list[EvaluationRecord]:
     """Return two 100 px frames of 20 px ground-truth boxes and their detections.
 
     The first frame holds two ground-truth boxes, a 0.95 detection on the first's box, a 0.85
@@ -576,17 +572,20 @@ def _iou_records() -> list[dict]:
         }
 
     return [
-        {
-            "width": 100,
-            "height": 100,
-            "gt": [gt(10, 10, 20, 20), gt(60, 60, 20, 20)],
-            "dt": [
+        whole_frame_record(
+            [
                 dt(10, 10, 20, 20, 0.95),
                 dt(62, 62, 20, 20, 0.85),
                 dt(90, 5, 8, 8, 0.6),
             ],
-        },
-        {"width": 100, "height": 100, "gt": [gt(40, 40, 20, 20)], "dt": []},
+            [gt(10, 10, 20, 20), gt(60, 60, 20, 20)],
+            width=100,
+            height=100,
+            cap=None,
+        ),
+        whole_frame_record(
+            [], [gt(40, 40, 20, 20)], width=100, height=100, cap=None
+        ),
     ]
 
 

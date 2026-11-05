@@ -1,41 +1,48 @@
 """Active learning selector: review-queue and unscoreable partitioning of predictions.
 
-The review queue is the medium-confidence predictions; both partition a checkpoint's own
-prediction dicts.
+The review queue is the medium-confidence predictions; both partition a checkpoint's own passes.
 """
 
 from __future__ import annotations
 
+from typing import cast
 
-def _confidence_values(pred: dict) -> list[float]:
-    """Return flat image-level confidences from a GenericPredictor prediction dict.
+from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
+
+
+def _confidence_values(pred: DetectionPass | HeadPass) -> list[float]:
+    """Return a pass's flat confidences: a detector's detection scores, a head's image-level ones.
 
     Classification/ordinal heads emit per-image confidences under ``head{i}_confidences``; matching
     the suffix covers a model with any number of heads. ``*_probabilities`` is not matched.
     """
+    if isinstance(pred, DetectionPass):
+        return [d.score for d in pred.detections]
     values: list[float] = []
-    for key, val in pred.items():
+    for key, val in pred.outputs.items():
         if key.endswith("_confidences") and isinstance(val, list):
-            values.extend(float(v) for v in val)
+            values.extend(map(float, cast("list[float]", val)))
     return values
 
 
-def unscoreable(predictions: list[dict]) -> list[dict]:
+def unscoreable(
+    predictions: list[DetectionPass | HeadPass],
+) -> list[DetectionPass | HeadPass]:
     """Return the predictions with no confidence-bearing signal.
 
-    That is no ``scores`` key (checked by presence; ``scores: []`` is a scored negative) and no
-    ``*_confidences`` head output.
+    That is a head's pass with no ``*_confidences`` output; a detector's pass is scored, one with
+    no detection a scored negative.
     """
     return [
         pred
         for pred in predictions
-        if "scores" not in pred and not _confidence_values(pred)
+        if not isinstance(pred, DetectionPass) and not _confidence_values(pred)
     ]
 
 
 def review_queue(
-    predictions: list[dict], low: float, high: float
-) -> list[dict]:
+    predictions: list[DetectionPass | HeadPass], low: float, high: float
+) -> list[DetectionPass | HeadPass]:
     """Select predictions needing human review (medium confidence).
 
     Returns predictions whose least-confident detection or head confidence
@@ -44,8 +51,7 @@ def review_queue(
     """
     queue = []
     for pred in predictions:
-        scores = pred.get("scores", [])
-        confs = scores if scores else _confidence_values(pred)
+        confs = _confidence_values(pred)
         if confs:
             min_conf = min(confs)
             if low <= min_conf < high:

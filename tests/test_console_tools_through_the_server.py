@@ -108,7 +108,7 @@ def console_cases(
         render_failure_cases,
         visualize,
     )
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._mapping_fixtures import write_plots_csv
     from tests._verified_checkpoint_fixtures import registered_checkpoint
     from tests.test_plant_aware_group_splits_script import (
@@ -133,15 +133,15 @@ def console_cases(
         project,
         "baseline",
         [
-            {
-                "image": str(image),
-                "width": 100,
-                "height": 80,
-                "boxes": [[1.0, 1.0, 40.0, 30.0], [50.0, 50.0, 60.0, 60.0]],
-                "scores": [0.9, 0.6],
-                "labels": [1, 1],
-                "cap": 3,
-            }
+            detection_pass(
+                image,
+                (100, 80),
+                [
+                    detected((1.0, 1.0, 40.0, 30.0), 0.9),
+                    detected((50.0, 50.0, 60.0, 60.0), 0.6),
+                ],
+                cap=3,
+            )
         ],
         scope={"subject": "bud"},
     )
@@ -157,7 +157,9 @@ def console_cases(
         "GenericPredictor",
         lambda *a, **k: SimpleNamespace(
             predict_batch=lambda sources, **kw: [
-                {"image": "c.jpg", "scores": [0.5]}
+                detection_pass(
+                    "c.jpg", (8, 8), [detected((0, 0, 1, 1), 0.5)], cap=2
+                )
             ]
         ),
     )

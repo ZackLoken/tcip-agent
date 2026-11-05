@@ -126,6 +126,7 @@ def run_full_frame_evaluation(
     geometry a detector cannot read, refuse by name.
     """
     from tcip_mcp.pipelines.execution import Reference, prepare
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_mcp.pipelines.operating_point import cap_saturated_frac
     from tcip_mcp.pipelines.training.evaluation import (
         detection_metrics,
@@ -163,18 +164,22 @@ def run_full_frame_evaluation(
     pass_ = prep.runnable(Reference(regions=measured.regions))
     execution = pass_.execution
     assert execution.conf is not None, "a detector's record"
-    per_image = [
-        result_record(
-            predictor.predict_sliced(
-                measured.image_of(key),
-                execution=execution,
-                tile_batch_size=pass_.tile_batch_size,
-            ),
-            gt,
-            image_id=measured.sample_of(key).member,
+    per_image = []
+    for key, gt in gt_by_key.items():
+        detected = predictor.predict_sliced(
+            measured.image_of(key),
+            execution=execution,
+            tile_batch_size=pass_.tile_batch_size,
         )
-        for key, gt in gt_by_key.items()
-    ]
+        assert isinstance(detected, DetectionPass), "a detector's pass"
+        per_image.append(
+            result_record(
+                detected,
+                gt,
+                image_id=measured.sample_of(key).member,
+                region=None,
+            )
+        )
 
     identity = EvaluationIdentity(
         **dict(checkpoint.producer),
@@ -199,7 +204,7 @@ def run_full_frame_evaluation(
         {
             **metrics,
             "n_gt": sum(len(gt_objects(r)) for r in per_image),
-            "n_pred": sum(len(r["dt"]) for r in per_image),
+            "n_pred": sum(len(r.dt) for r in per_image),
             "cap_saturated_frac": cap_saturated_frac(per_image),
             "scored_images": len(per_image),
             "tallies": admitted.tallies,

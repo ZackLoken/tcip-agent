@@ -25,12 +25,14 @@ if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
     from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
     from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import (
         ModelSourceSchema,
         TilingSpec,
         TrainGeometry,
     )
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
     from tcip_mcp.traits import TraitEntry
 
 torch = pytest.importorskip("torch")
@@ -39,6 +41,7 @@ from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
 from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
+from tests._chain_fixtures import detected  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     label_image,
@@ -705,8 +708,7 @@ def _sliced_stub(
         in_chans=3,
         width=128,
         height=128,
-        boxes=boxes,
-        scores=(0.9,) * len(boxes),
+        detections=[detected(box, 0.9) for box in boxes],
         **training,
     )
 
@@ -804,18 +806,18 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(
     from tcip_annotation.state import Annotation, BBox
 
     scored: list = []
-    real_record = evaluation.prediction_record
+    real_record = evaluation.result_record
 
     def recording(
-        dt: list[dict],
+        result: DetectionPass,
         gt: list[dict],
         **kw: int | str | tuple[int, int, int, int] | None,
-    ) -> dict:
-        record = real_record(dt, gt, **kw)
-        scored.append((record["gt"], record["dt"]))
+    ) -> EvaluationRecord:
+        record = real_record(result, gt, **kw)
+        scored.append((record.gt, record.dt))
         return record
 
-    monkeypatch.setattr(evaluation, "prediction_record", recording)
+    monkeypatch.setattr(evaluation, "result_record", recording)
     bur = {"num_channels": 3, "scope": {"subject": "bur"}}
     _full_frame(
         tmp_path,
@@ -846,8 +848,7 @@ def _geometry_stub(
     It answers empty results.
     """
     return StubPredictor(
-        boxes=(),
-        scores=(),
+        detections=(),
         task="detection",
         in_chans=3,
         train_tile_size=train_tile_size,
@@ -860,7 +861,7 @@ def _pass_over(
     monkeypatch: pytest.MonkeyPatch,
     stub: StubPredictor,
     **stated: bool | int,
-) -> tuple[Pass, list[dict]]:
+) -> tuple[Pass, list[DetectionPass | HeadPass]]:
     """Return the pass a registered checkpoint prepares over one image with ``stub`` predicting."""
     from tests._verified_checkpoint_fixtures import predicted_over
 

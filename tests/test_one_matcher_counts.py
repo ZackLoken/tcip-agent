@@ -13,15 +13,14 @@ import pytest
 
 if TYPE_CHECKING:
     from tcip_annotation.matching import Matching
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
 
 pytest.importorskip("torch")
 
 
-def _records() -> list[dict]:
-    from tcip_mcp.pipelines.training.evaluation import (
-        gt_record,
-        prediction_record,
-    )
+def _records() -> list[EvaluationRecord]:
+    from tcip_mcp.pipelines.training.evaluation import gt_record
+    from tests._dense_op_fixtures import whole_frame_record
 
     dt = [
         {"category_id": 1, "bbox": [10.0, 10.0, 20.0, 20.0], "score": 0.5},
@@ -29,7 +28,7 @@ def _records() -> list[dict]:
         {"category_id": 1, "bbox": [0.0, 80.0, 10.0, 10.0], "score": 0.3},
     ]
     return [
-        prediction_record(
+        whole_frame_record(
             dt,
             [
                 gt_record([10.0, 10.0, 20.0, 20.0], 1, 0),
@@ -38,7 +37,6 @@ def _records() -> list[dict]:
             width=100,
             height=100,
             cap=None,
-            count=len(dt),
         )
     ]
 

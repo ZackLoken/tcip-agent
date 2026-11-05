@@ -77,8 +77,7 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
     import tifffile
 
     from tcip_mcp.dataset_layout import image_dir, label_key_of
-    from tcip_mcp.pipelines.postprocessing.export import DetectionResult
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import (
         box_annotation,
         label_image,
@@ -105,15 +104,10 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
             project,
             f"{bucket}/{raw}",
             [
-                DetectionResult(
-                    image=str(image),
-                    width=width,
-                    height=height,
-                    boxes=[(1.0, 1.0, 4.0, 4.0)],
-                    scores=[0.9],
-                    cap=2,
-                ).model_dump()
-                for image, (width, height) in photographs
+                detection_pass(
+                    image, frame, [detected((1.0, 1.0, 4.0, 4.0), 0.9)], cap=2
+                )
+                for image, frame in photographs
             ],
             scope={"subject": SUBJECT},
         )

@@ -92,21 +92,18 @@ def _write_pred(
     ``(x1, y1, x2, y2, conf)`` a box labeled 1, scoped to ``subject``.
     """
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     return published(
         dataset_root.parent,
         f"{name}/2-11-26",
         [
-            {
-                "image": str(image_dir(dataset_root, "2-11-26") / image),
-                "width": w,
-                "height": h,
-                "boxes": [list(p[:4]) for p in boxes],
-                "scores": [p[4] for p in boxes],
-                "labels": [1] * len(boxes),
-                "cap": len(boxes) + 1,
-            }
+            detection_pass(
+                image_dir(dataset_root, "2-11-26") / image,
+                (w, h),
+                [detected(p[:4], p[4]) for p in boxes],
+                cap=len(boxes) + 1,
+            )
             for image, boxes in preds.items()
         ],
         scope={"subject": subject},
@@ -122,21 +119,21 @@ def _published_bucket(
     that entry.
     """
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     published(
         project,
         name,
         [
-            {
-                "image": str(image),
-                "width": 100,
-                "height": 80,
-                "boxes": [[40.0, 32.0, 60.0, 48.0]] * len(labels),
-                "scores": [0.9] * len(labels),
-                "labels": labels,
-                "cap": len(labels) + 1,
-            }
+            detection_pass(
+                image,
+                (100, 80),
+                [
+                    detected((40.0, 32.0, 60.0, 48.0), 0.9, label=label)
+                    for label in labels
+                ],
+                cap=len(labels) + 1,
+            )
         ],
         scope=scope,
     )

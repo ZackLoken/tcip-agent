@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import Execution
     from tcip_mcp.pipelines.image_utils import BandGroupRef
-    from tcip_mcp.pipelines.postprocessing.export import DetectionResult
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_web.routes.inference import InferenceJob
 
 from tcip_mcp.pipelines.execution import Stated
@@ -170,7 +170,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
     calls: list[str] = []
 
     def failing_second_document(
-        result: DetectionResult, **kwargs: str | ClassScope
+        result: DetectionPass, **kwargs: str | ClassScope
     ) -> tuple[dict, int]:
         calls.append(result.image)
         if len(calls) % 2 == 0:
@@ -273,7 +273,7 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
             *,
             tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
             batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
-        ) -> list[dict]:
+        ) -> list[DetectionPass]:
             job.cancel_event.set()
             return super().predict_batch(
                 image_paths,
@@ -319,7 +319,7 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     written = []
 
     def recording_encode(
-        result: DetectionResult, **kwargs: str | ClassScope
+        result: DetectionPass, **kwargs: str | ClassScope
     ) -> tuple[dict, int]:
         written.append(result.image)
         return real_encode(result, **kwargs)

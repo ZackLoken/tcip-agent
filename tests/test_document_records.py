@@ -288,10 +288,7 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
         read_bucket,
     )
     from tcip_mcp.pipelines.data.split_construction import raster_identity
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
@@ -310,7 +307,7 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
         Document(
             str(p),
             *encode_predictions(
-                DetectionResult.model_validate(predicted(p, [BUD])),
+                predicted(p, [BUD]),
                 "detector",
                 scope=first.scope,
             ),

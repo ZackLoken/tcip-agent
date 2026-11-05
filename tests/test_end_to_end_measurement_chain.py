@@ -106,10 +106,10 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
         [str(images_dir / f"{stem}.png") for stem in STEMS[:3]]
     )
 
-    assert [r["count"] for r in results] == [1, 1, 1], results
+    assert [len(r.detections) for r in results] == [1, 1, 1], results
     for index, result in enumerate(results):
         x0, y0, size = object_at(index)
-        assert result["boxes"][0] == pytest.approx(
+        assert result.detections[0].box == pytest.approx(
             [float(x0), float(y0), float(x0 + size), float(y0 + size)], abs=1.0
         )
 

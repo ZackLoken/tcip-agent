@@ -59,7 +59,7 @@ def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring() -> (
         mask_cut=None,
     )
 
-    assert record["dt"][0]["bbox"] == QUANTIZED_BOX
+    assert record.dt[0]["bbox"] == QUANTIZED_BOX
 
 
 def test_ground_truth_already_on_the_stored_grid_is_unchanged() -> None:
@@ -77,7 +77,7 @@ def test_ground_truth_already_on_the_stored_grid_is_unchanged() -> None:
     )
 
     x1, y1, x2, y2 = ON_GRID_BOX
-    assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
+    assert record.gt[0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
 
 
 def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scoring() -> (
@@ -99,8 +99,8 @@ def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scorin
     )
 
     x1, y1, x2, y2 = ON_GRID_BOX
-    assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
-    assert record["dt"][0]["bbox"] == QUANTIZED_BOX
+    assert record.gt[0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
+    assert record.dt[0]["bbox"] == QUANTIZED_BOX
 
 
 def test_the_grid_is_the_one_the_label_writer_owns() -> None:
