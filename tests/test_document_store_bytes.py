@@ -118,7 +118,9 @@ def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_deco
     path = subjects_path(tmp_path)
     subject_registry.replace_registry(
         tmp_path,
-        subject_registry.registry_from_dict(REGISTRY_VALUE),
+        subject_registry.registry_from_dict(
+            REGISTRY_VALUE, where="the subjects this test states"
+        ),
         expect=None,
         actor=None,
     )

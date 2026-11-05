@@ -389,7 +389,9 @@ def write_subject_registry(
     from tcip_store import ReadRefusedError, VersionConflictError
 
     try:
-        registry = subject_registry.registry_from_dict(subjects)
+        registry = subject_registry.registry_from_dict(
+            subjects, where=f"the subjects stated for {dataset_root}"
+        )
     except ReadRefusedError as exc:
         return {"error": str(exc)}
 

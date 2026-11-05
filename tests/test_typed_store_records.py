@@ -511,7 +511,10 @@ def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuse
 
     assert sr.read_registry(tmp_path) == registry
     with pytest.raises(ts.ReadRefusedError, match="description"):
-        sr.registry_from_dict({"bud": {"attributes": None}})
+        sr.registry_from_dict(
+            {"bud": {"attributes": None}},
+            where="the subjects this test states",
+        )
 
 
 def test_a_scale_assessment_reads_back_as_its_producer_answered_it(

@@ -38,6 +38,8 @@ OPENING_ORDINAL = Attribute(
     name="opening", type="ordinal", values=("closed", "open")
 )
 """The same values declared ordinal: the other side of a type flip."""
+STATED = "the subjects this test states"
+"""Where every registry a test states by hand came from, as a refusal names it."""
 
 
 def _version(dataset_root: Path) -> Version:
@@ -65,14 +67,14 @@ def _bud_bush() -> SubjectRegistry:
 
 
 def test_a_subject_stating_no_description_refuses_naming_the_field() -> None:
-    """A subject missing ``description`` refuses naming the field."""
-    with pytest.raises(ReadRefusedError, match="description"):
-        registry_from_dict({"bud": {}})
+    """A subject missing ``description`` refuses naming the field, behind its caller's place."""
+    with pytest.raises(ReadRefusedError, match=f"^{STATED}: .*description"):
+        registry_from_dict({"bud": {}}, where=STATED)
 
 
 def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path: Path) -> None:
     reg = _bud_bush()
-    assert registry_from_dict(registry_to_dict(reg)) == reg
+    assert registry_from_dict(registry_to_dict(reg), where=STATED) == reg
 
     path = tmp_path / "subjects.json"
     registry_over(tmp_path, reg)
@@ -124,7 +126,7 @@ def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(
     tmp_path: Path,
 ) -> None:
     # rail admits valid work: bush (detection-only) loads and reads an empty attribute tuple
-    reg = registry_from_dict({"bush": {"description": "a bush"}})
+    reg = registry_from_dict({"bush": {"description": "a bush"}}, where=STATED)
     assert scope_over(tmp_path, reg, "bush").attributes == ()
     with pytest.raises(RegistryError):
         scope_over(tmp_path, reg, "acorn")
@@ -161,7 +163,9 @@ def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(
 )
 def test_malformed_registry_refuses(bad: dict) -> None:
     with pytest.raises(ReadRefusedError):
-        registry_from_dict({"bud": {**bad["bud"], "description": "one bud"}})
+        registry_from_dict(
+            {"bud": {**bad["bud"], "description": "one bud"}}, where=STATED
+        )
 
 
 def test_ordinal_file_roundtrip_preserves_type_and_rank(
@@ -212,12 +216,14 @@ def test_attribute_refuses_bad_values_at_construction() -> None:
 def test_absent_attributes_are_valid_and_any_other_spelling_of_none_refuses() -> (
     None
 ):
-    bush = registry_from_dict({"bush": {"description": ""}}).subject("bush")
+    bush = registry_from_dict(
+        {"bush": {"description": ""}}, where=STATED
+    ).subject("bush")
     assert bush is not None and bush.attributes == ()
     for bad in (None, False, 0, "", []):
         with pytest.raises(ReadRefusedError, match="attributes"):
             registry_from_dict(
-                {"bush": {"description": "", "attributes": bad}}
+                {"bush": {"description": "", "attributes": bad}}, where=STATED
             )
 
 
@@ -791,4 +797,4 @@ def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow
         tmp_path, str(tmp_path), stated, allow_removals=True, actor=None
     )
     assert "error" not in repaired
-    assert read_registry(tmp_path) == registry_from_dict(stated)
+    assert read_registry(tmp_path) == registry_from_dict(stated, where=STATED)
