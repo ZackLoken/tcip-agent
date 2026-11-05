@@ -44,6 +44,7 @@ from tests._training_values import (  # noqa: E402
     RATIONALE,
 )
 from tests._verified_checkpoint_fixtures import BUILT_DETECTOR  # noqa: E402
+from tests.bespoke_models import _KeepsItsOperatingPoint  # noqa: E402
 
 UNFILTERED = Stated(tile=False, conf=0.0, rationale=RATIONALE)
 """An untiled pass keeping every box up to the checkpoint's density."""
@@ -349,10 +350,7 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
         ClassificationHead,
         OrdinalHead,
     )
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-        set_detector_operating_point,
-    )
+    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tests import bespoke_models
     from tests._chain_fixtures import detector_values
     from tests._producer_fixtures import painted_array
@@ -361,7 +359,6 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
     model = getattr(bespoke_models, builder)(
         attributes=(GRADE, COLOR), **detector_values()
     )
-    assert detector_operating_point_holder(model) == (model, "self")
     grade_head, color_head = model.attribute_heads
     assert (type(grade_head), grade_head.num_ranks) == (OrdinalHead, 3)
     assert (type(color_head), color_head.num_classes) == (
@@ -402,6 +399,7 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
         return out
 
     out = kept(0.0)
+    assert (model.score_thresh, model.detections_per_img) == (0.0, 5)
     ids = out["attributes"]
     assert ids.dtype == torch.int64
     assert tuple(ids.shape) == (len(out["boxes"]), 2) and len(ids) == 5
@@ -521,10 +519,11 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
 # --- per-attribute agreement ------------------------------------------------
 
 
-class _CallsEveryFrameOnce(torch.nn.Module):
+class _CallsEveryFrameOnce(_KeepsItsOperatingPoint, torch.nn.Module):
     """A detector answering one box per frame at (8, 8, 24, 24), scored 0.9 and carrying ``ids``.
 
-    ``ids`` are the box's attribute ids; in training its loss is zero.
+    ``ids`` are the box's attribute ids, each frame's output kept to both knobs
+    (:meth:`governed`); in training its loss is zero.
     """
 
     def __init__(self, ids: list[int]) -> None:
@@ -539,12 +538,14 @@ class _CallsEveryFrameOnce(torch.nn.Module):
         if self.training:
             return {"loss": torch.zeros(())}
         return [
-            {
-                "boxes": torch.tensor([[8.0, 8.0, 24.0, 24.0]]),
-                "scores": torch.tensor([0.9]),
-                "labels": torch.tensor([1]),
-                "attributes": torch.tensor([self.ids]),
-            }
+            self.governed(
+                {
+                    "boxes": torch.tensor([[8.0, 8.0, 24.0, 24.0]]),
+                    "scores": torch.tensor([0.9]),
+                    "labels": torch.tensor([1]),
+                    "attributes": torch.tensor([self.ids]),
+                }
+            )
             for _ in images
         ]
 

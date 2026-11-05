@@ -156,14 +156,16 @@ def test_a_detector_pass_refuses_an_unstated_conf_by_name(
 def _in_model_point(p: Pass, tmp_path: Path) -> dict:
     """Return the operating point the pass's model holds after predicting one 64 px frame."""
     from tcip_mcp.pipelines.operating_point import (
-        OPERATING_POINT_ATTRS,
-        detector_operating_point_holder,
+        DETECTIONS_PER_IMG,
+        SCORE_THRESH,
     )
     from tests._producer_fixtures import write_image
 
     p.predict([str(write_image(tmp_path / "frame.png", (64, 64)))])
-    holder, _path = detector_operating_point_holder(p.predictor.model)
-    return {attr: getattr(holder, attr) for attr in OPERATING_POINT_ATTRS}
+    return {
+        attr: getattr(p.predictor.model, attr)
+        for attr in (SCORE_THRESH, DETECTIONS_PER_IMG)
+    }
 
 
 def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(
@@ -177,7 +179,6 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(
     from tcip_mcp.pipelines.operating_point import (
         DETECTIONS_PER_IMG,
         SCORE_THRESH,
-        detector_operating_point_holder,
     )
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
@@ -199,8 +200,8 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(
     )
     p.predict([str(tmp_path / "frame.png")], execution=staged)
 
-    holder, _path = detector_operating_point_holder(p.predictor.model)
-    assert (holder.score_thresh, holder.detections_per_img) == (0.01, 5)
+    model = p.predictor.model
+    assert model.score_thresh == 0.01 and model.detections_per_img == 5
 
 
 def test_every_execution_door_takes_its_statement_with_no_default() -> None:

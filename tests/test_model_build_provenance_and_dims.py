@@ -47,6 +47,8 @@ from tests import REPO_ROOT
 from tests._chain_fixtures import (
     FRAME_STATISTICS,
     built_model,
+    frame_statistics,
+    noise_frames,
     training_config,
     weights_statistics,
 )
@@ -565,7 +567,7 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
             "builder": PROBE_NET,
             "source_files": PROBE_FILES,
             "task": "detection",
-            "normalization": WEIGHTS_NORMALIZATION,
+            "normalization": frame_statistics(noise_frames(1), 1),
         },
         data,
     )

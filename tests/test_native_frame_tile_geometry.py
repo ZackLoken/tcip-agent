@@ -52,6 +52,7 @@ pytest.importorskip("torchvision")
 import torch  # noqa: E402
 
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
+from tests.bespoke_models import _KeepsItsOperatingPoint  # noqa: E402
 
 TILE = 64
 IMAGE = 128
@@ -76,11 +77,12 @@ class _GeometryStub:
         self.train_augmentation = train_augmentation
 
 
-class _MiddleHalfDetector(torch.nn.Module):
+class _MiddleHalfDetector(_KeepsItsOperatingPoint, torch.nn.Module):
     """A detector stub returning one box per image, scored 0.9, via ``GeneralizedRCNNTransform``.
 
     The box is the middle half of each image as the transform at ``min_size`` and ``max_size``
-    resized it, mapped back by the transform's own ``postprocess``.
+    resized it, mapped back by the transform's own ``postprocess`` and kept to both knobs
+    (:meth:`governed`).
     """
 
     def __init__(
@@ -116,9 +118,12 @@ class _MiddleHalfDetector(torch.nn.Module):
             }
             for h, w in image_list.image_sizes
         ]
-        return self.transform.postprocess(
-            results, image_list.image_sizes, original_sizes
-        )
+        return [
+            self.governed(result)
+            for result in self.transform.postprocess(
+                results, image_list.image_sizes, original_sizes
+            )
+        ]
 
 
 def _geometry(

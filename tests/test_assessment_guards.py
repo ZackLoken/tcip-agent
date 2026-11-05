@@ -409,7 +409,6 @@ def test_an_accurate_reference_passes_the_count_criterion() -> None:
         hold,
         _count_entry(count_error_tolerance=2.0),
         staged_conf_floor=0.01,
-        staged_conf_floor_attribute_path="self",
         **COUNT_TEST,
     )
 
@@ -435,7 +434,6 @@ def test_a_known_count_bias_fails_the_outcome_tolerance_with_no_dispersion_at_al
         hold,
         _count_entry(count_error_tolerance=20.0),
         staged_conf_floor=0.01,
-        staged_conf_floor_attribute_path="self",
         **COUNT_TEST,
     )
 

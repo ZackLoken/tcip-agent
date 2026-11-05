@@ -82,7 +82,6 @@ def _criterion(
         hold,
         entry,
         staged_conf_floor=0.05,
-        staged_conf_floor_attribute_path=None,
         **COUNT_TEST,
     )
 
