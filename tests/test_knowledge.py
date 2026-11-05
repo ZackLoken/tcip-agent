@@ -276,6 +276,62 @@ def test_every_document_naming_the_vocabulary_names_the_call_serving_it() -> (
     assert naming == []
 
 
+_PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
+
+
+def _unresolved_imports(code: str) -> list[str]:
+    """Return each name an ``import`` or ``from ... import`` statement in ``code`` cannot import.
+
+    A ``from`` import's name resolves as the module's attribute or as its submodule.
+    """
+    import ast
+    import importlib
+
+    def imports(module: str) -> bool:
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            return False
+        return True
+
+    unresolved = []
+    for node in ast.walk(ast.parse(code)):
+        if isinstance(node, ast.Import):
+            unresolved += [a.name for a in node.names if not imports(a.name)]
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            unresolved += [
+                f"{node.module}.{a.name}"
+                for a in node.names
+                if not (
+                    imports(node.module)
+                    and hasattr(importlib.import_module(node.module), a.name)
+                )
+                and not imports(f"{node.module}.{a.name}")
+            ]
+    return unresolved
+
+
+def test_every_name_a_served_documents_python_imports_resolves() -> None:
+    """Every name a served document's Python code imports is importable as the document says.
+
+    Each ``python`` code block of every document ``serve_domain_knowledge`` serves is parsed, and
+    each of its ``import`` and ``from ... import`` statements imports.
+    """
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
+
+    unresolved = {}
+    for entry in serve_domain_knowledge()["documents"]:
+        content = serve_domain_knowledge(entry["name"])["content"]
+        if found := [
+            missing
+            for block in _PYTHON_BLOCK.findall(content)
+            for missing in _unresolved_imports(block)
+        ]:
+            unresolved[entry["name"]] = found
+
+    assert unresolved == {}
+
+
 def test_serve_domain_knowledge_with_an_unknown_name_names_the_available_names() -> (
     None
 ):

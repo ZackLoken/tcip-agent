@@ -89,11 +89,11 @@ door only an operator runs (an operator-only command module in `cli/` calls it, 
 
 - `pipelines/` imports torch at module level, so `tools/` lazy-imports the `pipelines/` modules
   too; a pipeline module loads only when a tool reaches into it.
-- Detectors are built via the plain `build_detector` (+ `_build_faster_rcnn` / `_build_fcos` /
-  `_build_retinanet` / `_build_mask_rcnn`); bespoke model code imports these directly. There is no
-  model spec or component registry; see the `toolkit-inventory` skill for the full composition
-  surface (`build_detector`/`build_loss` task strings, heads/necks/backbones, derivations, the `ctx`
-  craft library, and the `model_source`/`training_source`/`dataset_source` seams).
+- The platform builds no model: a detection model is the agent's own module over a library
+  detector, held to the model contract (`model_contract.check_model_contract`). There is no model
+  spec or component registry; see the `toolkit-inventory` skill for the full composition surface
+  (the model contract, `build_loss` names and task strings, heads/necks/backbones, derivations,
+  the `ctx` craft library, and the `model_source`/`training_source`/`dataset_source` seams).
 - A standing capability lives in `tools/`, and every registered tool is also the `tcip` command of
   its own name (`cli.hyphenated`): the one adapter `cli.run_tool` parses its arguments into the
   tool's advertised input schema and calls it through the server `server.server_for` returns, its
