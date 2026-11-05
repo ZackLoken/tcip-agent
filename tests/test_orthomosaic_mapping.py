@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         GenericPredictor,
         WindowedRasterReader,
     )
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
 # ── Pixel -> native affine (including the y-axis flip) ────────────────────
 
@@ -398,7 +399,7 @@ def _sliced(
     execution: Execution,
     source: str | WindowedRasterReader,
     **kwargs: str | dict | Callable[[int, int, dict], None] | None,
-) -> dict:
+) -> DetectionPass | HeadPass:
     """Run ``predict_sliced`` under ``execution``, eight tiles a batch."""
     return predictor.predict_sliced(
         source, execution=execution, tile_batch_size=8, **kwargs
@@ -502,6 +503,8 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tcip_mcp.pipelines.slicing import slice_lattice
+
     path = tmp_path / "mosaic.tif"
     arr = _windowed_multiband_tiff(path)
     ckpt = _bespoke_detection_checkpoint(
@@ -520,19 +523,38 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(
             source_label=str(path),
         )
 
-    assert win_result["width"] == full_result["width"] == arr.shape[1]
-    assert win_result["height"] == full_result["height"] == arr.shape[0]
+    assert win_result.width == full_result.width == arr.shape[1]
+    assert win_result.height == full_result.height == arr.shape[0]
     assert (
-        win_result["tiles"] == full_result["tiles"] > 1
+        len(
+            slice_lattice(
+                full_result.height,
+                full_result.width,
+                full.execution.tile_size,
+                full.execution.overlap,
+            )
+        )
+        > 1
     )  # really tiled, not one pass
-    assert win_result["image"] == str(path)
-    np.testing.assert_allclose(
-        win_result["boxes"], full_result["boxes"], rtol=1e-5, atol=1e-4
+    assert win_result.image == str(path)
+    windowed_detections, full_detections = (
+        r.detections for r in (win_result, full_result)
     )
     np.testing.assert_allclose(
-        win_result["scores"], full_result["scores"], rtol=1e-5, atol=1e-6
+        [d.box for d in windowed_detections],
+        [d.box for d in full_detections],
+        rtol=1e-5,
+        atol=1e-4,
     )
-    assert win_result["labels"] == full_result["labels"]
+    np.testing.assert_allclose(
+        [d.score for d in windowed_detections],
+        [d.score for d in full_detections],
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    assert [d.label for d in windowed_detections] == [
+        d.label for d in full_detections
+    ]
 
 
 def _bespoke_instance_seg_checkpoint(
@@ -578,26 +600,22 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
             source_label=str(path),
         )
 
-    assert "masks" in full_result and "masks" in win_result
-    assert (
-        len(full_result["masks"])
-        == len(win_result["masks"])
-        == full_result["count"]
+    full_masks, win_masks = (
+        [d.mask for d in r.detections] for r in (full_result, win_result)
     )
-    for m in full_result["masks"] + win_result["masks"]:
-        assert set(m) == {"segmentation"}
-        for flat in m["segmentation"]:
-            assert all(0 <= x <= win_result["width"] for x in flat[0::2])
-            assert all(0 <= y <= win_result["height"] for y in flat[1::2])
-    assert [m["segmentation"] for m in full_result["masks"]] == [
-        m["segmentation"] for m in win_result["masks"]
-    ]
+    assert len(full_masks) == len(win_masks)
+    for mask in full_masks + win_masks:
+        assert mask is not None
+        for flat in mask:
+            assert all(0 <= x <= win_result.width for x in flat[0::2])
+            assert all(0 <= y <= win_result.height for y in flat[1::2])
+    assert full_masks == win_masks
 
 
-def test_a_windowed_pass_stating_no_masks_carries_no_masks_key(
+def test_a_windowed_pass_stating_no_masks_carries_no_mask_on_any_detection(
     tmp_path: Path,
 ) -> None:
-    """A windowed pass stating no masks carries no ``masks`` key at all, not an empty one."""
+    """A windowed pass stating no masks carries no mask on any detection, not an empty one."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
 
@@ -608,8 +626,8 @@ def test_a_windowed_pass_stating_no_masks_carries_no_masks_key(
     p = _pass(tmp_path, ckpt, masks=False)
     with open_raster(path, 3) as reader:
         result = _sliced(p.predictor, p.execution, reader)
-    assert "masks" not in result
-    assert {"boxes", "scores", "labels", "count", "tiles"} <= set(result)
+    assert result.detections
+    assert all(d.mask is None for d in result.detections)
 
 
 def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
@@ -624,10 +642,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
     from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
@@ -638,18 +653,15 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
         result = _sliced(
             p.predictor, p.execution, reader, source_label=str(path)
         )
-    assert result["count"] > 0, (
-        "fixture assumes at least one surviving detection"
-    )
-
+    first, *rest = result.detections
     # A clean polygon past the first slice replaces whatever the untrained model predicted: the
     # point is where export places it, not the from-scratch-weights mask content.
-    result["masks"][0] = {
-        "segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]
-    }
+    placed = first.model_copy(
+        update={"mask": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]}
+    )
 
     data, _dropped = encode_predictions(
-        DetectionResult.model_validate(result),
+        result.model_copy(update={"detections": [placed, *rest]}),
         "model:fixture",
         scope=registry_scope(tmp_path, "leaf"),
     )

@@ -161,8 +161,8 @@ def test_run_inference_images_dir_folds_a_grouped_capture(
         tmp_path, ckpt, str(images_dir), device="cpu", tile=False
     )
 
-    assert len(results) == 1
-    assert results[0]["image"].endswith(manifest.name)
+    (result,) = results
+    assert result.image.endswith(manifest.name)
 
 
 def test_predict_batch_rejects_stringified_band_group_refs(

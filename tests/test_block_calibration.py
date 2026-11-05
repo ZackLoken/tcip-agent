@@ -28,7 +28,9 @@ if TYPE_CHECKING:
         GenericPredictor,
         WindowedRasterReader,
     )
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_mcp.pipelines.raster_source import RasterSource
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -44,6 +46,8 @@ from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     BUILT_DETECTOR,
     SAVE_BUILT_WEIGHTS,
+    detected,
+    detection_pass,
     training_config,
 )
 from tests._mapping_fixtures import write_plant_csv  # noqa: E402
@@ -929,16 +933,13 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(
             | dict
             | Callable[[int, int, dict], None]
             | None,
-        ) -> dict:
-            return {
-                "width": 200,
-                "height": 200,
-                "boxes": [[10.1, 10.1, 40.3, 30.3]],
-                "scores": [0.9],
-                "labels": [1],
-                "count": 1,
-                "cap": 5,
-            }
+        ) -> DetectionPass:
+            return detection_pass(
+                "a",
+                (200, 200),
+                [detected((10.1, 10.1, 40.3, 30.3), 0.9)],
+                cap=5,
+            )
 
     mosaic = image_dir(tmp_path, UNDATED_BUCKET) / "mosaic.tif"
     label = image_label_key(mosaic)
@@ -985,10 +986,10 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(
         source="mosaic.tif",
     )
 
-    assert [g["iscrowd"] for g in records[0]["gt"]] == [0, 1]
-    assert records[0]["gt"][0]["bbox"] == [20.3, 20.7, 19.8, 40.2]
-    assert [d["bbox"] for d in records[0]["dt"]] == [[10.1, 10.1, 30.2, 20.2]]
-    assert records[0]["image_id"] == "band-digest"
+    assert [g["iscrowd"] for g in records[0].gt] == [0, 1]
+    assert records[0].gt[0]["bbox"] == [20.3, 20.7, 19.8, 40.2]
+    assert [d["bbox"] for d in records[0].dt] == [[10.1, 10.1, 30.2, 20.2]]
+    assert records[0].image_id == "band-digest"
 
 
 def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_scores(
@@ -1014,7 +1015,7 @@ def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_score
         p: Pass,
         execution: Execution,
         **kwargs: dict | str,
-    ) -> list[dict]:
+    ) -> list[EvaluationRecord]:
         records = real(reader, side, bands, p, execution, **kwargs)
         seen.append(((reader.width, reader.height), bands, execution, records))
         return records
@@ -1035,20 +1036,85 @@ def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_score
                 min(width, ix1 + halo) - hx0,
                 min(height, iy1 + halo) - hy0,
             )
-            region = [ix0 - hx0, iy0 - hy0, ix1 - hx0, iy1 - hy0]
-            assert (record["width"], record["height"]) == frame
-            assert record["cap"] == detection_cap(
+            region = (ix0 - hx0, iy0 - hy0, ix1 - hx0, iy1 - hy0)
+            assert (record.width, record.height) == frame
+            assert record.cap == detection_cap(
                 execution.density, frame[0] * frame[1]
             )
-            assert (
-                record["count"] <= record["cap"] and record["region"] == region
-            )
-            for row in record["dt"] + record["gt"]:
+            assert record.frame_count <= record.cap and record.region == region
+            for row in record.dt + record.gt:
                 x, y, w, h = row["bbox"]
                 assert (
                     region[0] <= x + w / 2 < region[2]
                     and region[1] <= y + h / 2 < region[3]
                 )
+
+
+def test_a_band_record_carries_its_frames_count_beside_the_bands_own_detections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A band record carries its halo frame's detection count beside the band's own detections.
+
+    Through a real assessment whose density admits more detections than the untrained detector
+    keeps, each band record's ``frame_count`` is the detection count of the pass over its halo
+    frame, its detections are those of that pass centered in the band, some frame holds more
+    detections than its band, and cap saturation reads the frame's count.
+    """
+    import numpy as np
+
+    import tcip_mcp.assessment as assessment
+    import tcip_mcp.pipelines.derivations as derivations_module
+    from tcip_mcp.pipelines import block_calibration as blocks
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.operating_point import cap_saturated_frac
+
+    exp = _attested(tmp_path)
+    # One detection per 100 square pixels, far past the GT's one object per 40 x 200 px column.
+    monkeypatch.setattr(
+        derivations_module, "derive_object_density", lambda *a, **k: 1e-2
+    )
+    passes: list = []
+    real_sliced = GenericPredictor.predict_sliced
+
+    def sliced(
+        predictor: GenericPredictor,
+        source: RasterSource,
+        **kwargs: object,
+    ) -> object:
+        result = real_sliced(predictor, source, **kwargs)
+        passes.append(result)
+        return result
+
+    seen: list = []
+    real_records = assessment._band_records
+
+    def recording(*args: object, **kwargs: object) -> list:
+        passes.clear()
+        records = real_records(*args, **kwargs)
+        seen.extend(zip(list(passes), records, strict=True))
+        return records
+
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", sliced)
+    monkeypatch.setattr(assessment, "_band_records", recording)
+    assert "error" not in _assess(exp, conf=0.0)
+    assert seen
+
+    for frame, record in seen:
+        kept = blocks.centered_in(
+            np.asarray(
+                [d.box for d in frame.detections], dtype=np.float64
+            ).reshape(-1, 4),
+            tuple(record.region),
+        )
+        assert record.frame_count == len(frame.detections)
+        assert len(record.dt) == int(kept.sum())
+    assert any(len(r.dt) < r.frame_count for _, r in seen), [
+        (len(r.dt), r.frame_count, r.cap, r.region, (r.width, r.height))
+        for _, r in seen
+    ]
+    assert cap_saturated_frac([r for _, r in seen]) == sum(
+        len(f.detections) == r.cap for f, r in seen
+    ) / len(seen)
 
 
 def test_band_rects_are_reported_in_full_mosaic_coordinates() -> None:

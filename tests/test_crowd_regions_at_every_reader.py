@@ -446,7 +446,7 @@ def test_a_crowd_prediction_is_no_detection_at_the_scoring_side(
     record = records_from_annotation(
         [], preds, width=IMG, height=IMG, cap=None
     )
-    assert record["dt"] == []
+    assert record.dt == []
     m = detection_metrics(
         [record],
         trait=None,
@@ -581,16 +581,17 @@ def test_the_governing_center_count_is_the_count_statistics_own(
     records = _center_records(tmp_path)
     # A detection whose center sits 6.4 px from the object's: outside the tolerance, a miss.
     records.append(
-        records[-1]
-        | {
-            "dt": [
-                {
-                    "category_id": 1,
-                    "bbox": [12.0, 12.0, 15.0, 15.0],
-                    "score": 0.9,
-                }
-            ]
-        }
+        records[-1].model_copy(
+            update={
+                "dt": [
+                    {
+                        "category_id": 1,
+                        "bbox": [12.0, 12.0, 15.0, 15.0],
+                        "score": 0.9,
+                    }
+                ]
+            }
+        )
     )
     stats = _count_stats_at_conf(
         records,

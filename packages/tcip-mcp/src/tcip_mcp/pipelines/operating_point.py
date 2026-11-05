@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import SpatialManifest
 
 from tcip_mcp.pipelines.training.evaluation import (
+    EvaluationRecord,
     classes_with_evidence,
     concordance_correlation_coefficient,
     derive_operating_point_curve,
@@ -138,27 +139,24 @@ def governed_forward(
     return outputs
 
 
-def _min_dt_score(records: list[dict]) -> float | None:
+def _min_dt_score(records: list[EvaluationRecord]) -> float | None:
     """Return the lowest detection score across a reference, or None if it holds none."""
-    scores = [d["score"] for rec in records for d in rec["dt"]]
+    scores = [d["score"] for rec in records for d in rec.dt]
     return min(scores) if scores else None
 
 
-def cap_saturated_frac(records: list[dict]) -> float:
-    """Return the fraction of ``records`` whose frame kept as many detections as its cap.
-
-    Every record states its frame's ``count`` and ``cap``.
-    """
+def cap_saturated_frac(records: list[EvaluationRecord]) -> float:
+    """Return the fraction of ``records`` whose frame kept as many detections as its cap."""
     return (
-        sum(r["count"] == r["cap"] for r in records) / len(records)
+        sum(r.frame_count == r.cap for r in records) / len(records)
         if records
         else 0.0
     )
 
 
 def count_criterion(
-    cal_records: list[dict],
-    hold_records: list[dict],
+    cal_records: list[EvaluationRecord],
+    hold_records: list[EvaluationRecord],
     entry: TraitEntry,
     *,
     staged_conf_floor: float,
@@ -168,9 +166,9 @@ def count_criterion(
 ) -> tuple[float, dict, list[str]]:
     """Pick the count objective's conf on the calibration side and check the holdout at it.
 
-    Returns ``(conf, evidence, failures)``. The records are per-image COCO records (``gt`` objects
-    and every ``dt`` detection with its score) collected at ``staged_conf_floor``, matched under
-    the trait's localization resolved once over the calibration records
+    Returns ``(conf, evidence, failures)``. The records are per-image evaluation records (``gt``
+    objects and every ``dt`` detection with its score) collected at ``staged_conf_floor``,
+    matched under the trait's localization resolved once over the calibration records
     (:func:`~tcip_mcp.pipelines.training.evaluation.resolve_match_criterion`, the evidence's
     ``localization``) and applied to each side
     (:func:`~tcip_mcp.pipelines.training.evaluation.scaled_to`). The holdout passes when its

@@ -100,18 +100,15 @@ def _bucket(
     The bucket lies under ``dataset_root`` and holds ``counts[stem]`` detections on each image
     ``images/<date>/<stem>.jpg``.
     """
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     results = [
-        {
-            "image": str(image_dir(dataset_root, date) / f"{stem}.jpg"),
-            "width": 8,
-            "height": 8,
-            "boxes": [[1.0, 1.0, 3.0, 3.0]] * n,
-            "scores": [0.9] * n,
-            "labels": [1] * n,
-            "cap": n + 1,
-        }
+        detection_pass(
+            image_dir(dataset_root, date) / f"{stem}.jpg",
+            (8, 8),
+            [detected((1.0, 1.0, 3.0, 3.0), 0.9)] * n,
+            cap=n + 1,
+        )
         for stem, n in counts.items()
     ]
     return published(project, f"{name}/{date}", results, scope=SCOPE).name

@@ -105,24 +105,14 @@ def test_a_raster_whose_content_changed_since_publication_refuses(
 def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(
     tmp_path: Path,
 ) -> None:
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detection_pass, published
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = published(
         tmp_path,
         "frames/2026-01-01",
-        [
-            {
-                "image": str(raster_path.parent / "img1.jpg"),
-                "width": 64,
-                "height": 64,
-                "boxes": [],
-                "scores": [],
-                "labels": [],
-                "cap": 1,
-            }
-        ],
+        [detection_pass(raster_path.parent / "img1.jpg", (64, 64), [], cap=1)],
         scope=SCOPE,
     ).name
 

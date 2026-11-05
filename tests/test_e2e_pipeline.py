@@ -50,7 +50,9 @@ def project_dataset(tmp_path: Path) -> WrittenDataset:
     images = image_dir(root, date)
     images.mkdir(parents=True)
 
+    pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import (
         label_image,
         registry_of,
@@ -81,19 +83,16 @@ def project_dataset(tmp_path: Path) -> WrittenDataset:
         )
         # Predictions: 1 matching (TP) + 1 false positive (FP), the confidence in each score.
         results.append(
-            {
-                "image": str(image),
-                "width": 640,
-                "height": 480,
-                "boxes": [[288, 216, 352, 264], [499.2, 374.4, 524.8, 393.6]],
-                "scores": [0.92, 0.60],
-                "labels": [1, 1],
-                "cap": 3,
-            }
+            detection_pass(
+                image,
+                (640, 480),
+                [
+                    detected((288, 216, 352, 264), 0.92),
+                    detected((499.2, 374.4, 524.8, 393.6), 0.60),
+                ],
+                cap=3,
+            )
         )
-    pytest.importorskip("torch")
-    from tests._chain_fixtures import published
-
     published(root, BUCKET, results, scope={"subject": "bud"})
     return WrittenDataset(root, images, written)
 

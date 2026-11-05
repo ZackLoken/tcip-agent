@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from tcip_mcp.pipelines.execution import Execution, Pass
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
 from tests._chain_fixtures import BUILT_DETECTOR
 from tests._producer_fixtures import gray_frame
@@ -63,7 +64,7 @@ def _sliced(
     source: str,
     execution: Execution | None = None,
     **kwargs: str | dict | Callable[[int, int, dict], None] | None,
-) -> dict:
+) -> DetectionPass | HeadPass:
     """Run ``predict_sliced`` under the pass's own record, or ``execution`` where one is given."""
     return p.predictor.predict_sliced(
         source,
@@ -74,25 +75,20 @@ def _sliced(
 
 
 def test_predict_sliced_shape_and_bounds(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.slicing import slice_lattice
+
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
 
     r = _sliced(p, gray_frame(tmp_path))
 
-    assert {
-        "image",
-        "width",
-        "height",
-        "boxes",
-        "scores",
-        "labels",
-        "count",
-        "cap",
-    } <= set(r)
-    assert isinstance(r["count"], int) and r["count"] == len(r["boxes"])
-    assert r["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice
-    for b in r["boxes"]:
-        assert 0 <= b[0] <= r["width"] and 0 <= b[2] <= r["width"]
-        assert 0 <= b[1] <= r["height"] and 0 <= b[3] <= r["height"]
+    assert len(r.detections) <= r.cap
+    assert (
+        len(slice_lattice(r.height, r.width, TILE, 0.2)) >= 4
+    )  # 128px image at tile 64 -> a 2x2+ lattice
+    for d in r.detections:
+        x0, y0, x1, y1 = d.box
+        assert 0 <= x0 <= r.width and 0 <= x1 <= r.width
+        assert 0 <= y0 <= r.height and 0 <= y1 <= r.height
 
 
 def test_predict_sliced_keeps_at_most_the_full_frame_cap(
@@ -118,22 +114,17 @@ def test_predict_sliced_keeps_at_most_the_full_frame_cap(
             sources={**p.execution.sources, "density": "explicit"},
         )
 
-    uncapped = _sliced(p, img, at_density(1.0))
-    assert uncapped["count"] > 1, (
+    n = len(_sliced(p, img, at_density(1.0)).detections)
+    assert n > 1, (
         "the bespoke model must produce more than one raw detection "
         "for this test to force a real truncation, not merely assert an untested edge"
     )
 
     outcomes = {}
-    for cap in (
-        uncapped["count"] - 1,
-        uncapped["count"],
-        uncapped["count"] + 1,
-    ):
+    for cap in (n - 1, n, n + 1):
         r = _sliced(p, img, at_density((cap - 0.5) / pixels))
-        outcomes[cap - uncapped["count"]] = (r["cap"], r["count"])
+        outcomes[cap - n] = (r.cap, len(r.detections))
 
-    n = uncapped["count"]
     assert outcomes == {-1: (n - 1, n - 1), 0: (n, n), 1: (n + 1, n)}
 
 
@@ -208,7 +199,7 @@ def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans
 
     result = _sliced(p, str(path))
 
-    assert result["width"] == 128 and result["height"] == 128
+    assert result.width == 128 and result.height == 128
 
 
 def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
@@ -242,5 +233,6 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
 
     assert p.scope.attributes == attributes
     for result in results:
-        assert len(result["attributes"]) == len(result["boxes"])
-        assert all(len(row) == len(attributes) for row in result["attributes"])
+        assert all(
+            len(d.attributes) == len(attributes) for d in result.detections
+        )

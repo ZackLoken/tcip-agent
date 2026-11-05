@@ -164,9 +164,7 @@ def test_job_registry_answers_snapshots_and_hands_the_live_job_to_its_worker() -
 def _fake_predictor(monkeypatch: pytest.MonkeyPatch) -> None:
     from tests._predictor_fixtures import StubPredictor, install
 
-    install(
-        monkeypatch, StubPredictor(width=16, height=16, boxes=(), scores=())
-    )
+    install(monkeypatch, StubPredictor(width=16, height=16, detections=()))
 
 
 def test_inference_cancel_endpoint_and_worker(

@@ -422,9 +422,7 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(
 
     img = write_image(tmp_path / "a.png", (64, 64), (120, 120, 120))
     (out,) = p.predict([str(img)])
-    assert {"boxes", "scores", "labels", "count"} <= set(
-        out
-    )  # measurable detection output
+    assert len(out.detections) <= out.cap  # measurable detection output
 
 
 def test_predictor_loads_at_the_two_channels_its_run_recorded(

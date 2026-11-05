@@ -8,6 +8,7 @@ run that cannot be decoded honestly encodes no document at all.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -15,11 +16,12 @@ from tcip_annotation.json_io import label_document
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.data.selection import ClassScope
-from tcip_mcp.pipelines.postprocessing.export import (
-    DetectionResult,
-    encode_predictions,
-)
+from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+from tests._chain_fixtures import detected, detection_pass
 from tests._producer_fixtures import registry_of, scope_over
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.inference.passes import Detection, DetectionPass
 
 SUBJECT = "object"
 
@@ -28,24 +30,13 @@ COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 
-def _result(
-    *,
-    boxes: list[tuple[float, float, float, float]],
-    scores: list[float],
-    attributes: list[list[int]] | None = None,
-) -> DetectionResult:
-    return DetectionResult(
-        image="img1.jpg",
-        boxes=boxes,
-        scores=scores,
-        attributes=attributes,
-        width=100,
-        height=80,
-        cap=len(boxes) + 1,
+def _result(*detections: Detection) -> DetectionPass:
+    return detection_pass(
+        "img1.jpg", (100, 80), list(detections), cap=len(detections) + 1
     )
 
 
-def _decoded(result: DetectionResult, scope: ClassScope) -> list:
+def _decoded(result: DetectionPass, scope: ClassScope) -> list:
     data, _dropped = encode_predictions(result, "model:fixture", scope=scope)
     return label_document(data).annotations
 
@@ -56,9 +47,8 @@ def test_an_attributed_run_writes_every_attributes_value_on_every_box(
     scope = scope_over(tmp_path, registry_of(SUBJECT, COLOR, GRADE), SUBJECT)
     first, second = _decoded(
         _result(
-            boxes=[(1, 1, 5, 5), (10, 10, 20, 20)],
-            scores=[0.9, 0.8],
-            attributes=[[1, 2], [0, 0]],
+            detected((1, 1, 5, 5), 0.9, attributes=[1, 2]),
+            detected((10, 10, 20, 20), 0.8, attributes=[0, 0]),
         ),
         scope,
     )
@@ -77,7 +67,7 @@ def test_an_empty_scope_publishes_no_name_it_cannot_decode() -> None:
     """An empty scope refuses to encode, saying it records no subject to publish under."""
     with pytest.raises(ValueError, match="records no subject"):
         encode_predictions(
-            _result(boxes=[(1, 1, 5, 5)], scores=[0.9]),
+            _result(detected((1, 1, 5, 5), 0.9)),
             "model:fixture",
             scope=ClassScope(),
         )
@@ -87,44 +77,65 @@ def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(
     tmp_path: Path,
 ) -> None:
     (written,) = _decoded(
-        _result(boxes=[(1, 1, 5, 5)], scores=[0.9]),
+        _result(detected((1, 1, 5, 5), 0.9)),
         scope_over(tmp_path, registry_of(SUBJECT), SUBJECT),
     )
     assert written.subject == SUBJECT
     assert written.attributes == {}
 
 
-@pytest.mark.parametrize(
-    "dropped", ["width", "height", "boxes", "scores", "cap"]
-)
+@pytest.mark.parametrize("dropped", ["width", "height", "detections", "cap"])
 def test_a_pass_result_missing_a_field_a_document_holds_refuses_naming_it(
     tmp_path: Path, dropped: str
 ) -> None:
-    """A detector's result missing a field its document holds refuses at the pass, naming it.
+    """A detector's pass missing a field its document holds refuses at publication, naming it.
 
-    The predictor's result for one image, without that field, refuses as the pass publishes it;
-    the same result whole publishes one document.
+    The predictor's pass for one image, without that field, refuses as the pass publishes it;
+    the same pass whole publishes one document.
     """
     pytest.importorskip("torch")
     from pydantic import ValidationError
+    from pydantic_core import to_jsonable_python
 
-    from tests._chain_fixtures import predicted, published
+    from tcip_mcp.buckets import pass_documents
+    from tests._chain_fixtures import detector_pass
     from tests._producer_fixtures import write_image
 
     image = write_image(image_dir(tmp_path / "ds", "2026-01-01") / "a.jpg")
-    damaged = predicted(image, [SUBJECT])
+    p = detector_pass(tmp_path, scope={"subject": SUBJECT})
+    (result,) = p.predict([image])
+    damaged = to_jsonable_python(result)
     del damaged[dropped]
 
     with pytest.raises(ValidationError, match=dropped):
-        published(tmp_path, "damaged", [damaged], scope={"subject": SUBJECT})
+        list(pass_documents(p, [damaged]))
+    assert len(list(pass_documents(p, [result]))) == 1
 
-    whole = published(
-        tmp_path,
-        "whole",
-        [predicted(image, [SUBJECT])],
-        scope={"subject": SUBJECT},
-    )
-    assert len(whole.documents) == 1
+
+def test_a_detector_pass_carrying_a_key_no_field_holds_refuses_at_publication(
+    tmp_path: Path,
+) -> None:
+    """A detector pass carrying a key its record does not hold refuses as it is published.
+
+    The predictor's own pass for one image, with one key added, refuses naming the key; the pass
+    as the predictor returned it publishes one document.
+    """
+    pytest.importorskip("torch")
+    from pydantic import ValidationError
+    from pydantic_core import to_jsonable_python
+
+    from tcip_mcp.buckets import pass_documents
+    from tests._chain_fixtures import detector_pass
+    from tests._producer_fixtures import write_image
+
+    image = write_image(image_dir(tmp_path / "ds", "2026-01-01") / "a.jpg")
+    p = detector_pass(tmp_path, scope={"subject": SUBJECT})
+    (result,) = p.predict([image])
+    carrying: Any = {**to_jsonable_python(result), "unrecorded": 1}
+
+    with pytest.raises(ValidationError, match="unrecorded"):
+        list(pass_documents(p, [carrying]))
+    assert len(list(pass_documents(p, [result]))) == 1
 
 
 def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(

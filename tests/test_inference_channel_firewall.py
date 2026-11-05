@@ -112,4 +112,4 @@ def test_a_photographic_source_the_model_reads_is_predicted(
         normalization=stats.model_dump(),
     )
 
-    assert [Path(r["image"]).name for r in results] == ["capture.png"]
+    assert [Path(r.image).name for r in results] == ["capture.png"]

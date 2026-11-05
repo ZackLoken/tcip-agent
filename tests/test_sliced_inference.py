@@ -42,6 +42,7 @@ if TYPE_CHECKING:
         SliceBatch,
         WindowedRasterReader,
     )
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
 torch = pytest.importorskip("torch")
 
@@ -191,7 +192,7 @@ def _sliced(
     p: Pass,
     source: str | Path | BandGroupRef | WindowedRasterReader,
     **kwargs: str | SliceBatch | Callable[[int, int, SliceBatch], None] | None,
-) -> dict:
+) -> DetectionPass | HeadPass:
     return p.predictor.predict_sliced(
         source,
         execution=p.execution,
@@ -200,7 +201,7 @@ def _sliced(
     )
 
 
-def _whole(p: Pass, source: str) -> dict:
+def _whole(p: Pass, source: str) -> DetectionPass | HeadPass:
     """Return the untiled record of ``source`` under the pass's own execution values.
 
     The values are the pass's own conf, mask collection and mask cut and the checkpoint's
@@ -274,6 +275,7 @@ def test_objects_across_a_seam_predict_once_through_both_source_kinds(
     holds whole predicted once over its full extent.
     """
     from tcip_mcp.pipelines.raster_source import open_raster
+    from tcip_mcp.pipelines.slicing import slice_lattice
 
     _path, checkpoint = _checkpoint(tmp_path)
     p = _pass(checkpoint)
@@ -284,10 +286,20 @@ def test_objects_across_a_seam_predict_once_through_both_source_kinds(
     with open_raster(str(npy), 3) as reader:
         windowed = _sliced(p, reader, source_label="frame")
 
-    expected = sorted(list(map(float, b)) for b in BLOBS)
-    assert whole["tiles"] == windowed["tiles"] == 4
-    assert sorted(whole["boxes"]) == expected
-    assert sorted(windowed["boxes"]) == expected
+    expected = sorted(tuple(map(float, b)) for b in BLOBS)
+    assert (
+        len(
+            slice_lattice(
+                whole.height,
+                whole.width,
+                p.execution.tile_size,
+                p.execution.overlap,
+            )
+        )
+        == 4
+    )
+    assert sorted(d.box for d in whole.detections) == expected
+    assert sorted(d.box for d in windowed.detections) == expected
 
 
 def test_a_five_band_slice_reaches_the_model_with_every_band(
@@ -317,14 +329,14 @@ def test_a_five_band_slice_reaches_the_model_with_every_band(
     assert any(
         peaks == expected for peaks in p.predictor.model.seen_band_peaks
     )
-    assert len(whole["boxes"]) == len(BLOBS)
+    assert len(whole.detections) == len(BLOBS)
 
 
-def _mask_extents(record: dict) -> list[tuple]:
+def _mask_extents(record: DetectionPass) -> list[tuple]:
     extents = []
-    for mask in record["masks"]:
-        assert len(mask["segmentation"]) == 1
-        xs, ys = mask["segmentation"][0][0::2], mask["segmentation"][0][1::2]
+    for d in record.detections:
+        assert d.mask is not None and len(d.mask) == 1
+        xs, ys = d.mask[0][0::2], d.mask[0][1::2]
         extents.append((min(xs), min(ys), max(xs), max(ys)))
     return sorted(extents)
 
@@ -346,8 +358,9 @@ def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_whatever
         _png(tmp_path, _frame(value=(255, 255, 0), blobs=(WIDE_BLOB,))),
     )
 
-    assert result["labels"] == [1]
-    assert result["attributes"][0][0] in (0, 1)
+    (detection,) = result.detections
+    assert detection.label == 1
+    assert detection.attributes[0] in (0, 1)
     # Contours run through pixel centers, so a blob's polygon ends one pixel inside its box.
     assert _mask_extents(result) == [(x0, y0, x1 - 1, y1 - 1)]
 
@@ -362,10 +375,12 @@ def test_an_untiled_record_carries_the_polygons_the_sliced_record_does(
     whole = _whole(p, path)
     sliced = _sliced(p, path)
 
-    assert whole["count"] == sliced["count"] == len(BLOBS)
+    assert len(whole.detections) == len(sliced.detections) == len(BLOBS)
     assert _mask_extents(whole) == _mask_extents(sliced)
-    assert sorted(whole["boxes"]) == sorted(sliced["boxes"])
-    assert whole["cap"] == sliced["cap"] > whole["count"]
+    assert sorted(d.box for d in whole.detections) == sorted(
+        d.box for d in sliced.detections
+    )
+    assert whole.cap == sliced.cap > len(whole.detections)
 
 
 def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
@@ -390,7 +405,7 @@ def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
 
     record = _whole(_pass(checkpoint), path)
 
-    assert [m["segmentation"] for m in record["masks"]] == [expected]
+    assert [d.mask for d in record.detections] == [expected]
 
 
 def test_masks_are_cut_at_the_stated_threshold_the_record_names(
@@ -415,8 +430,8 @@ def test_masks_are_cut_at_the_stated_threshold_the_record_names(
     kept = _whole(_pass(checkpoint), path)
     cut = _whole(at_zero, path)
 
-    def rings(record: dict) -> list[str]:
-        return [repr(m["segmentation"]) for m in record["masks"]]
+    def rings(record: DetectionPass) -> list[str]:
+        return [repr(d.mask) for d in record.detections]
 
     assert len(set(rings(kept))) == len(BLOBS)
     assert len(set(rings(cut))) == 1 and not set(rings(cut)) & set(rings(kept))
@@ -469,7 +484,7 @@ def test_an_untiled_detector_record_carries_no_masks(tmp_path: Path) -> None:
 
     record = _whole(_pass(checkpoint), _png(tmp_path, _frame()))
 
-    assert "masks" not in record and record["count"] == len(BLOBS)
+    assert [d.mask for d in record.detections] == [None] * len(BLOBS)
 
 
 @pytest.mark.parametrize("with_masks", [False, True])
@@ -503,7 +518,7 @@ def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(
             _sliced(p, reader, progress=record_then_stop)
         prior = SliceBatch(
             slices=[s for b in recorded for s in b.slices],
-            predictions=[row for b in recorded for row in b.predictions],
+            predictions=[d for b in recorded for d in b.predictions],
         )
         seen_before = len(p.predictor.model.seen_channels)
         resumed = _sliced(p, reader, prior=prior)
@@ -512,7 +527,7 @@ def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(
     assert len(p.predictor.model.seen_channels) - seen_before == 2
     assert resumed == uninterrupted
     if with_masks:
-        assert all(m["segmentation"] for m in resumed["masks"])
+        assert all(d.mask for d in resumed.detections)
 
 
 def test_training_and_inference_slice_one_frame_on_one_lattice(
@@ -564,7 +579,7 @@ def test_a_postprocess_outside_the_vocabulary_refuses_by_name(
     with pytest.raises(ValueError, match="greedynmm"):
         _pass(checkpoint, postprocess="soft-nms")
     admitted = _pass(checkpoint, postprocess="greedynmm")
-    assert len(_sliced(admitted, _png(tmp_path, _frame()))["boxes"]) == len(
+    assert len(_sliced(admitted, _png(tmp_path, _frame())).detections) == len(
         BLOBS
     )
 
@@ -892,7 +907,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
         | dict
         | Callable[[int, int, dict], None]
         | None,
-    ) -> dict:
+    ) -> DetectionPass | HeadPass:
         merged_at.append(kwargs["execution"].cross_tile_nms)
         return real_predict_sliced(self, source, **kwargs)
 

@@ -21,6 +21,7 @@ from sahi.slicing import get_slice_bboxes
 
 from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_mcp.pipelines.execution import cross_tile_merge_of
+from tcip_mcp.pipelines.inference.passes import Detection
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution
@@ -243,43 +244,42 @@ def is_full_slice(box: tuple[int, int, int, int], tile_size: int) -> bool:
 
 def prediction_rows(
     predictions: list[ObjectPrediction], sizes: Sequence[int]
-) -> list[dict]:
-    """Return full-frame predictions as plain rows.
+) -> list[Detection]:
+    """Return full-frame predictions as detections.
 
-    Each row holds an xyxy ``bbox``, ``category_id`` the label, the ``attributes`` ids
-    :func:`unpacked_category` reads off the category under the value counts ``sizes``, ``score``,
-    and ``segmentation`` polygons or ``None``.
+    Each holds its xyxy box, its label and the attribute ids :func:`unpacked_category` reads off
+    the category under the value counts ``sizes``, its score, and its polygons, ``None`` for a
+    prediction carrying no mask.
     """
-    rows = []
+    detections = []
     for p in predictions:
         label, ids = unpacked_category(p.category.id, sizes)
-        rows.append(
-            {
-                "bbox": [float(v) for v in p.bbox.to_xyxy()],
-                "category_id": label,
-                "attributes": ids,
-                "score": float(p.score.value),
-                "segmentation": p.mask.segmentation if p.mask else None,
-            }
+        x0, y0, x1, y1 = (float(v) for v in p.bbox.to_xyxy())
+        detections.append(
+            Detection(
+                box=(x0, y0, x1, y1),
+                score=float(p.score.value),
+                label=label,
+                attributes=ids,
+                mask=p.mask.segmentation if p.mask else None,
+            )
         )
-    return rows
+    return detections
 
 
 def predictions_from_rows(
-    rows: list[dict], full_shape: list[int], sizes: Sequence[int]
+    detections: list[Detection], full_shape: list[int], sizes: Sequence[int]
 ) -> list[ObjectPrediction]:
     """Rebuild the predictions :func:`prediction_rows` recorded over a ``[height, width]`` frame."""
     return [
         ObjectPrediction(
-            bbox=r["bbox"],
-            score=r["score"],
-            category_id=packed_category(
-                r["category_id"], r["attributes"], sizes
-            ),
-            segmentation=r["segmentation"],
-            full_shape=full_shape if r["segmentation"] else None,
+            bbox=list(d.box),
+            score=d.score,
+            category_id=packed_category(d.label, d.attributes, sizes),
+            segmentation=d.mask,
+            full_shape=full_shape if d.mask else None,
         )
-        for r in rows
+        for d in detections
     ]
 
 

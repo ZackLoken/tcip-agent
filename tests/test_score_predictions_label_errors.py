@@ -40,22 +40,23 @@ def _published(
     The box carries the last value of each attribute ``registry`` declares on it (none for no
     registry).
     """
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     attributes = (
         registry.subjects[0].attributes if registry is not None else ()
     )
-    result = {
-        "image": str(image),
-        "width": 100,
-        "height": 80,
-        "boxes": [[1.0, 1.0, 5.0, 5.0]],
-        "scores": [0.9],
-        "labels": [1],
-        "cap": 2,
-    }
-    if attributes:
-        result["attributes"] = [[len(a.values) - 1 for a in attributes]]
+    result = detection_pass(
+        image,
+        (100, 80),
+        [
+            detected(
+                (1.0, 1.0, 5.0, 5.0),
+                0.9,
+                attributes=[len(a.values) - 1 for a in attributes],
+            )
+        ],
+        cap=2,
+    )
     return published(
         project, name, [result], scope={"subject": "bud"}, registry=registry
     )

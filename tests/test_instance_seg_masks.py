@@ -17,6 +17,8 @@ from tests._chain_fixtures import (
     BESPOKE_INSTANCE_SEG,
     BESPOKE_MODELS,
     FRAME_STATISTICS,
+    detected,
+    detection_pass,
     detector_values,
 )
 from tests._producer_fixtures import (
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     import tcip_store
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
 torch = pytest.importorskip("torch")
 
@@ -329,6 +332,7 @@ def test_a_pass_stating_no_masks_returns_boxes_only(
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
+    from tcip_mcp.pipelines.slicing import slice_lattice
 
     checkpoint = load_registered_checkpoint(
         instance_seg_ckpt, project=tmp_path
@@ -353,19 +357,18 @@ def test_a_pass_stating_no_masks_returns_boxes_only(
         execution=tiled_pass.execution,
         tile_batch_size=8,
     )
-    assert "masks" not in tiled
-    assert {"boxes", "scores", "labels", "count", "tiles"} <= set(tiled)
+    assert all(d.mask is None for d in tiled.detections)
     assert (
-        tiled["tiles"] >= 4
+        len(slice_lattice(tiled.height, tiled.width, TILE, 0.2)) >= 4
     )  # 128px image at tile 64 -> a 2x2+ lattice, i.e. it really sliced
-    assert tiled["count"] == len(tiled["boxes"]) == len(tiled["scores"])
 
     untiled = prepare(
         checkpoint,
         Stated(tile=False, **SAMPLE_INSTANCE_SEG_PASS),
         device="cpu",
     ).runnable()
-    assert "masks" in untiled.predict([img])[0]
+    (masked,) = untiled.predict([img])
+    assert all(d.mask is not None for d in masked.detections)
 
     # Whether the pass collects masks is its statement, never read off the head.
     unstated = prepare(
@@ -400,11 +403,8 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
         mask_cut=MASK_CUT,
     )
     assert p.execution.tiled
-    assert len(results) == 1
-    result = results[0]
-    assert "masks" in result
-    if result["count"]:
-        assert set(result["masks"][0]) == {"segmentation"}
+    (result,) = results
+    assert all(d.mask is not None for d in result.detections)
 
 
 def _document(published: dict, images_dir: Path) -> tcip_store.Key | None:
@@ -629,23 +629,18 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
 # export.py encode_predictions: masks become a real (possibly multi-ring) Polygon.
 
 
-def _encoded(result: dict) -> tuple[list, int]:
+def _encoded(result: DetectionPass) -> tuple[list, int]:
     """Return ``result`` encoded under :data:`LEAF` and read back, and the count it dropped."""
     from tcip_annotation.json_io import label_document
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-    data, dropped = encode_predictions(
-        DetectionResult.model_validate(result), "model:fixture", scope=LEAF
-    )
+    data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
     return label_document(data).annotations, dropped
 
 
 def _predicted(
     tmp_path: Path, size: int, regions: list, *, box: list, masks: bool
-) -> dict:
+) -> DetectionPass | HeadPass:
     """Return the record the predictor makes of a black ``size`` x ``size`` frame.
 
     The frame runs under a registered segmenter whose one detection, over ``box``, holds a 0.9
@@ -753,16 +748,12 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(
             rings=[[(5, 10), (8, 10), (12, 10)]]
         ),
     )
-    result = {
-        "image": "img.jpg",
-        "width": 64,
-        "height": 64,
-        "cap": 2,
-        "boxes": [[5.0, 10.0, 12.0, 12.0]],
-        "scores": [0.9],
-        "labels": [1],
-        "masks": [{"segmentation": []}],
-    }
+    result = detection_pass(
+        "img.jpg",
+        (64, 64),
+        [detected((5.0, 10.0, 12.0, 12.0), 0.9, mask=[])],
+        cap=2,
+    )
     anns, dropped = _encoded(result)
 
     assert dropped == 1
@@ -787,16 +778,12 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(
             rings=[[(0.996, 0.996), (1.004, 0.996), (1.004, 1.004)]]
         ),
     )
-    result = {
-        "image": "img.jpg",
-        "width": 64,
-        "height": 64,
-        "cap": 2,
-        "boxes": [[1.0, 1.0, 2.0, 2.0]],
-        "scores": [0.9],
-        "labels": [1],
-        "masks": [{"segmentation": []}],
-    }
+    result = detection_pass(
+        "img.jpg",
+        (64, 64),
+        [detected((1.0, 1.0, 2.0, 2.0), 0.9, mask=[])],
+        cap=2,
+    )
     anns, dropped = _encoded(result)
 
     assert dropped == 1
@@ -804,16 +791,16 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(
 
 
 def test_export_no_masks_key_writes_bbox_as_before(tmp_path: Path) -> None:
-    """A result carrying no masks key exports a box.
+    """A pass collecting no masks exports a box.
 
-    A pass collecting no masks returns a result with no masks key, and it exports as one BBox.
+    Its detections carry no mask, and each exports as one BBox.
     """
     from tcip_annotation.state import BBox
 
     result = _predicted(
         tmp_path, 32, [[1, 1, 5, 5]], box=[1, 1, 5, 5], masks=False
     )
-    assert "masks" not in result
+    assert [d.mask for d in result.detections] == [None]
     anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, BBox)

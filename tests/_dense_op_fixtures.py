@@ -7,16 +7,42 @@
 from __future__ import annotations
 
 import inspect
+import math
 
 from tcip_mcp.pipelines.training.evaluation import (
+    EvaluationRecord,
     dt_record,
     gt_record,
-    prediction_record,
 )
 
 
 def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
     return [cx - s / 2, cy - s / 2, s, s]
+
+
+def whole_frame_record(
+    dt: list[dict],
+    gt: list[dict],
+    *,
+    width: int,
+    height: int,
+    cap: int | None,
+    image_id: str | None = None,
+) -> EvaluationRecord:
+    """Return the record of a ``width`` x ``height`` frame scored whole, kept to ``cap``.
+
+    Its detections ``dt`` are every one its forward kept, and ``image_id`` names it.
+    """
+    return EvaluationRecord(
+        gt=gt,
+        dt=dt,
+        width=width,
+        height=height,
+        cap=cap,
+        frame_count=len(dt),
+        image_id=image_id,
+        region=None,
+    )
 
 
 def dense_records(
@@ -32,7 +58,7 @@ def dense_records(
     spacing: float = 40.0,
     miss_pattern: list[int] | None = None,
     fp_pattern: list[int] | None = None,
-) -> list[dict]:
+) -> list[EvaluationRecord]:
     """Return ``n_images`` records, each with ``objects_per_image`` 20 px GT boxes on a grid.
 
     The grid's points are ``spacing`` px apart. Per image ``i``: the first ``miss_pattern[i]``
@@ -53,7 +79,7 @@ def dense_records(
 
     cols = int(objects_per_image**0.5) + 2
     far_row = (objects_per_image // cols) + 2
-    records: list[dict] = []
+    records: list[EvaluationRecord] = []
     for i in range(n_images):
         gt: list[dict] = []
         dt: list[dict] = []
@@ -69,22 +95,34 @@ def dense_records(
             fx, fy = 50.0 + j * spacing, 50.0 + (far_row + i) * spacing
             dt.append(dt_record(_box(fx, fy), 0, fp_score))
         records.append(
-            prediction_record(
+            whole_frame_record(
                 dt,
                 gt,
                 width=width,
                 height=height,
                 cap=len(dt) + 1,
-                count=len(dt),
                 image_id=f"{id_prefix}_{i}",
             )
         )
     return records
 
 
-def gt_only(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
-    """Return one record holding ``boxes`` as ground truth and nothing else."""
-    return [{"gt": [gt_record(list(b), 0, 0) for b in boxes]}]
+def gt_only(
+    boxes: list[tuple[float, float, float, float]],
+) -> list[EvaluationRecord]:
+    """Return one record holding the xywh ``boxes`` as ground truth and no detection.
+
+    Its frame is the least whole-pixel one holding every box.
+    """
+    return [
+        whole_frame_record(
+            [],
+            [gt_record(list(b), 0, 0) for b in boxes],
+            width=math.ceil(max(x + w for x, _, w, _ in boxes)),
+            height=math.ceil(max(y + h for _, y, _, h in boxes)),
+            cap=None,
+        )
+    ]
 
 
 def ann(
@@ -99,35 +137,42 @@ def ann(
     return gt_record(_box(cx, cy), cid, 0)
 
 
-def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
+def toy_records(
+    id_prefix: str = "c", *, shift: float = 0.0
+) -> list[EvaluationRecord]:
     """Return two 400x400 records of 20 px boxes.
 
     Image A has one GT at (100, 100) and detections at (100, 100) scored 0.9 and (300, 300)
     scored 0.6; image B has GT at (100, 100) and (200, 200) and detections there scored 0.9 and
     0.3. ``shift`` is added to every GT's x, not to the detections'.
     """
-    a = prediction_record(
-        [ann(100, 100, score=0.9), ann(300, 300, score=0.6)],
-        [ann(100 + shift, 100)],
-        width=400,
-        height=400,
-        cap=3,
-        count=2,
-        image_id=f"{id_prefix}_a",
-    )
-    b = prediction_record(
-        [ann(100, 100, score=0.9), ann(200, 200, score=0.3)],
-        [ann(100 + shift, 100), ann(200 + shift, 200)],
-        width=400,
-        height=400,
-        cap=3,
-        count=2,
-        image_id=f"{id_prefix}_b",
-    )
-    return [a, b]
+    return [
+        whole_frame_record(
+            dt,
+            gt,
+            width=400,
+            height=400,
+            cap=3,
+            image_id=f"{id_prefix}_{name}",
+        )
+        for name, dt, gt in (
+            (
+                "a",
+                [ann(100, 100, score=0.9), ann(300, 300, score=0.6)],
+                [ann(100 + shift, 100)],
+            ),
+            (
+                "b",
+                [ann(100, 100, score=0.9), ann(200, 200, score=0.3)],
+                [ann(100 + shift, 100), ann(200 + shift, 200)],
+            ),
+        )
+    ]
 
 
-def shifted_cal_holdout() -> tuple[list[dict], list[dict]]:
+def shifted_cal_holdout() -> tuple[
+    list[EvaluationRecord], list[EvaluationRecord]
+]:
     """Return a calibration/holdout pair of :func:`dense_records`, the holdout's GT shifted 5 px.
 
     Each side is 20 images of 80 grid points, none missed, detections at 0.9 and one further
@@ -159,7 +204,7 @@ def shifted_cal_holdout() -> tuple[list[dict], list[dict]]:
 
 def good_cal_holdout(
     *, fp_score: float = 0.05
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[EvaluationRecord], list[EvaluationRecord]]:
     """Return a calibration/holdout pair of :func:`dense_records`.
 
     Each side is 20 images, none missed, detections at 0.9 and one further detection per image

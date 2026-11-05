@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from torch.utils.data import Dataset
 
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_store import Key, Txn
     from tcip_web.state import OpenProject
 
@@ -801,6 +802,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS, bucket_key
     from tcip_mcp.pipelines.execution import Stated
+    from tests._chain_fixtures import detected
     from tests._predictor_fixtures import StubPredictor, install
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
@@ -808,12 +810,15 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
     )
 
     root = _dataset(tmp_path).root
-    install(monkeypatch, StubPredictor(width=IMG, height=IMG, boxes=(BOX,)))
+    install(
+        monkeypatch,
+        StubPredictor(width=IMG, height=IMG, detections=[detected(BOX, 0.9)]),
+    )
     real_encode = export.encode_predictions
     calls: list[str] = []
 
     def failing_second_document(
-        result: export.DetectionResult, **kwargs: str | ClassScope
+        result: DetectionPass, **kwargs: str | ClassScope
     ) -> tuple[dict, int]:
         calls.append(result.image)
         if len(calls) == 2:
@@ -1121,8 +1126,8 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(
         cap=1,
         mask_cut=None,
     )
-    assert [g["iscrowd"] for g in from_annotations["gt"]] == [0, 1]
-    assert [g["iscrowd"] for g in from_detector["gt"]] == [0, 1]
+    assert [g["iscrowd"] for g in from_annotations.gt] == [0, 1]
+    assert [g["iscrowd"] for g in from_detector.gt] == [0, 1]
 
 
 def _uncompressed_counts(mask: np.ndarray) -> list[int]:

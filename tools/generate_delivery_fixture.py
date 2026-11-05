@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
     from pydantic import BaseModel, JsonValue
 
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_web.state import OpenProject
 
 GENERATED_PATH = FRONTEND_SRC / "test" / "deliveryEvents.json"
@@ -141,11 +142,12 @@ MILESTONE_PLOTS = {
 names what each holds."""
 
 
-def _milestone_result(image: Path) -> dict:
+def _milestone_result(image: Path) -> DetectionPass:
     """Return the published detections of ``image`` by the plant its name begins with.
 
     ``P1`` and ``P2`` hold one open flower, ``P3`` none and ``P4`` one closed flower.
     """
+    from tests._chain_fixtures import detected, detection_pass
     from tests.test_second_trait_acceptance import BLOOM_STATE
 
     states = {
@@ -154,16 +156,15 @@ def _milestone_result(image: Path) -> dict:
         "P3": [],
         "P4": [[BLOOM_STATE.values.index("closed")]],
     }[image.stem.split("_")[0]]
-    return {
-        "image": str(image),
-        "width": 8,
-        "height": 8,
-        "boxes": [[1.0, 1.0, 3.0, 3.0]] * len(states),
-        "scores": [0.9] * len(states),
-        "labels": [1] * len(states),
-        "cap": 2,
-        "attributes": states,
-    }
+    return detection_pass(
+        image,
+        (8, 8),
+        [
+            detected((1.0, 1.0, 3.0, 3.0), 0.9, attributes=ids)
+            for ids in states
+        ],
+        cap=2,
+    )
 
 
 def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:

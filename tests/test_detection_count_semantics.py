@@ -6,21 +6,29 @@ Two properties, each over an asymmetric fixture:
   and a recall over everything real, two different numbers;
 * the center-match matcher consumes a ground-truth object when a detection claims it, so a cluster
   of detections on one object contributes one true positive and the rest as false positives.
+
+And every producer of an evaluation record states a frame's detection count alike.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
+    EvaluationRecord,
     derive_operating_point_curve,
     detection_metrics,
     governing_counts,
     gt_record,
-    prediction_record,  # noqa: E402
 )
+from tests._dense_op_fixtures import whole_frame_record  # noqa: E402
 from tests._training_values import DISPERSION_QUANTILE  # noqa: E402
 
 CENTER_MATCH_TOLERANCE = 10.0
@@ -29,7 +37,7 @@ CENTER_MATCH_TOLERANCE = 10.0
 # -- precision and recall carry different denominators -----------------------------------------
 
 
-def _asymmetric_iou_records() -> list[dict]:
+def _asymmetric_iou_records() -> list[EvaluationRecord]:
     """Return two frames of different shapes, all boxes of class 1.
 
     Frame one (640x400): three ground-truth boxes of three aspect ratios, a detection on the very
@@ -47,15 +55,10 @@ def _asymmetric_iou_records() -> list[dict]:
         {"category_id": 1, "bbox": [600, 350, 20, 40], "score": 0.55},
     ]
     two_dt = [{"category_id": 1, "bbox": [40, 40, 60, 15], "score": 0.95}]
-    frame_one = prediction_record(
-        one_dt,
-        [wide_gt, tall_gt, flat_gt],
-        width=640,
-        height=400,
-        cap=None,
-        count=len(one_dt),
+    frame_one = whole_frame_record(
+        one_dt, [wide_gt, tall_gt, flat_gt], width=640, height=400, cap=None
     )
-    frame_two = prediction_record(
+    frame_two = whole_frame_record(
         two_dt,
         [
             gt_record([40, 40, 60, 15], 1, 0),
@@ -64,7 +67,6 @@ def _asymmetric_iou_records() -> list[dict]:
         width=300,
         height=500,
         cap=None,
-        count=len(two_dt),
     )
     return [frame_one, frame_two]
 
@@ -101,11 +103,12 @@ def test_extra_false_positives_move_precision_and_leave_recall_alone() -> None:
     """
     base = _asymmetric_iou_records()
     noisier = _asymmetric_iou_records()
-    noisier[1]["dt"] = [
-        *noisier[1]["dt"],
-        {"category_id": 1, "bbox": [10, 400, 30, 40], "score": 0.65},
-        {"category_id": 1, "bbox": [220, 60, 40, 20], "score": 0.45},
-    ]
+    noisier[1].dt.extend(
+        [
+            {"category_id": 1, "bbox": [10, 400, 30, 40], "score": 0.65},
+            {"category_id": 1, "bbox": [220, 60, 40, 20], "score": 0.45},
+        ]
+    )
 
     before, after = (
         detection_metrics(
@@ -126,7 +129,7 @@ def test_extra_false_positives_move_precision_and_leave_recall_alone() -> None:
 # -- center matching consumes the object it matched --------------------------------------------
 
 
-def _clustered_center_match_records() -> list[dict]:
+def _clustered_center_match_records() -> list[EvaluationRecord]:
     """Return two frames where one object has two detections centered near its center.
 
     Frame one (500x300) holds two objects: the first has detections centered 0 and about 5.8 px
@@ -139,7 +142,7 @@ def _clustered_center_match_records() -> list[dict]:
         {"category_id": 7, "bbox": [290, 190, 20, 20], "score": 0.50},
     ]
     two_dt = [{"category_id": 7, "bbox": [396, 296, 8, 8], "score": 0.70}]
-    frame_one = prediction_record(
+    frame_one = whole_frame_record(
         one_dt,
         [
             {"category_id": 7, "bbox": [88, 92, 24, 16], "iscrowd": 0},
@@ -148,9 +151,8 @@ def _clustered_center_match_records() -> list[dict]:
         width=500,
         height=300,
         cap=None,
-        count=len(one_dt),
     )
-    frame_two = prediction_record(
+    frame_two = whole_frame_record(
         two_dt,
         [
             {"category_id": 7, "bbox": [370, 290, 60, 20], "iscrowd": 0},
@@ -160,7 +162,6 @@ def _clustered_center_match_records() -> list[dict]:
         width=800,
         height=600,
         cap=None,
-        count=len(two_dt),
     )
     return [frame_one, frame_two]
 
@@ -175,8 +176,8 @@ def test_second_detection_of_one_object_is_a_false_positive() -> None:
     criterion = {"kind": "center_match", "tolerance": CENTER_MATCH_TOLERANCE}
     counts = governing_counts(records, criterion, conf_threshold=0.25)
 
-    n_gt = sum(len(r["gt"]) for r in records)
-    n_dt = sum(len(r["dt"]) for r in records)
+    n_gt = sum(len(r.gt) for r in records)
+    n_dt = sum(len(r.dt) for r in records)
     assert (n_gt, n_dt) == (5, 4)
     assert (counts["tp"], counts["fp"], counts["fn"]) == (3, 1, 2)
     assert counts["tp"] + counts["fn"] == n_gt
@@ -222,7 +223,7 @@ def test_uncontested_detections_all_match() -> None:
         {"category_id": 7, "bbox": [292, 192, 16, 16], "score": 0.50},
     ]
     records = [
-        prediction_record(
+        whole_frame_record(
             dt,
             [
                 {"category_id": 7, "bbox": [88, 92, 24, 16], "iscrowd": 0},
@@ -231,7 +232,6 @@ def test_uncontested_detections_all_match() -> None:
             width=500,
             height=300,
             cap=None,
-            count=len(dt),
         )
     ]
     counts = governing_counts(
@@ -241,3 +241,98 @@ def test_uncontested_detections_all_match() -> None:
     )
     assert (counts["tp"], counts["fp"], counts["fn"]) == (2, 0, 0)
     assert counts["f1"] == pytest.approx(1.0)
+
+
+# -- every evaluation record states its frame's count alike --------------------------------------
+
+
+def test_the_three_evaluation_record_producers_agree_on_a_frames_count(
+    tmp_path: Path,
+) -> None:
+    """The three evaluation-record producers state one frame's detection count alike.
+
+    Over a frame of two objects, the record of the predictor's pass, the record of the model's
+    own output governed at the pass's cap and conf, and the record of the document the pass
+    publishes each state the count the pass kept, and each scores it detection for detection.
+    """
+    from tcip_annotation.json_io import read_label_document, read_predictions
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key_of
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.datasets import target_tensors
+    from tcip_mcp.pipelines.data.label_queries import (
+        json_det_targets,
+        registry_scope,
+    )
+    from tcip_mcp.pipelines.execution import Stated, prepare
+    from tcip_mcp.pipelines.inference.passes import DetectionPass
+    from tcip_mcp.pipelines.operating_point import governed_forward
+    from tcip_mcp.pipelines.training.evaluation import (
+        gt_records,
+        records_from_annotation,
+        records_from_detector,
+        result_record,
+    )
+    from tests._chain_fixtures import BLOB_BUILDER, published
+    from tests._producer_fixtures import seed_labeled_images
+    from tests._training_values import RATIONALE
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images_dir = seed_labeled_images(
+        image_dir(tmp_path / "ds", UNDATED_BUCKET),
+        [
+            Annotation(subject="bud", geometry=BBox(4, 4, 20, 20)),
+            Annotation(subject="bud", geometry=BBox(36, 30, 56, 44)),
+        ],
+        n=1,
+        width=64,
+        height=48,
+    )
+    p = prepare(
+        load_registered_checkpoint(
+            registered_checkpoint(tmp_path, model_source=BLOB_BUILDER),
+            project=tmp_path,
+        ),
+        Stated(tile=False, conf=0.0, rationale=RATIONALE),
+        images_dir=str(images_dir),
+        device="cpu",
+    ).runnable()
+    (path,) = p.paths
+    (result,) = p.predict([path])
+    assert isinstance(result, DetectionPass)
+    annotations = read_label_document(label_key_of(path)).annotations
+    target = target_tensors(
+        json_det_targets(annotations, registry_scope(tmp_path / "ds", "bud"))
+    )
+    (output,) = governed_forward(
+        p.predictor.model,
+        [p.predictor.model_input(path)[0]],
+        [result.cap],
+        conf=float(p.execution.conf),
+    )
+    bucket = published(tmp_path, "m", [result], scope={"subject": "bud"})
+    document = bucket.document_key(path.stem)
+    assert document is not None
+
+    records = [
+        result_record(result, gt_records(target), image_id=None),
+        records_from_detector(
+            target,
+            output,
+            width=result.width,
+            height=result.height,
+            cap=result.cap,
+            mask_cut=None,
+        ),
+        records_from_annotation(
+            annotations,
+            read_predictions(document).annotations,
+            width=result.width,
+            height=result.height,
+            cap=result.cap,
+        ),
+    ]
+
+    assert result.detections
+    assert [r.frame_count for r in records] == [len(result.detections)] * 3
+    assert [len(r.dt) for r in records] == [len(result.detections)] * 3

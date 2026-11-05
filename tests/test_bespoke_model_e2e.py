@@ -199,6 +199,4 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
     assert overfit["passed"], overfit["issue"]
 
     (pred,) = p.predict([str(images_dir / "img0.png")])
-    assert {"boxes", "scores", "labels", "count"} <= set(
-        pred
-    )  # measurable detection output
+    assert len(pred.detections) <= pred.cap  # measurable detection output

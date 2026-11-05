@@ -30,6 +30,7 @@ from tcip_mcp.pipelines.raster_source import RasterIdentity
 if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
 _PATHS = (("raster_path",),)
 
@@ -228,38 +229,35 @@ def buckets_by_date(
     return grouped
 
 
-def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
+def pass_documents(
+    p: Pass, results: Iterable[DetectionPass | HeadPass]
+) -> Iterator[Document]:
     """Yield each of a pass's ``results`` encoded as the document it publishes.
 
-    A detector's (a pass whose execution record states a conf) is read as its
-    :class:`~tcip_mcp.pipelines.postprocessing.export.DetectionResult`, refusing
-    (``ValidationError``) a result that is none, and encoded as its prediction document under
-    the pass's scope, carrying the cap its frame was predicted under and stamped with the
-    checkpoint that predicted it
-    (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_predictions`); any other head's is
-    its own output (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_head_output`).
+    Each result is read as a :class:`~tcip_mcp.pipelines.inference.passes.DetectionPass` or a
+    :class:`~tcip_mcp.pipelines.inference.passes.HeadPass`, refusing (``ValidationError``) one
+    that is neither. A detector's is encoded as its prediction document under the pass's scope,
+    carrying the cap its frame was predicted under and stamped with the checkpoint that
+    predicted it (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_predictions`); a head's
+    is its own output (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_head_output`).
     """
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
     from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
         encode_head_output,
         encode_predictions,
     )
 
     created_by = prediction_producer(p.checkpoint)
-    detector = p.execution.conf is not None
-    for r in results:
-        if detector:
-            detected = DetectionResult.model_validate(r)
-            yield Document(
-                detected.image,
-                *encode_predictions(
-                    detected, created_by=created_by, scope=p.scope
-                ),
-            )
-        else:
-            yield Document(
-                r["image"], *encode_head_output(r, task=p.checkpoint.task)
-            )
+    read = TypeAdapter(DetectionPass | HeadPass)
+    for r in map(read.validate_python, results):
+        yield Document(
+            r.image,
+            *(
+                encode_predictions(r, created_by=created_by, scope=p.scope)
+                if isinstance(r, DetectionPass)
+                else encode_head_output(r, task=p.checkpoint.task)
+            ),
+        )
 
 
 def _one_root(roots: Iterable[Path], what: str) -> Path:
