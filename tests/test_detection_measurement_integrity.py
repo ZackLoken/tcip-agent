@@ -414,7 +414,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(
 
     A separately built copy of the checkpoint, counted at the reported record's conf under the
     cap it gives each frame, answers with the measured numbers over the measured loader; counted
-    at conf 0.6, the copy answers a different recall.
+    at no floor, the copy answers a different recall.
     """
     from typing import cast
 
@@ -432,7 +432,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     for i in range(2):
         write_image(images_dir / f"img{i}.png", (128, 128), (120, 120, 120))
-    # This seed's weights score just above 0.5, so a count at 0.6 keeps none of its detections.
+    # This seed's weights score below the pass's conf, so a count at no floor keeps detections a
+    # count at that conf does not.
     ckpt = registered_checkpoint(tmp_path, seed=0)
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
     _detections_as_ground_truth(verified, images_dir, subject="bud")
@@ -523,9 +524,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(
             else value
         ), key
 
-    # What a count at a conf above every score reports instead, so the equality above is evidence
-    # about this fixture rather than a comparison nothing could separate.
-    assert _independent(0.6)["recall"] != measured["recall"]
+    # What a count at no floor reports instead, so the equality above is evidence about this
+    # fixture rather than a comparison nothing could separate.
+    assert _independent(0.0)["recall"] != measured["recall"]
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")

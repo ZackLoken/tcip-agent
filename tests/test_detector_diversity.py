@@ -1,4 +1,4 @@
-"""Detector and architecture diversity: add_p2 necks, FCOS end to end.
+"""Detector and architecture diversity: add_p2 necks, a one-stage detector end to end.
 
 The cases run on CPU over tiny inputs.
 """
@@ -109,18 +109,18 @@ def test_detection_anchor_count_with_p2() -> None:
 
 
 # --------------------------------------------------------------------------
-# End-to-end (anchor-free)
+# End-to-end (one-stage)
 # --------------------------------------------------------------------------
 
 
-def test_detection_anchor_free_e2e(tmp_path: Path) -> None:
+def test_detection_one_stage_e2e(tmp_path: Path) -> None:
     from torchvision.utils import save_image
 
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tests._chain_fixtures import training_config
     from tests._producer_fixtures import label_image
-    from tests._verified_checkpoint_fixtures import built_detector
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
     from tests.tiny_trainer_fixtures import run_context
 
     images_dir = image_dir(tmp_path / "ds", UNDATED_BUCKET)
@@ -137,7 +137,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path) -> None:
     # No validation side: loss is the only metric coherent to select on without one.
     cfg = training_config(
         tmp_path,
-        built_detector(detector="fcos"),
+        BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},

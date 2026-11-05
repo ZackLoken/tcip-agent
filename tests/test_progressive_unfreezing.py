@@ -234,10 +234,10 @@ def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_r
 ) -> None:
     """The optimizer gives a built detector's backbone ``backbone_lr`` and the rest ``head_lr``.
 
-    For a detector the platform's ``build_detector`` builds, its subject's attribute heads beside
-    it or not, the optimizer assigns the parameters of its ``backbone`` the stated
-    ``backbone_lr`` and every other ``head_lr``; a model exposing neither groups nor a backbone
-    refuses differing rates by name and builds one group at equal ones.
+    For a built detector, its subject's attribute heads beside it or not, the optimizer assigns
+    the parameters of its ``backbone`` the stated ``backbone_lr`` and every other ``head_lr``; a
+    model exposing neither groups nor a backbone refuses differing rates by name and builds one
+    group at equal ones.
     """
     from tcip_mcp import subject_registry
     from tcip_mcp.pipelines.schemas import OptimizerSpec
@@ -254,7 +254,7 @@ def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_r
             subject_registry.Attribute(name, "ordinal", ("low", "high"))
             for name in attributes
         ),
-    ).detector
+    )
     opt = build_optimizer(
         spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr
     )

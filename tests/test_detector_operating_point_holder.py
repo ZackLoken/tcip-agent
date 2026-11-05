@@ -127,36 +127,55 @@ def test_holder_is_none_when_nothing_exposes_a_knob() -> None:
 def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_a_knob() -> (
     None
 ):
-    """The holder refuses a module whose knob sits both on itself and on its detector's heads.
-
-    The module is a torchvision two-stage detector under ``.detector`` (whose ``roi_heads``
-    exposes the knob) plus a knob restated on the wrapper itself, and the holder refuses naming
-    more than one location.
-    """
+    """The holder refuses a module whose knob sits both on itself and on its detector's heads."""
     from tcip_mcp.pipelines.operating_point import (
-        SCORE_THRESH,
         detector_operating_point_holder,
     )
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    model = _built(BUILT_DETECTOR)
-    assert hasattr(model.detector, "roi_heads")
-    assert hasattr(model.detector.roi_heads, SCORE_THRESH)
-    model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
+    model = SimpleNamespace(
+        score_thresh=0.5,
+        detector=SimpleNamespace(roi_heads=SimpleNamespace(score_thresh=0.5)),
+    )
 
     with pytest.raises(ValueError, match="more than one location"):
         detector_operating_point_holder(model)
 
 
-def test_set_detector_operating_point_sets_each_knob_on_the_holder() -> None:
-    """Each knob lands on its own attribute of a built detector's holder."""
-    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-    from tests._verified_checkpoint_fixtures import built_detector
+def test_a_built_detector_holds_both_knobs_on_itself_and_its_eval_forward_honors_them() -> (
+    None
+):
+    """A built detector holds both knobs on itself, and its eval forward keeps to them.
 
-    model = _built(built_detector())
-    set_detector_operating_point(model, score_thresh=0.2, detections_per_img=3)
-    holder = model.detector.roi_heads
-    assert (holder.score_thresh, holder.detections_per_img) == (0.2, 3)
+    The knobs land on the model itself, the holder its path names ``self``; at a floor of zero
+    and a cap of one a frame keeps its one highest-scoring detection of the two a cap of two
+    keeps, and at a floor above that score it keeps none.
+    """
+    from tcip_mcp.pipelines.operating_point import (
+        detector_operating_point_holder,
+        set_detector_operating_point,
+    )
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    model = _built(BUILT_DETECTOR).eval()
+    frame = [torch.rand(3, IMG, IMG)]
+
+    def kept(score_thresh: float, detections_per_img: int) -> list[float]:
+        set_detector_operating_point(
+            model,
+            score_thresh=score_thresh,
+            detections_per_img=detections_per_img,
+        )
+        with torch.no_grad():
+            (out,) = model(frame)
+        return out["scores"].tolist()
+
+    two = kept(0.0, 2)
+    holder, path = detector_operating_point_holder(model)
+    assert (holder.score_thresh, holder.detections_per_img) == (0.0, 2)
+    assert holder is model and path == "self"
+    assert len(two) == 2 and two[0] >= two[1], two
+    assert kept(0.0, 1) == two[:1]
+    assert kept(2 * two[0], 2) == []
 
 
 @pytest.mark.parametrize(

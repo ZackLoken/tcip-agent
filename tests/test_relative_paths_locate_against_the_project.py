@@ -880,13 +880,13 @@ def _authored_checkpoint(
     module = f"builder_{uuid.uuid4().hex[:8]}"
     new_project(project)
     (project / f"{module}_helper.py").write_text(
-        "BOX_NMS_THRESH = 0.4\n", encoding="utf-8"
+        "NMS_THRESH = 0.4\n", encoding="utf-8"
     )
     (project / f"{module}.py").write_text(
         f"import {module}_helper\n\n\n"
         "def build(**kwargs):\n"
         "    from tests.bespoke_models import build_bespoke_detection\n\n"
-        f"    kwargs['box_nms_thresh'] = {module}_helper.BOX_NMS_THRESH\n"
+        f"    kwargs['nms_thresh'] = {module}_helper.NMS_THRESH\n"
         "    return build_bespoke_detection(**kwargs)\n",
         encoding="utf-8",
     )
