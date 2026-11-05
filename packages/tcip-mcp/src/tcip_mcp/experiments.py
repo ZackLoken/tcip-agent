@@ -1394,7 +1394,7 @@ def read_sweep(
     trials = [
         row
         for row in rows
-        if row.kind == "trial" and row.sweep_id == directory.name
+        if isinstance(row, TrialRun) and row.sweep_id == directory.name
     ]
     return SweepGroup(
         sweep_id=directory.name,
