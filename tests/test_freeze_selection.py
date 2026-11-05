@@ -47,7 +47,6 @@ from tests._training_values import (  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     opened_run,
     resolved_run,
-    unbuilt_source,
 )
 from tests.test_selection_binding import (
     DATES,
@@ -76,7 +75,7 @@ def _real_drawn_experiment(
         project,
         training_config(
             project,
-            unbuilt_source("detection"),
+            BUILT_DETECTOR,
             {
                 "images_dir": str(images_dir),
                 "scope": {"subject": subject},

@@ -15,6 +15,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.schemas import train_config
 from tests import REPO_ROOT
 from tests._chain_fixtures import (
+    BUILT_DETECTOR,
     FRAME_STATISTICS,
     training_config,
     weights_statistics,
@@ -34,15 +35,15 @@ if TYPE_CHECKING:
 def _config(project: Path, data: dict | None = None, **keys: object) -> dict:
     """Return a training config of ``project`` for a detection model.
 
-    The config is a :func:`~tests._chain_fixtures.training_config` of ``unbuilt_source``'s
-    detector with this module added to its source files, with ``keys`` in place of theirs:
+    The config is a :func:`~tests._chain_fixtures.training_config` of ``BUILT_DETECTOR``
+    with this module added to its source files, with ``keys`` in place of theirs:
     over the data section ``data``, or with no data over its weights' statistics
     (``_chain_fixtures.weights_statistics``).
     """
-    from tests._verified_checkpoint_fixtures import unbuilt_source
-
-    source = unbuilt_source("detection")
-    declared = {**source, "source_files": [*source["source_files"], __file__]}
+    declared = {
+        **BUILT_DETECTOR,
+        "source_files": [*BUILT_DETECTOR["source_files"], __file__],
+    }
     return training_config(
         project,
         declared if data else weights_statistics(declared),
