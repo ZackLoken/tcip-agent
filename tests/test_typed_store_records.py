@@ -466,7 +466,7 @@ def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
         gestures=Gestures(flag=(FlagRequest(text=" open? ", target=target),)),
     )
 
-    (flag,) = read_flags(flag_key(key))
+    (flag,) = read_flags(ts.read, flag_key(key))
     assert (flag.request.text, flag.by, flag.request.target, flag.open) == (
         "open?",
         "user:breeder",
@@ -481,7 +481,7 @@ def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
     with pytest.raises(
         ts.ReadRefusedError, match=r"flags\.0\.by: Field required"
     ):
-        read_flags(flag_key(key))
+        read_flags(ts.read, flag_key(key))
 
 
 def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuses(
@@ -511,7 +511,10 @@ def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuse
 
     assert sr.read_registry(tmp_path) == registry
     with pytest.raises(ts.ReadRefusedError, match="description"):
-        sr.registry_from_dict({"bud": {"attributes": None}})
+        sr.registry_from_dict(
+            {"bud": {"attributes": None}},
+            where="the subjects this test states",
+        )
 
 
 def test_a_scale_assessment_reads_back_as_its_producer_answered_it(

@@ -44,7 +44,9 @@ ON_BOX = PointTarget(point=INSIDE, subject="bud")
 
 
 def _flags(image: Path) -> list[Flag]:
-    return read_flags(flag_key(image_label_key(image)))
+    import tcip_store as ts
+
+    return read_flags(ts.read, flag_key(image_label_key(image)))
 
 
 def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
@@ -67,7 +69,7 @@ def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
         ON_BOX,
     )
     assert flag.open and flag.at
-    assert flags_of(flags_record([flag])) == [flag]
+    assert flags_of(flags_record([flag]), "2026-02-11/a") == [flag]
 
 
 def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
@@ -403,6 +405,7 @@ def test_each_served_flag_names_the_annotation_whose_rings_hold_its_point(
 def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does(
     tmp_path: Path,
 ) -> None:
+    """A flags record its model refuses is one warning: the flags record's place, once, and why."""
     import tcip_store as ts
     from tcip_mcp.tools.doctor_tools import _buckets, check_state
 
@@ -417,12 +420,14 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
     check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))
     assert findings == []
 
-    ts.replace(flag_key(image_label_key(image)), {"flags": [{"id": "x"}]})
+    key = flag_key(image_label_key(image))
+    ts.replace(key, {"flags": [{"id": "x"}]})
     check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))
-    assert [level for level, _ in findings] == ["warn"]
-    assert (
-        "flags record" in findings[0][1] and "will not read" in findings[0][1]
-    )
+    image_name = "/".join(key.parts)
+    ((level, finding),) = findings
+    assert level == "warn"
+    assert finding.startswith(f"the flags record of {image_name}: flags.0.")
+    assert finding.count(image_name) == 1
 
 
 def test_a_save_that_touches_no_flag_writes_no_flags_record(

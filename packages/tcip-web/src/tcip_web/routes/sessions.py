@@ -78,15 +78,17 @@ def stored_stats(
 ) -> AnnotationStats:
     """Return the stats record ``key`` names, read by ``read`` (a store or a transaction read).
 
-    An absent record holds no session. Bytes that do not decode and a document that is not the
-    record's whole shape raise ``tcip_store.ReadRefusedError`` naming the project.
+    An absent record holds no session. A record the store will not read and a document that is
+    not the record's whole shape raise ``tcip_store.ReadRefusedError`` naming the project.
     """
-    where = f"the annotation stats of the project at {key.root}"
-    with tcip_store.unreadable(where, tcip_store.DecodeError):
-        raw = read(key, default=None)
-    if raw is None:
-        return AnnotationStats(sessions=[])
-    return tcip_store.validated(AnnotationStats, raw, where)
+    stats = tcip_store.read_record(
+        read,
+        key,
+        AnnotationStats,
+        f"the annotation stats of the project at {key.root}",
+        default=None,
+    )
+    return AnnotationStats(sessions=[]) if stats is None else stats
 
 
 def _session_start(sessions: list[Session]) -> datetime:

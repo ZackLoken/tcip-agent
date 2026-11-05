@@ -28,10 +28,7 @@ from tcip_store import (
     Key,
     ReadRefusedError,
     RefusedRead,
-    StoreError,
     Version,
-    unreadable,
-    validated,
 )
 
 FrictionCategory = Literal[
@@ -112,10 +109,12 @@ def read_memory[M: MemoryRecord](
     issues; for nothing recorded under that id or a record that will not decode, that error's
     sentence.
     """
-    where = f"the {_store(record)} record {record_id}"
-    with unreadable(where, StoreError):
-        raw = tcip_store.read(memory_key(record, project_path, record_id))
-    return validated(record, raw, where)
+    return tcip_store.read_record(
+        tcip_store.read,
+        memory_key(record, project_path, record_id),
+        record,
+        f"the {_store(record)} record {record_id}",
+    )
 
 
 def _write_memory(project: Path, record: MemoryRecord) -> str:

@@ -476,9 +476,9 @@ def save_label_document(
     """
     from tcip_annotation.flags import (
         flag_key,
-        flags_of,
         flags_record,
         raised,
+        read_flags,
         resolved_by_removal,
     )
     from tcip_annotation.json_io import (
@@ -538,7 +538,7 @@ def save_label_document(
                     f"none at position {i} to confirm"
                 )
             annotations[i] = signed_off(annotations[i], author, stamp)
-        held_flags = flags_of(txn.read(flags_key, default=None))
+        held_flags = read_flags(txn.read, flags_key)
         open_ids = {flag.id for flag in held_flags if flag.open}
         unknown = sorted(set(gestures.resolve) - open_ids)
         if unknown:
@@ -736,7 +736,7 @@ def admitted(
             else:
                 try:
                     document = label_document(item.document)
-                    flags_of(item.flags)
+                    flags_of(item.flags, where)
                 except (UnreadableLabelDocumentError, ReadRefusedError) as exc:
                     faults.append(f"{where} does not read: {exc}")
                     continue

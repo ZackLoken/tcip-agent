@@ -247,18 +247,13 @@ def check_state(
     import tcip_store
     from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
-    from tcip_store import ReadRefusedError, StoreError
+    from tcip_store import ReadRefusedError
 
     for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(root)):
         try:
-            read_flags(key)
-        except (ValueError, StoreError) as exc:
-            findings.append(
-                (
-                    "warn",
-                    f"flags record {'/'.join(key.parts)} will not read: {exc}",
-                )
-            )
+            read_flags(tcip_store.read, key)
+        except ReadRefusedError as exc:
+            findings.append(("warn", str(exc)))
     for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(root)):
         name, stem = key.parts
         try:
