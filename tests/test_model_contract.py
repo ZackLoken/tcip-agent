@@ -33,6 +33,7 @@ from tcip_mcp.pipelines.schemas import (  # noqa: E402
 )
 from tcip_store import check_json_value  # noqa: E402
 from tests import bespoke_models  # noqa: E402
+from tests._training_values import overfit_optimizer  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
@@ -288,6 +289,7 @@ def test_overfit_check_classification_passes() -> None:
     report = overfit_check(
         model,
         "classification",
+        optimizer=overfit_optimizer(),
         steps=25,
         dims=CLS_DIMS,
         seed=0,
@@ -309,6 +311,7 @@ def test_render_overfit_report_passes_through_a_finite_report() -> None:
     raw = overfit_check(
         model,
         "classification",
+        optimizer=overfit_optimizer(),
         steps=5,
         dims=CLS_DIMS,
         seed=0,

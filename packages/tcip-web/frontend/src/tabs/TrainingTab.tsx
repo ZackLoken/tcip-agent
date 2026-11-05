@@ -6,6 +6,7 @@ import {
   type MetricsRow,
   NO_LOGS,
   type NoLogsRefusal,
+  RANGE_TEST,
   TENSORBOARD_RELOAD_SELECTOR,
   type RunRow,
   type SplitChoices,
@@ -106,6 +107,7 @@ function runLaunchRow(
         <span className="block text-[12px] text-tcip-muted">
           {run.builder} · {run.task}
           {run.kind === TRIAL ? ` · trial of ${run.sweep_id}` : ""}
+          {run.kind === RANGE_TEST ? " · learning-rate range test" : ""}
         </span>
         <span className="block text-[12px] text-tcip-muted">
           {new Date(run.created).toLocaleString()} · {run.state}

@@ -115,7 +115,6 @@ class TestOptimizerFactory:
         with pytest.raises(TypeError, match="momentum"):
             _OPTIMIZER_BUILDERS["adamw"](
                 nn.Linear(10, 5).parameters(),
-                lr=1e-3,
                 weight_decay=0.0,
                 momentum=0.8,
             )

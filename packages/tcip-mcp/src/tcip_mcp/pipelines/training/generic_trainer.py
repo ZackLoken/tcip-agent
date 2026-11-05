@@ -18,12 +18,13 @@ import random
 import time
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Unpack
+from typing import TYPE_CHECKING, Any, Unpack, cast
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from tcip_mcp.experiments import BATCH_LOSS_KEY
 from tcip_mcp.pipelines.data.datasets import (
     indexed_sample_keys,
     instance_targets,
@@ -43,6 +44,7 @@ from tcip_mcp.pipelines.schemas import (
     VAL_METRIC_PREFIX,
     CosineSchedule,
     DataSpec,
+    DefaultTrainerRegime,
     DetectorGeometry,
     HorizonSchedule,
     OneCycleSchedule,
@@ -69,6 +71,7 @@ from tcip_mcp.pipelines.training.optimizer_factory import (
     capture_training_state,
     captured_sources,
     compute_lr_scale,
+    head_group,
     restore_training_state,
 )
 from tcip_mcp.pipelines.training.run_registry import TrainRun
@@ -727,6 +730,106 @@ def _improves(
     return candidate < incumbent - min_delta
 
 
+def trainable_parameters(model: torch.nn.Module) -> int:
+    """Return how many parameter elements of ``model`` train (``requires_grad``)."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def trained_parameters(model: torch.nn.Module, subject: str) -> int:
+    """Return :func:`trainable_parameters` of ``model``, the model ``subject`` names.
+
+    Refuses (``ValueError``) a model none of whose parameters trains, naming ``subject``.
+    """
+    trainable = trainable_parameters(model)
+    if not trainable:
+        raise ValueError(
+            f"{subject} trains no parameter: every parameter of this "
+            f"{type(model).__name__} is frozen."
+        )
+    return trainable
+
+
+def stage_accumulation(spec: TrainConfigSchema, stage: StageSpec) -> int:
+    """Return the batches ``stage`` accumulates per optimizer step.
+
+    That is the stage's own ``gradient_accumulation_steps``, else the config's.
+    """
+    if stage.gradient_accumulation_steps is None:
+        return spec.gradient_accumulation_steps
+    return stage.gradient_accumulation_steps
+
+
+def stage_rates(
+    spec: TrainConfigSchema,
+    regime: DefaultTrainerRegime,
+    stage: StageSpec,
+    physical_batch: int,
+) -> tuple[float, float]:
+    """Return the backbone and head rates the default trainer trains ``stage`` of ``regime`` at.
+
+    They are the regime's ``optimizer`` rates, scaled under the config's ``lr_scaling`` by
+    ``compute_lr_scale`` of the stage's target effective batch (``physical_batch`` times
+    :func:`stage_accumulation`) over the first stage's and capped at its ``max_lr`` when stated.
+    """
+    backbone_lr = regime.optimizer.backbone_lr
+    head_lr = regime.optimizer.head_lr
+    if spec.lr_scaling is None:
+        return backbone_lr, head_lr
+    mult = compute_lr_scale(
+        physical_batch * stage_accumulation(spec, stage),
+        physical_batch * stage_accumulation(spec, regime.stages[0]),
+        spec.lr_scaling.scale_power,
+    )
+    backbone_lr, head_lr = backbone_lr * mult, head_lr * mult
+    if (cap := spec.lr_scaling.max_lr) is not None:
+        backbone_lr, head_lr = min(backbone_lr, cap), min(head_lr, cap)
+    return backbone_lr, head_lr
+
+
+def batch_loss(
+    model: torch.nn.Module,
+    batch: Batch,
+    task: str,
+    device: torch.device,
+    *,
+    use_amp: bool,
+) -> torch.Tensor:
+    """Return ``model``'s training loss on ``batch`` of a ``task`` run, on ``device``.
+
+    The batch's images and targets are moved to ``device`` (a detector's targets as
+    ``instance_targets``) and the forward runs under autocast when ``use_amp``; a loss dict is
+    summed.
+    """
+    images: Any
+    targets: Any
+    images, targets = batch
+    if task in DETECTOR_TASKS:
+        images = [img.to(device) for img in images]
+        targets = instance_targets(
+            [
+                {
+                    k: v.to(device) if isinstance(v, torch.Tensor) else v
+                    for k, v in t.items()
+                }
+                for t in targets
+            ]
+        )
+    else:
+        images = images.to(device)
+        targets = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in targets.items()
+        }
+    with torch.amp.autocast(device.type, enabled=use_amp):
+        loss_dict = model(images, targets)
+        return cast(
+            torch.Tensor,
+            sum(loss_dict.values())
+            if isinstance(loss_dict, dict)
+            else loss_dict,
+        )
+
+
 def apply_stage_freeze(
     model: torch.nn.Module,
     freeze_to: int,
@@ -766,7 +869,7 @@ def apply_stage_freeze(
     else:
         freeze_backbone(freeze_to)
 
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    trainable = trainable_parameters(model)
     if prev_trainable is not None and trainable < prev_trainable:
         raise RuntimeError(
             f"Non-decreasing unfreeze violated: {trainable} < {prev_trainable} trainable params"
@@ -915,18 +1018,8 @@ def train(
         use_amp = spec.mixed_precision and device.type == "cuda"
         scaler = torch.amp.GradScaler(device.type) if use_amp else None
 
-        # Progressive-unfreezing fidelity setup.
-        base_backbone_lr = optimizer_spec.backbone_lr
-        base_head_lr = optimizer_spec.head_lr
         stage_warmup_epochs = spec.stage_warmup_epochs
         physical_batch = reads.batch_size
-
-        def accumulation(stage: StageSpec) -> int:
-            if stage.gradient_accumulation_steps is None:
-                return spec.gradient_accumulation_steps
-            return stage.gradient_accumulation_steps
-
-        first_eff_batch = physical_batch * accumulation(stages[0])
         prev_trainable = None  # trainable param count of the previous stage
         trait = evaluated["trait"]
         loader_generator = train_loader.generator
@@ -996,23 +1089,11 @@ def train(
             )
             prev_trainable = trainable
 
-            # Per-stage accumulation + optional effective-batch LR scaling.
-            stage_accum = accumulation(stage)
+            stage_accum = stage_accumulation(spec, stage)
             target_eff_batch = physical_batch * stage_accum
-            stage_backbone_lr, stage_head_lr = base_backbone_lr, base_head_lr
-            if spec.lr_scaling is not None:
-                mult = compute_lr_scale(
-                    target_eff_batch,
-                    first_eff_batch,
-                    spec.lr_scaling.scale_power,
-                )
-                stage_backbone_lr *= mult
-                stage_head_lr *= mult
-                max_lr = spec.lr_scaling.max_lr
-                if max_lr is not None:
-                    stage_backbone_lr = min(stage_backbone_lr, max_lr)
-                    stage_head_lr = min(stage_head_lr, max_lr)
-
+            stage_backbone_lr, stage_head_lr = stage_rates(
+                spec, regime, stage, physical_batch
+            )
             optimizer = build_optimizer(
                 optimizer_spec,
                 model,
@@ -1113,43 +1194,14 @@ def train(
                     if canceled:
                         break
                     final_row = None
-                    if task in DETECTOR_TASKS:
-                        images, targets = batch
-                        images = [img.to(device) for img in images]
-                        targets = instance_targets(
-                            [
-                                {
-                                    k: v.to(device)
-                                    if isinstance(v, torch.Tensor)
-                                    else v
-                                    for k, v in t.items()
-                                }
-                                for t in targets
-                            ]
-                        )
-                    else:
-                        images, targets = batch
-                        images = images.to(device)
-                        targets = {
-                            k: v.to(device)
-                            if isinstance(v, torch.Tensor)
-                            else v
-                            for k, v in targets.items()
-                        }
-
                     window = (
                         stage_accum
                         if batch_idx < full_windows_end
                         else n_loader - full_windows_end
                     )
-                    loss: Any
-                    with torch.amp.autocast(device.type, enabled=use_amp):
-                        loss_dict = model(images, targets)
-                        loss = (
-                            sum(loss_dict.values())
-                            if isinstance(loss_dict, dict)
-                            else loss_dict
-                        )
+                    loss = batch_loss(
+                        model, batch, task, device, use_amp=use_amp
+                    )
                     scaled = loss / window
                     (
                         scaled if scaler is None else scaler.scale(scaled)
@@ -1179,7 +1231,7 @@ def train(
                         batch_callback(
                             global_step,
                             run.current_epoch,
-                            {"batch_loss": loss_value},
+                            {BATCH_LOSS_KEY: loss_value},
                         )
 
                     if math.isfinite(loss_value):
@@ -1202,7 +1254,7 @@ def train(
                     break  # skip this epoch's epoch-end block; stop before validation/checkpoints
 
                 avg_loss = epoch_loss / max(n_batches, 1)
-                current_lr = optimizer.param_groups[0]["lr"]
+                current_lr = head_group(optimizer)["lr"]
 
                 val_metrics = {}
                 if val_loader is not None:

@@ -36,10 +36,12 @@ def prepare_run_context(
     """Build the ``TrainContext`` of the observed run from what its launch record resolved.
 
     Nothing is resolved again. The context carries its config with the resolved data section,
-    its objective, its within-image split if its partition records one, and its datasets and
-    loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
-    ``origin`` and ``epoch_hook`` are the context's own.
+    its objective, its within-image split if its partition records one, its datasets and
+    loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`), and the
+    range test it was launched as, if it was. ``origin`` and ``epoch_hook`` are the context's
+    own.
     """
+    from tcip_mcp.experiments import RangeTest
     from tcip_mcp.pipelines.data.split_construction import recorded_datasets
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -73,6 +75,9 @@ def prepare_run_context(
         spatial=spatial,
         resume_from=run_record.resume_from or "",
         epoch_hook=epoch_hook,
+        range_test=launched
+        if isinstance(launched := run_record.launched_as, RangeTest)
+        else None,
     )
 
 

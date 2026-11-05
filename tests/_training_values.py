@@ -5,10 +5,15 @@ split and tiling blocks, a sample search space and search, and the sample settin
 assessment and a failure-case ranking.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.pipelines.execution import MaskCut, Stated
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import OptimizerSpec
 
 RATIONALE = "a sample reason the test states for this block"
 """The reason every sample block here states (``schemas`` requires one per stated block)."""
@@ -115,6 +120,19 @@ def adamw_optimizer(**stated: object) -> dict:
         "rationale": RATIONALE,
         **stated,
     }
+
+
+OVERFIT_LR = 1e-2
+"""A sample rate the overfit checks here step a model at, both groups alike."""
+
+
+def overfit_optimizer(lr: float = OVERFIT_LR) -> OptimizerSpec:
+    """Return :func:`adamw_optimizer` at ``lr`` for both groups, validated as a config's block."""
+    from tcip_mcp.pipelines.schemas import OptimizerSpec
+
+    return OptimizerSpec.model_validate(
+        adamw_optimizer(backbone_lr=lr, head_lr=lr)
+    )
 
 
 def sgd_optimizer(**stated: object) -> dict:

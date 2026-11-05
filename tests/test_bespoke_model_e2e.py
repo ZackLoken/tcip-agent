@@ -44,6 +44,7 @@ from tests._training_values import (  # noqa: E402
     RATIONALE,
     adamw_optimizer,
     drawn_split,
+    overfit_optimizer,
     schedule,
 )
 
@@ -192,8 +193,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
         seed=0,
         deterministic=False,
         device=torch.device("cpu"),
+        optimizer=overfit_optimizer(5e-3),
         steps=30,
-        lr=5e-3,
         dims={"in_chans": 3, "num_classes": 1, "img_size": (64, 64)},
     )
     assert overfit["passed"], overfit["issue"]

@@ -311,12 +311,12 @@ def test_preflight_config_overfit_restores_rng_state(
 def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
     tmp_path: Path,
 ) -> None:
-    """An overfit preflight on an all-frozen model reports its empty parameters without raising.
+    """An overfit preflight on an all-frozen model reports that it trains nothing, without raising.
 
     check_model_contract's own gradient-presence check requires a real learnable path, so the
     report carries that issue for a literally all-frozen model; the overfit branch's
-    empty-parameter case does not raise out of preflight_config, and its report names the empty
-    parameter list.
+    nothing-to-train case does not raise out of preflight_config, and its report says the model
+    trains no parameter.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -330,7 +330,7 @@ def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
         for i in r["issues"]
     )
     assert r["overfit_check"]["passed"] is False
-    assert "empty parameter list" in r["overfit_check"]["issue"]
+    assert "trains no parameter" in r["overfit_check"]["issue"]
 
 
 def test_preflight_config_refuses_a_per_stage_lr_by_name(
@@ -999,7 +999,7 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
         },
         "optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
     }
-    points = _preflight_points(space, "random")
+    points = _preflight_points(space, "random", open_above=frozenset())
 
     assert {p["model_source.builder"] for _, p in points} == {
         "a:b",
@@ -1011,7 +1011,9 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
     assert len(held) == len({repr(p) for p in held}) == 4, points
 
     repeated = _preflight_points(
-        {"batch_size": {"type": "categorical", "choices": [2, 4, 4]}}, "random"
+        {"batch_size": {"type": "categorical", "choices": [2, 4, 4]}},
+        "random",
+        open_above=frozenset(),
     )
     assert [p for _, p in repeated] == [
         {"batch_size": 2},
