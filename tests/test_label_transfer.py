@@ -187,7 +187,9 @@ def _label(root: Path) -> None:
             )
         ),
     )
-    first, _second = read_flags(flag_key(label_key(root, SECOND, "flagged")))
+    first, _second = read_flags(
+        ts.read, flag_key(label_key(root, SECOND, "flagged"))
+    )
     label_image(
         flagged,
         held,
@@ -280,9 +282,9 @@ def test_labels_imported_into_a_new_project_export_as_they_left(
         and not accepted.created_by.startswith("user:")
     )
     assert accepted.accepted_by == BREEDER
-    assert read_flags(flag_key(label_key(second, SECOND, "flagged"))) == (
-        read_flags(flag_key(label_key(first, SECOND, "flagged")))
-    )
+    assert read_flags(
+        ts.read, flag_key(label_key(second, SECOND, "flagged"))
+    ) == read_flags(ts.read, flag_key(label_key(first, SECOND, "flagged")))
     (line,) = audit_rows(second, LABELS_IMPORTED)
     assert line["arguments"]["source"] == str(container.resolve())
     assert line["arguments"]["dataset"] == left.dataset.model_dump(mode="json")
