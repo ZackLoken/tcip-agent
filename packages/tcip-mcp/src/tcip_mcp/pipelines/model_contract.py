@@ -355,7 +355,7 @@ def _forward_loss(model: torch.nn.Module, batch: Batch) -> torch.Tensor:
 def _detection_eval(
     model: torch.nn.Module,
     task: str,
-    images: list[torch.Tensor] | torch.Tensor,
+    images: list[torch.Tensor],
     targets: list[dict],
     issues: list[str],
 ) -> list[int] | None:
@@ -367,103 +367,88 @@ def _detection_eval(
     ``attributes`` as int64 of shape ``[len(boxes), width]``, the row's width. At a floor above
     every score it returned the output keeps no detection, and at a floor of zero and a cap of
     one at most one per image and exactly one where the unfiltered output returned any. A model
-    the setter refuses is that one issue, its output held to its keys alone. The model's own
-    knobs are put back. Returns the unfiltered per-image detection counts, ``None`` when the
-    knobs were not set or the output answered no keys.
+    the setter refuses is that one issue, its output held to its keys alone. Returns the
+    unfiltered per-image detection counts, ``None`` when the knobs were not set or the output
+    answered no keys.
     """
     import torch
 
     from tcip_mcp.pipelines.operating_point import (
         DETECTIONS_PER_IMG,
         SCORE_THRESH,
+        governed_forward,
         set_detector_operating_point,
     )
 
-    built: tuple[Any, Any] = (
-        getattr(model, SCORE_THRESH, None),
-        getattr(model, DETECTIONS_PER_IMG, None),
-    )
-
-    def forward(score_thresh: float, detections_per_img: int) -> list:
-        set_detector_operating_point(
-            model,
-            score_thresh=score_thresh,
-            detections_per_img=detections_per_img,
-        )
-        with torch.no_grad():
-            return model(images)
-
+    built_cap: Any = getattr(model, DETECTIONS_PER_IMG, None)
     try:
         set_detector_operating_point(
-            model, score_thresh=0.0, detections_per_img=built[1]
+            model, score_thresh=0.0, detections_per_img=built_cap
         )
         governed = True
     except ValueError as exc:
         issues.append(str(exc))
         governed = False
-    try:
-        with torch.no_grad():
-            out = model(images)
-        required = {"boxes", "scores", "labels"}
-        if task == "instance_seg":
-            # A model dropping its masks would pass as a detector no mask measurement can reach.
-            required |= {"masks"}
-        if any("attributes" in t for t in targets):
-            required |= {"attributes"}
-        if not (
-            isinstance(out, list)
-            and out
-            and all(isinstance(o, dict) and required <= set(o) for o in out)
-        ):
-            issues.append(
-                f"detection eval output is not list[dict] with {sorted(required)}"
-            )
-            return None
-        for i, (o, t) in enumerate(zip(out, targets, strict=True)):
-            if "attributes" not in t:
-                continue
-            ids, width = o["attributes"], t["attributes"].shape[-1]
-            shape = [len(o["boxes"]), width]
-            if ids.dtype != torch.int64 or list(ids.shape) != shape:
-                issues.append(
-                    f"detection eval output's attributes on image {i} are {ids.dtype} of "
-                    f"shape {list(ids.shape)}; a detection model answers int64 of shape "
-                    f"[len(boxes), {width}], one id per attribute per box in declared order"
-                )
-        if not governed:
-            return None
-        counts = [len(o["boxes"]) for o in out]
-        scored = [o["scores"] for o in out if len(o["scores"])]
-        floor = 1.0
-        if scored:
-            # The next score up in the scores' own dtype, so no float32 score rounds onto it.
-            top = torch.cat(scored).max()
-            floor = float(torch.nextafter(top, top.new_tensor(math.inf)))
-        keeps = (
-            "a detection model's eval forward keeps only the detections scoring at least its "
-            "own score_thresh, at most detections_per_img of them, the highest first (the model "
-            "contract the toolkit-inventory document states)"
+    with torch.no_grad():
+        out = model(images)
+    required = {"boxes", "scores", "labels"}
+    if task == "instance_seg":
+        # A model dropping its masks would pass as a detector no mask measurement can reach.
+        required |= {"masks"}
+    if any("attributes" in t for t in targets):
+        required |= {"attributes"}
+    if not (
+        isinstance(out, list)
+        and out
+        and all(isinstance(o, dict) and required <= set(o) for o in out)
+    ):
+        issues.append(
+            f"detection eval output is not list[dict] with {sorted(required)}"
         )
-        for i, o in enumerate(forward(floor, built[1])):
-            if n := len(o["boxes"]):
-                issues.append(
-                    f"the eval output ignores {SCORE_THRESH}: set to {floor}, above every "
-                    f"score its unfiltered pass returned, image {i} kept {n} detections; {keeps}"
-                )
-        for i, (o, before) in enumerate(
-            zip(forward(0.0, 1), counts, strict=True)
-        ):
-            if (n := len(o["boxes"])) > 1 or (before and n != 1):
-                issues.append(
-                    f"the eval output ignores {DETECTIONS_PER_IMG}: set to 1, image {i} kept "
-                    f"{n} detections of the {before} its unfiltered pass returned; {keeps}"
-                )
-        return counts
-    finally:
-        if governed:
-            set_detector_operating_point(
-                model, score_thresh=built[0], detections_per_img=built[1]
+        return None
+    for i, (o, t) in enumerate(zip(out, targets, strict=True)):
+        if "attributes" not in t:
+            continue
+        ids, width = o["attributes"], t["attributes"].shape[-1]
+        shape = [len(o["boxes"]), width]
+        if ids.dtype != torch.int64 or list(ids.shape) != shape:
+            issues.append(
+                f"detection eval output's attributes on image {i} are {ids.dtype} of "
+                f"shape {list(ids.shape)}; a detection model answers int64 of shape "
+                f"[len(boxes), {width}], one id per attribute per box in declared order"
             )
+    if not governed:
+        return None
+    counts = [len(o["boxes"]) for o in out]
+    scored = [o["scores"] for o in out if len(o["scores"])]
+    floor = 1.0
+    if scored:
+        # The next score up in the scores' own dtype, so no float32 score rounds onto it.
+        top = torch.cat(scored).max()
+        floor = float(torch.nextafter(top, top.new_tensor(math.inf)))
+    keeps = (
+        "a detection model's eval forward keeps only the detections scoring at least its "
+        "own score_thresh, at most detections_per_img of them, the highest first (the model "
+        "contract the toolkit-inventory document states)"
+    )
+    with torch.no_grad():
+        floored = governed_forward(
+            model, images, [built_cap] * len(images), conf=floor
+        )
+        capped = governed_forward(model, images, [1] * len(images), conf=0.0)
+    for i, o in enumerate(floored):
+        if n := len(o["boxes"]):
+            issues.append(
+                f"the eval output ignores {SCORE_THRESH}: set to {floor}, above every "
+                f"score its unfiltered pass returned, image {i} kept {n} detections; {keeps}"
+            )
+    for i, (o, before) in enumerate(zip(capped, counts, strict=True)):
+        if (n := len(o["boxes"])) > 1 or (before and n != 1):
+            issues.append(
+                f"the eval output ignores {DETECTIONS_PER_IMG}: set to 1, image {i} kept "
+                f"{n} detections of the {before} its unfiltered pass returned; {keeps}"
+            )
+    return counts
 
 
 def check_model_contract(
@@ -552,7 +537,11 @@ def check_model_contract(
         if task in DETECTOR_TASKS:
             report["eval_output_type"] = "list[dict]"
             report["unfiltered_counts"] = _detection_eval(
-                model, task, images, cast("list[dict]", targets), issues
+                model,
+                task,
+                cast("list[torch.Tensor]", images),
+                cast("list[dict]", targets),
+                issues,
             )
         else:
             with torch.no_grad():

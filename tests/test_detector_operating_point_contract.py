@@ -245,19 +245,17 @@ def test_a_built_detector_passes_the_contract_with_detections_its_cap_check_kept
     """A built detector passes the contract, its unfiltered pass returning detections.
 
     The report's unfiltered counts show the floor and cap checks ran on detections, not
-    vacuously over an empty output, and the check leaves the model's own knobs as it found them.
+    vacuously over an empty output.
     """
     from tests import bespoke_models
     from tests._chain_fixtures import detector_values
 
-    model = bespoke_models.build_bespoke_detection(**detector_values())
-    built = (model.score_thresh, model.detections_per_img)
-
-    report = _contract(model)
+    report = _contract(
+        bespoke_models.build_bespoke_detection(**detector_values())
+    )
 
     assert report["ok"], report["issues"]
     assert all(count >= 1 for count in report["unfiltered_counts"]), report
-    assert (model.score_thresh, model.detections_per_img) == built
 
 
 class _AnswersAttributes(_KeepsItsOperatingPoint, _ThreeScoredBoxes):
