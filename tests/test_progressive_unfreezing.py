@@ -49,7 +49,8 @@ from tests._training_values import (  # noqa: E402
 )
 
 IMG = 64
-BASE_BB_LR = 1e-3
+BASE_BB_LR = 1e-4
+BASE_HEAD_LR = 1e-3
 
 
 # --------------------------------------------------------------------------
@@ -185,6 +186,7 @@ class _CustomGroupRegressor(nn.Linear):
     ) -> list[dict]:
         return [
             {
+                "name": "head",
                 "params": self.parameters(),
                 "lr": head_lr,
                 "custom": torch.tensor([1.0, 2.0]),
@@ -502,7 +504,7 @@ def _trained(
         **{
             "stages": stages,
             "optimizer": adamw_optimizer(
-                backbone_lr=BASE_BB_LR, head_lr=1e-3, weight_decay=0
+                backbone_lr=BASE_BB_LR, head_lr=BASE_HEAD_LR, weight_decay=0
             ),
             "evaluation": evaluation_block(selection_metric="loss"),
             **extra,
@@ -525,18 +527,26 @@ def test_monotonic_unfreeze_guard_fails(tmp_path: Path) -> None:
 
 
 def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path) -> None:
-    """The learning rate ramps up over warmup at a stage boundary.
+    """The head rate ramps up over warmup at a stage boundary.
 
-    The second stage's three epochs start below the base backbone rate, rise, and reach it at the
-    second epoch; every epoch records its target effective batch and trainable parameters.
+    The second stage accumulates four batches, so its head rate scales to twice the first
+    stage's ((8/2)^0.5); its three epochs start above the first stage's head rate, rise, and
+    reach the scaled one at the second epoch. Every epoch records its target effective batch and
+    trainable parameters.
     """
-    run, _ = _trained(tmp_path, [stage(-1), stage(0)], stage_warmup_epochs=2)
+    run, _ = _trained(
+        tmp_path,
+        [stage(-1), stage(0, gradient_accumulation_steps=4)],
+        stage_warmup_epochs=2,
+        lr_scaling={"scale_power": 0.5, "rationale": RATIONALE},
+        batch_size=2,
+    )
     assert run.status == "completed", run.status_error
 
     stage1 = [m for m in run.metrics_history if m["stage"] == 1]
     assert len(stage1) == 3
-    assert 0 < stage1[0]["lr"] < stage1[1]["lr"]
-    assert stage1[1]["lr"] == pytest.approx(BASE_BB_LR)
+    assert BASE_HEAD_LR < stage1[0]["lr"] < stage1[1]["lr"]
+    assert stage1[1]["lr"] == pytest.approx(BASE_HEAD_LR * 2.0)
     for m in run.metrics_history:
         assert "target_eff_batch" in m and "trainable_params" in m
 
@@ -560,8 +570,8 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
     assert run.status == "completed", run.status_error
     assert [m["target_eff_batch"] for m in run.metrics_history] == [2, 8]
     assert [m["optimizer_steps"] for m in run.metrics_history] == [3, 1]
-    assert run.metrics_history[0]["lr"] == pytest.approx(BASE_BB_LR)
-    assert run.metrics_history[1]["lr"] == pytest.approx(BASE_BB_LR * 2.0)
+    assert run.metrics_history[0]["lr"] == pytest.approx(BASE_HEAD_LR)
+    assert run.metrics_history[1]["lr"] == pytest.approx(BASE_HEAD_LR * 2.0)
 
 
 def test_two_stage_handoff_smoke(tmp_path: Path) -> None:
