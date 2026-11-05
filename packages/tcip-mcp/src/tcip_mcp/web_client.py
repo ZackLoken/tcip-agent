@@ -364,11 +364,15 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     from tcip_mcp.registry_paths import resolved_registry_path
 
     place = f"the GUI snapshot of {project}"
-    with tcip_store.unreadable(place, tcip_store.StoreError):
-        raw = tcip_store.read(gui_snapshot_key(project), default=None)
-    if raw is None:
+    persisted = tcip_store.read_record(
+        tcip_store.read,
+        gui_snapshot_key(project),
+        _PersistedGuiState,
+        place,
+        default=None,
+    )
+    if persisted is None:
         return None
-    persisted = tcip_store.validated(_PersistedGuiState, raw, place)
     choice = persisted.dataset
     with tcip_store.unreadable(place, ValueError):
         dataset = (
