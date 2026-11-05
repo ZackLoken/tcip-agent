@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
+import subprocess
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator
@@ -56,14 +58,18 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Size GDAL's block cache and warm the agent terminal before the app serves.
+    """Size GDAL's block cache, check the bundle and warm the agent terminal before the app serves.
 
-    The backend starts with no project open.
+    The backend starts with no project open. A stale bundle (:func:`stale_bundle`) is logged and
+    held for the state snapshots until the app stops.
     """
     # GDAL's block cache is sized once per process, at its entry point.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     configure_gdal_cache()
+    _app.state.stale_bundle = await asyncio.to_thread(stale_bundle)
+    if _app.state.stale_bundle is not None:
+        logger.warning(_app.state.stale_bundle)
     try:
         from tcip_web import terminal
 
@@ -78,6 +84,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await asyncio.to_thread(terminal_routes.shutdown_all)
     except Exception:  # pragma: no cover - shutdown cleanup is best-effort
         logger.exception("agent terminal shutdown failed")
+    _app.state.stale_bundle = None
 
 
 # Bound at import, so a route exercised without the app's lifespan running still has a store.
@@ -85,6 +92,7 @@ bind()
 
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
+app.state.stale_bundle = None
 
 app.add_middleware(TrustBoundaryMiddleware)
 
@@ -154,6 +162,7 @@ def state_snapshot_message(
         version=notification.version,
         project=None if opened is None else SnapshotProject.of(opened),
         epoch=SERVER_EPOCH,
+        bundle=app.state.stale_bundle,
     )
 
 
@@ -233,6 +242,46 @@ ASSETS_DIR = STATIC_DIR / "assets"
 
 if ASSETS_DIR.exists():
     app.mount(f"/{ASSETS_DIR.name}", StaticFiles(directory=str(ASSETS_DIR)))
+
+FRONTEND_DIR = Path(__file__).parents[2] / "frontend"
+"""The frontend's package in a checkout; no directory beside an installed ``tcip_web``."""
+
+
+def stale_bundle() -> str | None:
+    """Return a sentence saying the served bundle was not built from the frontend's source.
+
+    The bundle is ``STATIC_DIR``'s and the source ``FRONTEND_DIR``'s. The frontend's own
+    ``bundleSource.mjs``, run under Node over ``FRONTEND_DIR``, gives the build record the source
+    has now; the bundle is stale when ``STATIC_DIR`` holds no such record or one of another
+    source. Returns ``None`` for a bundle built from the source, and for a package with no
+    ``FRONTEND_DIR`` or an output with no page, where there is nothing to compare. A script that
+    fails raises.
+    """
+    if not FRONTEND_DIR.is_dir() or not (STATIC_DIR / "index.html").exists():
+        return None
+    current = json.loads(
+        subprocess.run(
+            [
+                "node",
+                str(FRONTEND_DIR / "scripts" / "bundleSource.mjs"),
+                str(FRONTEND_DIR),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    record = STATIC_DIR / current["record"]
+    if (
+        record.exists()
+        and json.loads(record.read_text("utf-8"))["source"]
+        == current["source"]
+    ):
+        return None
+    return (
+        f"The frontend bundle in {STATIC_DIR} was not built from the source in {FRONTEND_DIR}; "
+        f"run `npm --prefix {FRONTEND_DIR} run build` and hard-reload the page."
+    )
 
 
 FRONTEND_SERVING_PATHS = frozenset({"/", "/health"})
