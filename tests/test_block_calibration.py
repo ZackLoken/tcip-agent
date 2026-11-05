@@ -1055,10 +1055,10 @@ def test_a_band_record_carries_its_frames_count_beside_the_bands_own_detections(
 ) -> None:
     """A band record carries its halo frame's detection count beside the band's own detections.
 
-    Through a real assessment whose density admits more detections than the untrained detector
-    keeps, each band record's ``frame_count`` is the detection count of the pass over its halo
-    frame, its detections are those of that pass centered in the band, some frame holds more
-    detections than its band, and cap saturation reads the frame's count.
+    Through a real assessment at a density whose cap the untrained detector fills over a halo
+    frame, each band record's ``frame_count`` is the detection count of the pass over its halo
+    frame and its detections are those of that pass centered in the band; some frame reaches its
+    cap while its band holds fewer, and cap saturation reads the frame's count.
     """
     import numpy as np
 
@@ -1069,7 +1069,7 @@ def test_a_band_record_carries_its_frames_count_beside_the_bands_own_detections(
     from tcip_mcp.pipelines.operating_point import cap_saturated_frac
 
     exp = _attested(tmp_path)
-    # One detection per 100 square pixels, far past the GT's one object per 40 x 200 px column.
+    # One detection per 100 square pixels: a cap the untrained detector fills over a halo frame.
     monkeypatch.setattr(
         derivations_module, "derive_object_density", lambda *a, **k: 1e-2
     )
@@ -1108,9 +1108,8 @@ def test_a_band_record_carries_its_frames_count_beside_the_bands_own_detections(
         )
         assert record.frame_count == len(frame.detections)
         assert len(record.dt) == int(kept.sum())
-    assert any(len(r.dt) < r.frame_count for _, r in seen), [
-        (len(r.dt), r.frame_count, r.cap, r.region, (r.width, r.height))
-        for _, r in seen
+    assert any(r.frame_count == r.cap > len(r.dt) for _, r in seen), [
+        (len(r.dt), r.frame_count, r.cap) for _, r in seen
     ]
     assert cap_saturated_frac([r for _, r in seen]) == sum(
         len(f.detections) == r.cap for f, r in seen

@@ -233,6 +233,7 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
 
     assert p.scope.attributes == attributes
     for result in results:
+        assert result.detections
         assert all(
             len(d.attributes) == len(attributes) for d in result.detections
         )
