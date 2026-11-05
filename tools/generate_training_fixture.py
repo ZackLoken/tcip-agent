@@ -30,7 +30,9 @@ the metrics stream sends, live, while the second run logs :data:`STREAMED_ROWS` 
 (``frames``), and for an id naming no run; the listing taken before that failure and the one taken
 once every scene ran; the detail of every listed run, sweep and trial; once a run over a
 dataset of its own is opened and that dataset's images removed (:data:`MOVED_RUN`), its data
-choices (``moved_split_choices``); and, once the default trainer completes a regression run over
+choices (``moved_split_choices``); once a run bound to a selection of its own is opened and that
+selection's record damaged (:data:`BOUND_RUN`), its data choices
+(``refused_bound_split_choices``); and, once the default trainer completes a regression run over
 :data:`VERIFIED_FRAMES` (:data:`VERIFIED_RUN`, ``tests._verified_checkpoint_fixtures.worker_run``),
 the comparison of it and the unstamped run (``compare_verified``) and their ranking by
 :data:`VERIFIED_METRIC` with unverified checkpoints left out (``verified_best``), the one ranking
@@ -115,6 +117,12 @@ canceled."""
 
 MOVED_RUN = "train-moved"
 """The id of a run whose images directory is removed once it is opened."""
+
+BOUND_RUN = "train-bound"
+"""The id of a run bound to :data:`BOUND_SELECTION`, whose record is damaged once it is opened."""
+
+BOUND_SELECTION = "bound-selection"
+"""The directory, under the project, of the selection :data:`BOUND_RUN` binds."""
 
 RICH_RUN = "train-rich"
 """The id of a completed run whose checkpoint carries a declared metric, an undeclared one and a
@@ -505,6 +513,24 @@ def produce() -> dict[str, JsonValue]:
         opened_run(root, moved, experiment_id=MOVED_RUN)
         shutil.rmtree(Path(moved["data"]["images_dir"]))
         served["moved_split_choices"] = split_choices(MOVED_RUN)
+
+        bound_selection = root / BOUND_SELECTION
+        _draw(root, dataset, bound_selection, subject=scope["subject"])
+        opened_run(
+            root,
+            training_config(
+                root,
+                BUILT_DETECTOR,
+                {
+                    **images,
+                    "num_channels": SCOPED_DATA["num_channels"],
+                    "split": {"selection_dir": str(bound_selection)},
+                },
+            ),
+            experiment_id=BOUND_RUN,
+        )
+        damage_record(selection_key(bound_selection), b"[]")
+        served["refused_bound_split_choices"] = split_choices(BOUND_RUN)
 
         verified_images, verified_values = write_regression_dataset(
             workspace / "verified", *zip(*VERIFIED_FRAMES, strict=True)
