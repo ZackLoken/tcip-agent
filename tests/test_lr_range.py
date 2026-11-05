@@ -349,6 +349,30 @@ def test_a_launch_at_the_ranges_high_end_is_refused_naming_the_rate_range_and_ru
         assert named in issue, issue
 
 
+def test_a_preflight_below_the_ranges_low_end_is_refused_naming_the_rate_range_and_run(
+    bound: BoundProject, project: Path
+) -> None:
+    """A preflight naming a range test at half the range's low end is refused, naming all three.
+
+    The refusal names the stated rate, both ends of the range and the run that derived it.
+    """
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    config, answer = _ranged(bound, project)
+    below = answer["low"] / 2
+    report = preflight_config(project, _naming(config, answer, below))
+
+    assert report["valid"] is False
+    (issue,) = [i for i in report["issues"] if "head_lr" in i]
+    for named in (
+        f"{below:g}",
+        f"{answer['high']:g}",
+        f"{answer['low']:g}",
+        answer["experiment_id"],
+    ):
+        assert named in issue, issue
+
+
 def test_a_preflight_whose_stage_freezes_otherwise_than_the_probe_is_refused(
     bound: BoundProject, project: Path
 ) -> None:
