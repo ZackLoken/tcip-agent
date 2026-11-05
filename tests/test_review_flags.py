@@ -67,7 +67,7 @@ def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
         ON_BOX,
     )
     assert flag.open and flag.at
-    assert flags_of(flags_record([flag])) == [flag]
+    assert flags_of(flags_record([flag]), "the flags record") == [flag]
 
 
 def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
