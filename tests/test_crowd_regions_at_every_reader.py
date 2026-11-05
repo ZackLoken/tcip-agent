@@ -35,6 +35,7 @@ from tests._producer_fixtures import (  # noqa: E402
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     TRIAGE_WEIGHTS,
+    overfit_optimizer,
 )
 from tests.bespoke_models import BrightRegionDetector  # noqa: E402
 
@@ -314,6 +315,7 @@ def test_the_overfit_probe_drives_the_model_with_objects_only(
         seed=0,
         deterministic=False,
         device=torch.device("cpu"),
+        optimizer=overfit_optimizer(),
         sample_batch=batch,
         steps=2,
     )

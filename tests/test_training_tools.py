@@ -311,12 +311,12 @@ def test_preflight_config_overfit_restores_rng_state(
 def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
     tmp_path: Path,
 ) -> None:
-    """An overfit preflight on an all-frozen model reports its empty parameters without raising.
+    """An overfit preflight on an all-frozen model reports that it trains nothing, without raising.
 
     check_model_contract's own gradient-presence check requires a real learnable path, so the
     report carries that issue for a literally all-frozen model; the overfit branch's
-    empty-parameter case does not raise out of preflight_config, and its report names the empty
-    parameter list.
+    nothing-to-train case does not raise out of preflight_config, and its report says the model
+    trains no parameter.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -330,7 +330,7 @@ def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
         for i in r["issues"]
     )
     assert r["overfit_check"]["passed"] is False
-    assert "empty parameter list" in r["overfit_check"]["issue"]
+    assert "trains no parameter" in r["overfit_check"]["issue"]
 
 
 def test_preflight_config_refuses_a_per_stage_lr_by_name(
