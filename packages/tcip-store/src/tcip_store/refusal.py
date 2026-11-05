@@ -1,9 +1,9 @@
 """Why a record or value will not read or a check refuses it, and the two read boundaries.
 
 :func:`validated` validates a raw value against its model and, when the model refuses it, raises
-:class:`~tcip_store.errors.ReadRefusedError` carrying every error the model raised, each by its
-place and message (:class:`Invalid`), behind where the value lives. :func:`unreadable` raises the
-same error carrying :class:`Unreadable`, the sentence of any other error that stops a read. A
+:class:`ReadRefusedError` carrying every error the model raised, each by its place and message
+(:class:`Invalid`), at where the value lives (:class:`RefusedRead`). :func:`unreadable` raises
+the same error carrying :class:`Unreadable`, the sentence of any other error that stops a read. A
 check that refuses a value states each objection as an issue of an :class:`Invalid`, its place
 empty when it names none. Each reads as text where a sentence carries it.
 """
@@ -15,8 +15,6 @@ from contextlib import contextmanager
 from typing import Annotated, Any, Literal, overload
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-
-from tcip_store.errors import ReadRefusedError
 
 
 class Issue(BaseModel):
@@ -88,6 +86,29 @@ type ReadRefusal = Annotated[Invalid | Unreadable, Field(discriminator="kind")]
 """Why a record will not read or a check refuses a value, told apart by its ``kind``."""
 
 
+class RefusedRead(BaseModel):
+    """A record or value that will not read: the place ``where`` names, and why (``refusal``)."""
+
+    where: str
+    refusal: ReadRefusal
+
+    def __str__(self) -> str:
+        """Return ``where`` before the refusal's text; it never quotes the value."""
+        return f"{self.where}: {self.refusal}"
+
+
+class ReadRefusedError(ValueError):
+    """A record or value that will not read, raised carrying its :class:`RefusedRead` (``served``).
+
+    Its message is the refused read's text.
+    """
+
+    def __init__(self, refusal: ReadRefusal, where: str) -> None:
+        """Hold ``refusal`` at ``where`` as the refused read, stated as the error's message."""
+        self.served = RefusedRead(where=where, refusal=refusal)
+        super().__init__(str(self.served))
+
+
 @overload
 def validated[M: BaseModel](
     model: type[M],
@@ -119,8 +140,8 @@ def validated(
 
     A model validates through its own ``model_validate``. ``raw`` is the decoded value, or the
     JSON bytes that spell it. ``where`` names where the value lives. A value the model refuses
-    raises :class:`~tcip_store.errors.ReadRefusedError` carrying the model's errors as
-    :class:`Invalid`, behind ``where``.
+    raises :class:`ReadRefusedError` carrying the model's errors as :class:`Invalid`, behind
+    ``where``.
     """
     try:
         if isinstance(model, TypeAdapter):
@@ -136,7 +157,7 @@ def validated(
 
 @contextmanager
 def unreadable(where: str, *errors: type[Exception]) -> Iterator[None]:
-    """Raise :class:`~tcip_store.errors.ReadRefusedError` for any of ``errors`` raised inside.
+    """Raise :class:`ReadRefusedError` for any of ``errors`` raised inside.
 
     The error carries the caught error's sentence as :class:`Unreadable`, behind ``where``; a
     ``ReadRefusedError`` raised inside passes as it is.

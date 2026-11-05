@@ -51,8 +51,8 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
 ) -> None:
     """The trait listing names a record its schema refuses beside the valid one.
 
-    The refused record is listed under ``unreadable`` by name, its reason the model's issues,
-    each by its place in the record and its message.
+    The refused record is listed under ``unreadable`` by name, its reason naming the trait beside
+    the model's issues, each by its place in the record and its message.
     """
     from tcip_mcp import traits
 
@@ -71,9 +71,11 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
     assert [record["trait"] for record in body["traits"]] == ["bud_opening"]
     assert [entry["trait"] for entry in body["unreadable"]] == ["unicorn"]
     reason = body["unreadable"][0]["reason"]
-    assert isinstance(reason, dict) and reason["kind"] == "invalid"
+    assert "'unicorn'" in reason["where"]
+    refusal = reason["refusal"]
+    assert refusal["kind"] == "invalid"
     assert ["revisions", 0, "entry", "localization"] in [
-        issue["loc"] for issue in reason["issues"]
+        issue["loc"] for issue in refusal["issues"]
     ]
 
 
@@ -100,8 +102,9 @@ def test_list_traits_names_a_record_that_will_not_decode_by_the_stores_sentence(
     assert body["traits"] == []
     (entry,) = body["unreadable"]
     assert entry["trait"] == "bud_opening"
-    assert entry["reason"]["kind"] == "unreadable"
-    assert "does not decode" in entry["reason"]["message"]
+    refusal = entry["reason"]["refusal"]
+    assert refusal["kind"] == "unreadable"
+    assert "does not decode" in refusal["message"]
 
 
 def test_plant_mapping_build_requires_a_registered_dataset(

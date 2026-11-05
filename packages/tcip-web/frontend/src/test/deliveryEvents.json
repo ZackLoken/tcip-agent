@@ -2961,13 +2961,16 @@
       "status": 400,
       "body": {
         "detail": {
-          "kind": "invalid",
-          "issues": [
-            {
-              "loc": [],
-              "msg": "Input should be a valid dictionary or instance of DeliveryEventRecord"
-            }
-          ]
+          "where": "delivery event <validated event>",
+          "refusal": {
+            "kind": "invalid",
+            "issues": [
+              {
+                "loc": [],
+                "msg": "Input should be a valid dictionary or instance of DeliveryEventRecord"
+              }
+            ]
+          }
         }
       }
     },

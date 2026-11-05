@@ -371,9 +371,9 @@ def test_opening_another_project_over_a_refused_stats_record_answers_409_and_sta
 ) -> None:
     """Opening a project while the open one's stats record is refused answers 409, invalid.
 
-    The record the sessions route wrote has its first session's person dropped. The detail is the
-    ``invalid`` refusal naming that field, the departed project stays open, and once the record
-    reads again the same open succeeds.
+    The record the sessions route wrote has its first session's person dropped. The detail names
+    the stats record and the departed project beside the ``invalid`` refusal naming that field,
+    the departed project stays open, and once the record reads again the same open succeeds.
     """
     refused, open_id, valley_id = _open_hill_over_damaged_stats(
         tmp_path, client, _without_first_sessions_person
@@ -381,8 +381,11 @@ def test_opening_another_project_over_a_refused_stats_record_answers_409_and_sta
 
     assert refused.status_code == 409, refused.text
     detail = refused.json()["detail"]
-    assert detail["kind"] == "invalid"
-    assert [issue["loc"] for issue in detail["issues"]] == [
+    assert "annotation stats" in detail["where"]
+    assert str(tmp_path.parent / "valley_block") in detail["where"]
+    refusal = detail["refusal"]
+    assert refusal["kind"] == "invalid"
+    assert [issue["loc"] for issue in refusal["issues"]] == [
         ["sessions", 0, "user"]
     ]
     assert open_id == valley_id
@@ -407,7 +410,7 @@ def test_opening_another_project_over_an_undecodable_stats_record_answers_409_an
     )
 
     assert refused.status_code == 409, refused.text
-    assert refused.json()["detail"]["kind"] == "unreadable"
+    assert refused.json()["detail"]["refusal"]["kind"] == "unreadable"
     assert open_id == valley_id
 
 

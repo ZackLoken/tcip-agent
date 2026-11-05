@@ -240,8 +240,9 @@ describe("SetupTab trait revisions", () => {
     expect(
       await screen.findByText(
         innermostHolding(
-          `${trait}: revisions.0.entry.localization: Input should be '', 'center_match' or ` +
-            "'iou_match'; revisions: Tuple should have at least 1 item after validation, not 0",
+          `the record of trait '${trait}': revisions.0.entry.localization: Input should be '', ` +
+            "'center_match' or 'iou_match'; revisions: Tuple should have at least 1 item after " +
+            "validation, not 0",
         ),
       ),
     ).toBeInTheDocument();

@@ -98,7 +98,10 @@ describe("MetaTab annotation sessions", () => {
     expect(record.assumptions_wrong).toBe("");
     expect(screen.queryByText("assumptions wrong")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Input should be a valid dictionary or instance of Retrospective"),
+      screen.getByText(
+        `the retrospectives record ${unread.id}: ` +
+          "Input should be a valid dictionary or instance of Retrospective",
+      ),
     ).toBeInTheDocument();
   });
 

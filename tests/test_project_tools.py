@@ -155,8 +155,8 @@ def test_initialize_project(tmp_path: Path) -> None:
 def test_inspect_project(tmp_path: Path) -> None:
     status = inspect_project(tmp_path)
     assert status["reading"]["kind"] == "unread"
-    assert isinstance(status["reading"]["problem"], dict)
-    assert "initialize_project" in status["reading"]["problem"]["message"]
+    refusal = status["reading"]["problem"]["refusal"]
+    assert "initialize_project" in refusal["message"]
 
     record = _initialized(tmp_path)
     status = inspect_project(tmp_path)
@@ -1174,8 +1174,8 @@ def test_inspect_project_reports_the_record_across_project_states(
     bare.mkdir()
     status = inspect_project(bare)
     assert status["reading"]["kind"] == "unread"
-    assert isinstance(status["reading"]["problem"], dict)
-    assert "initialize_project" in status["reading"]["problem"]["message"]
+    refusal = status["reading"]["problem"]["refusal"]
+    assert "initialize_project" in refusal["message"]
 
     recordless = tmp_path / "recordless"
     recordless.mkdir()
@@ -1184,7 +1184,8 @@ def test_inspect_project_reports_the_record_across_project_states(
     )
     status = inspect_project(recordless)
     assert status["reading"]["kind"] == "unread"
-    assert "initialize_project" in status["reading"]["problem"]["message"]
+    refusal = status["reading"]["problem"]["refusal"]
+    assert "initialize_project" in refusal["message"]
 
     recorded = tmp_path / "recorded"
     _initialized(recorded)
@@ -1203,9 +1204,9 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path) -> None:
     status = inspect_project(tmp_path)
 
     assert status["reading"]["kind"] == "unread"
-    problem = status["reading"]["problem"]
-    assert isinstance(problem, dict) and problem["kind"] == "invalid"
-    assert ["site"] in [issue["loc"] for issue in problem["issues"]]
+    refusal = status["reading"]["problem"]["refusal"]
+    assert refusal["kind"] == "invalid"
+    assert ["site"] in [issue["loc"] for issue in refusal["issues"]]
 
 
 def test_archive_and_import_carry_the_project_record(tmp_path: Path) -> None:

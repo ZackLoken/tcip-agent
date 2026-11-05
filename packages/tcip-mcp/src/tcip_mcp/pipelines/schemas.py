@@ -990,7 +990,7 @@ def checked_train_config(
             context={"project": project},
         ), []
     except ReadRefusedError as e:
-        refusal = e.refusal
+        refusal = e.served.refusal
         issues = refusal.issues if refusal.kind == "invalid" else [refusal]
         return None, [str(issue) for issue in issues]
 
