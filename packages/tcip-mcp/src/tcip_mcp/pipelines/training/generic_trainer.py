@@ -69,6 +69,7 @@ from tcip_mcp.pipelines.training.optimizer_factory import (
     capture_training_state,
     captured_sources,
     compute_lr_scale,
+    head_group,
     restore_training_state,
 )
 from tcip_mcp.pipelines.training.run_registry import TrainRun
@@ -1202,7 +1203,7 @@ def train(
                     break  # skip this epoch's epoch-end block; stop before validation/checkpoints
 
                 avg_loss = epoch_loss / max(n_batches, 1)
-                current_lr = optimizer.param_groups[0]["lr"]
+                current_lr = head_group(optimizer)["lr"]
 
                 val_metrics = {}
                 if val_loader is not None:

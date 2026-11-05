@@ -136,6 +136,7 @@ class CountingRegressor(MeanIntensityRegressor):
     ) -> list[dict]:
         return [
             {
+                "name": "head",
                 "params": [self.weight],
                 "lr": head_lr,
                 "rates": torch.tensor([backbone_lr, head_lr]),
@@ -169,8 +170,8 @@ class TwoRateRegressor(MeanIntensityRegressor):
         self, backbone_lr: float, head_lr: float
     ) -> list[dict]:
         groups = [
-            {"params": [self.weight], "lr": backbone_lr},
-            {"params": [self.bias], "lr": head_lr},
+            {"name": "backbone", "params": [self.weight], "lr": backbone_lr},
+            {"name": "head", "params": [self.bias], "lr": head_lr},
         ]
         return groups[::-1] if self.reverse_groups else groups
 
@@ -180,6 +181,36 @@ def build_two_rate_regressor(
 ) -> TwoRateRegressor:
     """Build a :class:`TwoRateRegressor` as a ``model_source`` builder."""
     return TwoRateRegressor(reverse_groups=reverse_groups)
+
+
+class _Offset(nn.Module):
+    """A module holding one zero-initialized offset, ``bias``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bias = nn.Parameter(torch.zeros(1))
+
+
+class BackboneRegressor(MeanIntensityRegressor):
+    """A regressor predicting ``weight * mean(image) + backbone.bias``.
+
+    Its offset sits in a ``backbone`` module and it defines no ``get_param_groups``, so the
+    optimizer factory trains the offset at the backbone rate and the weight at the head rate.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.backbone = _Offset()
+
+    def predict(self, images: torch.Tensor) -> torch.Tensor:
+        return self.weight * images.mean(dim=(1, 2, 3)) + self.backbone.bias
+
+
+def build_backbone_regressor(
+    *, in_chans: int = 1, **_statistics: object
+) -> BackboneRegressor:
+    """Build a :class:`BackboneRegressor` as a ``model_source`` builder."""
+    return BackboneRegressor()
 
 
 class NanEvalRegressor(MeanIntensityRegressor):
@@ -433,6 +464,7 @@ MEAN_INTENSITY_CLASSIFIER = (
 ALWAYS_DIVERGED_MODEL = "tiny_trainer_fixtures:build_always_diverged_model"
 NAN_EVAL_REGRESSOR = "tiny_trainer_fixtures:build_nan_eval_regressor"
 TWO_RATE_REGRESSOR = "tiny_trainer_fixtures:build_two_rate_regressor"
+BACKBONE_REGRESSOR = "tiny_trainer_fixtures:build_backbone_regressor"
 COUNTING_REGRESSOR = "tiny_trainer_fixtures:build_counting_regressor"
 TINY_TRAINER_FILE = str(REPO_ROOT / "tests" / "tiny_trainer_fixtures.py")
 """The file of ``tests.tiny_trainer_fixtures`` in this repository, which a config naming one of
