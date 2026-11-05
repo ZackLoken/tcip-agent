@@ -62,7 +62,7 @@ def test_contract_rejects_maskless_instance_seg_model() -> None:
     """The instance_seg contract rejects a model emitting no masks.
 
     A model that emits boxes, scores and labels but no masks fails the instance_seg contract
-    with an issue naming the masks.
+    with an issue naming the masks, beside the one naming the operating-point knob it lacks.
     """
     import torch.nn as nn
 
@@ -92,6 +92,9 @@ def test_contract_rejects_maskless_instance_seg_model() -> None:
     )
     assert report["ok"] is False
     assert any("masks" in i for i in report["issues"]), report["issues"]
+    assert any("exposes no score_thresh" in i for i in report["issues"]), (
+        report["issues"]
+    )
 
 
 def test_contract_accepts_real_masked_instance_seg_model() -> None:
