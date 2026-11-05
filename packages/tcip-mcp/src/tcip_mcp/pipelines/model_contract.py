@@ -335,22 +335,6 @@ def _contains_tensor(
     return False
 
 
-def _forward_loss(model: torch.nn.Module, batch: Batch) -> torch.Tensor:
-    """Return a single scalar loss tensor from a train-mode forward (a loss dict summed)."""
-    out = model(*batch)
-    if isinstance(out, dict):
-        terms = [v for v in out.values() if hasattr(v, "requires_grad")]
-        if not terms:
-            raise ValueError(
-                "train-mode forward returned a dict with no tensor loss terms"
-            )
-        loss = terms[0]
-        for t in terms[1:]:
-            loss = loss + t
-        return loss
-    return out  # already a scalar loss tensor
-
-
 def _detection_eval(
     model: torch.nn.Module,
     task: str,
@@ -468,9 +452,12 @@ def check_model_contract(
     ``sample_batch`` is a supplied ``(images, targets)`` pair; one from the run's own dataset is
     required where no batch can be synthesized (:func:`no_batch_reason`).
 
-    A detection or instance-segmentation model's eval pass is :func:`_detection_eval`'s.
+    The train pass's loss is the trainer's own (``generic_trainer.batch_loss``). A detection or
+    instance-segmentation model's eval pass is :func:`_detection_eval`'s.
     """
     import torch
+
+    from tcip_mcp.pipelines.training.generic_trainer import batch_loss
 
     dims = keywords.get("dims")
     sample_batch = keywords.get("sample_batch")
@@ -493,8 +480,12 @@ def check_model_contract(
     # Train pass: finite loss with a gradient.
     try:
         model.train()
-        loss = _forward_loss(
-            model, _driving_batch(task, dims, sample_batch, device)
+        loss = batch_loss(
+            model,
+            _driving_batch(task, dims, sample_batch, device),
+            task,
+            device,
+            use_amp=False,
         )
         if not loss.requires_grad:
             issues.append(
@@ -592,6 +583,7 @@ def overfit_check(
     import torch
 
     from tcip_mcp.pipelines.training.generic_trainer import (
+        batch_loss,
         set_seed,
         trained_parameters,
     )
@@ -640,7 +632,7 @@ def overfit_check(
         model.train()
         for _ in range(max(1, keywords.get("steps", 20))):
             stepped.zero_grad()
-            loss = _forward_loss(model, batch)
+            loss = batch_loss(model, batch, task, device, use_amp=False)
             loss.backward()
             stepped.step()
             losses.append(float(loss.detach()))
