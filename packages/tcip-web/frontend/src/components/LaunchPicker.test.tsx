@@ -26,8 +26,11 @@ function reasonOf(check: ChoiceCheck): string {
   return readRefusalText(check.reason);
 }
 
-/** The disabled partition's reason as the page shows it: its one issue, at the record whole. */
-const DISABLED_REASON = "Input should be a dictionary or an instance of Selection";
+/** The disabled partition's reason as the page shows it: the selection's place before its one
+ * issue, at the record whole. */
+const DISABLED_REASON =
+  "the selection at /scratch/workspace/training/dataset/splits/unreadable: " +
+  "Input should be a dictionary or an instance of Selection";
 
 /** The radio of the partition under `dir` itself, never of one in a directory beneath it. */
 function radioOf(dir: string): HTMLElement {

@@ -123,9 +123,9 @@ describe("a read refusal's text", () => {
   const STRAY = PICKER.stray;
 
   it("issuesText joins each issue's dotted place and message, a placeless one by its message", () => {
-    const delivery = UNREADABLE_DELIVERIES.body.detail;
+    const delivery = UNREADABLE_DELIVERIES.body.detail.refusal;
     if (delivery.kind !== INVALID) throw new Error("the produced refusal is not a model's");
-    const trait = UNREADABLE_TRAIT.reason;
+    const trait = UNREADABLE_TRAIT.reason.refusal;
     if (trait.kind !== INVALID) throw new Error("the produced trait refusal is not a model's");
     expect(issuesText(trait.issues)).toBe(
       "revisions.0.entry.localization: Input should be '', 'center_match' or 'iou_match'; " +
@@ -136,22 +136,26 @@ describe("a read refusal's text", () => {
     );
   });
 
-  it("readRefusalText reads an invalid record by its issues and an unreadable one by its message", () => {
+  it("readRefusalText reads a refused read as its place before its issues or its message", () => {
     if (STRAY.kind !== UNREAD) throw new Error("the produced stray's record read");
     expect(readRefusalText(UNREADABLE_TRAIT.reason)).toBe(
-      "revisions.0.entry.localization: Input should be '', 'center_match' or 'iou_match'; " +
+      "the record of trait 'stem': " +
+        "revisions.0.entry.localization: Input should be '', 'center_match' or 'iou_match'; " +
         "revisions: Tuple should have at least 1 item after validation, not 0",
     );
-    expect(STRAY.problem.kind).toBe(UNREADABLE);
+    expect(STRAY.problem.refusal.kind).toBe(UNREADABLE);
     expect(readRefusalText(STRAY.problem)).toBe(
-      "/scratch/workspace/stray is not a project yet: create it with initialize_project",
+      "the project record of /scratch/workspace/stray: " +
+        "/scratch/workspace/stray is not a project yet: create it with initialize_project",
     );
   });
 
-  it("decodeRefusal reads an invalid detail as its issues' text", async () => {
+  it("decodeRefusal reads a refused read's detail as its place before its issues", async () => {
     const raised = await thrown(UNREADABLE_DELIVERIES);
+    expect(raised).toBeInstanceOf(StructuredRefusalError);
     expect(raised.message).toBe(
-      "Input should be a valid dictionary or instance of DeliveryEventRecord",
+      "delivery event <validated event>: " +
+        "Input should be a valid dictionary or instance of DeliveryEventRecord",
     );
   });
 });

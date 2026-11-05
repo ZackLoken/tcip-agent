@@ -38,10 +38,13 @@
         ],
         "kind": "unread",
         "reason": {
-          "kind": "invalid",
-          "issues": [
-            { "loc": [], "msg": "Input should be a dictionary or an instance of Selection" }
-          ]
+          "where": "the selection at /scratch/workspace/training/dataset/splits/unreadable",
+          "refusal": {
+            "kind": "invalid",
+            "issues": [
+              { "loc": [], "msg": "Input should be a dictionary or an instance of Selection" }
+            ]
+          }
         }
       }
     ]
@@ -2249,13 +2252,16 @@
       "check": {
         "kind": "blocked",
         "reason": {
-          "kind": "invalid",
-          "issues": [
-            {
-              "loc": [],
-              "msg": "Not found: data.images_dir = '/scratch/workspace/moved-data/images/undated'"
-            }
-          ]
+          "where": "the training config",
+          "refusal": {
+            "kind": "invalid",
+            "issues": [
+              {
+                "loc": [],
+                "msg": "Not found: data.images_dir = '/scratch/workspace/moved-data/images/undated'"
+              }
+            ]
+          }
         }
       }
     },

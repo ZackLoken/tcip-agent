@@ -36,10 +36,16 @@
         "kind": "unread",
         "id": "<damaged retrospective id>",
         "reason": {
-          "kind": "invalid",
-          "issues": [
-            { "loc": [], "msg": "Input should be a valid dictionary or instance of Retrospective" }
-          ]
+          "where": "the retrospectives record <damaged retrospective id>",
+          "refusal": {
+            "kind": "invalid",
+            "issues": [
+              {
+                "loc": [],
+                "msg": "Input should be a valid dictionary or instance of Retrospective"
+              }
+            ]
+          }
         }
       }
     ],

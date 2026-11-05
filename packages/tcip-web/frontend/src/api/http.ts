@@ -8,9 +8,8 @@ import {
   AUDIT_ENTRY_NOT_WRITTEN,
   type AuditGapRefusal,
   INVALID,
-  type Invalid,
   type Issue,
-  type ReadRefusal,
+  type RefusedRead,
 } from "@/api/types.generated";
 
 /** The text a model's issues read as: each one's dotted place before its message. */
@@ -20,10 +19,11 @@ export function issuesText(issues: Issue[]): string {
     .join("; ");
 }
 
-/** The text a refusal reads as: its model's issues or a check's objections, each an issue that
- * may name no place, or the sentence of why a record will not read. */
-export function readRefusalText(refusal: ReadRefusal): string {
-  return refusal.kind === INVALID ? issuesText(refusal.issues) : refusal.message;
+/** The text a refused read reads as: its place before its refusal, the model's issues or a
+ * check's objections, each an issue that may name no place, or the sentence of why it will not
+ * read. */
+export function readRefusalText({ where, refusal }: RefusedRead): string {
+  return `${where}: ${refusal.kind === INVALID ? issuesText(refusal.issues) : refusal.message}`;
 }
 
 /** A refusal whose `detail` is an object, kept parsed so a caller can branch on its own fields. */
@@ -53,8 +53,8 @@ export async function decodeRefusal(r: Response, fallback = ""): Promise<Error> 
     // within the request part its first place names.
     const message = Array.isArray(detail)
       ? issuesText((detail as Issue[]).map((issue) => ({ ...issue, loc: issue.loc.slice(1) })))
-      : parsed.kind === INVALID
-        ? issuesText((parsed as unknown as Invalid).issues)
+      : typeof parsed.where === "string" && typeof parsed.refusal === "object"
+        ? readRefusalText(parsed as unknown as RefusedRead)
         : typeof parsed.message === "string"
           ? parsed.message
           : "";
