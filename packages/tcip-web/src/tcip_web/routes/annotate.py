@@ -190,10 +190,11 @@ class LabelDocumentAnswer(BaseModel):
         registry's subjects through :func:`~tcip_mcp.dataset_layout.list_subjects`; either
         record that will not read answers 400.
         """
+        import tcip_store
         from tcip_annotation.flags import flag_key, read_flags
 
         try:
-            flags = read_flags(flag_key(key))
+            flags = read_flags(tcip_store.read, flag_key(key))
             declared = list_subjects(key.root)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc

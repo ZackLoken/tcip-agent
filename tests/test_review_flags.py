@@ -44,7 +44,9 @@ ON_BOX = PointTarget(point=INSIDE, subject="bud")
 
 
 def _flags(image: Path) -> list[Flag]:
-    return read_flags(flag_key(image_label_key(image)))
+    import tcip_store as ts
+
+    return read_flags(ts.read, flag_key(image_label_key(image)))
 
 
 def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
@@ -67,7 +69,7 @@ def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
         ON_BOX,
     )
     assert flag.open and flag.at
-    assert flags_of(flags_record([flag]), "the flags record") == [flag]
+    assert flags_of(flags_record([flag]), "2026-02-11/a") == [flag]
 
 
 def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
@@ -421,7 +423,7 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
     key = flag_key(image_label_key(image))
     ts.replace(key, {"flags": [{"id": "x"}]})
     with pytest.raises(ts.ReadRefusedError) as refused:
-        read_flags(key)
+        read_flags(ts.read, key)
     check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))
     assert findings == [("warn", str(refused.value))]
     assert findings[0][1].count("/".join(key.parts)) == 1

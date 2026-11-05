@@ -251,7 +251,7 @@ def check_state(
 
     for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(root)):
         try:
-            read_flags(key)
+            read_flags(tcip_store.read, key)
         except ReadRefusedError as exc:
             findings.append(("warn", str(exc)))
     for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(root)):

@@ -134,15 +134,21 @@ class FlagsRecord(TypedDict):
 _FLAGS_RECORD = TypeAdapter(FlagsRecord)
 
 
-def flags_of(record: JsonValue, where: str) -> list[Flag]:
+def _flags_place(image: str) -> str:
+    """Return where the flags record of ``image``, an image's name, lives, as a refusal names it."""
+    return f"the flags record of {image}"
+
+
+def flags_of(record: JsonValue, image: str) -> list[Flag]:
     """Return the flags a flags record holds, oldest first; an absent record holds none.
 
-    ``where`` names the record. One that does not validate as a :class:`FlagsRecord` refuses
-    (``tcip_store.ReadRefusedError``) behind ``where``, naming each field.
+    ``image`` names the image the record is of. One that does not validate as a
+    :class:`FlagsRecord` refuses (``tcip_store.ReadRefusedError``) naming the record by
+    ``image`` and each field.
     """
     if record is None:
         return []
-    return validated(_FLAGS_RECORD, record, where)["flags"]
+    return validated(_FLAGS_RECORD, record, _flags_place(image))["flags"]
 
 
 def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
@@ -150,16 +156,15 @@ def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
     return _FLAGS_RECORD.dump_python({"flags": flags}, mode="json")
 
 
-def read_flags(
-    key: Key, *, read: Callable[..., JsonValue] = tcip_store.read
-) -> list[Flag]:
+def read_flags(read: Callable[..., JsonValue], key: Key) -> list[Flag]:
     """Return every flag the record ``key`` names holds (:func:`flags_of`), read by ``read``.
 
-    ``read`` is a store or a transaction read. A record the store will not read refuses
-    (``tcip_store.ReadRefusedError``) as :func:`flags_of` does, naming the image's key.
+    ``read`` is a store or a transaction read. The record is named by the image's key parts; one
+    the store will not read refuses (``tcip_store.ReadRefusedError``) as :func:`flags_of` does.
     """
-    where = f"the flags record of {'/'.join(key.parts)}"
-    return flags_of(tcip_store.read_raw(read, key, where, default=None), where)
+    image = "/".join(key.parts)
+    raw = tcip_store.read_raw(read, key, _flags_place(image), default=None)
+    return flags_of(raw, image)
 
 
 def covers(
