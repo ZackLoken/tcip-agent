@@ -856,13 +856,12 @@ def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission() -
     from tcip_mcp.pipelines.schemas import train_config
     from tests import REPO_ROOT
     from tests._chain_fixtures import training_config, weights_statistics
-    from tests._verified_checkpoint_fixtures import unbuilt_source
 
     def admitted(weights: dict) -> TrainConfigSchema:
         return train_config(
             training_config(
                 REPO_ROOT,
-                weights_statistics(unbuilt_source("detection")),
+                weights_statistics(BUILT_DETECTOR),
                 {},
                 evaluation=evaluation_block(score_weights=weights),
             )

@@ -28,7 +28,7 @@ from tests._training_values import (
     tiling_block,
     tune_arguments,
 )
-from tests._verified_checkpoint_fixtures import opened_sweep
+from tests._verified_checkpoint_fixtures import opened_sweep, unbuilt_source
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1942,7 +1942,7 @@ def _tiled_cfg(
     shares beside it, at the statistics of the frames that split places on its training side
     (``_chain_fixtures.training_config``).
     """
-    source = {**BUILT_DETECTOR, "task": task}
+    source = unbuilt_source(task)
     if task == "instance_seg":
         source["builder"] = BESPOKE_INSTANCE_SEG
     return training_config(

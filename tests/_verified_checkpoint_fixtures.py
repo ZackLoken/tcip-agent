@@ -14,7 +14,6 @@ import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
-    BESPOKE_DETECTION,
     BESPOKE_MODELS,
     BUILT_DETECTOR,
     FRAME_STATISTICS,
@@ -376,12 +375,7 @@ def unbuilt_source(task: str) -> dict:
     Its normalization is the statistics of the train side's frames
     (:data:`~tests._chain_fixtures.FRAME_STATISTICS`).
     """
-    return {
-        "builder": BESPOKE_DETECTION,
-        "source_files": [BESPOKE_MODELS],
-        "task": task,
-        "normalization": FRAME_STATISTICS,
-    }
+    return {**BUILT_DETECTOR, "task": task}
 
 
 def worker_run(

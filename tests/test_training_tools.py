@@ -782,12 +782,7 @@ def test_preflight_reserved_regions_admit_a_feasible_layout(
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(
         tmp_path,
-        {
-            "builder": BESPOKE_DETECTION,
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": FRAME_STATISTICS,
-        },
+        BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
@@ -1084,14 +1079,12 @@ class _FakeDataset:
 def _detection_base(project: Path) -> dict:
     """Return a detection base config over :func:`_labeled`'s frames, selecting on the loss.
 
-    Its model is :func:`~tests._verified_checkpoint_fixtures.unbuilt_source`'s detector,
-    normalized by its frames' own statistics, and its frames lie under ``project``.
+    Its model is :data:`~tests._chain_fixtures.BUILT_DETECTOR`, normalized by its frames' own
+    statistics, and its frames lie under ``project``.
     """
-    from tests._verified_checkpoint_fixtures import unbuilt_source
-
     return training_config(
         project,
-        unbuilt_source("detection"),
+        BUILT_DETECTOR,
         _labeled(project),
         evaluation=evaluation_block(selection_metric="loss"),
     )

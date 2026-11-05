@@ -15,9 +15,8 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_CLASSIFIER,
-    BESPOKE_DETECTION,
     BESPOKE_SEMANTIC_SEG,
-    FRAME_STATISTICS,
+    BUILT_DETECTOR,
     training_config,
 )
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
@@ -283,11 +282,7 @@ def _base_config(
     ``tiling`` is ``None`` for a run that tiles nothing. The config normalizes by its own
     frames' statistics, or by pretrained weights when ``refused``.
     """
-    from tests._chain_fixtures import (
-        BESPOKE_MODELS,
-        CLASSIFIER_SOURCE,
-        weights_statistics,
-    )
+    from tests._chain_fixtures import CLASSIFIER_SOURCE, weights_statistics
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         detection_images,
@@ -297,12 +292,7 @@ def _base_config(
 
     where = fixture_data_dir(project, task)
     if task == "detection":
-        source = {
-            "builder": BESPOKE_DETECTION,
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": FRAME_STATISTICS,
-        }
+        source = dict(BUILT_DETECTOR)
         frames = {
             **detection_images(where, SCOPED_DATA["scope"], n=4),
             **SCOPED_DATA,

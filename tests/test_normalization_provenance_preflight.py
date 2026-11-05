@@ -18,8 +18,8 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, parse_image_path
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
-    BESPOKE_DETECTION,
     BESPOKE_MODELS,
+    BUILT_DETECTOR,
     FRAME_STATISTICS,
     run_config,
     training_config,
@@ -42,20 +42,14 @@ def _cfg(
     *,
     normalization: dict | str = FRAME_STATISTICS,
 ) -> dict:
-    """Return ``training_config`` of ``project`` for ``BESPOKE_DETECTION`` over ``images_dir``.
+    """Return ``training_config`` of ``project`` for ``BUILT_DETECTOR`` over ``images_dir``.
 
     The model source normalizes by ``normalization``; the data section scopes to the subject under
     a drawn split of validation ratio 0.0, and the evaluation selects on loss.
     """
-    model_source = {
-        "builder": BESPOKE_DETECTION,
-        "source_files": [BESPOKE_MODELS],
-        "task": "detection",
-        "normalization": normalization,
-    }
     return training_config(
         project,
-        model_source,
+        {**BUILT_DETECTOR, "normalization": normalization},
         {
             "images_dir": str(images_dir),
             "scope": {"subject": SUBJECT},
@@ -236,12 +230,7 @@ def test_preflight_records_not_checked_when_no_membership_resolved(
     _frame(image)
     cfg = training_config(
         tmp_path,
-        {
-            "builder": BESPOKE_DETECTION,
-            "task": "detection",
-            "source_files": [BESPOKE_MODELS],
-            "normalization": _derived([image]),
-        },
+        {**BUILT_DETECTOR, "normalization": _derived([image])},
         {
             "dataset_source": {
                 "builder": BESPOKE_CLASSIFIER,
@@ -396,9 +385,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(
     assert {parse_image_path(s.source)[1] for s in bound} == set(DATES)
 
     model_source = {
-        "builder": BESPOKE_DETECTION,
-        "source_files": [BESPOKE_MODELS],
-        "task": "detection",
+        **BUILT_DETECTOR,
         "normalization": _derived([s.source for s in bound]),
     }
     r = preflight_config(tmp_path, run_config(tmp_path, out, model_source))
@@ -614,7 +601,6 @@ def test_a_configs_statistics_are_its_resolved_train_side_whatever_its_route(
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import (
-        BUILT_DETECTOR,
         draw_reference_selection,
         synthetic_capture,
         training_config,
@@ -662,7 +648,7 @@ def test_own_statistics_refuses_a_config_whose_frames_carry_none(
     from pydantic import ValidationError
 
     from tcip_annotation.state import Annotation, BBox
-    from tests._chain_fixtures import BUILT_DETECTOR, training_config
+    from tests._chain_fixtures import training_config
     from tests._producer_fixtures import label_image, write_image
 
     with pytest.raises(ValueError, match="images_dir"):
