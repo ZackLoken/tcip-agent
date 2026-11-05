@@ -257,42 +257,38 @@ def run_range_test(ctx: TrainContext, test: RangeTest) -> None:
     run.status = "completed"
 
 
-def read_lr_range(path: Path) -> LrRangeResult:
-    """Return the :class:`LrRangeResult` at ``path``, a run's ``lr_range.json``.
-
-    A record its model refuses raises ``tcip_store.ReadRefusedError`` naming the file.
-    """
-    from tcip_mcp.experiments import read_run_record
-    from tcip_store import validated
-
-    return validated(LrRangeResult, read_run_record(path), str(path))
+class NoRangeError(ValueError):
+    """A run named as a range test that derived no range."""
 
 
 def range_result(run_id: str, project: Path) -> LrRangeResult:
-    """Return the reading of the range test ``run_id`` names in ``project``.
+    """Return the reading of the range test ``run_id`` names in ``project``, its ``lr_range.json``.
 
-    Refuses (``ValueError``) an id naming no run, a run that is no range test, and a range test
-    that ended with no reading, naming its state and error.
+    Refuses (:class:`NoRangeError`) an id naming no run, a run that is no range test, and a
+    range test that ended with no reading, naming its state and error; a reading its model
+    refuses raises ``tcip_store.ReadRefusedError`` naming the file.
     """
     from tcip_mcp.experiments import (
         LR_RANGE_FILE,
         RangeTest,
         find_observation,
+        read_run_record,
     )
+    from tcip_store import validated
 
     observation = find_observation(run_id, project=project)
     if observation is None:
-        raise ValueError(
+        raise NoRangeError(
             f"optimizer.lr_range_run {run_id!r} names no run of this project."
         )
     if not isinstance(observation.record.launched_as, RangeTest):
-        raise ValueError(
+        raise NoRangeError(
             f"optimizer.lr_range_run {run_id!r} names a run launched as "
             f"{observation.record.launched_as.kind!r}, not a range test (derive_lr_range)."
         )
     written = observation.directory / LR_RANGE_FILE
     if observation.state != "completed" or not written.is_file():
-        raise ValueError(
+        raise NoRangeError(
             f"range test {run_id!r} derived no range: it is {observation.state}"
             + (
                 f" ({observation.status_error})"
@@ -301,7 +297,7 @@ def range_result(run_id: str, project: Path) -> LrRangeResult:
             )
             + "."
         )
-    return read_lr_range(written)
+    return validated(LrRangeResult, read_run_record(written), str(written))
 
 
 def named_range_run(config: dict) -> str | None:
@@ -332,6 +328,19 @@ def ranged_point(config: dict, point: dict, project: Path) -> dict:
         return {}
     ratio = range_result(run_id, project).ratio
     return {BACKBONE_LR_AXIS: point[HEAD_LR_AXIS] * ratio}
+
+
+def range_answer(result: LrRangeResult | None) -> dict:
+    """Return a range test's reading as an answer carries it.
+
+    That is the result as it dumps, and the ``low`` and ``high`` it derives, each ``None`` for
+    a range test with no reading.
+    """
+    return {
+        "result": result and result.model_dump(mode="json"),
+        "low": result and result.low,
+        "high": result and result.high,
+    }
 
 
 def range_issues(spec: TrainConfigSchema, project: Path) -> list[str]:

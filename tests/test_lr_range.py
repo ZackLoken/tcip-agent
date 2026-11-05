@@ -292,7 +292,7 @@ def test_a_range_test_of_the_chain_detector_is_its_own_listed_run(
         )
     )
 
-    from tcip_mcp.pipelines.training.lr_range import read_lr_range
+    from tcip_mcp.pipelines.training.lr_range import range_result
 
     run_dir = experiments.experiment_dir(
         answer["experiment_id"], project=project
@@ -306,11 +306,11 @@ def test_a_range_test_of_the_chain_detector_is_its_own_listed_run(
     )[1]
     assert rows
     for row in rows:
-        assert {"batch_loss", "smoothed_loss", "lr"} <= set(row.model_dump())
-    assert (
-        read_lr_range(run_dir / experiments.LR_RANGE_FILE).model_dump(
-            mode="json"
+        assert {experiments.BATCH_LOSS_KEY, "smoothed_loss", "lr"} <= set(
+            row.model_dump()
         )
+    assert (
+        range_result(answer["experiment_id"], project).model_dump(mode="json")
         == answer["result"]
     )
 
