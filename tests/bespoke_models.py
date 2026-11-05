@@ -82,13 +82,12 @@ class _GNBackboneFPN(nn.Module):
 
 
 class _FreezesBackbone:
-    """A mixin giving ``freeze_backbone`` over a ``.backbone`` that may declare ``freeze_to``."""
+    """A mixin giving ``freeze_backbone`` through its ``.backbone``'s own ``freeze_to``."""
 
     backbone: nn.Module
 
     def freeze_backbone(self, to_stage: int) -> None:
-        if hasattr(self.backbone, "freeze_to"):
-            self.backbone.freeze_to(to_stage)
+        self.backbone.freeze_to(to_stage)
 
 
 class _KeepsItsOperatingPoint:
@@ -121,12 +120,13 @@ def build_bespoke_detector(
     in_chans: int = 3,
     out_channels: int = 64,
     gn_groups: int = 8,
+    attributes: tuple[Attribute, ...] = (),
 ) -> BespokeDetection:
     """Build a :class:`BespokeDetection` over a RetinaNet on a GroupNorm backbone/FPN.
 
     The RetinaNet is built at ``min_size``, ``max_size``, ``image_mean`` and ``image_std``, its
     one fused level's anchors at ``anchor_base_size`` and its next two doublings over
-    ``aspect_ratios``.
+    ``aspect_ratios``; the module carries one head per record of ``attributes``.
     """
     from torchvision.models.detection import RetinaNet
     from torchvision.models.detection.anchor_utils import AnchorGenerator
@@ -144,7 +144,9 @@ def build_bespoke_detector(
         image_mean=image_mean,
         image_std=image_std,
     )
-    return BespokeDetection(library, backbone, featmap_names=["0"])
+    return BespokeDetection(
+        library, backbone, featmap_names=["0"], attributes=attributes
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -424,8 +426,9 @@ class BespokeDetection(_FreezesBackbone, _KeepsItsOperatingPoint, nn.Module):
     ``library`` is the torchvision detector it calls and ``backbone`` the module inside it
     trained at the backbone rate. ``score_thresh`` and ``detections_per_img`` start at the
     library's own; the library's floor is then held at zero and its cap set to the module's
-    before each eval forward, so the library drops nothing the module would keep, and each
-    frame's output passes through :meth:`governed`. Each of ``attributes``, the scope's records,
+    before each eval forward, so no floor or cap of the library's is stricter than the module's
+    (its own candidate limits and NMS still apply), and each frame's output passes through
+    :meth:`governed`. Each of ``attributes``, the scope's records,
     gets a ``ClassificationHead`` (categorical) or an ``OrdinalHead`` (ordinal) reading the
     channel means ``MultiScaleRoIAlign`` pools at a box from the library backbone's levels
     ``featmap_names``, run over the frame as given. In train mode each head's loss over the rows
@@ -912,13 +915,13 @@ def build_diverging_detection(
     )
 
 
-class BrightRegionDetector(nn.Module):
+class BrightRegionDetector(_KeepsItsOperatingPoint, nn.Module):
     """A detector whose box geometry is analytic and whose confidence is learned.
 
     It reports the extent of a frame's pixels whose band mean exceeds ``bright`` as one box scored
     by the sigmoid of the learned ``logit``, beside a decoy box, that extent with every
-    coordinate plus one, scored ``decoy_score``, keeping the boxes scoring at least
-    ``score_thresh``, at most ``detections_per_img``; a frame with no such pixel gets no box.
+    coordinate plus one, scored ``decoy_score``, kept by :meth:`governed`; a frame with no such
+    pixel gets no box.
     In training its loss is the squared distance of that confidence from the batch's mean label
     presence.
     """
@@ -998,13 +1001,10 @@ class BrightRegionDetector(nn.Module):
                 ]
             )
             labels = torch.ones(2, dtype=torch.int64, device=device)
-            keep = scores >= self.score_thresh
             results.append(
-                {
-                    "boxes": boxes[keep][: self.detections_per_img],
-                    "scores": scores[keep][: self.detections_per_img],
-                    "labels": labels[keep][: self.detections_per_img],
-                }
+                self.governed(
+                    {"boxes": boxes, "scores": scores, "labels": labels}
+                )
             )
         return results
 

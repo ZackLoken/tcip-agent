@@ -142,7 +142,9 @@ def test_normalization_length_and_channel_count_are_validated() -> None:
         "num_levels": len(names),
         **detector_geometry().handed(),
     }
-    with pytest.raises(ValueError, match="both must be 5"):
+    with pytest.raises(
+        ValueError, match=r"both must be 5(.|\n)*StatedBeyondWeights"
+    ):
         build_detector(
             "faster_rcnn",
             adapter,

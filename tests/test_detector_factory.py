@@ -90,6 +90,57 @@ def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(
     assert _built("faster_rcnn", box_nms_thresh=0.4) is not None
 
 
+@pytest.mark.parametrize(
+    "name", ["faster_rcnn", "fcos", "retinanet", "mask_rcnn"]
+)
+def test_each_builtin_detector_carries_one_head_per_attribute(
+    name: str,
+) -> None:
+    """Each built-in detector built with attributes carries one attribute head per attribute.
+
+    Around each built-in detector, the attribute module returns one loss per attribute in train
+    mode beside the detector's own losses, the unassessed attribute's at zero, and writes
+    ``attributes`` boxes by attributes in eval.
+    """
+    from tcip_annotation.json_io import UNASSESSED
+    from tcip_mcp import subject_registry
+    from tests._producer_fixtures import painted_array
+
+    torch.manual_seed(0)
+    model = _built(
+        name,
+        attributes=(
+            subject_registry.Attribute(
+                "color", "categorical", ("red", "blue")
+            ),
+            subject_registry.Attribute(
+                "grade", "ordinal", ("low", "mid", "high")
+            ),
+        ),
+    )
+    image = torch.rand(3, 64, 64)
+    target = {
+        "boxes": torch.tensor([[8.0, 8.0, 40.0, 40.0]]),
+        "labels": torch.tensor([1]),
+        "attributes": torch.tensor([[1, UNASSESSED]]),
+        "masks": torch.as_tensor(painted_array(64, 64, [((8, 8, 40, 40), 1)]))[
+            None
+        ],
+    }
+
+    model.train()
+    losses = model([image], [target])
+    assert {"attribute_loss_color", "attribute_loss_grade"} <= set(losses)
+    assert len(losses) > 2
+    assert float(losses["attribute_loss_grade"].detach()) == 0.0
+
+    model.eval()
+    with torch.no_grad():
+        (out,) = model([image])
+    assert out["attributes"].dtype == torch.int64
+    assert tuple(out["attributes"].shape) == (len(out["boxes"]), 2)
+
+
 def test_build_detector_unknown_name_raises() -> None:
     from tcip_mcp.pipelines.components.detectors import build_detector
 
