@@ -20,8 +20,11 @@ What is broken, missing, or wrong today that this fixes or adds.
 ## Persisted-format impact
 
 If this re-shapes a record: its one producer and its one reader change together, and the records
-already written are regenerated or discarded with the change, never read through a default or a
-migration shim.
+already written are conformed, regenerated or discarded with the change, never read through a
+default or a migration shim. State how each new field of an already-written record is derived;
+the change's pull request posts the one-off conform script the maintainer runs over every project
+in the workspace before the merge, and reports the counts per project. The script is never
+tracked.
 
 ## Refusal or gate impact
 
