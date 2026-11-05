@@ -4,8 +4,8 @@
 train-mode forward yields a finite loss with a gradient, and an eval-mode forward yields the
 documented shape for the task (``list[dict]`` per image for detection/instance_seg, kept to the
 two operating-point knobs set on the model, a ``dict`` of tensors otherwise).
-* ``overfit_check(model, task, *, seed, deterministic, device)``: a few optimizer steps on one
-fixed tiny batch, seeded, on ``device``, must drive the loss down.
+* ``overfit_check(model, task, *, seed, deterministic, device, optimizer)``: a few steps of the
+config's ``optimizer`` on one fixed tiny batch, seeded, on ``device``, must drive the loss down.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
     import torch
 
+    from tcip_mcp.pipelines.schemas import OptimizerSpec
     from tcip_mcp.pipelines.training.collation import Batch
 
 DETECTOR_TASKS = frozenset({"detection", "instance_seg"})
@@ -60,12 +61,10 @@ class ContractKeywords(TypedDict, total=False):
 class OverfitKeywords(ContractKeywords, total=False):
     """The keywords :func:`overfit_check` takes beside its model, task, seed, determinism, device.
 
-    Those of :class:`ContractKeywords`, and the optimizer ``steps`` (20 unstated) and learning
-    rate ``lr`` (0.01 unstated).
+    Those of :class:`ContractKeywords`, and the optimizer ``steps`` (20 unstated).
     """
 
     steps: int
-    lr: float
 
 
 class ContractReport(TypedDict):
@@ -573,27 +572,39 @@ def overfit_check(
     seed: int,
     deterministic: bool,
     device: torch.device,
+    optimizer: OptimizerSpec | None,
     **keywords: Unpack[OverfitKeywords],
 ) -> OverfitReport:
     """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
 
-    The ``keywords`` are :class:`OverfitKeywords`; ``dims`` is as for
-    :func:`check_model_contract`. Seeded at the run's own ``seed`` and ``deterministic``, the
-    model moved to ``device``. Returns the :class:`OverfitReport`, ``passed`` iff
-    every step completes with no recorded ``issue``, every loss is finite and the final loss is
-    strictly below the initial one.
+    The updates are the ``optimizer`` block's own, built over the model's parameter groups at the
+    block's rates (``optimizer_factory.build_optimizer``). The ``keywords`` are
+    :class:`OverfitKeywords`; ``dims`` is as for :func:`check_model_contract`. Seeded at the
+    run's own ``seed`` and ``deterministic``, the model moved to ``device``. Returns the
+    :class:`OverfitReport`, ``passed`` iff every step completes with no recorded ``issue``,
+    every loss is finite and the final loss is strictly below the initial one.
 
-    ``sample_batch`` is a supplied ``(images, targets)`` pair; one from the run's own dataset is
-    required where no batch can be synthesized (:func:`no_batch_reason`), and without it such a
-    call returns ``passed: False`` with the reason in ``issue``; it never raises.
+    It never raises: an ``optimizer`` of ``None`` (a config stating no block), a model with no
+    trainable parameter (``generic_trainer.trained_parameters``), and a task no batch can be
+    synthesized for given no ``sample_batch`` from the run's own dataset
+    (:func:`no_batch_reason`) each return ``passed: False`` with the reason in ``issue``.
     """
     import torch
 
-    from tcip_mcp.pipelines.training.generic_trainer import set_seed
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        set_seed,
+        trained_parameters,
+    )
+    from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
 
     dims = keywords.get("dims")
     sample_batch = keywords.get("sample_batch")
-    reason = no_batch_reason(task, dims, sample_batch)
+    reason = (
+        "the config states no optimizer block, which the overfit check steps the model "
+        "through; state one"
+        if optimizer is None
+        else no_batch_reason(task, dims, sample_batch)
+    )
     if reason is not None:
         return {
             "passed": False,
@@ -617,19 +628,21 @@ def overfit_check(
         }
     losses: list[float] = []
     issue: str | None = None
+    assert optimizer is not None, "an unstated block returned above"
     try:
-        # Built inside the try: a model with no trainable parameter (every parameter frozen, a
-        # legitimate stage-0 configuration) makes Adam raise, and that belongs in the report.
-        optimizer = torch.optim.Adam(
-            (p for p in model.parameters() if p.requires_grad),
-            lr=keywords.get("lr", 1e-2),
+        trained_parameters(model, "the overfit check's model")
+        stepped = build_optimizer(
+            optimizer,
+            model,
+            backbone_lr=optimizer.backbone_lr,
+            head_lr=optimizer.head_lr,
         )
         model.train()
         for _ in range(max(1, keywords.get("steps", 20))):
-            optimizer.zero_grad()
+            stepped.zero_grad()
             loss = _forward_loss(model, batch)
             loss.backward()
-            optimizer.step()
+            stepped.step()
             losses.append(float(loss.detach()))
     except Exception as exc:  # noqa: BLE001
         issue = f"optimization step failed: {exc}"

@@ -189,8 +189,9 @@ class TrainContext:
     ) -> OverfitReport:
         """Drive a few steps on one tiny batch of ``model`` and report whether the loss falls.
 
-        The steps (``model_contract.overfit_check``) run at the arguments :meth:`_contract_args`
-        gives, ``overrides`` laid over them, on the run's ``seed``, ``deterministic`` and device.
+        The steps (``model_contract.overfit_check``) are the run's ``optimizer`` block's, at the
+        arguments :meth:`_contract_args` gives, ``overrides`` laid over them, on the run's
+        ``seed``, ``deterministic`` and device.
         """
         from tcip_mcp.pipelines.model_contract import overfit_check
 
@@ -200,6 +201,7 @@ class TrainContext:
             seed=self.spec.seed,
             deterministic=self.spec.deterministic,
             device=self.device,
+            optimizer=self.spec.optimizer,
             **(self._contract_args() | overrides),
         )
 

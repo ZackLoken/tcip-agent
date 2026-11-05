@@ -398,6 +398,7 @@ def _preflight(
                             seed=resolved_spec.seed,
                             deterministic=resolved_spec.deterministic,
                             device=device,
+                            optimizer=resolved_spec.optimizer,
                             **prepared.keywords,
                         )
                     except Exception as exc:  # noqa: BLE001, becomes the report's issue only

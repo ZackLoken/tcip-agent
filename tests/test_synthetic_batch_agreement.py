@@ -28,6 +28,7 @@ from tcip_mcp.pipelines.model_contract import (
 )  # noqa: E402
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
+from tests._training_values import overfit_optimizer  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
@@ -339,6 +340,7 @@ def test_real_models_still_smoke_green_on_the_collated_batch() -> None:
     learned = overfit_check(
         _OrdinalProbe(num_ranks=4),
         "ordinal",
+        optimizer=overfit_optimizer(),
         steps=20,
         dims=ORD_DIMS,
         seed=0,
