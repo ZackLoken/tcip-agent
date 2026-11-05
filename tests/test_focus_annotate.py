@@ -83,7 +83,7 @@ def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(
     import pytest
 
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import write_image
 
     root, date = tmp_path, "2026-03-02"
@@ -95,18 +95,18 @@ def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(
         root,
         "preds",
         [
-            {
-                "image": str(frame),
-                "width": 100,
-                "height": 100,
-                "boxes": [[10.0, 10.0, 20.0, 20.0]],
-                "scores": [0.9],
-                "labels": [1],
-                "cap": 2,
-                "masks": [
-                    {"segmentation": [[10.0, 10.0, 20.0, 10.0, 20.0, 20.0]]}
+            detection_pass(
+                frame,
+                (100, 100),
+                [
+                    detected(
+                        (10.0, 10.0, 20.0, 20.0),
+                        0.9,
+                        mask=[[10.0, 10.0, 20.0, 10.0, 20.0, 20.0]],
+                    )
                 ],
-            }
+                cap=2,
+            )
         ],
         scope={"subject": "bud"},
     )

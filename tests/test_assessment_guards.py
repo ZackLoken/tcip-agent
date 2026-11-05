@@ -712,10 +712,22 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
 def test_an_evaluation_record_missing_its_ground_truth_field_refuses_by_name() -> (
     None
 ):
-    from tcip_mcp.pipelines.training.evaluation import gt_objects
+    from pydantic import ValidationError
 
-    with pytest.raises(KeyError, match="gt"):
-        gt_objects({"width": IMG, "height": IMG, "dt": []})
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
+
+    with pytest.raises(ValidationError, match="gt"):
+        EvaluationRecord.model_validate(
+            {
+                "width": IMG,
+                "height": IMG,
+                "dt": [],
+                "cap": None,
+                "frame_count": 0,
+                "image_id": None,
+                "region": None,
+            }
+        )
 
 
 def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
@@ -730,6 +742,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
         WholeSource,
     )
     from tcip_mcp.pipelines.execution import Pass, execution_record
+    from tcip_mcp.pipelines.inference.passes import HeadPass
     from tests._producer_fixtures import write_image
 
     class Silent:
@@ -739,8 +752,16 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
             execution: Execution,
             *,
             tile_batch_size: int,
-        ) -> list[dict]:
-            return [{"image": s, "regression_values": []} for s in sources]
+        ) -> list[HeadPass]:
+            return [
+                HeadPass(
+                    image=str(s),
+                    width=8,
+                    height=8,
+                    outputs={"regression_values": []},
+                )
+                for s in sources
+            ]
 
     checkpoint = SimpleNamespace(
         task="regression", payload={}, path="regressor.pt"
@@ -777,7 +798,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
             execution: Execution,
             *,
             tile_batch_size: int,
-        ) -> list[dict]:
+        ) -> list[HeadPass]:
             return []
 
     p.predictor = Short()

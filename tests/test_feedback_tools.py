@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.generic_predictor import (
         GenericPredictor,
     )
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
 DATE = "2026-03-04"
 QUEUE = {"scorer": COMBINED_SCORER, "budget": 50, "rationale": RATIONALE}
@@ -161,6 +162,7 @@ def test_triage_predictions_skips_only_the_images_marked_finished(
 
     import tcip_mcp.pipelines.inference.generic_predictor as predmod
     from tcip_mcp.tools.feedback_tools import triage_predictions
+    from tests._chain_fixtures import detected, detection_pass
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images = _dataset(tmp_path, marked=("imgA",))
@@ -170,7 +172,10 @@ def test_triage_predictions_skips_only_the_images_marked_finished(
         "GenericPredictor",
         lambda *a, **k: SimpleNamespace(
             predict_batch=lambda sources, **kw: [
-                {"image": Path(s).name, "scores": [0.5]} for s in sources
+                detection_pass(
+                    Path(s).name, (8, 8), [detected((0, 0, 1, 1), 0.5)], cap=2
+                )
+                for s in sources
             ]
         ),
     )
@@ -215,8 +220,15 @@ def test_triage_predictions_surfaces_unscoreable(
     images.mkdir(parents=True)
     (images / "a.jpg").write_bytes(b"x")
 
+    from tcip_mcp.pipelines.inference.passes import HeadPass
+
     predictions = [
-        {"image": "a.jpg", "width": 4, "height": 4, "head0_values": [0.42]}
+        HeadPass(
+            image="a.jpg",
+            width=4,
+            height=4,
+            outputs={"head0_values": [0.42]},
+        )
     ]
     monkeypatch.setattr(
         predmod,
@@ -237,7 +249,7 @@ def test_triage_predictions_surfaces_unscoreable(
 def _stubbed_triage_predictions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    predictions: list[dict],
+    predictions: list[DetectionPass | HeadPass],
     **kwargs: float | str,
 ) -> dict:
     """Run triage_predictions over a real registered checkpoint with predict_batch stubbed.
@@ -255,7 +267,7 @@ def _stubbed_triage_predictions(
     images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     for pred in predictions:
-        (images / pred["image"]).write_bytes(b"x")
+        (images / pred.image).write_bytes(b"x")
     monkeypatch.setattr(
         predmod,
         "GenericPredictor",
@@ -282,6 +294,7 @@ def _triage_over_one_image(
     from types import SimpleNamespace
 
     import tcip_mcp.pipelines.inference.generic_predictor as predmod
+    from tests._chain_fixtures import detected, detection_pass
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -292,9 +305,13 @@ def _triage_over_one_image(
 
     def _predict(
         sources: list[str | Path | BandGroupRef], **kw: Execution | int
-    ) -> list[dict]:
+    ) -> list[DetectionPass]:
         ran_at.append(kw["execution"])
-        return [{"image": "a.jpg", "scores": [0.35]}]
+        return [
+            detection_pass(
+                "a.jpg", (8, 8), [detected((0, 0, 1, 1), 0.35)], cap=2
+            )
+        ]
 
     monkeypatch.setattr(
         predmod,
@@ -337,10 +354,20 @@ def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_noth
     A confident prediction leaves the queue without being accepted: the answer names no accepted
     image, while the mid-confidence and unscoreable predictions are routed to review.
     """
+    from tcip_mcp.pipelines.inference.passes import HeadPass
+    from tests._chain_fixtures import detected, detection_pass
+
     predictions = [
-        {"image": "high.jpg", "scores": [0.9]},
-        {"image": "mid.jpg", "scores": [0.5]},
-        {"image": "unscoreable.jpg", "head0_values": [0.42]},
+        *(
+            detection_pass(name, (8, 8), [detected((0, 0, 1, 1), s)], cap=2)
+            for name, s in (("high.jpg", 0.9), ("mid.jpg", 0.5))
+        ),
+        HeadPass(
+            image="unscoreable.jpg",
+            width=8,
+            height=8,
+            outputs={"head0_values": [0.42]},
+        ),
     ]
     r = _stubbed_triage_predictions(tmp_path, monkeypatch, predictions)
     assert r == {

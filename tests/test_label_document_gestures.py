@@ -193,11 +193,9 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     color = cr.Attribute("color", "categorical", ("red", "blue"))
     registry = registry_of("bud", color)
-    result = {
-        **predicted(image, ["blue"], (color,)),
-        "width": WIDTH,
-        "height": HEIGHT,
-    }
+    result = predicted(image, ["blue"], (color,)).model_copy(
+        update={"width": WIDTH, "height": HEIGHT}
+    )
     bucket = published(
         tmp_path,
         f"model/{DATE}",
@@ -1067,20 +1065,19 @@ def _counted(annotations: list, proposals: list, criterion: dict) -> dict:
         dt_record,
         governing_counts,
         gt_record,
-        prediction_record,
     )
+    from tests._dense_op_fixtures import whole_frame_record
 
     def box(a: Annotation) -> list[float]:
         g = a.geometry
         return xywh(g.x1, g.y1, g.x2, g.y2)
 
-    record = prediction_record(
+    record = whole_frame_record(
         [dt_record(box(p), 1, p.score) for p in proposals],
         [gt_record(box(a), 1, a.iscrowd) for a in annotations],
         width=WIDTH,
         height=HEIGHT,
         cap=None,
-        count=len(proposals),
     )
     return governing_counts([record], criterion, conf_threshold=0.0)
 

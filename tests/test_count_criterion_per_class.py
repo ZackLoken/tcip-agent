@@ -18,13 +18,14 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     count_criterion,
 )
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
+    EvaluationRecord,
     derive_operating_point_curve,
     gt_class_avg_size,
     pick_count_unbiased,
-    prediction_record,
     scaled_to,
 )
 from tests import _trait_fixtures as fx  # noqa: E402
+from tests._dense_op_fixtures import whole_frame_record  # noqa: E402
 from tests._training_values import (  # noqa: E402
     COUNT_TEST,
     DISPERSION_QUANTILE,
@@ -82,14 +83,15 @@ def _gt_records(
     return recs
 
 
-def _record(prefix: str, i: int, gt: list[dict], dt: list[dict]) -> dict:
-    return prediction_record(
+def _record(
+    prefix: str, i: int, gt: list[dict], dt: list[dict]
+) -> EvaluationRecord:
+    return whole_frame_record(
         dt,
         gt,
         width=FRAME,
         height=FRAME,
         cap=len(dt) + 1,
-        count=len(dt),
         image_id=f"{prefix}{i}",
     )
 
@@ -240,7 +242,7 @@ def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap() -> None:
     """
     recs = _gt_records("cal", 4, swap_classes=True)
     for r in recs:  # a real score spread, so confs actually filter
-        for k, d in enumerate(r["dt"]):
+        for k, d in enumerate(r.dt):
             d["score"] = 0.15 + 0.1 * k
     sweep = derive_operating_point_curve(
         recs,
@@ -260,12 +262,12 @@ def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap() -> None:
                 len(
                     [
                         d
-                        for d in r["dt"]
+                        for d in r.dt
                         if d["category_id"] == int(cid)
                         and d["score"] >= entry["conf"]
                     ]
                 )
-                - len([a for a in r["gt"] if a["category_id"] == int(cid)])
+                - len([a for a in r.gt if a["category_id"] == int(cid)])
                 for r in recs
             ) / len(recs)
             assert stats["count_bias_mean"] == pytest.approx(expected)

@@ -45,6 +45,7 @@ from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
     run_test_evaluation,
 )
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
+    EvaluationRecord,
     classification_metrics,
     comparability_criterion,
     compute_composite_objective,
@@ -57,7 +58,6 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     ordinal_metrics,
     pick_count_unbiased,
     pick_f1_max,
-    prediction_record,
     quadratic_weighted_kappa,
     r_squared,
     regression_metrics,
@@ -68,7 +68,11 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     selection_value,
 )
 from tests import _trait_fixtures as fx  # noqa: E402
-from tests._dense_op_fixtures import gt_only, toy_records  # noqa: E402
+from tests._dense_op_fixtures import (  # noqa: E402
+    gt_only,
+    toy_records,
+    whole_frame_record,
+)
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     WrittenDataset,
@@ -128,10 +132,10 @@ def test_composite_objective_has_no_score_for_a_degenerate_epoch() -> None:
 # --------------------------------------------------------------------------
 
 
-def _rec(gt: list[dict], dt: list[dict], w: int = 100, h: int = 100) -> dict:
-    return prediction_record(
-        dt, gt, width=w, height=h, cap=None, count=len(dt)
-    )
+def _rec(
+    gt: list[dict], dt: list[dict], w: int = 100, h: int = 100
+) -> EvaluationRecord:
+    return whole_frame_record(dt, gt, width=w, height=h, cap=None)
 
 
 def _gt(*boxes: list[float]) -> list[dict]:
@@ -144,7 +148,7 @@ def _dt(*scored: tuple[list[float], float]) -> list[dict]:
     return [dt_record(box, 1, score) for box, score in scored]
 
 
-def _masked(gt_ring: list, dt_ring: list) -> dict:
+def _masked(gt_ring: list, dt_ring: list) -> EvaluationRecord:
     """Return the ``records_from_annotation`` record of one masked object and one detection.
 
     The frame is 100 x 100, holding one object of region ``gt_ring`` and one detection at 0.9
@@ -443,11 +447,13 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name() -> (
     with pytest.raises(ValueError, match="is None"):
         _dt_score({"bbox": [0, 0, 1, 1], "score": None})
     per_image = [
-        {
-            "image_id": 1,
-            "gt": [],
-            "dt": [{"bbox": [0, 0, 1, 1], "category_id": 1}],
-        }
+        whole_frame_record(
+            [{"bbox": [0, 0, 1, 1], "category_id": 1}],
+            [],
+            width=10,
+            height=10,
+            cap=None,
+        )
     ]
     with pytest.raises(ValueError, match="no 'score' field"):
         derive_operating_point_curve(
@@ -1133,8 +1139,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
             in_chans=3,
             width=32,
             height=32,
-            boxes=(),
-            scores=(),
+            detections=(),
         ),
     )
     ff_result = run_full_frame_evaluation(
@@ -1207,8 +1212,7 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
             in_chans=3,
             width=32,
             height=32,
-            boxes=(),
-            scores=(),
+            detections=(),
         ),
     )
     admission = checkpoint_admission(checkpoint, images_dir)
@@ -1547,7 +1551,7 @@ _OBJECT = [10.0, 10.0, 20.0, 20.0]
 _CROWD = [50.0, 50.0, 40.0, 40.0]
 
 
-def _crowd_records() -> list[dict]:
+def _crowd_records() -> list[EvaluationRecord]:
     """Return the records of two images holding a crowd region.
 
     One image's object a detection matches and its crowd region holds another detection; the
@@ -1675,7 +1679,7 @@ def test_a_detector_output_stating_no_boxes_refuses_rather_than_reading_as_no_de
             height=10,
             cap=1,
             mask_cut=None,
-        )["dt"]
+        ).dt
         == []
     )
 
@@ -1719,9 +1723,9 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
     )
     # The annotation route also names each record's annotation, by its index in the document.
     assert [
-        {k: v for k, v in g.items() if k != "index"} for g in record["gt"]
+        {k: v for k, v in g.items() if k != "index"} for g in record.gt
     ] == gt_records(listed)
-    assert [g["index"] for g in record["gt"]] == [0, 1]
+    assert [g["index"] for g in record.gt] == [0, 1]
 
 
 def test_a_detectors_record_reads_both_sides_on_the_stored_grid(
@@ -1759,13 +1763,13 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(
         cap=2,
         mask_cut=None,
     )
-    assert [g["bbox"] for g in record["gt"]] == [[10.3, 20.7, 29.8, 40.2]]
-    assert [d["bbox"] for d in record["dt"]] == [[10.1, 10.1, 30.2, 20.2]]
+    assert [g["bbox"] for g in record.gt] == [[10.3, 20.7, 29.8, 40.2]]
+    assert [d["bbox"] for d in record.dt] == [[10.1, 10.1, 30.2, 20.2]]
 
 
 def _reference_records(
     tmp_path: Path, reference: list, detections: list
-) -> list[dict]:
+) -> list[EvaluationRecord]:
     """Return one image's records, its reference read back through the label document."""
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 

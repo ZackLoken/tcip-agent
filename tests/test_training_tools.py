@@ -1674,7 +1674,7 @@ def test_get_worst_predictions_reads_canonical_confidence(
     pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.vision_tools import get_worst_predictions
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import label_image, write_image
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
@@ -1695,15 +1695,12 @@ def test_get_worst_predictions_reads_canonical_confidence(
         tmp_path,
         "preds",
         [
-            {
-                "image": str(image),
-                "width": 100,
-                "height": 100,
-                "boxes": [[10.0, 10.0, 40.0, 22.0]] * len(scores),
-                "scores": scores,
-                "labels": [1] * len(scores),
-                "cap": len(scores) + 1,
-            }
+            detection_pass(
+                image,
+                (100, 100),
+                [detected((10.0, 10.0, 40.0, 22.0), s) for s in scores],
+                cap=len(scores) + 1,
+            )
             for image, scores in scored.items()
         ],
         scope={"subject": "bud"},

@@ -23,7 +23,7 @@ SCORED_AT = ["--iou-threshold", "0.5", "--conf-threshold", "0.25"]
 def _fixture(tmp_path: Path) -> tuple[Path, str]:
     """Write an image, its label document and a published bucket; return image and bucket name."""
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import label_image
 
     img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
@@ -35,15 +35,9 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
         tmp_path,
         "baseline",
         [
-            {
-                "image": str(img),
-                "width": 100,
-                "height": 80,
-                "boxes": [[1.0, 1.0, 40.0, 30.0]],
-                "scores": [0.9],
-                "labels": [1],
-                "cap": 2,
-            }
+            detection_pass(
+                img, (100, 80), [detected((1.0, 1.0, 40.0, 30.0), 0.9)], cap=2
+            )
         ],
         scope={"subject": "bud"},
     )

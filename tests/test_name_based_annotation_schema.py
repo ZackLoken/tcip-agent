@@ -170,11 +170,9 @@ def test_loader_filters_by_subject_and_geometry(tmp_path: Path) -> None:
 
 # (f) the encoder decodes a prediction's attribute ids through the scope the loader read under.
 def test_decode_inverts_the_recorded_scope(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.postprocessing.export import (
-        DetectionResult,
-        encode_predictions,
-    )
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tcip_mcp.subject_registry import Attribute
+    from tests._chain_fixtures import detected, detection_pass
 
     scope = scope_over(
         tmp_path,
@@ -183,13 +181,10 @@ def test_decode_inverts_the_recorded_scope(tmp_path: Path) -> None:
     )
 
     data, _dropped = encode_predictions(
-        DetectionResult(
-            image="pred.jpg",
-            boxes=[(10, 10, 40, 40)],
-            scores=[0.9],
-            attributes=[[1]],
-            width=640,
-            height=480,
+        detection_pass(
+            "pred.jpg",
+            (640, 480),
+            [detected((10, 10, 40, 40), 0.9, attributes=[1])],
             cap=2,
         ),
         created_by="model:x",
@@ -442,8 +437,8 @@ def test_records_from_annotation_honors_a_global_name_id() -> None:
         cap=None,
         name_id=name_id,
     )
-    assert {r["category_id"] for r in rec["gt"]} == {2}
-    assert {r["category_id"] for r in rec["dt"]} == {2}
+    assert {r["category_id"] for r in rec.gt} == {2}
+    assert {r["category_id"] for r in rec.dt} == {2}
 
 
 def test_uppercase_extension_image_still_yields_boxes(tmp_path: Path) -> None:

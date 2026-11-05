@@ -67,11 +67,10 @@ def _picker() -> dict[str, JsonValue]:
     its name.
     """
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.pipelines.postprocessing.export import DetectionResult
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tcip_mcp.workspace import ProjectRemoval
     from tcip_web.routes.projects import RemovalRequest, RenameRequest
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import (
         box_annotation,
         label_image,
@@ -111,14 +110,12 @@ def _picker() -> dict[str, JsonValue]:
             valley.root,
             f"baseline/{one_labeled}",
             [
-                DetectionResult(
-                    image=str(one),
-                    width=100,
-                    height=80,
-                    boxes=[(10.0, 10.0, 40.0, 30.0)],
-                    scores=[0.9],
+                detection_pass(
+                    one,
+                    (100, 80),
+                    [detected((10.0, 10.0, 40.0, 30.0), 0.9)],
                     cap=2,
-                ).model_dump()
+                )
             ],
             scope={"subject": SUBJECT},
         )

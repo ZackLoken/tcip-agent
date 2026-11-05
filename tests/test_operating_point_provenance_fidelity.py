@@ -6,10 +6,15 @@ against the floor it was collected at.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tests import _trait_fixtures as fx
 from tests._training_values import COUNT_TEST
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
 
 pytest.importorskip("torch")
 
@@ -24,17 +29,14 @@ ENTRY = fx.with_fields(
 
 def _records(
     prefix: str, offset: float, *, stray: tuple[dict, ...] = ()
-) -> list[dict]:
-    """Return ``N_IMAGES`` records built by ``evaluation.prediction_record``.
+) -> list[EvaluationRecord]:
+    """Return ``N_IMAGES`` whole-frame evaluation records.
 
     Each image's 40 px GT boxes, 100 px apart from ``offset``, each get a detection at the same
     box scored 0.9, and ``stray`` is appended unchanged to the first image's detections.
     """
-    from tcip_mcp.pipelines.training.evaluation import (
-        dt_record,
-        gt_record,
-        prediction_record,
-    )
+    from tcip_mcp.pipelines.training.evaluation import dt_record, gt_record
+    from tests._dense_op_fixtures import whole_frame_record
 
     recs = []
     for i in range(N_IMAGES):
@@ -46,13 +48,12 @@ def _records(
             stray if i == 0 else ()
         )
         recs.append(
-            prediction_record(
+            whole_frame_record(
                 dt,
                 [gt_record(box, 1, 0) for box in boxes],
                 width=4000,
                 height=1000,
                 cap=len(dt) + 1,
-                count=len(dt),
                 image_id=f"{prefix}{i}",
             )
         )

@@ -74,21 +74,18 @@ def _publish(root: Path, date: str, preds: dict[Path, list[float]]) -> str:
     for an empty list).
     """
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     return published(
         root.parent,
         f"baseline/{date}",
         [
-            {
-                "image": str(image),
-                "width": 100,
-                "height": 100,
-                "boxes": [[10.0, 10.0, 20.0, 20.0]] * len(scores),
-                "scores": scores,
-                "labels": [1] * len(scores),
-                "cap": len(scores) + 1,
-            }
+            detection_pass(
+                image,
+                (100, 100),
+                [detected((10.0, 10.0, 20.0, 20.0), s) for s in scores],
+                cap=len(scores) + 1,
+            )
             for image, scores in preds.items()
         ],
         scope={"subject": "bud"},

@@ -237,11 +237,11 @@ class TestActiveLearningScoringLogic:
 
     def test_review_queue(self) -> None:
         from tcip_mcp.pipelines.active_learning.selector import review_queue
+        from tests._chain_fixtures import detected, detection_pass
 
         predictions = [
-            {"image": "a.png", "scores": [0.95]},
-            {"image": "b.png", "scores": [0.5]},
-            {"image": "c.png", "scores": [0.2]},
+            detection_pass(name, (8, 8), [detected((0, 0, 1, 1), s)], cap=2)
+            for name, s in (("a.png", 0.95), ("b.png", 0.5), ("c.png", 0.2))
         ]
         queue = review_queue(predictions, low=0.3, high=0.8)
         assert len(queue) == 1  # only b.png

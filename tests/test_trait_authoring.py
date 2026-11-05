@@ -453,27 +453,25 @@ def _bucket(
     """
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import image_dir
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import registry_of
 
     return published(
         project,
         f"run/{date}",
         [
-            {
-                "image": str(image),
-                "width": 8,
-                "height": 8,
-                "boxes": [[1.0, 1.0, 3.0, 3.0]],
-                "scores": [0.9],
-                "labels": [1],
-                "cap": 2,
-                **(
-                    {"attributes": [[len(a.values) - 1 for a in attributes]]}
-                    if attributes
-                    else {}
-                ),
-            }
+            detection_pass(
+                image,
+                (8, 8),
+                [
+                    detected(
+                        (1.0, 1.0, 3.0, 3.0),
+                        0.9,
+                        attributes=[len(a.values) - 1 for a in attributes],
+                    )
+                ],
+                cap=2,
+            )
             for image in images or [image_dir(project / "ds", date) / "P1.png"]
         ],
         scope={"subject": "bud"},

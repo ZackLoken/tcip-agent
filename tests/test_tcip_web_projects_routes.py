@@ -103,7 +103,7 @@ def test_projects_report_per_date_subject_model_availability(
     # 03-24 has images but nothing labeled. One name-based label document per image.
     pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import label_image
 
     proj = _make_project(
@@ -128,15 +128,12 @@ def test_projects_report_per_date_subject_model_availability(
         proj,
         "baseline/2026-02-11",
         [
-            {
-                "image": str(image_dir(proj, "2026-02-11") / "img.png"),
-                "width": 8,
-                "height": 8,
-                "boxes": [[1.0, 1.0, 7.0, 7.0]],
-                "scores": [0.9],
-                "labels": [1],
-                "cap": 2,
-            }
+            detection_pass(
+                image_dir(proj, "2026-02-11") / "img.png",
+                (8, 8),
+                [detected((1.0, 1.0, 7.0, 7.0), 0.9)],
+                cap=2,
+            )
         ],
         scope={"subject": "bud"},
     )

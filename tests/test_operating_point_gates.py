@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
     from tcip_mcp.traits import TraitEntry
 
 torch = pytest.importorskip(
@@ -25,8 +26,10 @@ from tcip_mcp.pipelines.operating_point import (
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import (  # noqa: E402
     _box,
+    ann,
     dense_records,
     toy_records as _records,  # noqa: E402
+    whole_frame_record,
 )
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
@@ -41,8 +44,8 @@ reaches it unless a test states a stricter one."""
 
 
 def _criterion(
-    cal: list[dict],
-    hold: list[dict],
+    cal: list[EvaluationRecord],
+    hold: list[EvaluationRecord],
     *,
     entry: TraitEntry = ENTRY,
     floor: float = 0.01,
@@ -63,7 +66,7 @@ def _criterion(
 # ── Exact-conf holdout evaluation, not a nearest-neighbor snap ─────────────
 
 
-def _cal_picks_conf_point_nine() -> list[dict]:
+def _cal_picks_conf_point_nine() -> list[EvaluationRecord]:
     """Return a 20-image dense calibration reference whose count-unbiased pick is exactly 0.9.
 
     Each image carries one low-conf spurious detection, scoring 0.05.
@@ -118,7 +121,7 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
         fp_pattern=[0] * n,
         score=0.05,
     )
-    assert {d["score"] for r in hold for d in r["dt"]} == {0.05}
+    assert {d["score"] for r in hold for d in r.dt} == {0.05}
 
     old = _nearest_neighbor_bias_comparator(
         hold, 0.5 * gt_class_avg_size(hold), 0.9
@@ -172,7 +175,7 @@ def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_
 
 def _tp_zero_bias_zero_records(
     id_prefix: str, *, n_images: int = 10, objects_per_image: int = 50
-) -> list[dict]:
+) -> list[EvaluationRecord]:
     """Return ``n_images`` records of ``objects_per_image`` GT boxes and as many detections.
 
     The GT boxes are 20 px, laid on a 40 px grid, and each detection, scored 0.9, sits 2000 px
@@ -190,15 +193,14 @@ def _tp_zero_bias_zero_records(
                 {"category_id": 0, "bbox": _box(cx + 2000, cy), "score": 0.9}
             )
         records.append(
-            {
-                "width": 4000,
-                "height": 4000,
-                "image_id": f"{id_prefix}_{i}",
-                "gt": gt,
-                "dt": dt,
-                "count": len(dt),
-                "cap": len(dt) + 1,
-            }
+            whole_frame_record(
+                dt,
+                gt,
+                width=4000,
+                height=4000,
+                cap=len(dt) + 1,
+                image_id=f"{id_prefix}_{i}",
+            )
         )
     return records
 
@@ -295,15 +297,9 @@ def test_an_all_negative_calibration_or_holdout_fails_as_insufficient() -> (
 ):
     real = _records("c")
     all_negative = [
-        {
-            "width": 400,
-            "height": 400,
-            "image_id": f"n_{i}",
-            "gt": [],
-            "dt": [],
-            "count": 0,
-            "cap": 1,
-        }
+        whole_frame_record(
+            [], [], width=400, height=400, cap=1, image_id=f"n_{i}"
+        )
         for i in range(3)
     ]
 
@@ -348,15 +344,9 @@ def test_padding_with_empty_records_cannot_dilute_the_equivalence_test() -> (
     loosened = fx.with_fields(ENTRY, count_bias_tolerance_frac=1.0)
     hold_real = _records("h", shift=3.0)
     padding = [
-        {
-            "width": 400,
-            "height": 400,
-            "image_id": f"h_pad_{i}",
-            "gt": [],
-            "dt": [],
-            "count": 0,
-            "cap": 1,
-        }
+        whole_frame_record(
+            [], [], width=400, height=400, cap=1, image_id=f"h_pad_{i}"
+        )
         for i in range(8)
     ]
 
@@ -397,14 +387,22 @@ def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(
 
 
 def test_cap_saturated_frac_is_the_share_of_records_that_hit_the_cap() -> None:
-    assert cap_saturated_frac(
-        [{"count": 4, "cap": 4}, {"count": 3, "cap": 4}]
-    ) == (pytest.approx(0.5))
+    four, three = (
+        whole_frame_record(
+            [ann(10.0 * k, 10.0, score=0.9) for k in range(n)],
+            [],
+            width=100,
+            height=100,
+            cap=4,
+        )
+        for n in (4, 3)
+    )
+    assert cap_saturated_frac([four, three]) == (pytest.approx(0.5))
     assert cap_saturated_frac([]) == 0.0
 
 
 def test_cap_saturation_is_surfaced_but_never_fails_the_criterion() -> None:
-    cal = [dict(r, cap=r["count"]) for r in _records("c")]
+    cal = [r.model_copy(update={"cap": r.frame_count}) for r in _records("c")]
     _conf, evidence, failures = _criterion(
         cal, _records("h", shift=3.0), floor=0.3
     )
@@ -586,7 +584,7 @@ def _mixed_reference(
     objects_per_image: int,
     fp_per_loaded: int,
     shift: float = 0.0,
-) -> list[dict]:
+) -> list[EvaluationRecord]:
     """Return ``dense_records`` of ``n_loaded`` images, then of ``n_negative`` images of no objects.
 
     The loaded images pass ``objects_per_image``, ``shift``, no misses and ``fp_per_loaded`` extra
@@ -678,7 +676,9 @@ def test_a_clean_detector_still_passes_on_a_reference_full_of_negatives() -> (
 def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard() -> (
     None
 ):
-    def _hallucinating(id_prefix: str, shift: float = 0.0) -> list[dict]:
+    def _hallucinating(
+        id_prefix: str, shift: float = 0.0
+    ) -> list[EvaluationRecord]:
         loaded = dense_records(
             n_images=10,
             objects_per_image=100,

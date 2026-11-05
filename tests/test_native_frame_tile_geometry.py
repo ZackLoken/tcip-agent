@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.generic_predictor import (
         WindowedRasterReader,
     )
+    from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
     from tcip_mcp.pipelines.schemas import AugmentationSpec
 
 pytest.importorskip("torch")
@@ -155,7 +156,7 @@ def _sliced(
     *,
     tile_resize: tuple[int, int] | None,
     **kwargs: str | dict | Callable[[int, int, dict], None] | None,
-) -> dict:
+) -> DetectionPass | HeadPass:
     """Run ``predict_sliced`` at this module's lattice.
 
     The lattice is a ``TILE`` edge, no overlap, and NMS at the sample merge threshold
@@ -365,7 +366,7 @@ def test_tiles_at_native_size_with_no_recorded_resize(tmp_path: Path) -> None:
 
     r = _sliced(pred, gray_frame(tmp_path, IMAGE), tile_resize=None)
 
-    assert {tuple(b) for b in r["boxes"]} == _expected_middle_half_boxes()
+    assert {d.box for d in r.detections} == _expected_middle_half_boxes()
 
 
 def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detectors_own(
@@ -381,7 +382,7 @@ def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detector
 
     r = _sliced(pred, gray_frame(tmp_path, IMAGE), tile_resize=(128, 96))
 
-    boxes = sorted(tuple(round(v, 4) for v in b) for b in r["boxes"])
+    boxes = sorted(tuple(round(v, 4) for v in d.box) for d in r.detections)
     assert boxes == sorted(_expected_middle_half_boxes())
 
 
@@ -409,7 +410,7 @@ def test_a_windowed_raster_source_is_resized_and_undone_the_same_way() -> None:
     r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
     assert {
-        tuple(round(v, 4) for v in b) for b in r["boxes"]
+        tuple(round(v, 4) for v in d.box) for d in r.detections
     } == _expected_middle_half_boxes()
 
 
@@ -442,7 +443,7 @@ def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way() -> 
     r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
     assert {
-        tuple(round(v, 4) for v in b) for b in r["boxes"]
+        tuple(round(v, 4) for v in d.box) for d in r.detections
     } == _expected_middle_half_boxes()
 
 
@@ -743,8 +744,8 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
         )
     )
     assert (
-        {tuple(b) for b in r_p["boxes"]}
-        == {tuple(b) for b in r_n["boxes"]}
+        {d.box for d in r_p.detections}
+        == {d.box for d in r_n.detections}
         == _expected_middle_half_boxes()
     )
 

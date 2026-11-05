@@ -232,10 +232,10 @@ def test_records_from_annotation_omits_a_point_and_its_category() -> None:
         height=80,
         cap=None,
     )
-    assert len(rec["gt"]) == 1 and len(rec["dt"]) == 1
+    assert len(rec.gt) == 1 and len(rec.dt) == 1
     # 'prompt' minted no category, so the box keeps id 1 rather than being pushed to 2 by a subject
     # that contributes no record at all.
-    assert rec["gt"][0]["category_id"] == 1
+    assert rec.gt[0]["category_id"] == 1
 
 
 # ── triage heuristics / phenology counts ─────────────────────────────────────
@@ -506,7 +506,7 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
     client: TestClient, tmp_path: Path
 ) -> None:
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._web_fixtures import open_new_project
 
     tmp_path = open_new_project(tmp_path / "proj").root
@@ -518,15 +518,12 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
         tmp_path,
         "baseline/2026-01-01",
         [
-            {
-                "image": str(img),
-                "width": 100,
-                "height": 80,
-                "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]],
-                "scores": [0.9],
-                "labels": [1],
-                "cap": 2,
-            }
+            detection_pass(
+                img,
+                (100, 80),
+                [detected((BOX.x1, BOX.y1, BOX.x2, BOX.y2), 0.9)],
+                cap=2,
+            )
         ],
         scope={"subject": "bud"},
     )

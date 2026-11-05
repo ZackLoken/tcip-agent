@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.pipelines.derivations import Region
     from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
 
 torch = pytest.importorskip(
     "torch"
@@ -30,6 +31,7 @@ from tests._dense_op_fixtures import (  # noqa: E402
     ann as _ann,  # noqa: E402
     dense_records,
     toy_records as _records,  # noqa: E402
+    whole_frame_record,
 )
 from tests._training_values import DISPERSION_QUANTILE  # noqa: E402
 
@@ -68,16 +70,13 @@ def test_count_unbiased_differs_from_f1_max() -> None:
 
 def test_center_match_respects_tolerance() -> None:
     # a correct detection just outside tolerance must not count as a hit
-    from tcip_mcp.pipelines.training.evaluation import prediction_record
-
     recs = [
-        prediction_record(
+        whole_frame_record(
             [_ann(100 + 100, 100, score=0.9)],
             [_ann(100, 100)],
             width=400,
             height=400,
             cap=None,
-            count=1,
         )
     ]  # 100px off, tolerance ~10
     sweep = derive_operating_point_curve(
@@ -122,11 +121,9 @@ def test_sweep_curve_carries_dispersion_and_reference_size_fields() -> None:
 
 
 def test_the_curve_evaluates_every_distinct_calibration_score() -> None:
-    from tcip_mcp.pipelines.training.evaluation import prediction_record
-
     scores = [round(0.01 + 0.0097 * i, 6) for i in range(101)]
     recs = [
-        prediction_record(
+        whole_frame_record(
             [
                 _ann(20 + 30 * (i % 50), 100, 1, score=s)
                 for i, s in enumerate(scores)
@@ -135,7 +132,6 @@ def test_the_curve_evaluates_every_distinct_calibration_score() -> None:
             width=4000,
             height=400,
             cap=None,
-            count=len(scores),
         )
     ]
     sweep = derive_operating_point_curve(
@@ -184,29 +180,26 @@ def test_the_object_density_is_its_quantile_over_the_object_bearing_regions() ->
 # --- the cross-tile merge threshold ---
 
 
-def _overlap_records(idp: str = "d") -> list[dict]:
+def _overlap_records(idp: str = "d") -> list[EvaluationRecord]:
     """Return records ``{idp}_0`` and ``{idp}_1``, each of three 20 px GT boxes 8 px apart.
 
     Each GT box is detected at 0.9.
     """
-    from tcip_mcp.pipelines.training.evaluation import prediction_record
-
     centers = [100, 108, 116]  # neighbor IoU ~0.43
     return [
-        prediction_record(
+        whole_frame_record(
             [_ann(x, 100, 1, score=0.9) for x in centers],
             [_ann(x, 100, 1) for x in centers],
             width=400,
             height=400,
             cap=None,
-            count=len(centers),
             image_id=f"{idp}_{i}",
         )
         for i in range(2)
     ]
 
 
-def _regions(records: list[dict]) -> list[Region]:
+def _regions(records: list[EvaluationRecord]) -> list[Region]:
     """Return each record's ground truth as the region of its objects over its frame."""
     from tests._verified_checkpoint_fixtures import objects_over
 
@@ -214,9 +207,9 @@ def _regions(records: list[dict]) -> list[Region]:
         objects_over(
             [
                 [x, y, x + w, y + h]
-                for x, y, w, h in (a["bbox"] for a in rec["gt"])
+                for x, y, w, h in (a["bbox"] for a in rec.gt)
             ],
-            rec["width"] * rec["height"],
+            rec.width * rec.height,
         )
         for rec in records
     ]
@@ -239,7 +232,9 @@ def test_no_overlapping_ground_truth_derives_no_merge_threshold() -> None:
     assert derive_cross_tile_nms(_regions(_records("c"))) is None
 
 
-def _tiled_pass(tmp_path: Path, records: list[dict], **stated: float) -> Pass:
+def _tiled_pass(
+    tmp_path: Path, records: list[EvaluationRecord], **stated: float
+) -> Pass:
     """Return a verified checkpoint's tiled pass, made runnable from ``records``' ground truth.
 
     The pass runs at the sample conf and merges by NMS.
@@ -288,18 +283,16 @@ def test_a_tiled_passs_derived_merge_threshold_is_the_method_its_label_names(
 
     import numpy as np
 
-    from tcip_mcp.pipelines.training.evaluation import prediction_record
     from tests.test_derivations import _label_percentile
 
     offsets = range(1, 16)
     records = [
-        prediction_record(
+        whole_frame_record(
             [],
             [_ann(110, 110, 1), _ann(110 + d, 110, 1)],
             width=400,
             height=400,
             cap=None,
-            count=0,
             image_id=f"o_{d}",
         )
         for d in offsets

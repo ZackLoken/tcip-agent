@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict
+
+from tcip_mcp.pipelines.inference.passes import (
+    Detection,
+    DetectionPass,
+    HeadPass,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,14 +53,15 @@ class SliceBatch(BaseModel):
     """Lattice slices a sliced pass predicted, with their shifted predictions.
 
     ``slices`` are ``(x0, y0, x1, y1)`` (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) and
-    ``predictions`` their full-frame rows (:func:`~tcip_mcp.pipelines.slicing.prediction_rows`):
-    one tile batch's, or every recorded batch's together as an interrupted pass's prior.
+    ``predictions`` their full-frame detections
+    (:func:`~tcip_mcp.pipelines.slicing.prediction_rows`): one tile batch's, or every recorded
+    batch's together as an interrupted pass's prior.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     slices: list[tuple[int, int, int, int]]
-    predictions: list[dict[str, JsonValue]]
+    predictions: list[Detection]
 
 
 class WindowedRasterReader(Protocol):
@@ -134,7 +141,7 @@ class GenericPredictor:
     @torch.no_grad()
     def predict(
         self, image_path: str | Path | BandGroupRef, execution: Execution
-    ) -> dict:
+    ) -> DetectionPass | HeadPass:
         """Run inference on a single image under the untiled ``execution`` record.
 
         The image is a plain path/string or a :class:`BandGroupRef`.
@@ -153,7 +160,7 @@ class GenericPredictor:
         *,
         tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
         batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
-    ) -> list[dict]:
+    ) -> list[DetectionPass | HeadPass]:
         """Run inference on multiple images under ``execution``, sliced when it is a tiled record.
 
         Detection takes ``batch_size`` images at a time, one forward per distinct frame cap among
@@ -185,11 +192,11 @@ class GenericPredictor:
 
     def _predict_whole(
         self, sources: list[str | Path | BandGroupRef], execution: Execution
-    ) -> list[dict]:
-        """Return the detection record of each of ``sources`` under ``execution``.
+    ) -> list[DetectionPass]:
+        """Return the detector pass over each of ``sources`` under ``execution``.
 
         Each source is decoded whole as one slice the size of its frame at shift zero and run
-        under its own frame's cap, each result built by :meth:`_detection_record` under the cap
+        under its own frame's cap, each pass built by :meth:`_detection_pass` under the cap
         its forward ran at; under an :attr:`~tcip_mcp.pipelines.execution.Execution.uncut` record
         each carries ``soft_masks``, each detection's uncut mask as the model kept it
         (``slicing.TcipDetectionModel.soft_masks``).
@@ -214,16 +221,14 @@ class GenericPredictor:
         )
         uncut = execution.uncut
         return [
-            {
-                **self._detection_record(
-                    preds,
-                    source_path_of(s),
-                    *frame_size(a),
-                    model=model,
-                    cap=cap,
-                ),
-                **({"soft_masks": soft} if uncut else {}),
-            }
+            self._detection_pass(
+                preds,
+                source_path_of(s),
+                *frame_size(a),
+                model=model,
+                cap=cap,
+                soft_masks=soft if uncut else None,
+            )
             for preds, s, a, cap, soft in zip(
                 model.object_prediction_list_per_image,
                 sources,
@@ -234,7 +239,7 @@ class GenericPredictor:
             )
         ]
 
-    def _detection_record(
+    def _detection_pass(
         self,
         predictions: list[ObjectPrediction],
         label: str,
@@ -243,37 +248,30 @@ class GenericPredictor:
         *,
         model: TcipDetectionModel,
         cap: int,
-    ) -> dict:
-        """Return the platform's detection record from ``ObjectPrediction``s in full-frame pixels.
+        soft_masks: list[tuple[np.ndarray, tuple[int, int]]] | None,
+    ) -> DetectionPass:
+        """Return the detector pass of ``ObjectPrediction``s in full-frame pixels, as ``label``.
 
         The predictions are as the forward or the merge that capped them at ``cap`` left them, of
-        the ``width`` x ``height`` frame. The record holds ``image``, ``width``, ``height``,
-        ``boxes`` (xyxy), ``scores``, ``labels`` (1-indexed), ``count`` (their number) and ``cap``;
-        where the checkpoint carries attributes, ``attributes``, one id per attribute per
-        detection; where ``model``'s record collects masks and cuts them, ``masks`` as one
-        ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection, empty where the mask
-        binarized to nothing.
+        the ``width`` x ``height`` frame, each its
+        :func:`~tcip_mcp.pipelines.slicing.prediction_rows` detection; where ``model``'s record
+        cuts masks, a detection whose mask binarized to nothing carries an empty one.
         """
         from tcip_mcp.pipelines.slicing import prediction_rows
 
-        kept = prediction_rows(predictions, self.attribute_sizes)
-        record = {
-            "image": label,
-            "width": int(width),
-            "height": int(height),
-            "boxes": [row["bbox"] for row in kept],
-            "scores": [row["score"] for row in kept],
-            "labels": [row["category_id"] for row in kept],
-            "count": len(kept),
-            "cap": cap,
-        }
-        if self.attribute_sizes:
-            record["attributes"] = [row["attributes"] for row in kept]
+        detections = prediction_rows(predictions, self.attribute_sizes)
         if model.execution.mask_cut is not None:
-            record["masks"] = [
-                {"segmentation": row["segmentation"] or []} for row in kept
+            detections = [
+                d.model_copy(update={"mask": d.mask or []}) for d in detections
             ]
-        return record
+        return DetectionPass(
+            image=label,
+            width=int(width),
+            height=int(height),
+            cap=cap,
+            detections=detections,
+            soft_masks=soft_masks,
+        )
 
     @torch.no_grad()
     def predict_sliced(
@@ -285,7 +283,7 @@ class GenericPredictor:
         source_label: str = "",
         prior: SliceBatch | None = None,
         progress: Callable[[int, int, SliceBatch], None] | None = None,
-    ) -> dict:
+    ) -> DetectionPass | HeadPass:
         """Run sliced detection over one source under a tiled ``execution`` record.
 
         The source is cut on SAHI's lattice (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) at
@@ -304,14 +302,13 @@ class GenericPredictor:
         reader.
 
         The record's ``tile_resize`` stretches each slice and maps the result back; a slice PIL
-        does not represent faithfully refuses (``ValueError``). A record collecting masks adds
-        ``masks``, one ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection: the
-        merged SAHI polygons in full-frame pixels, empty where the mask binarized to nothing.
+        does not represent faithfully refuses (``ValueError``). Under a record cutting masks, each
+        detection's mask is its merged SAHI polygons in full-frame pixels.
 
         ``prior`` seeds a reader's pass with the :class:`SliceBatch` an interrupted pass recorded,
         and its slices are skipped; ``progress`` is called once per live batch with its first and
         last slice index and its :class:`SliceBatch`. Both refuse on a decoded source. Returns the
-        detection record (:meth:`_detection_record`) with ``tiles``, the lattice's slice count.
+        detector pass (:meth:`_detection_pass`).
         """
         from tcip_mcp.pipelines.slicing import (
             cross_tile_merge,
@@ -409,23 +406,31 @@ class GenericPredictor:
             merge(predictions) if predictions else [],
             key=lambda p: -p.score.value,
         )[:frame_cap]
-        return {
-            **self._detection_record(
-                merged, label, width, height, model=model, cap=frame_cap
-            ),
-            "tiles": len(slices),
-        }
+        return self._detection_pass(
+            merged,
+            label,
+            width,
+            height,
+            model=model,
+            cap=frame_cap,
+            soft_masks=None,
+        )
 
     def _format_other(
         self, outputs: dict, image_path: str, w: int, h: int
-    ) -> dict:
-        result: dict = {"image": image_path, "width": w, "height": h}
+    ) -> HeadPass:
+        """Return a non-detector head's ``outputs`` as the pass over the ``w`` x ``h`` image.
+
+        Each tensor output becomes nested lists under its own name, any other output stays as
+        returned, and a bare tensor output is named ``output``.
+        """
+        named: dict = {}
         if isinstance(outputs, dict):
             for k, v in outputs.items():
                 if isinstance(v, torch.Tensor):
-                    result[k] = v.cpu().tolist()
+                    named[k] = v.cpu().tolist()
                 else:
-                    result[k] = v
+                    named[k] = v
         elif isinstance(outputs, torch.Tensor):
-            result["output"] = outputs.cpu().tolist()
-        return result
+            named["output"] = outputs.cpu().tolist()
+        return HeadPass(image=image_path, width=w, height=h, outputs=named)

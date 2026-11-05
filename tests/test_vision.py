@@ -77,21 +77,21 @@ def viz_bucket(viz_dataset: WrittenDataset) -> WrittenDataset:
     The bucket is published through ``_chain_fixtures.published``.
     """
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
 
     published(
         viz_dataset.root,
         PUBLISHED,
         [
-            {
-                "image": str(image),
-                "width": 640,
-                "height": 480,
-                "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]],
-                "scores": [0.95, 0.6],
-                "labels": [1, 1],
-                "cap": 3,
-            }
+            detection_pass(
+                image,
+                (640, 480),
+                [
+                    detected((288, 216, 352, 264), 0.95),
+                    detected((496, 372, 528, 396), 0.6),
+                ],
+                cap=3,
+            )
             for image in viz_dataset.images
         ],
         scope={"subject": "bud"},
@@ -574,7 +574,7 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
     pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.annotation_tools import score_predictions
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import detected, detection_pass, published
     from tests._producer_fixtures import label_image
 
     image = write_image(
@@ -597,15 +597,15 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
         tmp_path,
         PUBLISHED,
         [
-            {
-                "image": str(image),
-                "width": 640,
-                "height": 480,
-                "boxes": [[288, 216, 352, 264], [100, 350, 200, 450]],
-                "scores": [0.95, 0.9],
-                "labels": [1, 1],
-                "cap": 3,
-            }
+            detection_pass(
+                image,
+                (640, 480),
+                [
+                    detected((288, 216, 352, 264), 0.95),
+                    detected((100, 350, 200, 450), 0.9),
+                ],
+                cap=3,
+            )
         ],
         scope={"subject": "bud"},
     )
