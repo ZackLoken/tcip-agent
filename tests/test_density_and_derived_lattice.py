@@ -168,14 +168,9 @@ def _in_model_caps(model: nn.Module) -> list:
 
     Each forward appends its value as it runs.
     """
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-    )
-
-    holder, _path = detector_operating_point_holder(model)
     caps: list = []
     model.register_forward_pre_hook(
-        lambda _module, _args: caps.append(holder.detections_per_img)
+        lambda module, _args: caps.append(module.detections_per_img)
     )
     return caps
 

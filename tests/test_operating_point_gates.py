@@ -55,7 +55,6 @@ def _criterion(
         hold,
         entry,
         staged_conf_floor=floor,
-        staged_conf_floor_attribute_path=None,
         equivalence_z=equivalence_z,
         dispersion_quantile=dispersion_quantile,
     )

@@ -1,9 +1,7 @@
-"""Where a detector's operating-point knobs live, resolved apart from what a call applies.
+"""A detection model's two operating-point knobs, on the model itself and honored by its forward.
 
-The knobs live on the module itself, its ``.detector.roi_heads``, or its ``.detector``. A module
-exposing its knobs on itself, with no ``.detector`` to route through, reaches a validated operating
-point through :func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`, and a
-knob set on a model exposing none refuses naming it.
+The knobs are set on the model, a knob set on a model exposing none refuses naming it, and a
+module exposing both is assessed at its stated floor.
 """
 
 from __future__ import annotations
@@ -80,80 +78,16 @@ def _built(model_source: dict) -> nn.Module:
     )
 
 
-def test_holder_resolves_to_the_module_itself_with_no_detector() -> None:
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-    )
-
-    model = SimpleNamespace(score_thresh=0.5)
-    holder, path = detector_operating_point_holder(model)
-    assert holder is model and path == "self"
-
-
-def test_holder_resolves_to_detector_roi_heads_for_a_two_stage_wrapper() -> (
-    None
-):
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-    )
-
-    roi_heads = SimpleNamespace(score_thresh=0.5)
-    model = SimpleNamespace(detector=SimpleNamespace(roi_heads=roi_heads))
-    holder, path = detector_operating_point_holder(model)
-    assert holder is roi_heads and path == "detector.roi_heads"
-
-
-def test_holder_resolves_to_detector_itself_for_a_one_stage_wrapper() -> None:
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-    )
-
-    detector = SimpleNamespace(score_thresh=0.5)
-    model = SimpleNamespace(detector=detector)
-    holder, path = detector_operating_point_holder(model)
-    assert holder is detector and path == "detector"
-
-
-def test_holder_is_none_when_nothing_exposes_a_knob() -> None:
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-    )
-
-    model = SimpleNamespace(unrelated=1)
-    holder, path = detector_operating_point_holder(model)
-    assert holder is None and path is None
-
-
-def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_a_knob() -> (
-    None
-):
-    """The holder refuses a module whose knob sits both on itself and on its detector's heads."""
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-    )
-
-    model = SimpleNamespace(
-        score_thresh=0.5,
-        detector=SimpleNamespace(roi_heads=SimpleNamespace(score_thresh=0.5)),
-    )
-
-    with pytest.raises(ValueError, match="more than one location"):
-        detector_operating_point_holder(model)
-
-
 def test_a_built_detector_holds_both_knobs_on_itself_and_its_eval_forward_honors_them() -> (
     None
 ):
     """A built detector holds both knobs on itself, and its eval forward keeps to them.
 
-    The knobs land on the model itself, the holder its path names ``self``; at a floor of zero
-    and a cap of one a frame keeps its one highest-scoring detection of the two a cap of two
-    keeps, and at a floor above that score it keeps none.
+    The knobs land on the model itself; at a floor of zero and a cap of one a frame keeps its
+    one highest-scoring detection of the two a cap of two keeps, and at a floor above that score
+    it keeps none.
     """
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-        set_detector_operating_point,
-    )
+    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     model = _built(BUILT_DETECTOR).eval()
@@ -170,9 +104,7 @@ def test_a_built_detector_holds_both_knobs_on_itself_and_its_eval_forward_honors
         return out["scores"].tolist()
 
     two = kept(0.0, 2)
-    holder, path = detector_operating_point_holder(model)
-    assert (holder.score_thresh, holder.detections_per_img) == (0.0, 2)
-    assert holder is model and path == "self"
+    assert model.score_thresh == 0.0 and model.detections_per_img == 2
     assert len(two) == 2 and two[0] >= two[1], two
     assert kept(0.0, 1) == two[:1]
     assert kept(2 * two[0], 2) == []
@@ -269,19 +201,18 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
 def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor(
     tmp_path: Path,
 ) -> None:
-    """A bespoke module exposing its own knobs is assessed, its floor path recorded as ``self``.
+    """A bespoke module exposing its own knobs is assessed at its stated floor.
 
-    A hand-rolled, non-torchvision module exposing both knobs on itself is assessed without
-    error; the record names ``"self"`` as the floor's attribute path and reports no
+    A hand-rolled module exposing both knobs on itself is assessed without error; the count
+    evidence records the floor and no place the knobs were found, and the record reports no
     ``conf_censored`` failure.
     """
     record = _assessed(tmp_path, BARE_SCORE_THRESH_DETECTOR)
 
     assert "error" not in record, record
-    assert (
-        record["criterion"]["count"]["staged_conf_floor_attribute_path"]
-        == "self"
-    )
+    count = record["criterion"]["count"]
+    assert "staged_conf_floor" in count
+    assert "staged_conf_floor_attribute_path" not in count
     assert "conf_censored" not in record["failures"]
 
 
