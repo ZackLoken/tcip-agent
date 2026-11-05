@@ -29,7 +29,6 @@ def _criterion(
         hold,
         fx.COUNT_SPEC,
         staged_conf_floor=floor,
-        staged_conf_floor_attribute_path="self",
         **COUNT_TEST,
     )
 

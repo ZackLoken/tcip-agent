@@ -46,7 +46,6 @@ def _criterion(
         hold,
         ENTRY,
         staged_conf_floor=0.05,
-        staged_conf_floor_attribute_path="self",
         **COUNT_TEST,
     )
 

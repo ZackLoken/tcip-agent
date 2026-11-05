@@ -738,19 +738,14 @@ def _count_fit(
     calibration side derives over the matching that fit made (:func:`_mask_fit`). Returns
     ``(evidence, failures, calibration records, holdout records)``.
     """
-    from tcip_mcp.pipelines.operating_point import (
-        count_criterion,
-        detector_operating_point_holder,
-    )
+    from tcip_mcp.pipelines.operating_point import count_criterion
 
     cal_records, hold_records = collect(p.execution)
-    _, path = detector_operating_point_holder(p.predictor.model)
     held: dict = {}
     conf, evidence, failures = count_criterion(
         cal_records,
         hold_records,
         entry,
-        staged_conf_floor_attribute_path=path,
         staged_conf_floor=cast(float, p.execution.conf),
         equivalence_z=equivalence_z,
         dispersion_quantile=dispersion_quantile,

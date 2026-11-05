@@ -1555,7 +1555,6 @@
               "holdout_missing_classes": [],
               "equivalence_z": 1.645,
               "staged_conf_floor": 0.01,
-              "staged_conf_floor_attribute_path": "self",
               "observed_min_score": 0.924356,
               "calibration_cap_saturated_frac": 1.0,
               "holdout_cap_saturated_frac": 1.0
@@ -2158,7 +2157,6 @@
               "holdout_missing_classes": [],
               "equivalence_z": 1.645,
               "staged_conf_floor": 0.999,
-              "staged_conf_floor_attribute_path": "self",
               "observed_min_score": null,
               "calibration_cap_saturated_frac": 0.0,
               "holdout_cap_saturated_frac": 0.0
@@ -2770,7 +2768,6 @@
               "holdout_missing_classes": [],
               "equivalence_z": 1.645,
               "staged_conf_floor": 0.999,
-              "staged_conf_floor_attribute_path": "self",
               "observed_min_score": null,
               "calibration_cap_saturated_frac": 0.0,
               "holdout_cap_saturated_frac": 0.0

@@ -349,10 +349,7 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
         ClassificationHead,
         OrdinalHead,
     )
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-        set_detector_operating_point,
-    )
+    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tests import bespoke_models
     from tests._chain_fixtures import detector_values
     from tests._producer_fixtures import painted_array
@@ -361,7 +358,6 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
     model = getattr(bespoke_models, builder)(
         attributes=(GRADE, COLOR), **detector_values()
     )
-    assert detector_operating_point_holder(model) == (model, "self")
     grade_head, color_head = model.attribute_heads
     assert (type(grade_head), grade_head.num_ranks) == (OrdinalHead, 3)
     assert (type(color_head), color_head.num_classes) == (
@@ -402,6 +398,7 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
         return out
 
     out = kept(0.0)
+    assert (model.score_thresh, model.detections_per_img) == (0.0, 5)
     ids = out["attributes"]
     assert ids.dtype == torch.int64
     assert tuple(ids.shape) == (len(out["boxes"]), 2) and len(ids) == 5

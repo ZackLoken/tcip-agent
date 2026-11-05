@@ -91,70 +91,31 @@ SCORE_THRESH = "score_thresh"
 """The knob holding the least score a detection keeps in the model's own output."""
 DETECTIONS_PER_IMG = "detections_per_img"
 """The knob holding the most detections the model keeps for one frame."""
-OPERATING_POINT_ATTRS = (SCORE_THRESH, DETECTIONS_PER_IMG)
-"""The two knobs the detection operating point governs, wherever a module holds them."""
-
-
-def detector_operating_point_holder(
-    model: torch.nn.Module,
-) -> tuple[Any, str | None]:
-    """Return the holder of a model's operating-point knobs and its attribute path.
-
-    Checked in this order, the first that exposes any of :data:`OPERATING_POINT_ATTRS`: the module
-    itself, its ``.detector``'s ``roi_heads`` (two-stage detectors), its ``.detector`` (one-stage).
-    Returns ``(None, None)`` when no candidate exposes either.
-
-    Raises ``ValueError``, naming both locations, when more than one candidate exposes a knob.
-    """
-    det = getattr(model, "detector", None)
-    candidates = (
-        (model, "self"),
-        (getattr(det, "roi_heads", None), "detector.roi_heads"),
-        (det, "detector"),
-    )
-    matches = [
-        (holder, path)
-        for holder, path in candidates
-        if holder is not None
-        and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)
-    ]
-    if len(matches) > 1:
-        raise ValueError(
-            "this model exposes an operating-point knob at more than one location "
-            f"({', '.join(path for _, path in matches)}); the platform cannot choose between "
-            "them. Expose the knob at exactly one of self, .detector.roi_heads, or .detector."
-        )
-    return matches[0] if matches else (None, None)
 
 
 def set_detector_operating_point(
     model: torch.nn.Module, *, score_thresh: float, detections_per_img: int
 ) -> None:
-    """Set both knobs on the holder :func:`detector_operating_point_holder` resolves.
+    """Set both operating-point knobs on ``model`` itself.
 
-    A knob the model does not expose refuses
-    (``ValueError``) naming it and the holder.
+    A knob the model does not expose refuses (``ValueError``) naming it.
     """
-    target, path = detector_operating_point_holder(model)
-    _set_knob(target, path, SCORE_THRESH, score_thresh)
-    _set_knob(target, path, DETECTIONS_PER_IMG, detections_per_img)
+    _set_knob(model, SCORE_THRESH, score_thresh)
+    _set_knob(model, DETECTIONS_PER_IMG, detections_per_img)
 
 
-def _set_knob(
-    target: torch.nn.Module | None, path: str | None, attr: str, value: float
-) -> None:
-    """Set the operating-point knob ``attr`` to ``value`` on ``target``, the holder at ``path``.
+def _set_knob(model: torch.nn.Module, attr: str, value: float) -> None:
+    """Set the operating-point knob ``attr`` to ``value`` on ``model``.
 
-    Refuses (``ValueError``) naming the knob and the holder when ``target`` does not expose it.
+    Refuses (``ValueError``) naming the knob when ``model`` does not expose it.
     """
-    if not hasattr(target, attr):
+    if not hasattr(model, attr):
         raise ValueError(
-            f"this model exposes no {attr} "
-            f"({f'at its holder {path}' if path else 'and no holder of either knob'}): a "
-            f"detector's operating point is set in the model before its forward, so its "
-            f"holder exposes {attr} and honors it."
+            f"this model exposes no {attr} on itself: a detection model's operating point is "
+            f"set on the model before its forward, so the model exposes {attr} and its eval "
+            "forward honors it."
         )
-    setattr(target, attr, value)
+    setattr(model, attr, value)
 
 
 def governed_forward(
@@ -201,7 +162,6 @@ def count_criterion(
     entry: TraitEntry,
     *,
     staged_conf_floor: float,
-    staged_conf_floor_attribute_path: str | None,
     equivalence_z: float,
     dispersion_quantile: float,
     held: dict | None = None,
@@ -223,9 +183,8 @@ def count_criterion(
     those fields; the evidence records ``equivalence_z`` and each curve its quantile and the
     criterion it matched under. Every matching is kept in ``held`` where one is given
     (:func:`~tcip_mcp.pipelines.training.evaluation.matched`).
-    A conf at or below the floor, applied on the attribute path beside it, fails as
-    ``conf_censored``. A calibration curve the objective picks no conf on refuses
-    (``ValueError``).
+    A conf at or below the floor fails as ``conf_censored``. A calibration curve the objective
+    picks no conf on refuses (``ValueError``).
     """
     picker, conf_label = COUNT_OBJECTIVE_PICKERS[entry.count_objective]
     criterion = resolve_match_criterion(entry, cal_records)
@@ -328,7 +287,6 @@ def count_criterion(
         "holdout_missing_classes": missing_classes,
         "equivalence_z": equivalence_z,
         "staged_conf_floor": staged_conf_floor,
-        "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
         "observed_min_score": _min_dt_score(cal_records + hold_records),
         "calibration_cap_saturated_frac": cap_saturated_frac(cal_records),
         "holdout_cap_saturated_frac": cap_saturated_frac(hold_records),
