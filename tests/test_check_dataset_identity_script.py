@@ -1,9 +1,9 @@
 """Tests for the outcomes of ``tcip check-dataset-identity``.
 
 The command prints the verdict ``check_dataset_identity`` answers, its state one of unchanged,
-unregistered, changed and never recorded, and exits 0 for each, the verdict being the answer;
-each path the project's registry holds for the id reads moved or gone where the dataset is no
-longer there.
+unregistered, refused, changed and never recorded, and exits 0 for each, the verdict being the
+answer; each path the project's registry holds for the id reads moved or gone where the dataset is
+no longer there.
 """
 
 from __future__ import annotations
