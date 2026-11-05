@@ -10,9 +10,9 @@ apply here and aren't restated.
 src/tcip_store/
   __init__.py          # the public surface, re-exported
   model.py             # Key, Version, Versioned, LogPage, canonical_path
-  errors.py            # every refusal the seam raises, a record that will not read among them
-  refusal.py           # why a record will not read, as served (a model's issues by place and
-                        #   message, or the error's sentence), and its two boundaries: validated,
+  errors.py            # every refusal the seam raises but a refused read's
+  refusal.py           # a refused read, served and raised: its place beside why (the model's
+                        #   issues, or the error's sentence), and its two boundaries: validated,
                         #   the one validation, and unreadable, any other error stopping a read
   values.py            # what a value must be to be stored, and its two spellings: a record
                         #   (encode_record) and a log line (encode_log_line), read by decode_value

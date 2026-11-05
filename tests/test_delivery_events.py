@@ -388,8 +388,9 @@ def test_delivery_events_route_refuses_a_record_its_model_refuses_with_the_model
 ) -> None:
     """A stored event its model refuses refuses the listing (400) with the model's issues.
 
-    The issues are served each by its place in the record and its message: a record that is a
-    list where an event belongs is one issue, placed at the record as a whole.
+    The detail names the event, and the issues are served each by its place in the record and
+    its message: a record that is a list where an event belongs is one issue, placed at the record
+    as a whole.
     """
     from tests._record_damage_fixtures import damage_record
 
@@ -403,8 +404,9 @@ def test_delivery_events_route_refuses_a_record_its_model_refuses_with_the_model
 
     assert resp.status_code == 400
     detail = resp.json()["detail"]
-    assert isinstance(detail, dict) and detail["kind"] == "invalid"
-    assert [issue["loc"] for issue in detail["issues"]] == [[]]
+    assert event.event_id in detail["where"]
+    assert detail["refusal"]["kind"] == "invalid"
+    assert [issue["loc"] for issue in detail["refusal"]["issues"]] == [[]]
 
 
 def test_delivery_events_route_refuses_while_no_project_is_open(

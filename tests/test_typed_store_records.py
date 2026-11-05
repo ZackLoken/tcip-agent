@@ -116,7 +116,7 @@ def test_a_run_record_whose_partition_sample_states_no_member_refuses_at_the_rea
     with pytest.raises(ts.ReadRefusedError) as refused:
         observe_run(run_dir)
 
-    (issue,) = refused.value.refusal.issues
+    (issue,) = refused.value.served.refusal.issues
     assert issue.loc[-4:] == ["partition", "samples", 0, "member"]
 
 
