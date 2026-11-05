@@ -33,11 +33,7 @@ if TYPE_CHECKING:
 
 pytest.importorskip("torch")
 
-from tests._chain_fixtures import (  # noqa: E402
-    BESPOKE_DETECTION,
-    BESPOKE_MODELS,
-    FRAME_STATISTICS,
-)
+from tests._chain_fixtures import BUILT_DETECTOR  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
 from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
@@ -505,8 +501,8 @@ def _trained_checkpoint(
 ) -> str:
     """Return the checkpoint ``registered_checkpoint`` completes over two ``size`` px frames.
 
-    ``seed_bud_images`` writes the frames under ``tmp_path``; the run is of ``BESPOKE_DETECTION``
-    at ``FRAME_STATISTICS``, under ``tiling``, with ``config``'s keys passed through.
+    ``seed_bud_images`` writes the frames under ``tmp_path``; the run is of ``BUILT_DETECTOR``,
+    under ``tiling``, with ``config``'s keys passed through.
     """
     from tests._producer_fixtures import seed_bud_images
     from tests._verified_checkpoint_fixtures import (
@@ -523,12 +519,7 @@ def _trained_checkpoint(
     )
     return registered_checkpoint(
         tmp_path,
-        model_source={
-            "builder": BESPOKE_DETECTION,
-            "task": "detection",
-            "source_files": [BESPOKE_MODELS],
-            "normalization": FRAME_STATISTICS,
-        },
+        model_source=BUILT_DETECTOR,
         data={"images_dir": str(images), "tiling": tiling, **_RUN_DATA},
         **config,
     )

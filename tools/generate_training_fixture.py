@@ -218,6 +218,7 @@ def produce() -> dict[str, JsonValue]:
     )
     from tests._chain_fixtures import (
         BESPOKE_MODELS,
+        BUILT_DETECTOR,
         FRAME_STATISTICS,
         training_config,
     )
@@ -225,7 +226,6 @@ def produce() -> dict[str, JsonValue]:
     from tests._record_damage_fixtures import damage_record
     from tests._training_values import drawn_split
     from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
         SCOPED_DATA,
         detection_config,
         detection_images,

@@ -784,10 +784,8 @@ def test_the_admissions_import_reads_the_files_its_run_holds(
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.tools.training_tools import _admitted, open_run
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        detection_config,
-    )
+    from tests._chain_fixtures import BUILT_DETECTOR
+    from tests._verified_checkpoint_fixtures import detection_config
 
     project = tmp_path / "project"
     pkg = project / "agentpkg_agree"

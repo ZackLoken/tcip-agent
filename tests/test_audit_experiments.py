@@ -9,8 +9,8 @@ import pytest
 
 import tcip_store as ts
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
+from tests._chain_fixtures import BUILT_DETECTOR
 from tests._verified_checkpoint_fixtures import (
-    BUILT_DETECTOR,
     detection_config,
     log_epoch,
     opened_run,

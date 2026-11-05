@@ -16,11 +16,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.pipelines.execution import Execution, Pass
 
-from tests._chain_fixtures import (
-    BESPOKE_DETECTION,
-    BESPOKE_MODELS,
-    FRAME_STATISTICS,
-)
+from tests._chain_fixtures import BUILT_DETECTOR
 from tests._producer_fixtures import gray_frame
 
 torch = pytest.importorskip("torch")
@@ -36,15 +32,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     """
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    return registered_checkpoint(
-        tmp_path,
-        model_source={
-            "builder": BESPOKE_DETECTION,
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": FRAME_STATISTICS,
-        },
-    )
+    return registered_checkpoint(tmp_path, model_source=BUILT_DETECTOR)
 
 
 def _tiled_pass(tmp_path: Path, ckpt: str) -> Pass:
@@ -244,12 +232,7 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
     )
     ckpt = registered_checkpoint(
         tmp_path,
-        model_source={
-            "builder": BESPOKE_DETECTION,
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": FRAME_STATISTICS,
-        },
+        model_source=BUILT_DETECTOR,
         data={"num_channels": 3, "scope": {"subject": "bud"}},
         registry=registry_of("bud", *attributes),
     )

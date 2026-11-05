@@ -14,13 +14,14 @@ import pytest
 pytest.importorskip("torch")
 
 from tests._chain_fixtures import (
-    BESPOKE_DETECTION,
-    BESPOKE_MODELS,
     FRAME_STATISTICS,
     training_config,
 )  # noqa: E402
 from tests._training_values import drawn_split, evaluation_block  # noqa: E402
-from tests._verified_checkpoint_fixtures import run_to_end  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    built_detector,
+    run_to_end,
+)
 
 
 def test_a_classification_config_launches_with_images_and_csv_only(
@@ -115,13 +116,7 @@ def test_a_detection_config_names_its_images_alone(tmp_path: Path) -> None:
     scope = {"subject": "bud"}
     cfg = training_config(
         tmp_path,
-        {
-            "builder": BESPOKE_DETECTION,
-            "builder_kwargs": {},
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": FRAME_STATISTICS,
-        },
+        built_detector(),
         {
             **detection_images(tmp_path / "ds", scope),
             "scope": scope,

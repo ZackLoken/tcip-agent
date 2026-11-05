@@ -31,13 +31,14 @@ import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.tools.training_tools import Admitted, UnreadSelectionChoice
 from tests._chain_fixtures import (
+    BUILT_DETECTOR,
     FRAME_STATISTICS,
     training_config,
     weights_statistics,
 )
 from tests._producer_fixtures import fake_popen
 from tests._training_values import RATIONALE, drawn_split
-from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_run
+from tests._verified_checkpoint_fixtures import opened_run
 from tests.test_selection_binding import (
     DATES,
     OTHER_SUBJECT,

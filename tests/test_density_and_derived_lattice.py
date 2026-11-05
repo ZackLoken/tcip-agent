@@ -318,12 +318,9 @@ def _resolved(
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
-    from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import unbuilt_source
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
 
-    spec = train_config(
-        training_config(project, unbuilt_source("detection"), data)
-    )
+    spec = train_config(training_config(project, BUILT_DETECTOR, data))
     calls: list = []
     real = derivations.derive_tile_geometry
 

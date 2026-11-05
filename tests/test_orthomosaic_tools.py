@@ -31,11 +31,7 @@ if TYPE_CHECKING:
 
 torch = pytest.importorskip("torch")
 
-from tests._chain_fixtures import (  # noqa: E402
-    BESPOKE_DETECTION,
-    BESPOKE_MODELS,
-    FRAME_STATISTICS,
-)
+from tests._chain_fixtures import BUILT_DETECTOR  # noqa: E402
 
 pytest.importorskip("torchvision")
 
@@ -117,12 +113,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3) -> str:
 
     return registered_checkpoint(
         tmp_path,
-        model_source={
-            "builder": BESPOKE_DETECTION,
-            "task": "detection",
-            "source_files": [BESPOKE_MODELS],
-            "normalization": FRAME_STATISTICS,
-        },
+        model_source=BUILT_DETECTOR,
         data={
             "num_channels": in_chans,
             "scope": dict(SCOPE),
