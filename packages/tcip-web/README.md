@@ -44,6 +44,11 @@ proxies the API routes to the backend. On startup, the backend:
   open.
 - Opens no project: the GUI starts at the project picker, and opening a project there replays its
   GUI snapshot if present.
+- Checks the bundle, when `frontend/` sits beside the package and `app.STATIC_DIR` holds a page: it
+  runs the frontend's `bundleSource.mjs` under Node over the source (`app.bundle_record`),
+  compares its record with the `build.json` the build wrote beside the bundle, logs one warning
+  naming the build command when the record is missing or differs, and holds that sentence as the
+  `bundle` of every state snapshot until it stops.
 
 ## Agent ↔ GUI integration
 
