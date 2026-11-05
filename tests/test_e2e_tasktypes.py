@@ -18,8 +18,6 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.execution import Stated
 
 if TYPE_CHECKING:
-    from pydantic import JsonValue
-
     from tcip_mcp.experiments import RunObservation
 
 torch = pytest.importorskip("torch")
@@ -34,10 +32,10 @@ from tests._chain_fixtures import (  # noqa: E402
 )
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
-from tests._training_values import (  # noqa: E402
-    IOU_THRESHOLD,
-    adamw_optimizer,
-    drawn_split,
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    bespoke_source,
+    trained_run,
 )
 from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
 
@@ -49,60 +47,6 @@ IMG = 64
 # --------------------------------------------------------------------------
 
 _save_png = partial(write_noise_image, size=IMG)
-
-
-def _model_source(builder: str, task: str, **kwargs: JsonValue) -> dict:
-    from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
-
-    return {
-        "builder": builder,
-        "builder_kwargs": kwargs,
-        "source_files": [BESPOKE_MODELS],
-        "task": task,
-        "normalization": FRAME_STATISTICS,
-    }
-
-
-def _train_config(
-    project: Path, model_source: dict, data: dict, batch_size: int
-) -> dict:
-    from tests._chain_fixtures import training_config
-
-    # No val_loader at any call site below: loss is the only metric coherent to select on
-    # without one.
-    config = training_config(
-        project,
-        model_source,
-        data,
-        optimizer=adamw_optimizer(),
-        batch_size=batch_size,
-    )
-    config["evaluation"]["selection_metric"] = "loss"
-    return config
-
-
-def _trained(
-    model_source: dict, data: dict, tmp_path: Path, *, batch_size: int = 2
-) -> RunObservation:
-    """Train a run of ``tmp_path`` over :func:`_train_config` and return its observation.
-
-    The run trains at ``batch_size``, opened by the launcher's own producer over the places
-    ``data`` names with no validation side and trained to its end by the child's own entry.
-    """
-    from tcip_mcp.experiments import observe
-    from tests._verified_checkpoint_fixtures import worker_run
-
-    return observe(
-        worker_run(
-            tmp_path,
-            _train_config(
-                tmp_path,
-                model_source,
-                {**data, "split": drawn_split(val_ratio=0.0)},
-                batch_size,
-            ),
-        )
-    )
 
 
 def _assert_trained(observation: RunObservation) -> None:
@@ -140,7 +84,7 @@ def test_detection_e2e(tmp_path: Path) -> None:
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     _assert_trained(
-        _trained(
+        trained_run(
             BUILT_DETECTOR,
             {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
             tmp_path,
@@ -169,8 +113,8 @@ def test_instance_seg_e2e(tmp_path: Path) -> None:
     assert dataset[0][1]["masks"].shape[0] > 0
 
     _assert_trained(
-        _trained(
-            _model_source(BESPOKE_INSTANCE_SEG, "instance_seg"),
+        trained_run(
+            bespoke_source(BESPOKE_INSTANCE_SEG, "instance_seg"),
             {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
             tmp_path,
         )
@@ -195,9 +139,9 @@ def test_semantic_seg_e2e(tmp_path: Path) -> None:
             masks_dir / f"img{i}.png"
         )
 
-    model_source = _model_source(BESPOKE_SEMANTIC_SEG, "semantic_seg")
+    model_source = bespoke_source(BESPOKE_SEMANTIC_SEG, "semantic_seg")
     _assert_trained(
-        _trained(
+        trained_run(
             model_source,
             {"images_dir": str(images_dir), "labels_dir": str(masks_dir)},
             tmp_path,
@@ -214,9 +158,9 @@ def test_ordinal_e2e(tmp_path: Path) -> None:
         width=IMG,
     )
 
-    model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
+    model_source = bespoke_source(BESPOKE_ORDINAL, "ordinal")
     _assert_trained(
-        _trained(
+        trained_run(
             model_source,
             {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
             tmp_path,
@@ -242,9 +186,9 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path) -> None:
     _dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     assert data["num_ranks"] == 7 and data.get("num_classes") is None
 
-    model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
+    model_source = bespoke_source(BESPOKE_ORDINAL, "ordinal")
     _assert_trained(
-        _trained(
+        trained_run(
             model_source,
             {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
             tmp_path,
@@ -306,9 +250,9 @@ def test_regression_e2e(tmp_path: Path) -> None:
         width=IMG,
     )
 
-    model_source = _model_source(BESPOKE_REGRESSOR, "regression")
+    model_source = bespoke_source(BESPOKE_REGRESSOR, "regression")
     _assert_trained(
-        _trained(
+        trained_run(
             model_source,
             {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
             tmp_path,
@@ -331,8 +275,8 @@ def test_ordinal_evaluate_model_e2e(
         width=IMG,
     )
 
-    model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    observation = _trained(
+    model_source = bespoke_source(BESPOKE_ORDINAL, "ordinal")
+    observation = trained_run(
         model_source,
         {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         tmp_path,
@@ -367,8 +311,8 @@ def test_regression_evaluate_model_e2e(
         width=IMG,
     )
 
-    model_source = _model_source(BESPOKE_REGRESSOR, "regression")
-    observation = _trained(
+    model_source = bespoke_source(BESPOKE_REGRESSOR, "regression")
+    observation = trained_run(
         model_source,
         {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         tmp_path,
