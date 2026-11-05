@@ -313,6 +313,43 @@ def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
     assert len(by_group) == len({s.group for s in frozen.samples})
 
 
+def test_a_frozen_selection_is_refused_as_a_scale_reference_naming_its_empty_sides(
+    tmp_path: Path,
+) -> None:
+    """The scale door answers a frozen selection with the empty reference sides as words.
+
+    A frozen selection holds neither a calibration nor a holdout side; the reference door's
+    answer names both in words, not as a list.
+    """
+    from tcip_mcp.tools.calibration_tools import calibrate_physical_scale
+    from tcip_mcp.tools.data_tools import freeze_selection
+    from tests import _trait_fixtures as fx
+
+    fx.seed_delivery_traits(tmp_path)
+    fx.propose_and_confirm(
+        tmp_path,
+        fx.with_fields(
+            fx.latest("plant_surface_area", tmp_path), scale_tolerance_frac=0.1
+        ),
+    )
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(tmp_path, root, "exp-src")
+    frozen = freeze_selection(tmp_path, "exp-src", actor=None)
+    assert "error" not in frozen, frozen
+
+    answer = calibrate_physical_scale(
+        tmp_path,
+        trait="plant_surface_area",
+        selection_dir=frozen["selection_dir"],
+        reference_csv=str(tmp_path / "reference.csv"),
+        unit="mm",
+        reference_subject=SUBJECT,
+        actor=None,
+    )
+
+    assert "holds no calibration or holdout side" in answer["error"], answer
+
+
 # -- refusals ------------------------------------------------------------------
 
 
