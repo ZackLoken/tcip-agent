@@ -70,10 +70,16 @@ DETECTOR_PASS = Stated(**SAMPLE_DETECTOR_PASS)
 
 
 class _StubDetector:
-    """A minimal detector recording each loss pass's image count and box count."""
+    """A minimal detector exposing both operating-point knobs.
+
+    Called with targets it records the loss pass's image count and box count and answers a loss
+    of 2.5; called without, it answers one empty prediction per image.
+    """
 
     def __init__(self) -> None:
         self.calls: list[tuple[int, int]] = []
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
 
     def train(self) -> None:  # noqa: D401
         pass
@@ -85,29 +91,15 @@ class _StubDetector:
         return []
 
     def __call__(
-        self, images: list[Tensor], targets: list[dict[str, Tensor]]
-    ) -> dict[str, Tensor]:
-        self.calls.append(
-            (len(images), sum(int(t["boxes"].numel()) for t in targets))
-        )
-        return {"loss": torch.tensor(2.5)}
-
-
-class _StubModel:
-    """Composed-model stand-in exposing ``.detector`` and both operating-point knobs.
-
-    Its forward returns one empty prediction per image.
-    """
-
-    def __init__(self, detector: _StubDetector) -> None:
-        self.detector = detector
-        self.score_thresh = 0.0
-        self.detections_per_img = 100
-
-    def eval(self) -> None:  # noqa: D401
-        pass
-
-    def __call__(self, images: list[Tensor]) -> list[dict[str, Tensor]]:
+        self,
+        images: list[Tensor],
+        targets: list[dict[str, Tensor]] | None = None,
+    ) -> dict[str, Tensor] | list[dict[str, Tensor]]:
+        if targets is not None:
+            self.calls.append(
+                (len(images), sum(int(t["boxes"].numel()) for t in targets))
+            )
+            return {"loss": torch.tensor(2.5)}
         return [
             {
                 "boxes": torch.zeros((0, 4)),
@@ -140,13 +132,12 @@ def _det_batch(
 
 def test_val_loss_forwards_all_negative_images() -> None:
     stub = _StubDetector()
-    model = _StubModel(stub)
     loader = [
         _det_batch([1, 0]),
         _det_batch([0]),
     ]  # mixed batch, then all-negative batch
     evaluate(
-        model,
+        stub,
         loader,
         torch.device("cpu"),
         "detection",
@@ -164,10 +155,9 @@ def test_val_loss_forwards_all_negative_images() -> None:
 
 def test_all_negative_only_loader_is_not_skipped() -> None:
     stub = _StubDetector()
-    model = _StubModel(stub)
     loader = [_det_batch([0, 0])]  # nothing but negatives
     result = evaluate(
-        model,
+        stub,
         loader,
         torch.device("cpu"),
         "detection",
