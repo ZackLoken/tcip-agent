@@ -21,6 +21,8 @@ from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_store import Key
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import JsonValue
 
     from tcip_mcp.subject_registry import SubjectRegistry
@@ -587,17 +589,29 @@ def trait_names(project: str | Path) -> list[str]:
     )
 
 
-def _record(trait: str, project: str | Path, value: JsonValue) -> TraitRecord:
-    """Return ``trait``'s stored ``value`` read through its schema.
+def _stored(
+    read: Callable[..., JsonValue], trait: str, project: str | Path
+) -> TraitRecord | None:
+    """Return ``trait``'s record read by ``read`` (``tcip_store.read_record``), or ``None``."""
+    return ts.read_record(
+        read,
+        trait_key(project, trait),
+        TraitRecord,
+        _trait_place(trait),
+        default=None,
+    )
 
-    An absent value raises :class:`TraitUnknownError` naming the project's traits; a value the
-    schema refuses raises ``tcip_store.ReadRefusedError`` naming the trait.
-    """
-    if value is None:
+
+def _record(
+    read: Callable[..., JsonValue], trait: str, project: str | Path
+) -> TraitRecord:
+    """Return :func:`_stored`'s record; an absent one raises :class:`TraitUnknownError`."""
+    record = _stored(read, trait, project)
+    if record is None:
         raise TraitUnknownError(
             f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}"
         )
-    return ts.validated(TraitRecord, value, _trait_place(trait))
+    return record
 
 
 def _trait_place(trait: str) -> str:
@@ -606,14 +620,8 @@ def _trait_place(trait: str) -> str:
 
 
 def read_trait(trait: str, project: str | Path) -> TraitRecord:
-    """Read one trait's record through its schema.
-
-    Refuses as :func:`_record` does, and a record the store will not read with
-    ``tcip_store.ReadRefusedError`` naming the trait and carrying the store's sentence.
-    """
-    with ts.unreadable(_trait_place(trait), ts.StoreError):
-        value = ts.read(trait_key(project, trait), default=None)
-    return _record(trait, project, value)
+    """Read one trait's record through its schema; refuses as :func:`_record` does."""
+    return _record(ts.read, trait, project)
 
 
 # ── the proposal and the confirmation ────────────────────────────────────────
@@ -701,12 +709,8 @@ def propose_trait(
             )
     key = trait_key(project, entry.name)
     with ts.transaction(key) as txn:
-        stored = txn.read(key, default=None)
-        revisions = (
-            ()
-            if stored is None
-            else _record(entry.name, project, stored).revisions
-        )
+        stored = _stored(txn.read, entry.name, project)
+        revisions = () if stored is None else stored.revisions
         number, sha256 = len(revisions) + 1, entry_sha256(entry)
         line = audit_line(
             "propose_trait",
@@ -761,7 +765,7 @@ def confirm_revision(
     """
     key = trait_key(project, trait)
     with ts.transaction(key) as txn:
-        record = _record(trait, project, txn.read(key, default=None))
+        record = _record(txn.read, trait, project)
         revision = record.revision(number, entry_sha256)
         revisions = list(record.revisions)
         state = revision.state

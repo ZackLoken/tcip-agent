@@ -154,17 +154,15 @@ class RegistryError(ValueError):
     """A write the stored registry refuses, or a scope the registry lacks."""
 
 
-def registry_from_dict(data: object) -> SubjectRegistry:
+def registry_from_dict(data: object, *, where: str) -> SubjectRegistry:
     """Parse the nested registry mapping into a :class:`SubjectRegistry`, in declared order.
 
-    Refuses (``tcip_store.ReadRefusedError``) what does not validate as the registry, naming
-    each field.
+    ``where`` names where ``data`` came from. Refuses (``tcip_store.ReadRefusedError``) what
+    does not validate as the registry, behind ``where``, naming each field.
     """
     import tcip_store
 
-    return tcip_store.validated(
-        _REGISTRY, {"subjects": data}, "the subject registry"
-    )
+    return tcip_store.validated(_REGISTRY, {"subjects": data}, where)
 
 
 def registry_to_dict(registry: SubjectRegistry) -> dict:
@@ -183,9 +181,10 @@ def _stored_registry(data: bytes, *, path: str | Path) -> SubjectRegistry:
     """
     import tcip_store
 
-    with tcip_store.unreadable(f"the subject registry at {path}", ValueError):
+    where = f"the subject registry at {path}"
+    with tcip_store.unreadable(where, ValueError):
         document = tcip_store.decode_value(data)
-    return registry_from_dict(document)
+    return registry_from_dict(document, where=where)
 
 
 def read_versioned_registry(

@@ -764,10 +764,12 @@ def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
 def _delivery_event(key: Key, project: str | Path) -> DeliveryEventRecord:
     """Return the delivery event ``key`` names, its paths resolved against ``project``."""
     where = f"delivery event {key.parts[0]}"
-    with tcip_store.unreadable(where, tcip_store.StoreError):
-        raw = tcip_store.read(key)
     return tcip_store.validated(
         DeliveryEventRecord,
-        runtime_paths(raw, DELIVERY_EVENT_PATHS, project),
+        runtime_paths(
+            tcip_store.read_raw(tcip_store.read, key, where),
+            DELIVERY_EVENT_PATHS,
+            project,
+        ),
         where,
     )

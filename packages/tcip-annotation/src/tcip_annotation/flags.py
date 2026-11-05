@@ -20,12 +20,14 @@ from pydantic import (
 )
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
+import tcip_store
 from tcip_annotation.json_io import Person
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_annotation.text import Text
 from tcip_store import Key, validated
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
     from pydantic import JsonValue
@@ -132,15 +134,21 @@ class FlagsRecord(TypedDict):
 _FLAGS_RECORD = TypeAdapter(FlagsRecord)
 
 
-def flags_of(record: JsonValue) -> list[Flag]:
-    """Return the flags a stored record holds, oldest first; an absent record holds none.
+def _flags_place(image: str) -> str:
+    """Return where the flags record of ``image``, an image's name, lives, as a refusal names it."""
+    return f"the flags record of {image}"
 
-    A record that does not validate as a :class:`FlagsRecord` refuses
-    (``tcip_store.ReadRefusedError``) naming the flags record and each field.
+
+def flags_of(record: JsonValue, image: str) -> list[Flag]:
+    """Return the flags a flags record holds, oldest first; an absent record holds none.
+
+    ``image`` names the image the record is of. One that does not validate as a
+    :class:`FlagsRecord` refuses (``tcip_store.ReadRefusedError``) naming the record by
+    ``image`` and each field.
     """
     if record is None:
         return []
-    return validated(_FLAGS_RECORD, record, "the flags record")["flags"]
+    return validated(_FLAGS_RECORD, record, _flags_place(image))["flags"]
 
 
 def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
@@ -148,11 +156,15 @@ def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
     return _FLAGS_RECORD.dump_python({"flags": flags}, mode="json")
 
 
-def read_flags(key: Key) -> list[Flag]:
-    """Return every flag the record ``key`` names holds (:func:`flags_of`)."""
-    import tcip_store
+def read_flags(read: Callable[..., JsonValue], key: Key) -> list[Flag]:
+    """Return every flag the record ``key`` names holds (:func:`flags_of`), read by ``read``.
 
-    return flags_of(tcip_store.read(key, default=None))
+    ``read`` is a store or a transaction read. The record is named by the image's key parts; one
+    the store will not read refuses (``tcip_store.ReadRefusedError``) as :func:`flags_of` does.
+    """
+    image = "/".join(key.parts)
+    raw = tcip_store.read_raw(read, key, _flags_place(image), default=None)
+    return flags_of(raw, image)
 
 
 def covers(
