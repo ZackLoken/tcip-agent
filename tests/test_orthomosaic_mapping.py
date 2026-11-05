@@ -25,9 +25,9 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
 )
 from tcip_mcp.pipelines.raster_source import open_raster
 from tests._chain_fixtures import (
-    BESPOKE_DETECTION,
     BESPOKE_INSTANCE_SEG,
     BESPOKE_MODELS,
+    BUILT_DETECTOR,
     FRAME_STATISTICS,
 )
 from tests._geotiff_fixtures import (
@@ -441,12 +441,7 @@ def _bespoke_detection_checkpoint(
 
     return _raster_checkpoint(
         tmp_path,
-        {
-            "builder": BESPOKE_DETECTION,
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-            "normalization": stats.model_dump(mode="json"),
-        },
+        {**BUILT_DETECTOR, "normalization": stats.model_dump(mode="json")},
         in_chans,
     )
 

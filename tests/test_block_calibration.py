@@ -42,9 +42,7 @@ from tcip_mcp.dataset_layout import (  # noqa: E402
 )
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
-    BESPOKE_DETECTION,
-    BESPOKE_MODELS,
-    FRAME_STATISTICS,
+    BUILT_DETECTOR,
     SAVE_BUILT_WEIGHTS,
     training_config,
 )
@@ -105,14 +103,6 @@ def _write_mosaic(
     )
 
 
-_BLOCK_MODEL_SOURCE = {
-    "builder": BESPOKE_DETECTION,
-    "source_files": [BESPOKE_MODELS],
-    "task": "detection",
-    "normalization": FRAME_STATISTICS,
-}
-
-
 def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
     """Run ``experiment_id`` over ``data_cfg`` in ``project`` through the child's own entry.
 
@@ -126,7 +116,7 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
         project,
         training_config(
             project,
-            _BLOCK_MODEL_SOURCE,
+            BUILT_DETECTOR,
             data_cfg,
             training_source=SAVE_BUILT_WEIGHTS,
         ),

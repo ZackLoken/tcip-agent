@@ -134,10 +134,8 @@ def test_a_geometry_sourced_by_any_label_but_the_derivations_is_refused() -> (
 
 
 def _preflight_config(tmp_path: Path, **model_source: dict) -> dict:
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        detection_config,
-    )
+    from tests._chain_fixtures import BUILT_DETECTOR
+    from tests._verified_checkpoint_fixtures import detection_config
 
     return detection_config(
         tmp_path / "ds",

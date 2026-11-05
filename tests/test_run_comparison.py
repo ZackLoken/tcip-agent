@@ -34,16 +34,16 @@ def _opened(
     directory beside the project named for ``experiment_id``), resolved and opened by the
     launcher's own producer and writer.
     """
+    from tests._chain_fixtures import BUILT_DETECTOR
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         fixture_data_dir,
         opened_run,
-        unbuilt_source,
     )
 
     config = detection_config(
         data_dir or fixture_data_dir(project, experiment_id),
-        model_source=unbuilt_source("detection"),
+        model_source=BUILT_DETECTOR,
         split=split,
         project=project,
     )
@@ -59,8 +59,8 @@ def _bound(
     two-subject, two-date dataset, and later calls bind to it; the run's ``data.split`` carries
     ``split``'s keys beside the binding.
     """
-    from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
+    from tests._verified_checkpoint_fixtures import opened_run
     from tests.test_selection_binding import (
         _draw,
         _two_subject_two_date_dataset,
@@ -78,7 +78,7 @@ def _bound(
         tmp_path,
         training_config(
             tmp_path,
-            unbuilt_source("detection"),
+            BUILT_DETECTOR,
             {"split": {"selection_dir": str(selection_dir), **split}},
         ),
         experiment_id=experiment_id,

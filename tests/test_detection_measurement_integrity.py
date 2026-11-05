@@ -306,10 +306,8 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     checkpoint recording no band count is refused as having none.
     """
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        registered_checkpoint,
-    )
+    from tests._chain_fixtures import BUILT_DETECTOR
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = seed_bud_images(
         image_dir(tmp_path, UNDATED_BUCKET)
@@ -561,11 +559,12 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     from tcip_mcp.pipelines.schemas import run_tiling
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._chain_fixtures import assess, confirm_count_trait
-    from tests._verified_checkpoint_fixtures import (
+    from tests._chain_fixtures import (
         BUILT_DETECTOR,
-        registered_checkpoint,
+        assess,
+        confirm_count_trait,
     )
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     root = tmp_path / "ds"
     images_dir = image_dir(root, UNDATED_BUCKET)

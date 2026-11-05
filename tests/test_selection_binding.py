@@ -29,7 +29,7 @@ from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
 from tcip_mcp.tools.data_tools import draw_splits
 from tests._chain_fixtures import (
     BLOB_BUILDER,
-    DETECTION_SOURCE,
+    BUILT_DETECTOR,
     run_config,
     stated_detector_geometry,
     training_config,
@@ -472,7 +472,7 @@ def test_a_ground_truth_place_stated_beside_a_selection_refuses_the_bound_run(
         issues = preflight_config(
             tmp_path,
             training_config(
-                tmp_path, weights_statistics(DETECTION_SOURCE), data_cfg
+                tmp_path, weights_statistics(BUILT_DETECTOR), data_cfg
             ),
         )["issues"]
         assert any("Drop data.labels_dir" in issue for issue in issues), issues
@@ -860,7 +860,7 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(
     drawn = _draw(tmp_path, root, out)
     config = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {
             **_run_data_cfg(root, out),
             "dataset_source": {
@@ -1066,7 +1066,6 @@ def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_rec
     """
     from tcip_mcp.experiments import read_run
     from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
     from tests.tiny_trainer_fixtures import run_context
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -1267,7 +1266,7 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(
     root, out = one_foreground_group_selection(tmp_path)
     config = training_config(
         tmp_path,
-        weights_statistics(DETECTION_SOURCE),
+        weights_statistics(BUILT_DETECTOR),
         {"split": {"selection_dir": str(out), "seed": 1}},
     )
 
@@ -1292,7 +1291,7 @@ def test_preflight_config_admits_a_bound_selection_with_no_issues(
 
     result = preflight_config(
         tmp_path,
-        training_config(tmp_path, DETECTION_SOURCE, _run_data_cfg(root, out)),
+        training_config(tmp_path, BUILT_DETECTOR, _run_data_cfg(root, out)),
     )
 
     # A bound config names no images_dir: the selection's samples carry their own sources and
@@ -1309,7 +1308,7 @@ def test_preflight_config_flags_a_selection_with_no_subject(
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
     config = training_config(
-        tmp_path, DETECTION_SOURCE, _run_data_cfg(root, out)
+        tmp_path, BUILT_DETECTOR, _run_data_cfg(root, out)
     )
     _strip_the_recorded_subject(out)
 
@@ -1328,7 +1327,7 @@ def test_preflight_config_admits_a_redraw_seed_with_a_warning(
     _draw(tmp_path, root, out)
     config = training_config(
         tmp_path,
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         {"split": {"selection_dir": str(out), "seed": 1}},
     )
 
