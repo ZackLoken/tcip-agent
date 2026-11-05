@@ -324,11 +324,11 @@ def test_an_instance_seg_run_trains_over_its_instances_clipped_to_each_tile(
 def test_a_pass_stating_no_masks_returns_boxes_only(
     instance_seg_ckpt: str, tmp_path: Path
 ) -> None:
-    """A pass stating no masks returns boxes and no masks key.
+    """A pass stating no masks returns detections carrying no mask.
 
     A tiled pass stating ``masks`` false and no mask threshold slices into four or more tiles
-    and returns no masks key; an untiled pass of the same checkpoint collecting masks carries
-    them, and a pass stating neither refuses naming ``masks``.
+    and returns detections carrying no mask; an untiled pass of the same checkpoint collecting
+    masks carries one on every detection, and a pass stating neither refuses naming ``masks``.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
@@ -357,6 +357,7 @@ def test_a_pass_stating_no_masks_returns_boxes_only(
         execution=tiled_pass.execution,
         tile_batch_size=8,
     )
+    assert tiled.detections
     assert all(d.mask is None for d in tiled.detections)
     assert (
         len(slice_lattice(tiled.height, tiled.width, TILE, 0.2)) >= 4
@@ -368,6 +369,7 @@ def test_a_pass_stating_no_masks_returns_boxes_only(
         device="cpu",
     ).runnable()
     (masked,) = untiled.predict([img])
+    assert masked.detections
     assert all(d.mask is not None for d in masked.detections)
 
     # Whether the pass collects masks is its statement, never read off the head.
@@ -404,6 +406,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
     )
     assert p.execution.tiled
     (result,) = results
+    assert result.detections
     assert all(d.mask is not None for d in result.detections)
 
 

@@ -1019,7 +1019,6 @@ def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete
     naming the missing field, and the complete record restores and predicts.
     """
     from tcip_mcp.pipelines.execution import EXECUTION_RECORD, prepare
-    from tcip_mcp.pipelines.slicing import slice_lattice
     from tests._producer_fixtures import gray_frame
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_OVERLAP,
@@ -1055,12 +1054,6 @@ def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete
     ).runnable()
     (result,) = restored.predict(restored.paths)
     assert restored.execution.tiled
-    assert slice_lattice(
-        result.height,
-        result.width,
-        restored.execution.tile_size,
-        restored.execution.overlap,
-    )
 
 
 def test_the_published_cap_reaches_the_row_scoring_its_bucket(

@@ -228,9 +228,8 @@ def test_a_scope_with_no_attribute_writes_no_attribute_row(
     _p, results = predicted_over(
         tmp_path, checkpoint, str(images_dir), tile=False, conf=0.0
     )
-    assert results and all(
-        d.attributes == [] for r in results for d in r.detections
-    ), results
+    assert results and all(r.detections for r in results), results
+    assert all(d.attributes == [] for r in results for d in r.detections)
 
     published = run_inference(
         tmp_path,
