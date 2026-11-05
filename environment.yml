@@ -4,8 +4,8 @@
 # with the dependencies and extras each declares. Run it from the
 # repository root so the editable paths resolve.
 #
-# torch is the CPU build while the CPU index and PyPI carry the same newest release, whose +cpu
-# build outranks PyPI's (a CUDA build on Linux); README.md's Setup names the CUDA line.
+# torch resolves to the +cpu build from the CPU index on Linux and Windows, and to PyPI's build on
+# macOS, which runs on Apple's GPU; README.md's Setup names the CUDA line.
 name: tcip-agent
 channels:
   - conda-forge
