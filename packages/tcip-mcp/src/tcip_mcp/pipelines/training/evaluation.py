@@ -2,7 +2,8 @@
 
 * detection / instance_seg counts and average precision from :mod:`tcip_annotation.matching`'s
 matcher, by box or, for instance segmentation, by mask;
-* in-house scalar metrics for classification / ordinal / regression;
+* scalar metrics for classification / ordinal / regression, scikit-learn's under the platform's
+conventions;
 * the composite selection objective (lower = better);
 * a task-agnostic two-pass ``evaluate()``.
 """
@@ -1123,35 +1124,41 @@ def classification_metrics(
     """Return accuracy, macro-F1 and per-class precision/recall/f1/support/count_bias.
 
     Each per-class mapping is keyed by the class index as a string (a JSON object's key).
+    Accuracy is scikit-learn's ``accuracy_score`` and the per-class rows its
+    ``precision_recall_fscore_support`` over ``labels=range(num_classes)`` with
+    ``zero_division=0``: a class with no true example and no prediction scores 0.0 on every row
+    and counts in the macro mean, which is the unweighted mean of the per-class F1 over every
+    class.
 
     ``count_bias[c] = (predicted count - true count) / true count``, ``0.0`` for a class with no
-    true example.
+    true example. An empty set answers zero accuracy and F1 and no classes.
     """
-    pred = pred_labels.detach().cpu().long()
-    gt = targets.detach().cpu().long()
-    if gt.numel() == 0:
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+
+    pred = pred_labels.detach().cpu().long().numpy()
+    gt = targets.detach().cpu().long().numpy()
+    if gt.size == 0:
         return {"accuracy": 0.0, "f1": 0.0, "per_class": {}, "count_bias": {}}
-    accuracy = (pred == gt).float().mean().item()
-    per_class: dict[str, dict] = {}
-    f1s = []
-    for c in range(num_classes):
-        tp = int(((pred == c) & (gt == c)).sum())
-        fp = int(((pred == c) & (gt != c)).sum())
-        fn = int(((pred != c) & (gt == c)).sum())
-        support = int((gt == c).sum())
-        pred_count = int((pred == c).sum())
-        prf = precision_recall_f1(tp, fp, fn)
-        f1s.append(prf["f1"])
-        per_class[str(c)] = {
-            **prf,
-            "support": support,
-            "count_bias": (pred_count - support) / support
-            if support > 0
+    precision, recall, f1, support = precision_recall_fscore_support(
+        gt, pred, labels=range(num_classes), zero_division=0
+    )
+    predicted = np.bincount(pred, minlength=num_classes)
+    per_class = {
+        str(c): {
+            "precision": float(precision[c]),
+            "recall": float(recall[c]),
+            "f1": float(f1[c]),
+            "support": int(support[c]),
+            "count_bias": (int(predicted[c]) - int(support[c]))
+            / int(support[c])
+            if support[c] > 0
             else 0.0,
         }
+        for c in range(num_classes)
+    }
     return {
-        "accuracy": accuracy,
-        "f1": sum(f1s) / len(f1s) if f1s else 0.0,
+        "accuracy": float(accuracy_score(gt, pred)),
+        "f1": float(np.mean(f1)),
         "per_class": per_class,
         "count_bias": {c: per_class[c]["count_bias"] for c in per_class},
     }
@@ -1164,32 +1171,22 @@ def quadratic_weighted_kappa(
 ) -> float | None:
     """Return the chance-corrected ordinal agreement over ``num_ranks``, the run's rank count.
 
-    Weights are squared rank distances and expected agreement comes from the scored set's own
-    observed rank marginals. ``None`` when undefined:
-    no items, fewer than two ranks, or expected disagreement is zero (every populated
-    true/predicted pair shares one rank).
+    Both rank tensors are rounded to the nearest rank, then scored by scikit-learn's
+    ``cohen_kappa_score`` with quadratic weights over ``labels=range(num_ranks)``: weights are
+    squared rank distances and expected agreement comes from the scored set's own observed rank
+    marginals. ``None`` when undefined: no items, fewer than two ranks, or expected disagreement
+    is zero (every populated true/predicted pair shares one rank), where the library answers nan.
     """
-    pred = pred_ranks.detach().cpu().round().long()
-    gt = gt_ranks.detach().cpu().round().long()
-    n = gt.numel()
-    if n == 0:
+    from sklearn.metrics import cohen_kappa_score
+
+    pred = pred_ranks.detach().cpu().round().long().numpy()
+    gt = gt_ranks.detach().cpu().round().long().numpy()
+    if gt.size == 0 or num_ranks < 2:
         return None
-    k = num_ranks
-    if k < 2:
-        return None
-    observed = torch.zeros((k, k))
-    for t, p in zip(gt.tolist(), pred.tolist()):
-        observed[t][p] += 1
-    row_marginal = observed.sum(dim=1)
-    col_marginal = observed.sum(dim=0)
-    expected = torch.outer(row_marginal, col_marginal) / n
-    idx = torch.arange(k, dtype=torch.float32)
-    weights = (idx.unsqueeze(1) - idx.unsqueeze(0)) ** 2
-    expected_disagreement = (weights * expected).sum().item()
-    if expected_disagreement == 0.0:
-        return None
-    observed_disagreement = (weights * observed).sum().item()
-    return 1.0 - observed_disagreement / expected_disagreement
+    kappa = cohen_kappa_score(
+        gt, pred, weights="quadratic", labels=range(num_ranks)
+    )
+    return None if math.isnan(kappa) else float(kappa)
 
 
 def r_squared(
@@ -1197,18 +1194,21 @@ def r_squared(
 ) -> float | None:
     """Return the fraction of variance explained beyond predicting the scored set's own mean.
 
-    ``None`` when undefined: no items, or the set's own values are constant (no variance to
-    explain).
+    It is scikit-learn's ``r2_score`` with ``force_finite=False``, computed in float64. ``None``
+    when undefined: no items, one item, or the set's own values are constant (no variance to
+    explain), whatever the predictions are; these are checked ahead of the call. A non-finite
+    prediction or truth scores a non-finite value, which the record states as such (the
+    library's input check is off for it).
     """
-    pred = pred_values.detach().cpu().float()
-    gt = gt_values.detach().cpu().float()
-    if gt.numel() == 0:
+    from sklearn import config_context
+    from sklearn.metrics import r2_score
+
+    pred = pred_values.detach().cpu().double().numpy()
+    gt = gt_values.detach().cpu().double().numpy()
+    if gt.size < 2 or gt.min() == gt.max():
         return None
-    ss_tot = ((gt - gt.mean()) ** 2).sum().item()
-    if ss_tot == 0.0:
-        return None
-    ss_res = ((gt - pred) ** 2).sum().item()
-    return 1.0 - ss_res / ss_tot
+    with config_context(assume_finite=True):
+        return float(r2_score(gt, pred, force_finite=False))
 
 
 def concordance_correlation_coefficient(
@@ -1243,14 +1243,24 @@ def concordance_correlation_coefficient(
 def ordinal_metrics(
     pred_ranks: torch.Tensor, gt_ranks: torch.Tensor, num_ranks: int
 ) -> dict:
-    """Return ordinal metrics over ``num_ranks``."""
+    """Return ordinal metrics over ``num_ranks``.
+
+    ``rank_acc`` is scikit-learn's ``accuracy_score`` over the ranks rounded to the nearest
+    rank; ``quadratic_weighted_kappa`` is :func:`quadratic_weighted_kappa`.
+    """
+    from sklearn.metrics import accuracy_score
+
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
     if gt.numel() == 0:
         return {"mae": 0.0, "rank_acc": 0.0, "quadratic_weighted_kappa": None}
     return {
         "mae": (pred - gt).abs().mean().item(),
-        "rank_acc": (pred.round() == gt.round()).float().mean().item(),
+        "rank_acc": float(
+            accuracy_score(
+                gt.round().long().numpy(), pred.round().long().numpy()
+            )
+        ),
         "quadratic_weighted_kappa": quadratic_weighted_kappa(
             pred_ranks, gt_ranks, num_ranks
         ),
