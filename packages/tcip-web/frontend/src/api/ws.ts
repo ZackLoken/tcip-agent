@@ -26,6 +26,7 @@ export class StateSocket {
         } catch {
           return;
         }
+        useStore.getState().setStaleBundle(envelope.bundle);
         useStore.getState().mergeSnapshot(envelope);
       },
     });
