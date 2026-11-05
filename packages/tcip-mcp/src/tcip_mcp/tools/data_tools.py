@@ -109,9 +109,13 @@ def freeze_selection(
     )
     existing, existing_error = read_selection_checked(out_dir, project=project)
     if existing is not None or existing_error is not None:
+        why = (
+            existing_error.refusal
+            if existing_error is not None
+            else "freeze_selection never overwrites one."
+        )
         return {
-            "error": f"a selection already exists at {str(out_dir)!r}: "
-            f"{existing_error or 'freeze_selection never overwrites one.'}"
+            "error": f"a selection already exists at {str(out_dir)!r}: {why}"
         }
 
     # The draw the run's partition came from: its own drawn split, or the selection it bound.

@@ -296,17 +296,20 @@
         {
           "trait": "stem",
           "reason": {
-            "kind": "invalid",
-            "issues": [
-              {
-                "loc": ["revisions", 0, "entry", "localization"],
-                "msg": "Input should be '', 'center_match' or 'iou_match'"
-              },
-              {
-                "loc": ["revisions"],
-                "msg": "Tuple should have at least 1 item after validation, not 0"
-              }
-            ]
+            "where": "the record of trait 'stem'",
+            "refusal": {
+              "kind": "invalid",
+              "issues": [
+                {
+                  "loc": ["revisions", 0, "entry", "localization"],
+                  "msg": "Input should be '', 'center_match' or 'iou_match'"
+                },
+                {
+                  "loc": ["revisions"],
+                  "msg": "Tuple should have at least 1 item after validation, not 0"
+                }
+              ]
+            }
           }
         }
       ],

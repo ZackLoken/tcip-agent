@@ -337,11 +337,12 @@ def test_record_or_problem_names_the_absent_record(tmp_path: Path) -> None:
     reading = record_or_problem(tmp_path)
 
     assert reading.kind == "unread"
-    assert not isinstance(reading.problem, str)
     from tcip_store import Unreadable
 
-    assert isinstance(reading.problem, Unreadable)
-    assert "initialize_project" in reading.problem.message
+    assert str(tmp_path) in reading.problem.where
+    refusal = reading.problem.refusal
+    assert isinstance(refusal, Unreadable)
+    assert "initialize_project" in refusal.message
 
 
 def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
@@ -358,11 +359,11 @@ def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
     reading = record_or_problem(tmp_path)
 
     assert reading.kind == "unread"
-    assert not isinstance(reading.problem, str)
     from tcip_store import Unreadable
 
-    assert isinstance(reading.problem, Unreadable)
-    assert "does not decode" in reading.problem.message
+    refusal = reading.problem.refusal
+    assert isinstance(refusal, Unreadable)
+    assert "does not decode" in refusal.message
 
 
 def test_record_or_problem_serves_a_record_its_model_refuses_by_the_models_issues(
@@ -389,11 +390,11 @@ def test_record_or_problem_serves_a_record_its_model_refuses_by_the_models_issue
     reading = record_or_problem(tmp_path)
 
     assert reading.kind == "unread"
-    assert not isinstance(reading.problem, str)
     from tcip_store import Invalid
 
-    assert isinstance(reading.problem, Invalid)
-    assert [issue.loc for issue in reading.problem.issues] == [["site"]]
+    refusal = reading.problem.refusal
+    assert isinstance(refusal, Invalid)
+    assert [issue.loc for issue in refusal.issues] == [["site"]]
 
 
 def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_record(

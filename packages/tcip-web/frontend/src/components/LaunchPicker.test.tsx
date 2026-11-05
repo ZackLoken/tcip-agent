@@ -5,7 +5,12 @@ import { readRefusalText } from "@/api/http";
 import { ADMITTED, BLOCKED, type ChoiceCheck, READ, UNREAD } from "@/api/types.generated";
 import { LaunchPicker, NO_OTHER_PARTITION, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { thrown } from "@/test/refusals";
-import { MOVED_SPLIT_CHOICES, SPLIT_CHOICES, TRAINING_REFUSALS } from "@/test/training";
+import {
+  MOVED_SPLIT_CHOICES,
+  REFUSED_BOUND_SPLIT_CHOICES,
+  SPLIT_CHOICES,
+  TRAINING_REFUSALS,
+} from "@/test/training";
 
 afterEach(cleanup);
 
@@ -26,8 +31,11 @@ function reasonOf(check: ChoiceCheck): string {
   return readRefusalText(check.reason);
 }
 
-/** The disabled partition's reason as the page shows it: its one issue, at the record whole. */
-const DISABLED_REASON = "Input should be a dictionary or an instance of Selection";
+/** The disabled partition's reason as the page shows it: the selection's place before its one
+ * issue, at the record whole. */
+const DISABLED_REASON =
+  "the selection at /scratch/workspace/training/dataset/splits/unreadable: " +
+  "Input should be a dictionary or an instance of Selection";
 
 /** The radio of the partition under `dir` itself, never of one in a directory beneath it. */
 function radioOf(dir: string): HTMLElement {
@@ -153,6 +161,15 @@ describe("LaunchPicker", () => {
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
     expect(screen.getAllByText(reason)).toHaveLength(1);
     expect(screen.getByRole("status")).toHaveTextContent(reason);
+  });
+
+  it("names the bound selection's place in the reason a refused bound run's As recorded shows", () => {
+    renderRow({ data: REFUSED_BOUND_SPLIT_CHOICES });
+    expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "the selection at /scratch/workspace/training/bound-selection: " +
+        "Input should be a dictionary or an instance of Selection",
+    );
   });
 
   it("shows a disabled candidate's own inline reason once it is no longer the checked choice, not duplicated into the status region", () => {

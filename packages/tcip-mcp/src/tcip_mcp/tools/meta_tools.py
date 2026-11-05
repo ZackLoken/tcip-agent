@@ -26,8 +26,8 @@ from tcip_mcp.pipelines.training.hpo import Count
 from tcip_mcp.server import tool
 from tcip_store import (
     Key,
-    ReadRefusal,
     ReadRefusedError,
+    RefusedRead,
     StoreError,
     Version,
     unreadable,
@@ -138,11 +138,11 @@ class ReadEntry[M: MemoryRecord](BaseModel):
 
 
 class UnreadEntry(BaseModel):
-    """A stored record that will not read as its corpus's record: its id and its reader's why."""
+    """A stored record that will not read as its corpus's record: its id and its refused read."""
 
     kind: Literal["unread"] = "unread"
     id: str
-    reason: ReadRefusal
+    reason: RefusedRead
 
 
 type MemoryEntry[M: MemoryRecord] = Annotated[
@@ -173,7 +173,7 @@ def memory_entries[M: MemoryRecord](
         try:
             read = read_memory(record, project_path, name)
         except ReadRefusedError as exc:
-            unread.append(UnreadEntry(id=name, reason=exc.refusal))
+            unread.append(UnreadEntry(id=name, reason=exc.served))
         else:
             stated.append((read.timestamp, ReadEntry(id=name, record=read)))
     stated.sort(key=lambda pair: pair[0], reverse=True)
@@ -267,9 +267,9 @@ def load_project_memory(
         texts = [
             entry.id,
             *(
-                [entry.reason]
-                if entry.kind == "unread"
-                else entry.record.model_dump().values()
+                entry.record.model_dump().values()
+                if entry.kind == "read"
+                else ()
             ),
         ]
         return any(

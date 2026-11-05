@@ -21,8 +21,7 @@ from pydantic import (
     TypeAdapter,
 )
 
-from tcip_store.errors import ReadRefusedError
-from tcip_store.refusal import validated
+from tcip_store.refusal import ReadRefusedError, validated
 
 
 def encode_record(value: JsonValue) -> bytes:
