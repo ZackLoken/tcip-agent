@@ -9,33 +9,12 @@ import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from types import TracebackType
 
     from fastapi.testclient import TestClient
 
     from tcip_web.state import OpenProject
 
 DISPLAY_NAME = "Valley block"
-
-
-class _SignaledLock:
-    """The workspace lock, setting ``reached`` as each acquire begins."""
-
-    def __init__(self, lock: threading.Lock, reached: threading.Event) -> None:
-        self._lock = lock
-        self._reached = reached
-
-    def __enter__(self) -> bool:
-        self._reached.set()
-        return self._lock.__enter__()
-
-    def __exit__(
-        self,
-        kind: type[BaseException] | None,
-        error: BaseException | None,
-        trace: TracebackType | None,
-    ) -> None:
-        self._lock.__exit__(kind, error, trace)
 
 
 def _request(
@@ -85,7 +64,7 @@ def test_a_route_waiting_on_the_workspace_lock_leaves_the_event_loop_free(
     answers 200 once the lock is released.
     """
     from tcip_web.routes import projects
-    from tests._web_fixtures import named_project
+    from tests._web_fixtures import ObservedTurn, named_project
 
     project = named_project(tmp_path.parent / "valley_block", DISPLAY_NAME)
     answers: dict[str, int] = {}
@@ -103,15 +82,20 @@ def test_a_route_waiting_on_the_workspace_lock_leaves_the_event_loop_free(
     with client:
         url, body = _request(route, client, project)
         lock = projects._WORKSPACE_TURN
-        reached = threading.Event()
-        monkeypatch.setattr(
-            projects, "_WORKSPACE_TURN", _SignaledLock(lock, reached)
-        )
+        turn = ObservedTurn(lock)
+        monkeypatch.setattr(projects, "_WORKSPACE_TURN", turn)
+        me = threading.get_ident()
         with lock:
             waiting = call("route", "POST", url, json=body)
-            assert reached.wait(10), (
-                f"the {route} route never reached the lock"
-            )
+            with turn.changed:
+                attempted = turn.changed.wait_for(
+                    lambda: any(
+                        event == "attempted" and thread != me
+                        for event, thread in turn.events
+                    ),
+                    10,
+                )
+            assert attempted, f"the {route} route never reached the lock"
             probe = call("state", "GET", "/api/state")
             probe.join(5)
             assert not probe.is_alive(), (
