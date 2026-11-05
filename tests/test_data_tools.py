@@ -1568,8 +1568,12 @@ def test_read_selection_refuses_an_empty_sample_list(tmp_path: Path) -> None:
     document, _samples = _stored_selection(out)
     ts.replace(selection_key(out), {**document, "samples": []})
 
-    with pytest.raises(ValueError, match="lists no samples"):
+    with pytest.raises(ts.ReadRefusedError) as refused:
         read_selection(out, project=tmp_path)
+    assert isinstance(refused.value.refusal, ts.Invalid)
+    assert [issue.loc for issue in refused.value.refusal.issues] == [
+        ["samples"]
+    ]
 
 
 def test_read_selection_refuses_one_source_on_two_sides(

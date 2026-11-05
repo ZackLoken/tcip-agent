@@ -276,7 +276,8 @@ def test_every_refusal_of_the_selection_reader_names_the_selection_place(
     """An absent, a damaged, an unlisting and an unresolvable record each name one place.
 
     The four records are an absence, a drawn selection's record replaced by one its model refuses,
-    one that validates but lists no samples, and one whose sample path will not resolve. Each
+    one whose sample list is empty, refused by the model at ``samples``, and one whose sample path
+    will not resolve. Each
     ``read_selection`` refusal's ``where`` is :func:`selection_place`'s sentence for its directory.
     """
     from tcip_mcp.pipelines.data.selection import (
@@ -284,7 +285,7 @@ def test_every_refusal_of_the_selection_reader_names_the_selection_place(
         selection_key,
         selection_place,
     )
-    from tcip_store import ReadRefusedError
+    from tcip_store import Invalid, ReadRefusedError
 
     drawn = tmp_path / "drawn"
     _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "ds"), drawn)
@@ -312,11 +313,14 @@ def test_every_refusal_of_the_selection_reader_names_the_selection_place(
         with pytest.raises(ReadRefusedError) as refused:
             read_selection(directory, project=tmp_path)
         assert refused.value.where == selection_place(directory)
-        reached[directory.name] = str(refused.value.refusal)
-    assert "no selection recorded" in reached["absent"]
-    assert "group_by" in reached["damaged"]
-    assert "lists no samples" in reached["unlisting"]
-    assert "carries a '..' segment" in reached["unresolvable"]
+        reached[directory.name] = refused.value.refusal
+    assert "no selection recorded" in str(reached["absent"])
+    assert "group_by" in str(reached["damaged"])
+    assert isinstance(reached["unlisting"], Invalid)
+    assert [issue.loc for issue in reached["unlisting"].issues] == [
+        ["samples"]
+    ]
+    assert "carries a '..' segment" in str(reached["unresolvable"])
 
 
 def _bound_to_a_draw(tmp_path: Path) -> dict:
