@@ -35,7 +35,12 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
     from torch.utils.tensorboard import SummaryWriter
 
-    from tcip_mcp.experiments import FinalState, MetricsRow, RunCheckpoint
+    from tcip_mcp.experiments import (
+        FinalState,
+        MetricsRow,
+        RangeTest,
+        RunCheckpoint,
+    )
     from tcip_mcp.pipelines.data.augmentations import Transforms
     from tcip_mcp.pipelines.data.datasets import (
         BaseDataset,
@@ -79,6 +84,8 @@ class TrainContext:
     )
     resume_from: str = ""
     epoch_hook: EpochCallback | None = None
+    range_test: RangeTest | None = None
+    """The range test the run was launched as, ``None`` for a run training a model."""
     _epoch: int = 0
     _tb: Any = None
 
@@ -539,9 +546,10 @@ class TrainContext:
 def dispatch_train_body(ctx: TrainContext) -> None:
     """Run the training body, then declare its deliverable when the body declared none.
 
-    The body is ``ctx.default_train()`` when the run reads the default trainer's regime
-    (``TrainerReads.regime``), else the agent's ``training_source``; the deliverable it falls
-    back to is the checkpoint the body saved under ``model_best``, else ``model_final``
+    The body is the range test's (``lr_range.run_range_test``) for a run launched as one
+    (``ctx.range_test``), else ``ctx.default_train()`` when the run reads the default trainer's
+    regime (``TrainerReads.regime``), else the agent's ``training_source``; the deliverable it
+    falls back to is the checkpoint the body saved under ``model_best``, else ``model_final``
     (``run.saved``). The run's TensorBoard writer (``ctx.tb``) is closed once the body returns
     or raises.
     """
@@ -549,7 +557,11 @@ def dispatch_train_body(ctx: TrainContext) -> None:
     from tcip_mcp.experiments import FINAL_STATES
 
     try:
-        if run.reads.regime is not None:
+        if ctx.range_test is not None:
+            from tcip_mcp.pipelines.training.lr_range import run_range_test
+
+            run_range_test(ctx, ctx.range_test)
+        elif run.reads.regime is not None:
             ctx.default_train()
         else:
             from tcip_mcp.pipelines.model_build import import_source_builder
@@ -667,11 +679,12 @@ def _settle_run(ctx: TrainContext) -> RunCheckpoint | None:
 
     For a completed run that is its deliverable (``run.deliverable``), named inside the run's
     directory with the sha256 the verified checkpoint reader admitted
-    (``model_registry.admitted_digest``), else ``None``. A run the wall clock stopped ends
+    (``model_registry.admitted_digest``), else ``None``; a range test's deliverable is its
+    reading, its ``lr_range.json``, and names no checkpoint. A run the wall clock stopped ends
     ``failed`` naming it; a completed run with no deliverable, or one that cannot be read or
     that the verified reader refuses, ends ``failed`` naming why.
     """
-    from tcip_mcp.experiments import RunCheckpoint
+    from tcip_mcp.experiments import LR_RANGE_FILE, RunCheckpoint
     from tcip_mcp.model_registry import admitted_digest
 
     run = ctx.run
@@ -681,7 +694,11 @@ def _settle_run(ctx: TrainContext) -> RunCheckpoint | None:
             "exceeded max_wall_clock_seconds",
         )
     checkpoint = None
-    if run.status == "completed":
+    if run.status == "completed" and ctx.range_test is not None:
+        if not (ctx.run_dir / LR_RANGE_FILE).is_file():
+            run.status = "failed"
+            run.status_error = "the range test completed but wrote no reading"
+    elif run.status == "completed":
         if run.deliverable is None:
             run.status = "failed"
             run.status_error = "training completed but saved no final weights"

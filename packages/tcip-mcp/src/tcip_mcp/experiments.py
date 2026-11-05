@@ -9,6 +9,8 @@ Each file in it has one writer:
 - ``heartbeat``: touched by the child while it lives.
 - ``cancel_requested.json``: the first cancellation request (:func:`request_cancel`).
 - ``final_status.json``: the outcome, written once at exit (:func:`write_final_status`).
+- ``lr_range.json``: a range test's reading of its curve, written once by its body
+  (``pipelines.training.lr_range``).
 
 Checkpoints, TensorBoard logs, a bespoke run's source snapshot and its recorded artifacts are
 files beside them. A sweep is a directory beside the runs, told from one by its ``sweep.json``,
@@ -45,7 +47,10 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    NonNegativeInt,
+    PositiveFloat,
     computed_field,
+    model_validator,
 )
 
 from tcip_mcp.agent_identity import AgentIdentity
@@ -101,6 +106,8 @@ CANCEL_FILE = "cancel_requested.json"
 FINAL_STATUS_FILE = "final_status.json"
 SWEEP_FILE = "sweep.json"
 """A sweep directory's input, written once before its first trial."""
+LR_RANGE_FILE = "lr_range.json"
+"""A range test's reading of its curve, written once at its end."""
 TENSORBOARD_DIR = "tensorboard"
 """A run directory's TensorBoard event directory."""
 
@@ -171,6 +178,7 @@ RECORD_PATHS: dict[str, PathFields] = {
         *within(("input", "param_space"), _SPACE_PATHS),
     ),
     FINAL_STATUS_FILE: (("checkpoint", "path"),),
+    LR_RANGE_FILE: (),
 }
 """The fields of each record of a run or sweep directory that name a path, each stored against
 the project the directory lies under (:func:`project_of_run`)."""
@@ -307,10 +315,44 @@ class TrialPoint(BaseModel):
     params: dict[str, JsonValue]
 
 
+class RangeTest(BaseModel):
+    """A learning-rate range test of one stage of its config, and the ramp it ran under.
+
+    The run probes ``stage``, an index into its config's ``stages``. Its head group's rate starts
+    at ``ramp_low`` and every group's rate is multiplied by one factor per optimizer step,
+    reaching ``ramp_high`` at step ``batches``; it stops at the first step whose loss is not
+    finite or whose loss, exponentially smoothed with ``smoothing`` the weight of each new loss,
+    exceeds ``divergence`` times the least smoothed loss so far (``pipelines.training.lr_range``).
+    Refuses a ramp whose ``ramp_low`` is not below its ``ramp_high``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["range_test"] = "range_test"
+    stage: NonNegativeInt
+    ramp_low: PositiveFloat
+    ramp_high: PositiveFloat
+    batches: int = Field(ge=2)
+    """A ramp has two ends, its first step and its last."""
+    divergence: PositiveFloat
+    smoothing: float = Field(gt=0, le=1)
+    """``1`` reads every loss unsmoothed."""
+
+    @model_validator(mode="after")
+    def _ramp_rises(self) -> RangeTest:
+        if self.ramp_low >= self.ramp_high:
+            raise ValueError(
+                f"ramp_low {self.ramp_low} is not below ramp_high {self.ramp_high}: a range "
+                "test ramps its rate up."
+            )
+        return self
+
+
 type LaunchedAs = Annotated[
-    Standalone | TrialPoint, Field(discriminator="kind")
+    Standalone | TrialPoint | RangeTest, Field(discriminator="kind")
 ]
-"""Whether a run was launched on its own or as a sweep's trial, told apart by its ``kind``."""
+"""Whether a run was launched on its own, as a sweep's trial or as a range test, told apart by its
+``kind``."""
 
 
 class RunRecord(BaseModel):
@@ -321,7 +363,7 @@ class RunRecord(BaseModel):
     failed to resolve), the ``environment`` it ran in, the ``dataset`` its data block names, the
     ``source`` snapshot record its admission took, the run it was relaunched from and the
     checkpoint it resumes from, its wall clock, the model contract preflight proved, and whether
-    it was launched on its own or as a sweep's trial at a sampled point.
+    it was launched on its own, as a sweep's trial at a sampled point or as a range test.
     """
 
     model_config = ConfigDict(
@@ -424,9 +466,7 @@ def open_run_directory(
     write_record(run_dir / RUN_FILE, record)
 
 
-def write_record(
-    path: Path, record: RunRecord | SweepRecord | FinalStatus
-) -> None:
+def write_record(path: Path, record: BaseModel) -> None:
     """Publish ``record`` at ``path`` once (:func:`write_once`), as its model dumps it.
 
     Each path :data:`RECORD_PATHS` names for its file is stored against the directory's project.
@@ -1030,8 +1070,22 @@ class TrialRun(_RunRow):
     params: dict[str, JsonValue]
 
 
-type RunRow = Annotated[StandaloneRun | TrialRun, Field(discriminator="kind")]
-"""One run's row, a run launched on its own or a sweep's trial, told apart by its ``kind``."""
+class RangeTestRun(_RunRow):
+    """A learning-rate range test, as its row."""
+
+    kind: Literal["range_test"] = "range_test"
+
+
+type OwnRun = Annotated[
+    StandaloneRun | RangeTestRun, Field(discriminator="kind")
+]
+"""A run launched on its own or as a range test, told apart by its ``kind``."""
+
+type RunRow = Annotated[
+    StandaloneRun | TrialRun | RangeTestRun, Field(discriminator="kind")
+]
+"""One run's row, a run launched on its own, a sweep's trial or a range test, told apart by its
+``kind``."""
 
 
 def run_summary(
@@ -1046,7 +1100,8 @@ def run_summary(
     read from by its id. The row holds its record's own fields, its last logged epoch, and its
     best selection value (:func:`best_selection`) under its config's selection metric and
     direction (``schemas.selection_of``), ``None`` for a run that resolved to nothing or logged
-    no finite one. A trial's row names the sweep its directory lies beneath.
+    no finite one. A trial's row names the sweep its directory lies beneath, and a range test's
+    row is of its own kind.
     """
     record = observation.record
     spec = record.spec
@@ -1071,13 +1126,16 @@ def run_summary(
         heartbeat=observation.heartbeat,
         launch=launches.get(observation.directory.name, NoLaunchLine()),
     )
-    if record.launched_as.kind == "standalone":
-        return StandaloneRun(**dict(row))
-    return TrialRun(
-        **dict(row),
-        sweep_id=observation.directory.parent.name,
-        params=record.launched_as.params,
-    )
+    launched = record.launched_as
+    if isinstance(launched, TrialPoint):
+        return TrialRun(
+            **dict(row),
+            sweep_id=observation.directory.parent.name,
+            params=launched.params,
+        )
+    if isinstance(launched, RangeTest):
+        return RangeTestRun(**dict(row))
+    return StandaloneRun(**dict(row))
 
 
 def run_rows(project: Path | str) -> list[RunRow]:
@@ -1370,16 +1428,17 @@ type TrainingDetail = Annotated[
 
 
 class TrainingListing(BaseModel):
-    """Every run of a project launched on its own as its row, and every sweep as its group."""
+    """A project's runs launched on their own or as range tests, and its sweeps as groups."""
 
-    runs: list[StandaloneRun]
+    runs: list[OwnRun]
     sweeps: list[SweepGroup]
 
 
 def training_listing(project: Path | str) -> TrainingListing:
-    """Return ``project``'s runs launched on their own, and its sweeps with their trial rows.
+    """Return ``project``'s runs launched on their own or as range tests, and its sweeps.
 
-    The runs are :func:`run_rows`'s and the sweeps :func:`read_sweep`'s, each in creation order.
+    The runs are :func:`run_rows`'s and the sweeps :func:`read_sweep`'s with their trial rows,
+    each in creation order.
     """
     rows = run_rows(project)
     sweeps = sorted(
@@ -1387,7 +1446,7 @@ def training_listing(project: Path | str) -> TrainingListing:
         key=lambda sweep: sweep.record.created,
     )
     return TrainingListing(
-        runs=[row for row in rows if row.kind == "standalone"],
+        runs=[row for row in rows if not isinstance(row, TrialRun)],
         sweeps=[read_sweep(sweep, rows) for sweep in sweeps],
     )
 
@@ -1401,10 +1460,10 @@ class _Launched(BaseModel):
 def launch_declarations(
     project: Path | str,
 ) -> dict[str, NoAgentLaunch | AgentLaunch]:
-    """Return who each run's ``launch_training`` audit line says started it, by run id.
+    """Return who each run's launch audit line says started it, by run id.
 
-    The lines are ``project``'s audit log's, keyed by the experiment id each names: the agent
-    client the line carries, or none declared.
+    The lines are ``project``'s audit log's ``launch_training`` and ``derive_lr_range`` lines,
+    keyed by the experiment id each names: the agent client the line carries, or none declared.
     """
     from tcip_mcp.audit import acts_of
 
@@ -1414,7 +1473,9 @@ def launch_declarations(
             if entry.agent_client_name is None
             else AgentLaunch.model_validate(entry, from_attributes=True)
         )
-        for entry in acts_of(project, ("launch_training",))[0]
+        for entry in acts_of(project, ("launch_training", "derive_lr_range"))[
+            0
+        ]
     }
 
 
@@ -1429,16 +1490,34 @@ def get_experiment(
 
     Returns its launch record, its final status (``None`` until written), its state, and its
     metrics as one row per epoch (:func:`epoch_rows`) paginated by ``metrics_offset`` and
-    ``metrics_limit``, ``n_epochs`` the number paged over. ``{"error": ...}`` for an id naming no
-    run.
+    ``metrics_limit``, ``n_epochs`` the number paged over; and, for a range test,
+    ``lr_range``: its per-batch rows, its result (``lr_range.read_lr_range``, ``None`` until
+    written) and the ``low`` and ``high`` that result derives, ``lr_range`` ``None`` for any
+    other run. ``{"error": ...}`` for an id naming no run.
     """
     observation = find_observation(experiment_id, project=project)
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
-    rows = epoch_rows(read_rows(observation.metrics_log)[0])
+    logged = read_rows(observation.metrics_log)[0]
+    rows = epoch_rows(logged)
     end = (
         (metrics_offset + metrics_limit) if metrics_limit is not None else None
     )
+    lr_range = None
+    if isinstance(observation.record.launched_as, RangeTest):
+        from tcip_mcp.pipelines.training.lr_range import read_lr_range
+
+        written = observation.directory / LR_RANGE_FILE
+        result = read_lr_range(written) if written.is_file() else None
+        lr_range = {
+            "rows": [
+                row.model_dump(mode="json")
+                for row in partition_rows(logged)[1]
+            ],
+            "result": result and result.model_dump(mode="json"),
+            "low": result and result.low,
+            "high": result and result.high,
+        }
     return {
         "experiment_id": experiment_id,
         "run": observation.record.model_dump(mode="json"),
@@ -1450,6 +1529,7 @@ def get_experiment(
             row.model_dump(mode="json") for row in rows[metrics_offset:end]
         ],
         "metrics_offset": metrics_offset,
+        "lr_range": lr_range,
     }
 
 

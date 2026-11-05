@@ -156,18 +156,28 @@ def _admitted(
 ) -> tuple[TrainConfigSchema | None, StagedSources | None, list[str]]:
     """Admit ``config`` with ``point`` applied, validated once against ``project``.
 
-    ``point`` is applied by :func:`_apply_hpo_params`, the result validated once against
-    ``project`` (``schemas.checked_train_config``) and, when it validates, its augmentation judged
-    against the project record's capture invariances (``augmentations.forbidden_transforms``) and
-    its structure (:func:`_structural_issues`). Returns the spec, ``None`` when it did not
-    validate, its staged sources, ``None`` when none were taken, and every issue.
+    ``point`` is applied by :func:`_apply_hpo_params`, a sampled ``head_lr`` under a range test
+    deriving its ``backbone_lr`` (``lr_range.with_ranged_backbone``), the result validated once
+    against ``project`` (``schemas.checked_train_config``) and, when it validates, its
+    augmentation judged against the project record's capture invariances
+    (``augmentations.forbidden_transforms``), its structure (:func:`_structural_issues`) and the
+    range its ``optimizer.lr_range_run`` names (``lr_range.range_issues``). Returns the spec,
+    ``None`` when it did not validate, its staged sources, ``None`` when none were taken, and
+    every issue.
     """
     from tcip_mcp.pipelines.data.augmentations import forbidden_transforms
+    from tcip_mcp.pipelines.training.lr_range import (
+        range_issues,
+        with_ranged_backbone,
+    )
     from tcip_mcp.project_record import read_record
 
     try:
         spec, issues = checked_train_config(
-            _apply_hpo_params(config, point), project
+            with_ranged_backbone(
+                _apply_hpo_params(config, point), point, project
+            ),
+            project,
         )
     except ValueError as exc:
         return None, None, [str(exc)]
@@ -181,7 +191,7 @@ def _admitted(
         except ValueError as exc:
             issues = [str(exc)]
     sources, structural = _structural_issues(spec, project)
-    return spec, sources, [*issues, *structural]
+    return spec, sources, [*issues, *structural, *range_issues(spec, project)]
 
 
 def _preflight(
@@ -617,18 +627,6 @@ def launch_training(
     )
 
     rendered_overfit_report = validation.get("overfit_check")
-
-    smoke_report = validation["smoke"]
-    model_contract_record = LaunchContract(
-        subject="the model as built at launch, before any training step",
-        gating=True,
-        batch_source=smoke_report["batch_source"],
-        dims=smoke_report["dims"],
-        issues=smoke_report["issues"],
-        gradient_magnitudes=smoke_report["gradient_magnitudes"],
-        overfit_check=rendered_overfit_report,
-    )
-
     experiment_id = experiments.mint_experiment_id()
     line = audit_line(
         "launch_training",
@@ -651,7 +649,7 @@ def launch_training(
             relaunched_from=relaunched_from,
             resume_from=resume,
             max_wall_clock_seconds=max_wall_clock_seconds,
-            model_contract=model_contract_record,
+            model_contract=_launch_contract(validation),
             launched_as=experiments.Standalone(),
         )
     except (StoreError, ValueError, OSError) as exc:
@@ -675,6 +673,155 @@ def launch_training(
         overfit_check=rendered_overfit_report,
         warnings=validation["warnings"],
     )
+
+
+def _launch_contract(validation: dict) -> LaunchContract:
+    """Return the model contract a run records from its passed preflight's ``validation``.
+
+    The contract is the smoke's, with the rendered overfit check when one ran.
+    """
+    smoke_report = validation["smoke"]
+    return LaunchContract(
+        subject="the model as built at launch, before any training step",
+        gating=True,
+        batch_source=smoke_report["batch_source"],
+        dims=smoke_report["dims"],
+        issues=smoke_report["issues"],
+        gradient_magnitudes=smoke_report["gradient_magnitudes"],
+        overfit_check=validation.get("overfit_check"),
+    )
+
+
+@tool()
+def derive_lr_range(
+    project: Path,
+    config: dict,
+    stage: int,
+    ramp_low: float = 1e-8,
+    ramp_high: float = 1.0,
+    batches: int = 100,
+    divergence: float = 4.0,
+    smoothing: float = 0.05,
+    *,
+    actor: str | None,
+) -> dict:
+    """Derive a head learning-rate range for one stage of ``config`` by a range test, by ``actor``.
+
+    The test is a run of its own, launched as a range test (``experiments.RangeTest``) and run
+    in a worker process this call waits on (``lr_range.run_range_test``): the stage's freeze
+    applied, its rates ramped from ``ramp_low`` to ``ramp_high`` over ``batches`` optimizer
+    steps with the config's ``backbone_lr / head_lr`` ratio held, each step a per-batch row of
+    its loss, smoothed loss and head rate. Its reading is written once as the run's
+    ``lr_range.json`` (``lr_range.LrRangeResult``), which derives the range ``[low, high)`` by a
+    rule that is provisional until a validation on this platform's data replaces it. A config
+    naming the run as ``optimizer.lr_range_run`` is held to that range, to the probed freeze
+    state and to the ramped ratio by every launch door and every sweep trial, and a sweep over
+    one samples ``optimizer.head_lr`` from the range; how far below ``high`` to state a constant
+    rate is your judgment, with the run's curve as its evidence.
+
+    Writes the run's ``run.json``, then the act's one audit line naming the minted
+    ``experiment_id`` (``AuditEntryNotWrittenError`` when it cannot be appended, and no worker
+    starts). Answers ``{experiment_id, low, high, result}`` once the run completes. Refuses with
+    ``{"error", "issues"}`` and nothing started: a ramp its parameters refuse (a non-positive
+    rate or factor, ``ramp_low`` not below ``ramp_high``, fewer than two ``batches``, a
+    ``smoothing`` outside ``(0, 1]``), a config naming a ``training_source`` (a bespoke loop owns
+    its rates), one ``launch_training``'s preflight refuses, and a ``stage`` past its
+    ``stages``. Answers ``{"error", "experiment_id"}`` naming why for a run that ended with no
+    reading: a stage that trains nothing, or a curve its reading refuses (fewer than two finite
+    rows, no descent, no turning point).
+
+    Args:
+        config: The training config to probe, as ``launch_training`` takes it, naming no
+            ``training_source``.
+        stage: The index into ``config``'s ``stages`` of the stage probed, whose freeze,
+            accumulation and rates the test runs at.
+        ramp_low: The head rate of the first step. Provisional default 1e-8, PyTorch
+            Lightning's ``lr_find`` default.
+        ramp_high: The head rate of the last step. Provisional default 1.0, Lightning's.
+        batches: The optimizer steps the ramp takes. Provisional default 100, Lightning's.
+        divergence: The test stops once the smoothed loss exceeds this many times the least
+            before it. Provisional default 4.0, Lightning's ``early_stop_threshold``
+            (torch-lr-finder's ``diverge_th`` is 5).
+        smoothing: The weight of each new loss in the exponentially smoothed loss, 1 for none.
+            Provisional default 0.05, torch-lr-finder's ``smooth_f``.
+
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.training.lr_range import read_lr_range
+
+    try:
+        test = experiments.RangeTest(
+            stage=stage,
+            ramp_low=ramp_low,
+            ramp_high=ramp_high,
+            batches=batches,
+            divergence=divergence,
+            smoothing=smoothing,
+        )
+    except ValidationError as exc:
+        return {
+            "error": "derive_lr_range: the ramp is refused",
+            "issues": [str(e["msg"]) for e in exc.errors()],
+        }
+    spec, sources, issues = _admitted(config, {}, project)
+    if spec is not None and spec.training_source is not None:
+        return {
+            "error": f"derive_lr_range: config names training_source "
+            f"{spec.training_source!r}, a loop of its own that owns its rates; probe a config "
+            "the default trainer trains.",
+            "issues": [],
+        }
+    validation, resolution = _preflight(
+        project, spec, sources, issues, smoke=True, overfit=False
+    )
+    if not validation["valid"]:
+        return {"error": "Invalid config", "issues": validation["issues"]}
+    assert resolution is not None and sources is not None, (
+        "a valid config resolved"
+    )
+    stages = resolution.spec.default_trainer_regime().stages
+    if test.stage >= len(stages):
+        return {
+            "error": f"derive_lr_range: stage {test.stage} is past the config's "
+            f"{len(stages)} stage(s).",
+            "issues": [],
+        }
+
+    experiment_id = experiments.mint_experiment_id("lr_range")
+    line = audit_line(
+        "derive_lr_range", {"experiment_id": experiment_id}, actor, "ok"
+    )
+    run_dir = experiments.experiment_dir(experiment_id, project=project)
+    try:
+        open_run(
+            run_dir,
+            resolution.spec,
+            sources,
+            resolution.record,
+            created=line.timestamp,
+            model_contract=_launch_contract(validation),
+            launched_as=test,
+        )
+    except (StoreError, ValueError, OSError) as exc:
+        return {"error": f"derive_lr_range: {exc}", "issues": []}
+    append_or_raise(line, scope=project)
+    _start_worker(run_dir, _child_env_for_launch(resolution.spec)).wait()
+
+    observation = experiments.observe_run(run_dir)
+    if observation.state != "completed":
+        return {
+            "error": f"range test {experiment_id} ended {observation.state}: "
+            f"{observation.status_error}",
+            "experiment_id": experiment_id,
+        }
+    result = read_lr_range(run_dir / experiments.LR_RANGE_FILE)
+    return {
+        "experiment_id": experiment_id,
+        "low": result.low,
+        "high": result.high,
+        "result": result.model_dump(mode="json"),
+    }
 
 
 def _worker_env() -> dict[str, str]:
@@ -1312,7 +1459,12 @@ def run_hyperparameter_search(
         param_space: Param-space dict (see ``hpo.space_axes``), each key a config key or a
             dotted path into one (``optimizer.head_lr``). A ``data.split.seed`` axis is refused
             whenever ``split_draws`` draws at most one partition; above 1 it belongs to
-            ``split_draws``/``split_draw_seeds``.
+            ``split_draws``/``split_draw_seeds``. Under a ``base_config`` naming
+            ``optimizer.lr_range_run``, the ``optimizer.head_lr`` axis is the range that test
+            derived, written here as a ``loguniform`` axis from its ``low`` to its ``high`` and
+            recorded so, each trial's ``backbone_lr`` derived from its ``head_lr`` at the ratio
+            the test ramped under; an ``optimizer.head_lr`` axis of the caller's own beside it
+            is refused, as is a range test that derived no range.
         n_trials: Number of sampled points.
         search_alg: Search algorithm, one ``available_search_algs`` lists.
         scheduler: Trial scheduler, a block naming one ``available_schedulers`` lists as its
@@ -1356,6 +1508,32 @@ def run_hyperparameter_search(
             omit for the derived default (see ``split_draws``).
 
     """
+    from tcip_mcp.pipelines.training.lr_range import (
+        HEAD_LR_AXIS,
+        named_range_run,
+        range_result,
+    )
+
+    if (run_id := named_range_run(base_config)) is not None:
+        if HEAD_LR_AXIS in param_space:
+            return {
+                "error": f"param_space states its own {HEAD_LR_AXIS} axis beside "
+                f"optimizer.lr_range_run {run_id!r}, a second spelling of the range that run "
+                "derived; drop the axis, and the sweep samples the derived range.",
+                "issues": [],
+            }
+        try:
+            derived = range_result(run_id, project)
+        except ValueError as exc:
+            return {"error": str(exc), "issues": []}
+        param_space = {
+            **param_space,
+            HEAD_LR_AXIS: {
+                "type": "loguniform",
+                "low": derived.low,
+                "high": derived.high,
+            },
+        }
     opened = open_sweep(
         project,
         base_config,
@@ -1414,7 +1592,9 @@ def open_sweep(
     """Check a sweep's arguments and open its directory under ``project``.
 
     The checks: its scheduler block (``hpo.scheduler_settings``), the first point
-    :func:`_preflight_points` lists applied to ``base_config`` and admitted once
+    :func:`_preflight_points` lists (a ``head_lr`` axis under a range test the base config names
+    open above, its high end held off by the range gate every point's admission runs) applied
+    to ``base_config`` and admitted once
     (:func:`_admitted`), its data block, which every split-draw check reads, a ``param_space``
     axis sampling an ``evaluation.selection_metric`` other than the base config's refused, then
     resolved and smoked once (:func:`_preflight`), whose partition answers whether its draws can
@@ -1454,9 +1634,18 @@ def open_sweep(
     except ValueError as exc:
         return {"error": str(exc), "issues": []}
 
+    from tcip_mcp.pipelines.training.lr_range import (
+        HEAD_LR_AXIS,
+        named_range_run,
+    )
+
     try:
         (first_label, first_point), *rest = _preflight_points(
-            param_space, search_alg
+            param_space,
+            search_alg,
+            open_above=frozenset(
+                {HEAD_LR_AXIS} if named_range_run(base_config) else ()
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         return {
@@ -1946,15 +2135,16 @@ def caller_split_seed_refusal(
 
 
 def _preflight_points(
-    param_space: dict, search_alg: str
+    param_space: dict, search_alg: str, *, open_above: frozenset[str]
 ) -> list[tuple[str, dict]]:
     """List the points a sweep's preflight checks, each with its label.
 
     The points are read through the space's shape reader (``hpo.space_axes`` as
     ``search_alg`` grids it, refusing as it refuses): the corner at every axis's first value, plus
     one variant per categorical choice and one per range end, each holding every other axis at
-    that corner, each point listed once. Combinations of several axes away from the corner, and a
-    range's interior, are not among them.
+    that corner, each point listed once. A range axis ``open_above`` names excludes its high end
+    from the rates it admits, so that end is no point. Combinations of several axes away from the
+    corner, and a range's interior, are not among them.
     """
     from tcip_mcp.pipelines.training.hpo import (
         GRID_SEARCH,
@@ -1971,6 +2161,8 @@ def _preflight_points(
         labels = (
             [f"{key}={v!r}" for v in values]
             if kind == "categorical"
+            else [f"{key} low={values[0]!r}"]
+            if key in open_above
             else [f"{key} low={values[0]!r}", f"{key} high={values[1]!r}"]
         )
         for label, value in zip(labels, values):
