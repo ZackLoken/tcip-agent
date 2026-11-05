@@ -2,7 +2,8 @@
 
 The smoke contract's class count is the loader's, the provenance snapshot copies the module a
 dotted reference names (not its top-level package), a saved checkpoint rebuilds from its own
-config's model source, and the dimensions a builder is handed are the run's own.
+config's model source, the dimensions a builder is handed are the run's own, and an unstated
+device places on the accelerator torch sees and is released when a model leaves the engine.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
-    from torch import Tensor, nn
+    from torch import Tensor, device as torch_device, nn
 
     from tcip_mcp.pipelines.schemas import PretrainedWeights
 
@@ -729,25 +730,83 @@ def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
     assert entries[-1] == "/already/set/path"
 
 
-@pytest.mark.parametrize(("seen", "placed"), [(True, "cuda"), (False, "cpu")])
-def test_an_unstated_device_places_on_cuda_only_when_torch_sees_one(
-    monkeypatch: pytest.MonkeyPatch, seen: bool, placed: str
+def _accelerator_torch_reports(
+    monkeypatch: pytest.MonkeyPatch, built: str | None, *, visible: bool
+) -> None:
+    """Make ``torch.accelerator`` report the ``built`` accelerator, seen only when ``visible``.
+
+    ``current_accelerator`` answers the built device for ``check_available=False`` and, as
+    torch's does, ``None`` for ``check_available=True`` when the device is not visible.
+    """
+    device = None if built is None else torch.device(built)
+
+    def current_accelerator(
+        check_available: bool = False,
+    ) -> torch_device | None:
+        return None if check_available and not visible else device
+
+    monkeypatch.setattr(
+        torch.accelerator, "current_accelerator", current_accelerator
+    )
+    monkeypatch.setattr(
+        torch.accelerator,
+        "is_available",
+        lambda: device is not None and visible,
+    )
+
+
+@pytest.mark.parametrize(
+    ("built", "visible", "placed"),
+    [
+        ("mps", True, "mps"),
+        ("cuda", True, "cuda"),
+        ("mps", False, "cpu"),
+        (None, False, "cpu"),
+    ],
+    ids=["mps seen", "cuda seen", "built but not visible", "none built"],
+)
+def test_an_unstated_device_places_on_the_accelerator_torch_sees_else_the_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+    built: str | None,
+    visible: bool,
+    placed: str,
 ) -> None:
     from tcip_mcp.pipelines.model_build import placement
 
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: seen)
+    _accelerator_torch_reports(monkeypatch, built, visible=visible)
 
     assert placement(None) == torch.device(placed)
 
 
-def test_a_stated_device_is_placed_as_stated_while_torch_sees_cuda(
+def test_a_stated_device_is_placed_as_stated_while_torch_reports_an_accelerator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_mcp.pipelines.model_build import placement
 
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    _accelerator_torch_reports(monkeypatch, "cuda", visible=True)
 
     assert placement("cpu") == torch.device("cpu")
+
+
+def test_a_model_leaving_the_engine_releases_the_cache_of_the_accelerator_torch_sees(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.pipelines.proposal_engines import _placed
+    from tests._chain_fixtures import detector_values
+    from tests.bespoke_models import build_bespoke_detection
+
+    _accelerator_torch_reports(monkeypatch, "cpu", visible=True)
+    released: list[bool] = []
+    monkeypatch.setattr(
+        torch.accelerator, "empty_cache", lambda: released.append(True)
+    )
+    model = build_bespoke_detection(**detector_values())
+
+    with _placed(model):
+        assert released == []
+
+    assert released == [True]
+    assert {p.device.type for p in model.parameters()} == {"cpu"}
 
 
 def test_a_stated_empty_device_is_refused_by_torch() -> None:

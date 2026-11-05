@@ -96,7 +96,7 @@ def assess_checkpoint(
             ``run_inference`` takes them: a detector's ``conf``, the one its predictions are
             collected at and the floor its fitted conf is censored at, and an instance
             segmentation checkpoint's ``masks`` among them.
-        device: cuda / cpu (auto if omitted).
+        device: A torch device name; omitted, placed as ``model_build.placement`` places it.
 
     """
     from tcip_mcp.assessment import assess
@@ -155,7 +155,7 @@ def assess_reserved_regions(
         rationale: Why the assessment states these settings, recorded with it.
         stated: Execution values to state rather than derive (``execution.Stated``), its
             ``conf`` as :func:`assess_checkpoint` takes it; the pass is always tiled.
-        device: cuda / cpu (auto if omitted).
+        device: A torch device name; omitted, placed as ``model_build.placement`` places it.
 
     """
     from tcip_mcp.assessment import assess_reserved_regions as assess
