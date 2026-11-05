@@ -3,7 +3,7 @@
 * detection / instance_seg counts and average precision from :mod:`tcip_annotation.matching`'s
 matcher, by box or, for instance segmentation, by mask;
 * scalar metrics for classification / ordinal / regression, scikit-learn's under the platform's
-conventions;
+conventions except the concordance correlation coefficient, which scikit-learn lacks;
 * the composite selection objective (lower = better);
 * a task-agnostic two-pass ``evaluate()``.
 """
@@ -27,6 +27,8 @@ from tcip_mcp.pipelines.schemas import (
 from tcip_store import stored_number, stored_numbers
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from pydantic import JsonValue
 
     from tcip_annotation.state import Annotation
@@ -1176,6 +1178,8 @@ def quadratic_weighted_kappa(
     squared rank distances and expected agreement comes from the scored set's own observed rank
     marginals. ``None`` when undefined: no items, fewer than two ranks, or expected disagreement
     is zero (every populated true/predicted pair shares one rank), where the library answers nan.
+    Every item is scored or the call refuses: a rounded rank outside ``0..num_ranks - 1`` in
+    either tensor raises ``ValueError`` naming the ranks found.
     """
     from sklearn.metrics import cohen_kappa_score
 
@@ -1183,10 +1187,28 @@ def quadratic_weighted_kappa(
     gt = gt_ranks.detach().cpu().round().long().numpy()
     if gt.size == 0 or num_ranks < 2:
         return None
+    found = np.unique(np.concatenate([gt, pred]))
+    outside = found[(found < 0) | (found >= num_ranks)]
+    if outside.size:
+        raise ValueError(
+            f"quadratic_weighted_kappa: rounded ranks {outside.tolist()} lie outside the "
+            f"{num_ranks} ranks 0..{num_ranks - 1} of the run"
+        )
     kappa = cohen_kappa_score(
         gt, pred, weights="quadratic", labels=range(num_ranks)
     )
     return None if math.isnan(kappa) else float(kappa)
+
+
+def _scores_non_finite() -> AbstractContextManager[None]:
+    """Return the context in which scikit-learn scores a non-finite value rather than refusing it.
+
+    A prediction or truth that is not finite scores a non-finite metric, which the record states
+    as such.
+    """
+    from sklearn import config_context
+
+    return config_context(assume_finite=True)
 
 
 def r_squared(
@@ -1200,14 +1222,13 @@ def r_squared(
     prediction or truth scores a non-finite value, which the record states as such (the
     library's input check is off for it).
     """
-    from sklearn import config_context
     from sklearn.metrics import r2_score
 
     pred = pred_values.detach().cpu().double().numpy()
     gt = gt_values.detach().cpu().double().numpy()
     if gt.size < 2 or gt.min() == gt.max():
         return None
-    with config_context(assume_finite=True):
+    with _scores_non_finite():
         return float(r2_score(gt, pred, force_finite=False))
 
 
@@ -1223,6 +1244,7 @@ def concordance_correlation_coefficient(
 
     ``CCC = 2*r*sigma_pred*sigma_gt / (sigma_pred^2 + sigma_gt^2 + (mean_pred - mean_gt)^2)``, with
     ``r`` the Pearson correlation and ``sigma`` the population (not sample) standard deviation.
+    It is computed here because scikit-learn has no concordance correlation coefficient.
     """
     pred = pred_values.detach().cpu().float()
     gt = gt_values.detach().cpu().float()
@@ -1245,17 +1267,20 @@ def ordinal_metrics(
 ) -> dict:
     """Return ordinal metrics over ``num_ranks``.
 
-    ``rank_acc`` is scikit-learn's ``accuracy_score`` over the ranks rounded to the nearest
-    rank; ``quadratic_weighted_kappa`` is :func:`quadratic_weighted_kappa`.
+    ``mae`` is scikit-learn's ``mean_absolute_error`` of the ranks as given, in float64;
+    ``rank_acc`` is its ``accuracy_score`` over the ranks rounded to the nearest rank;
+    ``quadratic_weighted_kappa`` is :func:`quadratic_weighted_kappa`.
     """
-    from sklearn.metrics import accuracy_score
+    from sklearn.metrics import accuracy_score, mean_absolute_error
 
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
     if gt.numel() == 0:
         return {"mae": 0.0, "rank_acc": 0.0, "quadratic_weighted_kappa": None}
+    with _scores_non_finite():
+        mae = float(mean_absolute_error(gt.double().numpy(), pred.double().numpy()))
     return {
-        "mae": (pred - gt).abs().mean().item(),
+        "mae": mae,
         "rank_acc": float(
             accuracy_score(
                 gt.round().long().numpy(), pred.round().long().numpy()
@@ -1272,15 +1297,21 @@ def regression_metrics(
 ) -> dict:
     """Return the MAE, RMSE and R-squared of ``pred_values`` against ``gt_values``.
 
-    An empty set answers zero errors and an R-squared of ``None`` (:func:`r_squared`).
+    MAE and RMSE are scikit-learn's ``mean_absolute_error`` and ``root_mean_squared_error``, in
+    float64. An empty set answers zero errors and an R-squared of ``None`` (:func:`r_squared`).
     """
-    pred = pred_values.detach().cpu().float()
-    gt = gt_values.detach().cpu().float()
-    if gt.numel() == 0:
+    from sklearn.metrics import mean_absolute_error, root_mean_squared_error
+
+    pred = pred_values.detach().cpu().double().numpy()
+    gt = gt_values.detach().cpu().double().numpy()
+    if gt.size == 0:
         return {"mae": 0.0, "rmse": 0.0, "r_squared": None}
+    with _scores_non_finite():
+        mae = float(mean_absolute_error(gt, pred))
+        rmse = float(root_mean_squared_error(gt, pred))
     return {
-        "mae": (pred - gt).abs().mean().item(),
-        "rmse": ((pred - gt) ** 2).mean().sqrt().item(),
+        "mae": mae,
+        "rmse": rmse,
         "r_squared": r_squared(pred_values, gt_values),
     }
 
