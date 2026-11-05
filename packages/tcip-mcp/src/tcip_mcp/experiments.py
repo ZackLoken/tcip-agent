@@ -1494,8 +1494,9 @@ def get_experiment(
     Returns its launch record, its final status (``None`` until written), its state, and its
     metrics as one row per epoch (:func:`epoch_rows`) paginated by ``metrics_offset`` and
     ``metrics_limit``, ``n_epochs`` the number paged over; and, for a range test,
-    ``lr_range``: its per-batch rows, its result (``lr_range.read_lr_range``, ``None`` until
-    written) and the ``low`` and ``high`` that result derives, ``lr_range`` ``None`` for any
+    ``lr_range``: its per-batch rows beside its reading as an answer carries it
+    (``lr_range.range_answer`` of ``lr_range.range_result``, ``None`` while it derived no
+    range), ``lr_range`` ``None`` for any
     other run. ``{"error": ...}`` for an id naming no run.
     """
     observation = find_observation(experiment_id, project=project)
@@ -1508,18 +1509,22 @@ def get_experiment(
     )
     lr_range = None
     if isinstance(observation.record.launched_as, RangeTest):
-        from tcip_mcp.pipelines.training.lr_range import read_lr_range
+        from tcip_mcp.pipelines.training.lr_range import (
+            NoRangeError,
+            range_answer,
+            range_result,
+        )
 
-        written = observation.directory / LR_RANGE_FILE
-        result = read_lr_range(written) if written.is_file() else None
+        try:
+            result = range_result(experiment_id, Path(project))
+        except NoRangeError:
+            result = None
         lr_range = {
             "rows": [
                 row.model_dump(mode="json")
                 for row in partition_rows(logged)[1]
             ],
-            "result": result and result.model_dump(mode="json"),
-            "low": result and result.low,
-            "high": result and result.high,
+            **range_answer(result),
         }
     return {
         "experiment_id": experiment_id,

@@ -63,6 +63,7 @@ tool()(available_search_algs)
 tool()(available_schedulers)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
     from tcip_mcp.pipelines.data.datasets import BaseDataset
@@ -616,27 +617,92 @@ def launch_training(
             "mints every run's id and answers it as experiment_id."
         }
     resume = str(located(resume_from, project)) if resume_from else None
+    started = _start_run(
+        project,
+        config,
+        act="launch_training",
+        arguments={"relaunched_from": relaunched_from, "resume_from": resume},
+        launched_as=experiments.Standalone(),
+        refusal=lambda spec: None,
+        overfit=overfit_check,
+        relaunched_from=relaunched_from,
+        resume_from=resume,
+        max_wall_clock_seconds=max_wall_clock_seconds,
+        actor=actor,
+    )
+    if isinstance(started, dict):
+        return started
+    if max_wall_clock_seconds is not None:
+        _watch_wall_clock(started.proc, max_wall_clock_seconds)
+
+    from tcip_mcp.pipelines.training.tensorboard_manager import (
+        launch_tensorboard,
+    )
+
+    return RunLaunched(
+        experiment_id=started.run_dir.name,
+        output_dir=str(started.run_dir),
+        tensorboard=launch_tensorboard(started.run_dir),
+        pid=started.proc.pid,
+        overfit_check=started.validation.get("overfit_check"),
+        warnings=started.validation["warnings"],
+    )
+
+
+class _Started(NamedTuple):
+    """A run :func:`_start_run` opened and started.
+
+    It holds the run's directory, named for its minted id, its worker process and the
+    validation its preflight answered.
+    """
+
+    run_dir: Path
+    proc: subprocess.Popen
+    validation: dict
+
+
+def _start_run(
+    project: Path,
+    config: dict,
+    *,
+    act: str,
+    arguments: dict[str, JsonValue],
+    launched_as: experiments.LaunchedAs,
+    refusal: Callable[[TrainConfigSchema], str | None],
+    overfit: bool,
+    relaunched_from: str | None,
+    resume_from: str | None,
+    max_wall_clock_seconds: float | None,
+    actor: str | None,
+) -> _Started | dict:
+    """Admit ``config``, preflight it, open its run as ``launched_as`` and start its worker.
+
+    The config is admitted (:func:`_admitted`) and preflighted with its smoke, and the overfit
+    check when ``overfit`` (:func:`_preflight`); ``refusal`` then reads the resolved config and
+    names why the act refuses it, ``None`` for nothing. The run's id is minted
+    (``experiments.mint_experiment_id``) and its directory opened (:func:`open_run`) with its
+    ``run.json``, recording the smoke's contract (:func:`_launch_contract`) and the other
+    keywords; then ``act``'s one audit line by ``actor``, naming the id beside ``arguments``
+    (``AuditEntryNotWrittenError`` when it cannot be appended, and no worker starts); then its
+    worker (:func:`_start_worker`). Returns the :class:`_Started` run, the refusal
+    ``{"error", "issues"}`` with nothing opened, or ``{"error"}`` naming why the directory could
+    not be opened.
+    """
     spec, sources, issues = _admitted(config, {}, project)
     validation, resolution = _preflight(
-        project, spec, sources, issues, smoke=True, overfit=overfit_check
+        project, spec, sources, issues, smoke=True, overfit=overfit
     )
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
     assert resolution is not None and sources is not None, (
         "a valid config resolved"
     )
+    if (refused := refusal(resolution.spec)) is not None:
+        return {"error": f"{act}: {refused}", "issues": []}
 
-    rendered_overfit_report = validation.get("overfit_check")
     experiment_id = experiments.mint_experiment_id()
     line = audit_line(
-        "launch_training",
-        {
-            "experiment_id": experiment_id,
-            "relaunched_from": relaunched_from,
-            "resume_from": resume,
-        },
-        actor,
-        "ok",
+        act, {"experiment_id": experiment_id, **arguments}, actor, "ok"
     )
     try:
         run_dir = experiments.experiment_dir(experiment_id, project=project)
@@ -647,31 +713,18 @@ def launch_training(
             resolution.record,
             created=line.timestamp,
             relaunched_from=relaunched_from,
-            resume_from=resume,
+            resume_from=resume_from,
             max_wall_clock_seconds=max_wall_clock_seconds,
             model_contract=_launch_contract(validation),
-            launched_as=experiments.Standalone(),
+            launched_as=launched_as,
         )
     except (StoreError, ValueError, OSError) as exc:
-        return {"error": f"launch_training: {exc}"}
+        return {"error": f"{act}: {exc}"}
     append_or_raise(line, scope=project)
-
-    proc = _start_worker(run_dir, _child_env_for_launch(resolution.spec))
-
-    if max_wall_clock_seconds is not None:
-        _watch_wall_clock(proc, max_wall_clock_seconds)
-
-    from tcip_mcp.pipelines.training.tensorboard_manager import (
-        launch_tensorboard,
-    )
-
-    return RunLaunched(
-        experiment_id=experiment_id,
-        output_dir=str(run_dir),
-        tensorboard=launch_tensorboard(run_dir),
-        pid=proc.pid,
-        overfit_check=rendered_overfit_report,
-        warnings=validation["warnings"],
+    return _Started(
+        run_dir,
+        _start_worker(run_dir, _child_env_for_launch(resolution.spec)),
+        validation,
     )
 
 
@@ -748,7 +801,11 @@ def derive_lr_range(
     """
     from pydantic import ValidationError
 
-    from tcip_mcp.pipelines.training.lr_range import read_lr_range
+    from tcip_mcp.pipelines.training.lr_range import (
+        NoRangeError,
+        range_answer,
+        range_result,
+    )
 
     try:
         test = experiments.RangeTest(
@@ -764,64 +821,40 @@ def derive_lr_range(
             "error": "derive_lr_range: the ramp is refused",
             "issues": [str(e["msg"]) for e in exc.errors()],
         }
-    spec, sources, issues = _admitted(config, {}, project)
-    if spec is not None and spec.training_source is not None:
-        return {
-            "error": f"derive_lr_range: config names training_source "
-            f"{spec.training_source!r}, a loop of its own that owns its rates; probe a config "
-            "the default trainer trains.",
-            "issues": [],
-        }
-    validation, resolution = _preflight(
-        project, spec, sources, issues, smoke=True, overfit=False
-    )
-    if not validation["valid"]:
-        return {"error": "Invalid config", "issues": validation["issues"]}
-    assert resolution is not None and sources is not None, (
-        "a valid config resolved"
-    )
-    stages = resolution.spec.default_trainer_regime().stages
-    if test.stage >= len(stages):
-        return {
-            "error": f"derive_lr_range: stage {test.stage} is past the config's "
-            f"{len(stages)} stage(s).",
-            "issues": [],
-        }
 
-    experiment_id = experiments.mint_experiment_id("lr_range")
-    line = audit_line(
-        "derive_lr_range", {"experiment_id": experiment_id}, actor, "ok"
+    def refusal(spec: TrainConfigSchema) -> str | None:
+        if spec.training_source is not None:
+            return (
+                f"config names training_source {spec.training_source!r}, a loop of its own "
+                "that owns its rates; probe a config the default trainer trains."
+            )
+        stages = spec.default_trainer_regime().stages
+        if test.stage >= len(stages):
+            return f"stage {test.stage} is past the config's {len(stages)} stage(s)."
+        return None
+
+    started = _start_run(
+        project,
+        config,
+        act="derive_lr_range",
+        arguments={},
+        launched_as=test,
+        refusal=refusal,
+        overfit=False,
+        relaunched_from=None,
+        resume_from=None,
+        max_wall_clock_seconds=None,
+        actor=actor,
     )
-    run_dir = experiments.experiment_dir(experiment_id, project=project)
+    if isinstance(started, dict):
+        return started
+    started.proc.wait()
+    experiment_id = started.run_dir.name
     try:
-        open_run(
-            run_dir,
-            resolution.spec,
-            sources,
-            resolution.record,
-            created=line.timestamp,
-            model_contract=_launch_contract(validation),
-            launched_as=test,
-        )
-    except (StoreError, ValueError, OSError) as exc:
-        return {"error": f"derive_lr_range: {exc}", "issues": []}
-    append_or_raise(line, scope=project)
-    _start_worker(run_dir, _child_env_for_launch(resolution.spec)).wait()
-
-    observation = experiments.observe_run(run_dir)
-    if observation.state != "completed":
-        return {
-            "error": f"range test {experiment_id} ended {observation.state}: "
-            f"{observation.status_error}",
-            "experiment_id": experiment_id,
-        }
-    result = read_lr_range(run_dir / experiments.LR_RANGE_FILE)
-    return {
-        "experiment_id": experiment_id,
-        "low": result.low,
-        "high": result.high,
-        "result": result.model_dump(mode="json"),
-    }
+        result = range_result(experiment_id, project)
+    except NoRangeError as exc:
+        return {"error": str(exc), "experiment_id": experiment_id}
+    return {"experiment_id": experiment_id, **range_answer(result)}
 
 
 def _worker_env() -> dict[str, str]:
