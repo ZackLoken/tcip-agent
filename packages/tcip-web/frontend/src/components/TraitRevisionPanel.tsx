@@ -285,9 +285,7 @@ export function TraitRevisionPanel() {
           <div>These trait records will not read:</div>
           <ul className="mt-1 list-disc pl-4">
             {listing.unreadable.map((u) => (
-              <li key={u.trait}>
-                {u.trait}: {readRefusalText(u.reason)}
-              </li>
+              <li key={u.trait}>{readRefusalText(u.reason)}</li>
             ))}
           </ul>
         </div>

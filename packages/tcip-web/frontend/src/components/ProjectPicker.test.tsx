@@ -77,7 +77,8 @@ describe("ProjectPicker", () => {
     if (STRAY.kind !== UNREAD) throw new Error("the produced stray's record read");
     expect(
       await screen.findByText(
-        "/scratch/workspace/stray is not a project yet: create it with initialize_project",
+        "the project record of /scratch/workspace/stray: " +
+          "not a project yet: create it with initialize_project",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(STRAY.tree.dataset_root)).toBeInTheDocument();

@@ -852,7 +852,7 @@ export interface Banner {
 
 export interface Blocked {
   kind: "blocked";
-  reason: ReadRefusal;
+  reason: RefusedRead;
 }
 
 export interface BoundColumn {
@@ -1566,6 +1566,11 @@ export interface ReferenceSample {
   source_digest: string;
 }
 
+export interface RefusedRead {
+  where: string;
+  refusal: ReadRefusal;
+}
+
 export interface RegistryEntry {
   name: string;
   checkpoint_path: string;
@@ -2088,7 +2093,7 @@ export interface Unlaunchable {
 export interface UnreadEntry {
   kind: "unread";
   id: string;
-  reason: ReadRefusal;
+  reason: RefusedRead;
 }
 
 export interface UnreadProject {
@@ -2096,14 +2101,14 @@ export interface UnreadProject {
   tree: DatasetTree;
   image_count: number;
   kind: "unread";
-  problem: ReadRefusal;
+  problem: RefusedRead;
 }
 
 export interface UnreadSelectionChoice {
   selection_dir: string;
   replaced_split_keys: string[];
   kind: "unread";
-  reason: ReadRefusal;
+  reason: RefusedRead;
 }
 
 export interface Unreadable {
@@ -2113,7 +2118,7 @@ export interface Unreadable {
 
 export interface UnreadableTrait {
   trait: string;
-  reason: ReadRefusal;
+  reason: RefusedRead;
 }
 
 export interface UnvalidatedBucket {

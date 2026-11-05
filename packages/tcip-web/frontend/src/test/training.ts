@@ -57,6 +57,7 @@ const PRODUCED = produced as unknown as {
   verified_best: Ranking;
   split_choices: SplitChoices;
   moved_split_choices: SplitChoices;
+  refused_bound_split_choices: SplitChoices;
   cancel: Answer<"cancel">;
   run_relaunch: Answer<"relaunch">;
   sweep_relaunch: Answer<"relaunch">;
@@ -210,6 +211,10 @@ export const SPLIT_CHOICES = PRODUCED.split_choices;
 /** The produced data choices of a run whose images were removed once it was opened: its recorded
  *  choice refused for the missing directory, and no other partition offered. */
 export const MOVED_SPLIT_CHOICES = PRODUCED.moved_split_choices;
+
+/** The produced data choices of a run bound to a selection whose record was then damaged: its
+ *  recorded choice refused with the selection's read error. */
+export const REFUSED_BOUND_SPLIT_CHOICES = PRODUCED.refused_bound_split_choices;
 
 /** The produced answer to a cancellation of the run `RUNS.unlaunched` names. */
 export const CANCEL = PRODUCED.cancel;
