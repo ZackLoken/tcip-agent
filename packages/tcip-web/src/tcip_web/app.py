@@ -247,30 +247,38 @@ FRONTEND_DIR = Path(__file__).parents[2] / "frontend"
 """The frontend's package in a checkout; no directory beside an installed ``tcip_web``."""
 
 
-def stale_bundle() -> str | None:
-    """Return a sentence saying the served bundle was not built from the frontend's source.
+def bundle_record(root: Path) -> dict[str, str]:
+    """Return the build record the frontend source under ``root`` would be built with.
 
-    The bundle is ``STATIC_DIR``'s and the source ``FRONTEND_DIR``'s. The frontend's own
-    ``bundleSource.mjs``, run under Node over ``FRONTEND_DIR``, gives the build record the source
-    has now; the bundle is stale when ``STATIC_DIR`` holds no such record or one of another
-    source. Returns ``None`` for a bundle built from the source, and for a package with no
-    ``FRONTEND_DIR`` or an output with no page, where there is nothing to compare. A script that
-    fails raises.
+    The record is what ``FRONTEND_DIR``'s ``bundleSource.mjs`` prints over ``root`` when run under
+    Node: ``source``, the source's identity, and ``record``, the file name a build writes it to.
+    A script that fails raises.
     """
-    if not FRONTEND_DIR.is_dir() or not (STATIC_DIR / "index.html").exists():
-        return None
-    current = json.loads(
+    return json.loads(
         subprocess.run(
             [
                 "node",
                 str(FRONTEND_DIR / "scripts" / "bundleSource.mjs"),
-                str(FRONTEND_DIR),
+                str(root),
             ],
             capture_output=True,
             text=True,
             check=True,
         ).stdout
     )
+
+
+def stale_bundle() -> str | None:
+    """Return a sentence saying the served bundle was not built from the frontend's source.
+
+    The bundle is ``STATIC_DIR``'s and the source ``FRONTEND_DIR``'s; the bundle is stale when
+    ``STATIC_DIR`` holds no :func:`bundle_record` of the source or one of another source. Returns
+    ``None`` for a bundle built from the source, and for a package with no ``FRONTEND_DIR`` or an
+    output with no page, where there is nothing to compare.
+    """
+    if not FRONTEND_DIR.is_dir() or not (STATIC_DIR / "index.html").exists():
+        return None
+    current = bundle_record(FRONTEND_DIR)
     record = STATIC_DIR / current["record"]
     if (
         record.exists()
