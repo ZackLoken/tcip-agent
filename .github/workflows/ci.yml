@@ -46,7 +46,8 @@ jobs:
           python -c "
           import torch
           print('torch', torch.__version__)
-          print('accelerator', torch.accelerator.current_accelerator(check_available=True))
+          print('built for', torch.accelerator.current_accelerator())
+          print('visible', torch.accelerator.current_accelerator(check_available=True))
           "
 
       - name: The raster stack works in the documented environment

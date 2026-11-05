@@ -7,8 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "mcp>=2",
     "pyyaml>=6.0",
-    "torch>=2.0",
-    "torchvision>=0.15",
+    # torch.accelerator.empty_cache is from torch 2.9, which torchvision 0.24 pairs with.
+    "torch>=2.9",
+    "torchvision>=0.24",
     "timm>=1.0",
     "numpy",
     # scipy.spatial (band-group identity tolerance, nearest-neighbor spacing, diversity scorer's
@@ -56,6 +57,8 @@ dev = [
     "pytest-xdist>=3.0",
     "ruff==0.16.8",
     "mypy==2.2.0",
+    # The version CI's files job installs for the YAML gate.
+    "yamllint==1.38.0",
     # The permission tests match deny rules with its gitignore matcher, installed at 1.1.1
     # through mypy.
     "pathspec>=1.1.1",

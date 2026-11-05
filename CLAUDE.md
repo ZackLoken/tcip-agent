@@ -115,7 +115,7 @@ ruff format --check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
 npx --yes markdownlint-cli2@0.23.3   # the markdown gate, run from the repo root
-yamllint .                         # the YAML gate (1.38.0, as CI pins), run from the repo root
+yamllint .                         # the YAML gate, run from the repo root
 npm --prefix packages/tcip-web/frontend run format:check   # the frontend gate, whole and in order
 npm --prefix packages/tcip-web/frontend run lint
 npm --prefix packages/tcip-web/frontend run typecheck
