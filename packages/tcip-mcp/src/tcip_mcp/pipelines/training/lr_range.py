@@ -315,13 +315,13 @@ def named_range_run(config: dict) -> str | None:
     )
 
 
-def with_ranged_backbone(config: dict, point: dict, project: Path) -> dict:
-    """Return ``config`` with its ``backbone_lr`` derived from a sampled ``head_lr``.
+def ranged_point(config: dict, point: dict, project: Path) -> dict:
+    """Return the point entries a range test derives beside a sampled ``head_lr``.
 
     When ``point`` samples :data:`HEAD_LR_AXIS` and no backbone rate of its own, and ``config``
-    names a range test (:func:`named_range_run`), the backbone rate is the point's head rate
-    times the ratio the test ramped under, on a copy; otherwise ``config`` comes back as it is.
-    Refuses (``ValueError``) as :func:`range_result` does.
+    names a range test (:func:`named_range_run`), that is :data:`BACKBONE_LR_AXIS` at the
+    point's head rate times the ratio the test ramped under; otherwise nothing. Refuses
+    (``ValueError``) as :func:`range_result` does.
     """
     run_id = named_range_run(config)
     if (
@@ -329,15 +329,9 @@ def with_ranged_backbone(config: dict, point: dict, project: Path) -> dict:
         or HEAD_LR_AXIS not in point
         or BACKBONE_LR_AXIS in point
     ):
-        return config
+        return {}
     ratio = range_result(run_id, project).ratio
-    return {
-        **config,
-        "optimizer": {
-            **config["optimizer"],
-            "backbone_lr": point[HEAD_LR_AXIS] * ratio,
-        },
-    }
+    return {BACKBONE_LR_AXIS: point[HEAD_LR_AXIS] * ratio}
 
 
 def range_issues(spec: TrainConfigSchema, project: Path) -> list[str]:

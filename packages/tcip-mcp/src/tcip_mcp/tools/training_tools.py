@@ -156,8 +156,8 @@ def _admitted(
 ) -> tuple[TrainConfigSchema | None, StagedSources | None, list[str]]:
     """Admit ``config`` with ``point`` applied, validated once against ``project``.
 
-    ``point`` is applied by :func:`_apply_hpo_params`, a sampled ``head_lr`` under a range test
-    deriving its ``backbone_lr`` (``lr_range.with_ranged_backbone``), the result validated once
+    ``point`` is applied by :func:`_apply_hpo_params` with the ``backbone_lr`` a range test
+    derives for its sampled ``head_lr`` (``lr_range.ranged_point``), the result validated once
     against ``project`` (``schemas.checked_train_config``) and, when it validates, its
     augmentation judged against the project record's capture invariances
     (``augmentations.forbidden_transforms``), its structure (:func:`_structural_issues`) and the
@@ -168,14 +168,14 @@ def _admitted(
     from tcip_mcp.pipelines.data.augmentations import forbidden_transforms
     from tcip_mcp.pipelines.training.lr_range import (
         range_issues,
-        with_ranged_backbone,
+        ranged_point,
     )
     from tcip_mcp.project_record import read_record
 
     try:
         spec, issues = checked_train_config(
-            with_ranged_backbone(
-                _apply_hpo_params(config, point), point, project
+            _apply_hpo_params(
+                config, point | ranged_point(config, point, project)
             ),
             project,
         )
