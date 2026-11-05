@@ -81,6 +81,42 @@ def dataset_entry_path(project: str | Path, entry: DatasetEntry) -> Path:
     return resolved_registry_path(project, entry.path)
 
 
+def entry_is_at(
+    project: str | Path, entry: DatasetEntry, root: str | Path
+) -> bool:
+    """Return whether the registry ``entry``'s path resolves to the dataset ``root``.
+
+    ``root`` is :func:`~tcip_mcp.registry_paths.located` against ``project``.
+    """
+    return dataset_entry_path(project, entry).resolve() == located(
+        root, project
+    )
+
+
+def registered_entry_at(
+    project: str | Path, root: str | Path
+) -> DatasetEntry | None:
+    """Return the project's registry entry whose path resolves to ``root``, or ``None``."""
+    return next(
+        (e for e in read_datasets(project) if entry_is_at(project, e, root)),
+        None,
+    )
+
+
+def identity_repair_door(project: str | Path, root: str | Path) -> str:
+    """Return the sentence naming how a refused identity document at ``root`` is repaired.
+
+    ``register_dataset`` repairs it when the project's registry holds ``root``; otherwise the
+    document is restored from a backup.
+    """
+    if registered_entry_at(project, root) is not None:
+        return "repair it with register_dataset on this root, which the project's registry holds"
+    return (
+        "restore the document from a backup; the project's registry holds no entry for this "
+        "root, which register_dataset needs to repair it"
+    )
+
+
 def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
     """Add or refresh a dataset in the project's registry, matched by ``id``.
 
@@ -118,6 +154,10 @@ def register_dataset(
     write is compare-and-set against the version this call read, a conflict keeping the id that
     committed.
 
+    A document present but refused by its model is rewritten, with the id of the registry entry
+    whose path is ``dataset_root``, the answer's ``repaired`` stating what was refused; at a root
+    the registry does not hold it refuses, minting no id.
+
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
             its label documents are records in).
@@ -143,21 +183,25 @@ def register_dataset(
     # identity is actually changing under it and ends when this write is the one that lands.
     while True:
         stored = tcip_store.read_blob_versioned(ident_path, default=None)
+        repaired = None
         try:
-            existing = (
+            existing_id = (
                 None
                 if stored.value is None
                 else decode_dataset_identity_document(
                     stored.value, dataset_root=root
-                )
+                ).id
             )
         except ValueError as exc:
-            return {
-                "error": f"{exc}; minting a fresh id over it would sever every record "
-                "that cites the old one"
-            }
+            held = registered_entry_at(project, root)
+            if held is None:
+                return {
+                    "error": f"{exc}; minting a fresh id over it would sever every record "
+                    f"that cites the old one; {identity_repair_door(project, root)}"
+                }
+            existing_id, repaired = held.id, str(exc)
         entry = DatasetEntry(
-            id=mint_id() if existing is None else existing.id,
+            id=mint_id() if existing_id is None else existing_id,
             path=stored_path(root, project),
         )
         identity = DatasetRecord(
@@ -174,19 +218,24 @@ def register_dataset(
         break
 
     upsert_dataset(project, entry)
-    return {"dataset_root": str(root), **identity.model_dump(mode="json")}
+    return {
+        "dataset_root": str(root),
+        **identity.model_dump(mode="json"),
+        **({} if repaired is None else {"repaired": repaired}),
+    }
 
 
 class RegisteredPath(BaseModel):
     """One path the project's dataset registry holds for a checked dataset's id, and its state.
 
     ``in_place`` is the checked root itself, ``moved`` another path holding the same identity,
-    ``diverged`` one holding another identity (``identity``), and ``gone`` one holding no
-    readable identity (``unreadable`` says why).
+    ``diverged`` one holding another identity (``identity``), ``refused`` one whose identity
+    document its model refuses, and ``gone`` one holding no identity document or an unreadable
+    one (``unreadable`` says why for both).
     """
 
     path: str
-    state: Literal["in_place", "moved", "diverged", "gone"]
+    state: Literal["in_place", "moved", "diverged", "refused", "gone"]
     identity: DatasetRecord | None = None
     unreadable: str | None = None
 
@@ -197,9 +246,11 @@ class DatasetIdentityCheck(BaseModel):
     ``state`` is ``unchanged`` when the fingerprint recomputed now (``fingerprint``) equals the
     one its identity records, ``changed`` when it differs (a number reproduced from the dataset is
     no longer valid), ``never_recorded`` when the identity records none (``register_dataset``
-    stamps one), ``unregistered`` when the root carries no identity (``reason`` says why), and
-    ``no_fingerprint`` when the root yields none (no images or labels, bespoke or empty).
-    ``registered`` is every path the project's registry holds for the identity's id.
+    stamps one), ``unregistered`` when the root carries no identity (``reason`` says why),
+    ``refused`` when its ``dataset.json`` is present and its model refuses it (``reason`` is the
+    refusal and the repair), and ``no_fingerprint`` when the root yields none (no images or
+    labels, bespoke or empty). ``registered`` is every path the project's registry holds for the
+    identity's id.
     """
 
     dataset_root: str
@@ -208,6 +259,7 @@ class DatasetIdentityCheck(BaseModel):
         "changed",
         "never_recorded",
         "unregistered",
+        "refused",
         "no_fingerprint",
     ]
     fingerprint: str | None = None
@@ -242,7 +294,14 @@ def check_dataset_identity(
         )
     try:
         identity = require_dataset_identity(root)
-    except ValueError as exc:
+    except tcip_store.ReadRefusedError as exc:
+        return DatasetIdentityCheck(
+            dataset_root=str(root),
+            state="refused",
+            fingerprint=current,
+            reason=f"{exc}; {identity_repair_door(project, root)}",
+        )
+    except (ValueError, OSError) as exc:
         return DatasetIdentityCheck(
             dataset_root=str(root),
             state="unregistered",
@@ -260,7 +319,11 @@ def check_dataset_identity(
         except (ValueError, OSError) as exc:
             registered.append(
                 RegisteredPath(
-                    path=str(entry_path), state="gone", unreadable=str(exc)
+                    path=str(entry_path),
+                    state="refused"
+                    if isinstance(exc, tcip_store.ReadRefusedError)
+                    else "gone",
+                    unreadable=str(exc),
                 )
             )
             continue
@@ -270,7 +333,7 @@ def check_dataset_identity(
                 state="diverged"
                 if there != identity
                 else "in_place"
-                if entry_path.resolve() == root
+                if entry_is_at(project, entry, root)
                 else "moved",
                 identity=there,
             )
