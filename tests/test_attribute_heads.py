@@ -603,3 +603,7 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
     assert (
         agreement["color"]["accuracy"] == agreement["grade"]["accuracy"] == 1.0
     )
+    # Every pair agrees on one value, so the macro mean is that value's 1.0 over the attribute's
+    # declared values (a class no pair carries scores 0.0 and counts), not over the one present.
+    assert agreement["color"]["f1"] == pytest.approx(1 / len(COLOR.values))
+    assert agreement["grade"]["f1"] == pytest.approx(1 / len(GRADE.values))
