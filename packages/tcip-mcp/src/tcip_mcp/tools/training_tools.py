@@ -32,7 +32,6 @@ from tcip_mcp.pipelines.data.split_construction import (
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.model_contract import LaunchContract
 from tcip_mcp.pipelines.schemas import (
-    TRAINING_CONFIG_PLACE,
     BoundSplit,
     DrawnSplit,
     ImageStatsSampling,
@@ -799,7 +798,8 @@ class Blocked(BaseModel):
     """A relaunch choice its compatibility check refuses, and why.
 
     ``reason`` is the refused read of a selection that will not read, or each of the check's
-    objections as an issue of its own, at the training config.
+    objections as an issue of its own at the place the check examined: the run's recorded data
+    section, that section bound to an offered selection, or the run's launch.
     """
 
     kind: Literal["blocked"] = "blocked"
@@ -810,12 +810,12 @@ type ChoiceCheck = Annotated[Admitted | Blocked, Field(discriminator="kind")]
 """What a relaunch choice's compatibility check found, told apart by its ``kind``."""
 
 
-def _checked(reasons: list[str]) -> ChoiceCheck:
-    """Return the check that refuses with each of ``reasons`` as an issue, or admits for none."""
+def _checked(reasons: list[str], where: str) -> ChoiceCheck:
+    """Return the check refusing with each of ``reasons`` as an issue at ``where``, or admitting."""
     return (
         Blocked(
             reason=RefusedRead(
-                where=TRAINING_CONFIG_PLACE,
+                where=where,
                 refusal=Invalid(
                     issues=[Issue(loc=[], msg=r) for r in reasons]
                 ),
@@ -927,6 +927,8 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         - {"selection_dir"}
     )
 
+    data_place = f"the data section of run {experiment_id}"
+    reasons_place = data_place
     own_selection = None
     case: Literal["bound", "drawn"]
     if isinstance(split, BoundSplit):
@@ -945,6 +947,7 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         reasons = selection_compatibility(data, split, own_selection)
     elif own.record.resolved is None:
         case, line = "drawn", "resolved to nothing at its launch"
+        reasons_place = f"the launch of run {experiment_id}"
         reasons = [
             own.status_error
             or "the run resolved to no partition at its launch"
@@ -957,7 +960,11 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
 
     dir_issues = data_dir_issues(data)
     as_recorded = AsRecordedChoice(
-        case=case, line=line, check=_checked([*reasons, *dir_issues])
+        case=case,
+        line=line,
+        check=_checked(reasons, reasons_place)
+        if reasons
+        else _checked(dir_issues, data_place),
     )
 
     # A bound config names no locations, so its own selection's first sample source anchors the
@@ -1027,7 +1034,9 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         selections.append(
             SelectionChoice(
                 selection_dir=candidate_dir,
-                check=_checked(issues),
+                check=_checked(
+                    issues, f"{data_place} bound to {candidate_dir}"
+                ),
                 seed=selection.seed,
                 group_by=selection.group_by,
                 train=counts["train"],

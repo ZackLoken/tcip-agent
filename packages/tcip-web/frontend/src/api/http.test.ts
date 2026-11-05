@@ -146,7 +146,7 @@ describe("a read refusal's text", () => {
     expect(STRAY.problem.refusal.kind).toBe(UNREADABLE);
     expect(readRefusalText(STRAY.problem)).toBe(
       "the project record of /scratch/workspace/stray: " +
-        "/scratch/workspace/stray is not a project yet: create it with initialize_project",
+        "not a project yet: create it with initialize_project",
     );
   });
 

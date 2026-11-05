@@ -78,7 +78,7 @@ describe("ProjectPicker", () => {
     expect(
       await screen.findByText(
         "the project record of /scratch/workspace/stray: " +
-          "/scratch/workspace/stray is not a project yet: create it with initialize_project",
+          "not a project yet: create it with initialize_project",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(STRAY.tree.dataset_root)).toBeInTheDocument();

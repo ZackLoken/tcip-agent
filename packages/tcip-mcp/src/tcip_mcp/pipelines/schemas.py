@@ -972,10 +972,6 @@ class TrainConfigSchema(_Recorded):
         )
 
 
-TRAINING_CONFIG_PLACE = "the training config"
-"""Where an objection to a run's training config lies, as a refusal names it."""
-
-
 def checked_train_config(
     config: JsonValue, project: Path | None = None
 ) -> tuple[TrainConfigSchema | None, list[str]]:
@@ -990,7 +986,7 @@ def checked_train_config(
         return validated(
             TrainConfigSchema,
             config,
-            TRAINING_CONFIG_PLACE,
+            "the training config",
             context={"project": project},
         ), []
     except ReadRefusedError as e:

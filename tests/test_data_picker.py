@@ -378,9 +378,13 @@ def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
 
     The "As recorded" check is blocked and its reason is ``read_selection``'s refused read as a
     record, the selection's place beside why: the selection model's issues for a record it
-    refuses, the absence's sentence for one no longer recorded.
+    refuses, the absence's sentence for one no longer recorded. The place names the bound
+    selection's directory.
     """
-    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        selection_place,
+    )
 
     config = bound_to(tmp_path)
     with pytest.raises(ts.ReadRefusedError) as refused:
@@ -394,6 +398,9 @@ def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
 
     assert check["kind"] == "blocked"
     assert check["reason"]["refusal"]["kind"] == kind
+    assert check["reason"]["where"] == selection_place(
+        config["data"]["split"]["selection_dir"]
+    )
     assert check["reason"] == refused.value.served.model_dump(mode="json")
 
 
@@ -712,7 +719,7 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
 ) -> None:
     """The picker's "As recorded" row reads incompatible when its images directory is gone.
 
-    The row's reason names ``data.images_dir`` as not found.
+    The row's reason names ``data.images_dir`` as not found, at the run's recorded data section.
     """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import Blocked, list_split_choices
@@ -725,7 +732,76 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
     check = list_split_choices(tmp_path, "exp-moved-dirs").as_recorded.check
 
     assert isinstance(check, Blocked)
+    assert check.reason.where == "the data section of run exp-moved-dirs"
     assert "Not found: data.images_dir" in str(check.reason)
+
+
+def test_an_offered_selection_its_check_refuses_names_the_data_section_bound_to_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An offered selection that reads and leaves an empty side is refused where it binds.
+
+    The selection is a real draw under the dataset's ``splits`` directory rewritten without its
+    ``val`` samples; its check's place is the picked run's data section bound to it.
+    """
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.tools.training_tools import (
+        Blocked,
+        SelectionChoice,
+        list_split_choices,
+    )
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    offered = root / "splits"
+    _selection_with_an_empty_val_side(tmp_path, root, offered)
+    opened_run(
+        tmp_path,
+        _bespoke_config(tmp_path, image_dir(root, DATES[0])),
+        experiment_id="exp-picked",
+    )
+
+    (choice,) = [
+        c
+        for c in list_split_choices(tmp_path, "exp-picked").selections
+        if c.selection_dir == str(offered)
+    ]
+
+    assert isinstance(choice, SelectionChoice)
+    assert isinstance(choice.check, Blocked)
+    assert (
+        choice.check.reason.where
+        == f"the data section of run exp-picked bound to {offered}"
+    )
+    assert "empty side" in str(choice.check.reason)
+
+
+def test_the_as_recorded_row_of_a_trial_that_resolved_nothing_names_its_launch(
+    tmp_path: Path,
+) -> None:
+    """A trial whose launch resolved no partition is refused As recorded at its launch.
+
+    The sweep's trial is opened by ``open_trial`` once its images directory is removed, so it
+    ends failed with no partition; its row's place is the trial's launch.
+    """
+    from tcip_mcp.tools.training_tools import (
+        Blocked,
+        list_split_choices,
+        open_trial,
+    )
+    from tests._verified_checkpoint_fixtures import opened_sweep
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    sweep = opened_sweep(
+        tmp_path, _bespoke_config(tmp_path, image_dir(root, DATES[0]))
+    )
+    shutil.rmtree(image_dir(root, DATES[0]))
+    trial = open_trial(sweep, "t0", {"optimizer.head_lr": 0.001})
+
+    check = list_split_choices(tmp_path, trial.name).as_recorded.check
+
+    assert isinstance(check, Blocked)
+    assert check.reason.where == f"the launch of run {trial.name}"
 
 
 def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces(

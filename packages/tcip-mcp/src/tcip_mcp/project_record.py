@@ -159,8 +159,7 @@ def _checked(project_path: str | Path, raw: object) -> ProjectRecord:
     if raw is None:
         raise ReadRefusedError(
             Unreadable(
-                message=f"{project_path} is not a project yet: create it with "
-                "initialize_project"
+                message="not a project yet: create it with initialize_project"
             ),
             where,
         )

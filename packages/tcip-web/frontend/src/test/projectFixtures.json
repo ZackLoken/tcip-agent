@@ -131,7 +131,7 @@
           "where": "the project record of /scratch/workspace/stray",
           "refusal": {
             "kind": "unreadable",
-            "message": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
+            "message": "not a project yet: create it with initialize_project"
           }
         }
       },
@@ -255,7 +255,7 @@
           "where": "the project record of /scratch/workspace/stray",
           "refusal": {
             "kind": "unreadable",
-            "message": "/scratch/workspace/stray is not a project yet: create it with initialize_project"
+            "message": "not a project yet: create it with initialize_project"
           }
         }
       },

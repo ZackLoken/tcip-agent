@@ -267,9 +267,9 @@ def load_project_memory(
         texts = [
             entry.id,
             *(
-                [entry.reason]
-                if entry.kind == "unread"
-                else entry.record.model_dump().values()
+                entry.record.model_dump().values()
+                if entry.kind == "read"
+                else ()
             ),
         ]
         return any(
