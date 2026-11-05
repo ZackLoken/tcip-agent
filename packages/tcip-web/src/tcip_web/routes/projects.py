@@ -160,7 +160,7 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
     from tcip_store import ReadRefusedError
 
     actor(req.user)
-    root, record = workspace_project(req.id)
+    root, record = await anyio.to_thread.run_sync(workspace_project, req.id)
     project = OpenProject(root, record.id)
     answer = OpenAnswer(project=SnapshotProject.of(project))
     try:
@@ -208,7 +208,7 @@ async def remove_project(req: RemovalRequest) -> workspace.ProjectRemoval:
     budget, 400 for a request naming no one.
     """
     person = actor(req.user)
-    project, record = workspace_project(req.id)
+    project, record = await anyio.to_thread.run_sync(workspace_project, req.id)
     display_name = record.display_name
     if req.confirm_name != display_name:
         raise HTTPException(
