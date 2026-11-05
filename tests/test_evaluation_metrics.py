@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING, Unpack
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_CLASSIFIER, FRAME_STATISTICS
+from tests._chain_fixtures import (
+    BESPOKE_CLASSIFIER,
+    BUILT_DETECTOR,
+    FRAME_STATISTICS,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1417,8 +1421,6 @@ def _context(
 def test_validate_detection_returns_metrics_and_objective(
     tmp_path: Path,
 ) -> None:
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
-
     ctx = _context(
         tmp_path,
         BUILT_DETECTOR,
@@ -1462,8 +1464,6 @@ def test_train_center_match_trait_records_governing_criterion(
     The untrained detector's run fails as having no selectable epoch, and its last metrics row
     carries ``val_governing_criterion``, ``val_map50_role`` and the trait it selected on.
     """
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
-
     ctx = _context(
         tmp_path,
         BUILT_DETECTOR,

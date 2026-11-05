@@ -572,8 +572,12 @@ def _bound_checkpoint(
     ``(run directory, checkpoint path)``.
     """
     from tcip_mcp.experiments import observe
-    from tests._chain_fixtures import SAVE_BUILT_WEIGHTS, run_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, worker_run
+    from tests._chain_fixtures import (
+        BUILT_DETECTOR,
+        SAVE_BUILT_WEIGHTS,
+        run_config,
+    )
+    from tests._verified_checkpoint_fixtures import worker_run
 
     run_dir = worker_run(
         project,
@@ -721,15 +725,13 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
 
     The combined scorer reads the candidates and the one image marked finished at that width.
     """
+    from tests._chain_fixtures import BUILT_DETECTOR
     from tests._producer_fixtures import (
         label_image,
         mark_complete,
         write_image,
     )
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR,
-        registered_checkpoint,
-    )
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(
         tmp_path,

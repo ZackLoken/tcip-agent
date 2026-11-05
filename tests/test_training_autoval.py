@@ -18,7 +18,11 @@ pytest.importorskip("torchvision")
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
-from tests._chain_fixtures import BLOB_BUILDER, training_config  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BLOB_BUILDER,
+    BUILT_DETECTOR,
+    training_config,
+)
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     big_single_source,
@@ -729,7 +733,6 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
     The run is a single tiled source with val, holdout and calibration shares.
     """
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(

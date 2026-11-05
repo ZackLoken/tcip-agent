@@ -504,12 +504,11 @@ def small_detection_config(
     """Return a :func:`~tests._chain_fixtures.training_config` of ``project`` over ``images_dir``.
 
     It passes ``model_source`` (by default
-    :data:`~tests._verified_checkpoint_fixtures.BUILT_DETECTOR`) and a data section of
+    :data:`~tests._chain_fixtures.BUILT_DETECTOR`) and a data section of
     ``images_dir``, scope ``bud`` and a drawn split at validation ratio 0.15 grouped by tile
     prefix, with ``data``'s keys over it.
     """
-    from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+    from tests._chain_fixtures import BUILT_DETECTOR, training_config
 
     return training_config(
         project,
@@ -822,13 +821,13 @@ def staged_layout(project: str | Path, data: dict | DataSpec) -> SourceLayout:
     """Return ``model_build.staged_sources``'s layout for a config of ``project`` over ``data``.
 
     ``data`` is a data block (a dict, or a ``DataSpec``). The config's model source is
-    ``_chain_fixtures.DETECTION_SOURCE`` normalized by its weights' statistics
+    ``_chain_fixtures.BUILT_DETECTOR`` normalized by its weights' statistics
     (``_chain_fixtures.weights_statistics``).
     """
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import (
-        DETECTION_SOURCE,
+        BUILT_DETECTOR,
         training_config,
         weights_statistics,
     )
@@ -838,7 +837,7 @@ def staged_layout(project: str | Path, data: dict | DataSpec) -> SourceLayout:
         train_config(
             training_config(
                 Path(project),
-                weights_statistics(DETECTION_SOURCE),
+                weights_statistics(BUILT_DETECTOR),
                 {"split": drawn_split(), **block},
             ),
             Path(project),

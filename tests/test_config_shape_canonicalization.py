@@ -524,7 +524,7 @@ def test_the_trainer_reads_the_flat_config_as_given(
     The record holds the configured stages and no ``training`` key.
     """
     monkeypatch.chdir(tmp_path)
-    from tests._chain_fixtures import DETECTION_SOURCE, own_statistics
+    from tests._chain_fixtures import BUILT_DETECTOR, own_statistics
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         detection_images,
@@ -536,7 +536,7 @@ def test_the_trainer_reads_the_flat_config_as_given(
         **SCOPED_DATA,
     }
     config = own_statistics(
-        {**FLAT_CONFIG, "model_source": DETECTION_SOURCE, "data": data},
+        {**FLAT_CONFIG, "model_source": BUILT_DETECTOR, "data": data},
         tmp_path,
     )
     run = run_context(tmp_path, config).run
