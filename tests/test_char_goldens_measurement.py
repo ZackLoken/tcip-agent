@@ -163,7 +163,6 @@ def test_golden_count_criterion_over_a_dense_distinct_reference() -> None:
         hold,
         entry,
         staged_conf_floor=0.01,
-        staged_conf_floor_attribute_path=None,
         **COUNT_TEST,
     )
     # count-unbiased pick: bias vanishes once the low-conf FP drops

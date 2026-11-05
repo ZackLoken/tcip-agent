@@ -131,15 +131,27 @@ def _real_ordinal_target(tmp_path: Path) -> dict:
     return _real_ordinal_items(tmp_path)[1][1]
 
 
-def _synthetic_detection_target() -> dict:
+def _recorded_targets(dims: dict) -> list[dict]:
+    """Return the targets of the one training forward the contract at ``dims`` ran a recorder on.
+
+    The recorder is a :class:`_DetectionTargetRecorder`, which exposes no operating-point knob, so
+    its report also names the knob it lacks.
+    """
     recorder = _DetectionTargetRecorder()
-    check_model_contract(
-        recorder, "detection", device=torch.device("cpu"), dims=DET_DIMS
+    report = check_model_contract(
+        recorder, "detection", device=torch.device("cpu"), dims=dims
+    )
+    assert any("exposes no score_thresh" in i for i in report["issues"]), (
+        report["issues"]
     )
     assert len(recorder.seen) == 1, (
         "the contract never ran a train-mode forward"
     )
-    targets = recorder.seen[0]
+    return recorder.seen[0]
+
+
+def _synthetic_detection_target() -> dict:
+    targets = _recorded_targets(DET_DIMS)
     assert len(targets) == 1
     return targets[0]
 
@@ -167,14 +179,9 @@ def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame() -> (
 ):
     """The synthetic detection box covers a positive area inside a non-square frame."""
     width, height = 96, 48
-    recorder = _DetectionTargetRecorder()
-    check_model_contract(
-        recorder,
-        "detection",
-        device=torch.device("cpu"),
-        dims={**DET_DIMS, "img_size": (width, height)},
-    )
-    boxes = recorder.seen[0][0]["boxes"]
+    boxes = _recorded_targets({**DET_DIMS, "img_size": (width, height)})[0][
+        "boxes"
+    ]
 
     assert boxes.shape == (1, 4)
     x1, y1, x2, y2 = (float(v) for v in boxes[0])
@@ -261,14 +268,7 @@ def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(
     Its per-image target holds exactly the keys the real loader's collated target holds, each at
     the same Python type.
     """
-    recorder = _DetectionTargetRecorder()
-    check_model_contract(
-        recorder, "detection", device=torch.device("cpu"), dims=DET_DIMS
-    )
-    assert len(recorder.seen) == 1, (
-        "the contract never ran a train-mode forward"
-    )
-    synth_target = recorder.seen[0][0]
+    synth_target = _recorded_targets(DET_DIMS)[0]
 
     real_images, real_targets = task_collate("detection")(
         [_real_detection_item(tmp_path)]

@@ -74,8 +74,8 @@ them costs you depends on what you are measuring and how; that part is yours to 
 You are the CV scientist:
 for every trait you write a bespoke `nn.Module`, from scratch or by importing the plain
 building blocks (FPN/PAN necks, the classification/ordinal/regression/semantic-seg heads, the
-losses, backbone wrappers, and `build_detector` + the `_build_*` detector functions), and,
-when the technique is novel, a custom training loop. There is no model spec, no composer, and
+losses, backbone wrappers) and a library's own detector or segmenter, and, when the technique is
+novel, a custom training loop. There is no model spec, no composer, and
 no component registry: nothing forces a model to a fixed shape or the default trainer.
 
 The building blocks are plain importable symbols, e.g.:
@@ -91,20 +91,18 @@ from tcip_mcp.pipelines.components.losses import (
     build_loss,
     compute_class_weights,
 )
-from tcip_mcp.pipelines.components.detectors import (
-    build_detector,
-    BackboneNeckAdapter,
-)
 ```
 
 Compose them inside your own `nn.Module`, or ignore them and write the network from scratch.
 No architecture is imposed. The `toolkit-inventory` skill is the name-and-location map for the
-whole set: the `build_detector` / `build_loss` / task string names, the heads/necks/backbones,
-the derivations, the `ctx` craft library, and the proposal-engine and scorer registries.
+whole set: the model contract a detection model meets, the `build_loss` and task string names,
+the heads/necks/backbones, the derivations, the `ctx` craft library, and the proposal-engine and
+scorer registries.
 
 Tailor the architecture to the data in hand, derived rather than pinned:
 
-- A torchvision detector's input scale and anchors from the frame and the GT boxes:
+- A library detector's input scale and anchors (an anchor-based torchvision detector's, for
+  example) from the frame and the GT boxes:
   `pipelines.derivations.derive_detector_geometry` keeps the frame at its native scale and sizes
   and shapes the anchors to the objects that actually occur (e.g. elongated organs). A run's
   resolution derives it at the run's own frame (the tile edge, else the frame its sources share)
@@ -174,8 +172,8 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   The platform hands your builder the run's width as `in_chans` (`data.num_channels`, the band count its
   sources carry) and its head sizes: over label documents, `num_classes`, the subjects the scope
   isolates, and `attributes`, the scope's attribute records when it declares any, one
-  per-instance head per record sized by its values (`build_detector` takes them and adds those
-  heads over its boxes); over ground truth carrying its own classes, `num_classes` or `num_ranks`
+  per-instance head per record sized by its values (the `toolkit-inventory` skill's model
+  contract states the `attributes` output those heads answer); over ground truth carrying its own classes, `num_classes` or `num_ranks`
   as that ground truth derives them; a regression run carries no count. Beside them it hands
   `image_mean`/`image_std` from `normalization`, and `pretrained_weights`, the weights your
   builder loads, when its source names them (the weights' own statistics, or a statement of

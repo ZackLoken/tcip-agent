@@ -77,7 +77,6 @@ def _criterion(*, spurious: bool) -> tuple[float, dict, list[str]]:
         _records("h", 100000.0, spurious=spurious),
         ENTRY,
         staged_conf_floor=0.05,
-        staged_conf_floor_attribute_path=None,
         **COUNT_TEST,
     )
 

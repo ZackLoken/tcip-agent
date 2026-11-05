@@ -77,7 +77,6 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
             _records("h", 100000.0),
             fx.with_fields(ENTRY, count_objective=objective),
             staged_conf_floor=0.05,
-            staged_conf_floor_attribute_path=None,
             **COUNT_TEST,
         )
         labels.add(evidence["conf_derived_from"])
@@ -111,7 +110,6 @@ def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it() 
         hold,
         ENTRY,
         staged_conf_floor=0.05,
-        staged_conf_floor_attribute_path=None,
         **COUNT_TEST,
     )
 
@@ -124,7 +122,6 @@ def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it() 
         _records("h", 100000.0),
         ENTRY,
         staged_conf_floor=0.05,
-        staged_conf_floor_attribute_path=None,
         **COUNT_TEST,
     )
     assert evidence["observed_min_score"] == pytest.approx(0.9)

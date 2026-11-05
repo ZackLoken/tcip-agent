@@ -1,7 +1,7 @@
 """Tests of the operating point and the values a pass derives beside it.
 
-Covered: the center-match count-unbiased operating-point sweep, the in-model operating-point
-seam, the detection cap, and the cross-tile merge threshold a tiled pass derives.
+Covered: the center-match count-unbiased operating-point sweep, the detection cap, and the
+cross-tile merge threshold a tiled pass derives.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from types import SimpleNamespace
 
     from tcip_mcp.pipelines.derivations import Region
     from tcip_mcp.pipelines.execution import Pass
@@ -148,52 +147,6 @@ def test_the_curve_evaluates_every_distinct_calibration_score() -> None:
         dispersion_quantile=DISPERSION_QUANTILE,
     )
     assert [c["conf"] for c in sweep["curve"]] == pytest.approx([0.0, *scores])
-
-
-# --- the in-model seam ---
-
-
-def _two_stage() -> SimpleNamespace:
-    from types import SimpleNamespace
-
-    return SimpleNamespace(
-        detector=SimpleNamespace(
-            roi_heads=SimpleNamespace(
-                score_thresh=0.05, nms_thresh=0.5, detections_per_img=100
-            )
-        )
-    )
-
-
-def _one_stage() -> SimpleNamespace:
-    from types import SimpleNamespace
-
-    return SimpleNamespace(
-        detector=SimpleNamespace(
-            score_thresh=0.2, nms_thresh=0.6, detections_per_img=100
-        )
-    )
-
-
-def test_set_detector_operating_point_two_stage() -> None:
-    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-
-    m = _two_stage()
-    set_detector_operating_point(m, score_thresh=0.4, detections_per_img=300)
-    assert m.detector.roi_heads.score_thresh == 0.4
-    assert (
-        m.detector.roi_heads.nms_thresh == 0.5
-    )  # the builder's own NMS, never set here
-    assert m.detector.roi_heads.detections_per_img == 300
-
-
-def test_set_detector_operating_point_one_stage() -> None:
-    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-
-    m = _one_stage()
-    set_detector_operating_point(m, score_thresh=0.4, detections_per_img=300)
-    assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.6
-    assert m.detector.detections_per_img == 300
 
 
 def test_the_object_density_is_its_quantile_over_the_object_bearing_regions() -> (
