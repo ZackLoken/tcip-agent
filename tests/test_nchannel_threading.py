@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     import numpy as np
     from numpy.typing import NDArray
-    from torch import Tensor
+    from torch import Tensor, nn
     from torch.utils.data import Dataset
 
     from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter
@@ -132,27 +132,60 @@ def test_n_channel_detector_builds_and_trains() -> None:
     assert losses and all(torch.isfinite(v) for v in losses.values())
 
 
-def test_normalization_length_and_channel_count_are_validated() -> None:
-    from tcip_mcp.pipelines.components.detectors import build_detector
+def _detection_model_at(in_chans: int, bands: int) -> nn.Module:
+    """Return the detection model a run at ``in_chans`` builds, normalized at ``bands`` bands.
 
-    adapter = _nchan_adapter(5)
-    names = list(adapter(torch.zeros(1, 5, 64, 64)).keys())
-    common = {
-        "featmap_names": names,
-        "num_levels": len(names),
-        **detector_geometry().handed(),
-    }
-    with pytest.raises(
-        ValueError, match=r"both must be 5(.|\n)*StatedBeyondWeights"
-    ):
-        build_detector(
-            "faster_rcnn",
-            adapter,
-            num_classes=1,
-            **common,
-            image_mean=[0.4] * 3,
-            image_std=[0.2] * 3,
+    The model source is :data:`~tests._chain_fixtures.DETECTION_SOURCE` stating the band
+    statistics of :func:`~tests._chain_fixtures.noise_frames` at ``bands``, validated in a run
+    config over no data and built through ``build_from_model_source`` at :func:`detector_geometry`.
+    """
+    from tcip_mcp.pipelines.model_build import (
+        build_from_model_source,
+        staged_sources,
+    )
+    from tcip_mcp.pipelines.schemas import TrainGeometry, train_config
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import (
+        DETECTION_SOURCE,
+        frame_statistics,
+        noise_frames,
+    )
+
+    spec = train_config(
+        training_config(
+            REPO_ROOT,
+            {
+                **DETECTION_SOURCE,
+                "normalization": frame_statistics(noise_frames(bands), bands),
+            },
+            {},
         )
+    )
+    return build_from_model_source(
+        spec.model_source,
+        staged_sources(spec, REPO_ROOT).layout,
+        {"in_chans": in_chans, "num_classes": 1},
+        TrainGeometry(
+            native_size=None, object_density=None, detector=detector_geometry()
+        ),
+    )
+
+
+def test_statistics_of_another_length_than_the_band_count_refuse_before_the_build() -> (
+    None
+):
+    """Statistics of three bands for a five-band model refuse, naming both lengths.
+
+    The refusal names the stated route, ``schemas.StatedBeyondWeights``; at five bands the same
+    model source builds, normalizing every band.
+    """
+    with pytest.raises(
+        ValueError, match=r"length 3(.|\n)*must be 5(.|\n)*StatedBeyondWeights"
+    ):
+        _detection_model_at(5, bands=3)
+
+    model = _detection_model_at(5, bands=5)
+    assert len(model.library.transform.image_mean) == 5
 
 
 def test_explicit_in_chans_wins_over_the_registration_order_probe() -> None:
