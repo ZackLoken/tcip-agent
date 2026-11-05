@@ -11,8 +11,11 @@ class Detection(BaseModel):
 
     It holds its xyxy ``box``, ``score``, 1-indexed ``label``, ``attributes`` (one value id per
     attribute the checkpoint's recorded dimensions declare, none where they declare none) and
-    ``mask``, its flat ``[x0, y0, x1, y1, ...]`` polygons: ``None`` for a detection carrying no
-    mask, empty for a mask that binarized to nothing.
+    ``mask``, its flat ``[x0, y0, x1, y1, ...]`` polygons or ``None``. A pass's detection carries
+    ``None`` under an execution cutting no mask and an empty list for a cut mask that binarized
+    to nothing; a raster pass's progress row
+    (:class:`~tcip_mcp.pipelines.inference.generic_predictor.SliceBatch`) carries ``None`` for
+    both.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
