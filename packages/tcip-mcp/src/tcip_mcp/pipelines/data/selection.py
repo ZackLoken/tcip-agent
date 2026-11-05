@@ -309,7 +309,7 @@ class Selection:
     registry scopes, a mask raster or a table row.
     """
 
-    samples: tuple[Sample, ...]
+    samples: Annotated[tuple[Sample, ...], Field(min_length=1)]
     seed: int
     group_by: str
     scope: ClassScope
@@ -500,8 +500,8 @@ def as_selection(document: JsonValue, *, where: str) -> Selection:
     """Read a held document back as a :class:`Selection`, refusing anything a draw never writes.
 
     Every refusal is ``tcip_store.ReadRefusedError`` naming the document at ``where``: the
-    record's own issues (each field that does not decode, a side outside :data:`SIDES` among
-    them), or the sentence of an empty ``samples`` list, samples whose sources lie under more
+    record's own issues (each field that does not decode, an empty ``samples`` list and a side
+    outside :data:`SIDES` among them), or the sentence of samples whose sources lie under more
     than one dataset root (:func:`~tcip_mcp.dataset_layout.image_capture`), a partition whose
     sides cross (:func:`refuse_crossing_sides`), or a scope its samples' shape cannot be read
     under (:meth:`ClassScope.admitted_for`).
@@ -511,11 +511,6 @@ def as_selection(document: JsonValue, *, where: str) -> Selection:
     place = selection_place(where)
     selection = tcip_store.validated(_SELECTION, document, place)
     with tcip_store.unreadable(place, ValueError):
-        if not selection.samples:
-            raise ValueError(
-                "it lists no samples: a selection is its sample list, so an empty one binds "
-                "nothing. Draw it again over the current data."
-            )
         roots = {image_capture(s.source)[0] for s in selection.samples}
         if len(roots) > 1:
             raise ValueError(
