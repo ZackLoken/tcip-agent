@@ -53,8 +53,8 @@ from tcip_mcp.server import tool
 from tcip_store import (
     Invalid,
     Issue,
-    ReadRefusal,
     ReadRefusedError,
+    RefusedRead,
     StoreError,
     canonical_path,
 )
@@ -797,22 +797,30 @@ class Admitted(BaseModel):
 class Blocked(BaseModel):
     """A relaunch choice its compatibility check refuses, and why.
 
-    ``reason`` is the refusal of a selection that will not read, or each of the check's
-    objections as an issue of its own.
+    ``reason`` is the refused read of a selection that will not read, or each of the check's
+    objections as an issue of its own at the place the check examined: the run's relaunch as
+    recorded, or the run's data section bound to an offered selection.
     """
 
     kind: Literal["blocked"] = "blocked"
-    reason: ReadRefusal
+    reason: RefusedRead
 
 
 type ChoiceCheck = Annotated[Admitted | Blocked, Field(discriminator="kind")]
 """What a relaunch choice's compatibility check found, told apart by its ``kind``."""
 
 
-def _checked(reasons: list[str]) -> ChoiceCheck:
-    """Return the check that refuses with each of ``reasons`` as an issue, or admits for none."""
+def _checked(reasons: list[str], where: str) -> ChoiceCheck:
+    """Return the check refusing with each of ``reasons`` as an issue at ``where``, or admitting."""
     return (
-        Blocked(reason=Invalid(issues=[Issue(loc=[], msg=r) for r in reasons]))
+        Blocked(
+            reason=RefusedRead(
+                where=where,
+                refusal=Invalid(
+                    issues=[Issue(loc=[], msg=r) for r in reasons]
+                ),
+            )
+        )
         if reasons
         else Admitted()
     )
@@ -850,10 +858,10 @@ class SelectionChoice(_Offered):
 
 
 class UnreadSelectionChoice(_Offered):
-    """An offered selection directory whose selection will not read, and why it will not."""
+    """An offered selection directory whose selection will not read, and its refused read."""
 
     kind: Literal["unread"] = "unread"
-    reason: ReadRefusal
+    reason: RefusedRead
 
 
 class SplitChoices(BaseModel):
@@ -876,8 +884,8 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     hold, each compatibility-checked the way a launch would check it.
 
     Every check is :func:`selection_compatibility` over a selection this reader read itself: the
-    run's own through :func:`~tcip_mcp.pipelines.data.selection.read_selection`, whose refusal
-    alone is the "As recorded" reason, with no candidate listed, and each candidate through
+    run's own through :func:`~tcip_mcp.pipelines.data.selection.read_selection`, whose refused
+    read alone is the "As recorded" reason, with no candidate listed, and each candidate through
     :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
     selection is checked against the data block :func:`data_with_selection` builds
     (``data.split`` replaced wholesale); "As recorded" is checked against the stated config
@@ -930,7 +938,7 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         except ReadRefusedError as exc:
             return SplitChoices(
                 as_recorded=AsRecordedChoice(
-                    case=case, line=line, check=Blocked(reason=exc.refusal)
+                    case=case, line=line, check=Blocked(reason=exc.served)
                 ),
                 selections=[],
             )
@@ -949,7 +957,12 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
 
     dir_issues = data_dir_issues(data)
     as_recorded = AsRecordedChoice(
-        case=case, line=line, check=_checked([*reasons, *dir_issues])
+        case=case,
+        line=line,
+        check=_checked(
+            [*reasons, *dir_issues],
+            f"the relaunch of run {experiment_id} as recorded",
+        ),
     )
 
     # A bound config names no locations, so its own selection's first sample source anchors the
@@ -1019,7 +1032,10 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         selections.append(
             SelectionChoice(
                 selection_dir=candidate_dir,
-                check=_checked(issues),
+                check=_checked(
+                    issues,
+                    f"the data section of run {experiment_id} bound to {candidate_dir}",
+                ),
                 seed=selection.seed,
                 group_by=selection.group_by,
                 train=counts["train"],

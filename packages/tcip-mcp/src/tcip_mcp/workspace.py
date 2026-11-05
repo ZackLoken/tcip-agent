@@ -146,7 +146,7 @@ def project_by_id(
     unreadable: list[str] = []
     for entry in records:
         if entry.kind == "unread":
-            unreadable.append(f"{entry.root}: {entry.problem}")
+            unreadable.append(str(entry.problem))
         elif entry.record.id == project_id:
             found.append((entry.root, entry.record))
     if not found:

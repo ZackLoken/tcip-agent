@@ -3,7 +3,8 @@
 Each record is written past its writer through ``tcip_store.replace`` and read through the
 platform's own door. The reader's error names where the record lives and carries the model's
 issues, never the validation library's documentation link; a door answering text answers that
-sentence, and a door answering the refusal as a record answers the issues the sentence states.
+sentence, and a door answering the refusal as a record answers the place and the issues the
+sentence states.
 """
 
 from __future__ import annotations
@@ -26,10 +27,10 @@ LIBRARY_LINK = "errors.pydantic.dev"
 
 
 def _states(sentence: str, served: dict) -> bool:
-    """Return whether ``sentence`` ends in the issues the served refusal record ``served`` holds."""
-    from tcip_store import Invalid
+    """Return whether ``sentence`` is the served refused read ``served`` read as text."""
+    from tcip_store import RefusedRead
 
-    return sentence.endswith(f": {Invalid.model_validate(served)}")
+    return sentence == str(RefusedRead.model_validate(served))
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
@@ -127,7 +128,9 @@ def test_opening_a_project_whose_gui_snapshot_is_refused_answers_its_readers_iss
     assert str(made.root) in sentence
     assert resp.status_code == 409
     detail = resp.json()["detail"]
-    assert [issue["loc"] for issue in detail["issues"]] == [["active_tab"]]
+    assert [issue["loc"] for issue in detail["refusal"]["issues"]] == [
+        ["active_tab"]
+    ]
     assert _states(sentence, detail)
 
 
@@ -176,7 +179,7 @@ def test_opening_a_project_whose_snapshot_names_no_capture_folder_answers_its_is
     assert LIBRARY_LINK not in sentence
     assert resp.status_code == 409
     detail = resp.json()["detail"]
-    assert detail["kind"] == "invalid"
+    assert detail["refusal"]["kind"] == "invalid"
     assert _states(sentence, detail)
 
 
@@ -200,7 +203,8 @@ def test_a_refused_memory_record_lists_with_the_issues_its_reader_raises(
 ) -> None:
     """A report its model refuses lists as unread, with the issues ``read_memory`` raises.
 
-    The sentence names the record's id; a report its writer wrote beside it still reads.
+    The sentence names the record's id, as the served entry's place does; a report its writer
+    wrote beside it still reads.
     """
     from tcip_mcp.tools.meta_tools import (
         FrictionReport,
@@ -232,7 +236,9 @@ def test_a_refused_memory_record_lists_with_the_issues_its_reader_raises(
     assert damaged["id"] in sentence
     by_id = {entry["id"]: entry for entry in entries}
     assert by_id[kept["id"]]["record"]["detail"] == "kept"
-    assert _states(sentence, by_id[damaged["id"]]["reason"])
+    reason = by_id[damaged["id"]]["reason"]
+    assert damaged["id"] in reason["where"]
+    assert _states(sentence, reason)
 
 
 def test_a_refused_delivery_event_refuses_the_listing_with_its_readers_issues(
@@ -264,7 +270,9 @@ def test_a_refused_delivery_event_refuses_the_listing_with_its_readers_issues(
     assert event_id in sentence
     assert resp.status_code == 400
     detail = resp.json()["detail"]
-    assert [issue["loc"] for issue in detail["issues"]] == [["produced_at"]]
+    assert [issue["loc"] for issue in detail["refusal"]["issues"]] == [
+        ["produced_at"]
+    ]
     assert _states(sentence, detail)
 
 

@@ -44,7 +44,7 @@ from tcip_mcp.pipelines.postprocessing.segment_attribution import PositionError
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_mcp.tools.model_tools import RegisteredModels
 from tcip_mcp.traits import TraitRevision
-from tcip_store import ReadRefusal
+from tcip_store import RefusedRead
 from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
 
@@ -667,7 +667,7 @@ def list_delivery_events() -> DeliveryEvents:
     The events are :func:`~tcip_mcp.delivery.read_delivery_events`'s: what shipped, under which
     trait revision and kind, over which buckets and with what each bucket's gate finding was,
     each a :class:`ServedDeliveryEvent`. A record that will not decode refuses the whole listing
-    (400), its detail the :data:`~tcip_store.ReadRefusal` saying why.
+    (400), its detail the :class:`~tcip_store.RefusedRead` naming the record and why.
     """
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -679,7 +679,7 @@ def list_delivery_events() -> DeliveryEvents:
     try:
         events = read_delivery_events(root)
     except ReadRefusedError as exc:
-        raise HTTPException(400, exc.refusal.model_dump()) from exc
+        raise HTTPException(400, exc.served.model_dump()) from exc
     return DeliveryEvents(
         records=[
             ServedDeliveryEvent(
@@ -720,10 +720,10 @@ class ServedTrait(BaseModel):
 
 
 class UnreadableTrait(BaseModel):
-    """A trait whose stored record will not read, and why (``read_trait``'s refusal)."""
+    """A trait whose stored record will not read, and why (``read_trait``'s refused read)."""
 
     trait: str
-    reason: ReadRefusal
+    reason: RefusedRead
 
 
 class TraitsListing(BaseModel):
@@ -750,7 +750,7 @@ def list_traits() -> TraitsListing:
         try:
             records.append(ServedTrait.of(name, read_trait(name, root)))
         except ReadRefusedError as exc:
-            unreadable.append(UnreadableTrait(trait=name, reason=exc.refusal))
+            unreadable.append(UnreadableTrait(trait=name, reason=exc.served))
     definitions = crops_definitions()
     delivered = {
         p for r in records for rev in r.revisions for p in rev.entry.delivers

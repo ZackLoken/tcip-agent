@@ -120,8 +120,7 @@ def test_a_retrospective_that_will_not_read_is_answered_with_its_reason(
     (entry,) = opened_client.get("/api/meta/retrospectives").json()["entries"]
 
     assert entry["id"] == "unreadable"
-    assert isinstance(entry["reason"], dict)
-    (issue,) = entry["reason"]["issues"]
+    (issue,) = entry["reason"]["refusal"]["issues"]
     assert issue["loc"] == [] and "Retrospective" in issue["msg"]
 
 
