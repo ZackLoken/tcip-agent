@@ -74,4 +74,13 @@ describe("the source's identity", () => {
     writeFileSync(join(root, "README.md"), "notes\n");
     expect(sourceHash(root)).toBe(before);
   });
+
+  it("does not move with a test file or a file under the source directory's test folder", () => {
+    const root = scratchRoot();
+    const before = sourceHash(root);
+    mkdirSync(join(root, "src", "test"));
+    writeFileSync(join(root, "src", "main.test.ts"), "it('runs', () => {});\n");
+    writeFileSync(join(root, "src", "test", "answers.json"), "{}\n");
+    expect(sourceHash(root)).toBe(before);
+  });
 });
