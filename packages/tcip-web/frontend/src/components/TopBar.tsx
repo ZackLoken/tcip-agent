@@ -15,16 +15,30 @@ export function tabPanelId(tab: TabName): string {
   return `tabpanel-${tab}`;
 }
 
+/** One status pill: a dot of the `dot` color class and its `label`, `title` on hover. */
+function StatusPill({ dot, label, title }: { dot: string; label: string; title?: string }) {
+  return (
+    <div
+      title={title}
+      className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[12px]"
+    >
+      <span className={`w-2 h-2 rounded-full ${dot}`} />
+      <span className="text-tcip-muted">{label}</span>
+    </div>
+  );
+}
+
 /**
- * Global app bar: logo, centered tab navigation, agent-rail toggle, and a connection
- * indicator that appears only when the connection is degraded. The project breadcrumb
- * lives in the StatusBar's lower-right corner; tab-specific tools live in each tab's
- * own toolbar (e.g. AnnotateToolbar), not here.
+ * Global app bar: logo, centered tab navigation, agent-rail toggle, and status pills that
+ * appear only when something is wrong: a degraded connection, a served bundle not built from
+ * its source. The project breadcrumb lives in the StatusBar's lower-right corner; tab-specific
+ * tools live in each tab's own toolbar (e.g. AnnotateToolbar), not here.
  */
 export function TopBar() {
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const wsStatus = useStore((s) => s.wsStatus);
+  const staleBundle = useStore((s) => s.staleBundle);
   const terminalOpen = useStore((s) => s.terminalOpen);
   const setTerminalOpen = useStore((s) => s.setTerminalOpen);
   // A minimized rail's switch of harness waits for the agent's hand-off; the rail starts the
@@ -98,15 +112,11 @@ export function TopBar() {
         {/* Connection state: visible only when something is wrong; it self-dismisses once the
             connection recovers. */}
         {degraded && (
-          <div className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[12px]">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                wsStatus === "connecting" ? "bg-tcip-fn" : "bg-tcip-fp"
-              }`}
-            />
-            <span className="text-tcip-muted">{label}</span>
-          </div>
+          <StatusPill dot={wsStatus === "connecting" ? "bg-tcip-fn" : "bg-tcip-fp"} label={label} />
         )}
+
+        {/* The backend's own sentence: the served bundle is not the one its source builds. */}
+        {staleBundle && <StatusPill dot="bg-tcip-fn" label="stale bundle" title={staleBundle} />}
 
         {/* Agent rail toggle */}
         <button

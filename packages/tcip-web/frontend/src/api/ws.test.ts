@@ -150,6 +150,20 @@ describe("StateSocket state_snapshot dispatch", () => {
     socket.close();
   });
 
+  it("holds the sentence an envelope states for a stale bundle, and none once a frame states none", () => {
+    vi.spyOn(useStore.getState(), "mergeSnapshot").mockImplementation(() => {});
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().open();
+
+    lastSocket().message(JSON.stringify({ ...PRODUCED_ENVELOPE, bundle: "rebuild the bundle" }));
+    expect(useStore.getState().staleBundle).toBe("rebuild the bundle");
+
+    lastSocket().message(JSON.stringify(PRODUCED_ENVELOPE));
+    expect(useStore.getState().staleBundle).toBeNull();
+    socket.close();
+  });
+
   it("resync stops and re-starts the socket, forcing a fresh connect-time replay", () => {
     const socket = new StateSocket();
     socket.connect();

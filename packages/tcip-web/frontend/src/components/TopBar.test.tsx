@@ -29,6 +29,24 @@ describe("TopBar connection notice", () => {
   });
 });
 
+describe("TopBar stale bundle notice", () => {
+  const SENTENCE = "The frontend bundle was not built from the source; run the build.";
+
+  it("shows nothing while the backend states no stale bundle", () => {
+    render(<TopBar />);
+    expect(screen.queryByText(/stale bundle/i)).not.toBeInTheDocument();
+  });
+
+  it("names the stale bundle with the backend's sentence, and clears when it states none", () => {
+    useStore.setState({ staleBundle: SENTENCE });
+    render(<TopBar />);
+    expect(screen.getByText(/stale bundle/i).closest("[title]")).toHaveAttribute("title", SENTENCE);
+
+    act(() => useStore.setState({ staleBundle: null }));
+    expect(screen.queryByText(/stale bundle/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("TopBar tab strip accessibility", () => {
   it("exposes the strip as a tablist and marks the active tab selected", () => {
     render(<TopBar />);
