@@ -56,7 +56,7 @@ SUBJECT = "bud"
 DATE = "2026-02-11"
 STEMS = tuple(f"s{i:02d}" for i in range(40))
 BESPOKE_DETECTION = "bespoke_models:build_bespoke_detection"
-"""The torchvision bespoke detector's builder, its further keywords passed to the detector."""
+"""The bespoke detector's builder, its further keywords passed to the RetinaNet it holds."""
 BESPOKE_CLASSIFIER = "bespoke_models:build_bespoke_classifier"
 BESPOKE_SEMANTIC_SEG = "bespoke_models:build_bespoke_semantic_seg"
 BESPOKE_INSTANCE_SEG = "bespoke_models:build_bespoke_instance_seg"

@@ -203,16 +203,14 @@ def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_reco
 # --- zero attributes --------------------------------------------------------
 
 
-def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attribute_row(
+def test_a_scope_with_no_attribute_writes_no_attribute_row(
     tmp_path: Path,
 ) -> None:
-    """A scope with no attribute builds the plain detector and writes no attribute.
+    """A scope with no attribute writes no attribute.
 
-    A subject its registry declares no attribute for builds the torchvision detector
-    ``build_detector`` returns, and its records and documents carry no attribute.
+    A detector over a subject its registry declares no attribute for writes no attribute in its
+    records or its documents.
     """
-    from torchvision.models.detection import FasterRCNN
-
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._producer_fixtures import write_image
@@ -226,10 +224,9 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
         write_image(images_dir / f"f{i}.png", (64, 64), (40 + 60 * i, 90, 60))
     checkpoint = registered_checkpoint(tmp_path)
 
-    p, results = predicted_over(
+    _p, results = predicted_over(
         tmp_path, checkpoint, str(images_dir), tile=False, conf=0.0
     )
-    assert type(p.predictor.model.detector) is FasterRCNN
     assert results and all("attributes" not in r for r in results), results
 
     published = run_inference(
@@ -318,7 +315,7 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
     )
     model.train()
     losses = model([image], [target])
-    color_head, grade_head = model.detector.attribute_heads
+    color_head, grade_head = model.attribute_heads
     (
         losses["attribute_loss_color"] + losses["attribute_loss_grade"]
     ).backward()
@@ -334,54 +331,90 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
 
 
 @pytest.mark.parametrize(
-    "name", ["faster_rcnn", "fcos", "retinanet", "mask_rcnn"]
+    "builder", ["build_bespoke_detection", "build_bespoke_instance_seg"]
 )
-def test_each_builtin_detector_carries_one_head_per_attribute(
-    name: str,
+def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
+    builder: str,
 ) -> None:
-    """Each built-in detector carries one attribute head per attribute.
+    """A built detector carries one head per attribute, in declared order, on the model itself.
 
-    Around each built-in detector, the attribute module returns one loss per attribute in train
-    mode beside the detector's own losses, the unassessed attribute's at zero, writes
-    ``attributes`` boxes by attributes in eval, and leaves the operating-point knobs with a
-    holder.
+    Built at ``grade`` then ``color``, the model holds its knobs on itself and an ordinal head of
+    three ranks then a categorical head of two classes; in train mode each head's loss joins the
+    detector's own, the unassessed one's at zero. In eval, its grade head biased to decode the
+    top rank, every box at a cap of five carries ``attributes``, int64, one row per box, its
+    columns rank 2 then a color id; at a floor between the kept scores the boxes above it alone
+    stay, every per-box key (masks too, for instance segmentation) kept by the same selection.
     """
+    from tcip_mcp.pipelines.components.heads import (
+        ClassificationHead,
+        OrdinalHead,
+    )
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
+        set_detector_operating_point,
     )
+    from tests import bespoke_models
     from tests._chain_fixtures import detector_values
-    from tests.bespoke_models import build_bespoke_detection
+    from tests._producer_fixtures import painted_array
 
     torch.manual_seed(0)
-    model = build_bespoke_detection(
-        detector=name, attributes=(COLOR, GRADE), **detector_values()
+    model = getattr(bespoke_models, builder)(
+        attributes=(GRADE, COLOR), **detector_values()
+    )
+    assert detector_operating_point_holder(model) == (model, "self")
+    grade_head, color_head = model.attribute_heads
+    assert (type(grade_head), grade_head.num_ranks) == (OrdinalHead, 3)
+    assert (type(color_head), color_head.num_classes) == (
+        ClassificationHead,
+        2,
     )
     image = torch.rand(3, 64, 64)
     target = {
         "boxes": torch.tensor([[8.0, 8.0, 40.0, 40.0]]),
         "labels": torch.tensor([1]),
-        "attributes": torch.tensor([[1, UNASSESSED]]),
+        "attributes": torch.tensor([[UNASSESSED, 1]]),
+        "masks": torch.as_tensor(painted_array(64, 64, [((8, 8, 40, 40), 1)]))[
+            None
+        ],
     }
-    if name == "mask_rcnn":
-        from tests._producer_fixtures import painted_array
-
-        target["masks"] = torch.as_tensor(
-            painted_array(64, 64, [((8, 8, 40, 40), 1)])
-        )[None]
 
     model.train()
     losses = model([image], [target])
     assert {"attribute_loss_color", "attribute_loss_grade"} <= set(losses)
     assert len(losses) > 2
     assert float(losses["attribute_loss_grade"].detach()) == 0.0
+    assert float(losses["attribute_loss_color"].detach()) > 0.0
 
     model.eval()
-    holder, path = detector_operating_point_holder(model)
-    assert holder is not None, path
     with torch.no_grad():
-        (out,) = model([image])
-    assert out["attributes"].dtype == torch.int64
-    assert tuple(out["attributes"].shape) == (len(out["boxes"]), 2)
+        grade_head.classifiers.weight.zero_()
+        grade_head.classifiers.bias.fill_(10.0)
+
+    def kept(score_thresh: float) -> dict:
+        set_detector_operating_point(
+            model, score_thresh=score_thresh, detections_per_img=5
+        )
+        with torch.no_grad():
+            (out,) = model([image])
+        assert {
+            key: len(value) for key, value in out.items()
+        } == dict.fromkeys(out, len(out["boxes"])), out
+        return out
+
+    out = kept(0.0)
+    ids = out["attributes"]
+    assert ids.dtype == torch.int64
+    assert tuple(ids.shape) == (len(out["boxes"]), 2) and len(ids) == 5
+    assert ids[:, 0].tolist() == [2] * 5
+    assert set(ids[:, 1].tolist()) <= {0, 1}
+    assert ("masks" in out) == (builder == "build_bespoke_instance_seg")
+
+    scores = out["scores"].tolist()
+    floor = (scores[0] + scores[-1]) / 2
+    fewer = kept(floor)
+    assert 0 < len(fewer["boxes"]) < len(scores), (scores, floor)
+    assert fewer["scores"].tolist() == [s for s in scores if s >= floor]
+    assert fewer["attributes"][:, 0].tolist() == [2] * len(fewer["boxes"])
 
 
 def test_the_tiler_carries_exactly_the_per_box_keys_the_loader_names(

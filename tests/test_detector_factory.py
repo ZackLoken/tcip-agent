@@ -15,7 +15,6 @@ pytest.importorskip("torchvision")
 from torch import Tensor, nn  # noqa: E402
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
-from tests import bespoke_models  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     detector_geometry,
     detector_values,
@@ -27,11 +26,32 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter
 
 
+def _built(detector: str, **kwargs: object) -> nn.Module:
+    """Return ``build_detector``'s ``detector`` over a three-band one-level adapter.
+
+    It is built at :func:`~tests._chain_fixtures.detector_values` (less ``aspect_ratios`` for
+    ``fcos``, which places one anchor per location) and ``kwargs``.
+    """
+    from tcip_mcp.pipelines.components.detectors import build_detector
+
+    values = detector_values()
+    if detector == "fcos":
+        values.pop("aspect_ratios")
+    return build_detector(
+        detector,
+        _unprobable_adapter(3),
+        1,
+        featmap_names=["0"],
+        num_levels=1,
+        in_chans=3,
+        **values,
+        **kwargs,
+    )
+
+
 @pytest.mark.parametrize("detector", ["faster_rcnn", "fcos", "retinanet"])
 def test_build_each_builtin_detector(detector: str) -> None:
-    model = bespoke_models.build_bespoke_detection(
-        num_classes=1, detector=detector, **detector_values()
-    )
+    model = _built(detector)
     model.eval()
     out = model([torch.rand(3, 64, 64)])
     assert isinstance(out, list) and "boxes" in out[0]
@@ -46,6 +66,79 @@ def test_build_each_builtin_detector(detector: str) -> None:
     loss = model([torch.rand(3, 64, 64)], target)
     assert isinstance(loss, dict) and loss
     assert torch.isfinite(sum(loss.values()))
+
+
+@pytest.mark.parametrize(
+    "knob",
+    [
+        "box_detections_per_img",
+        "detections_per_img",
+        "box_score_thresh",
+        "score_thresh",
+    ],
+)
+def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(
+    knob: str,
+) -> None:
+    """An operating-point knob stated to ``build_detector`` refuses by name.
+
+    A build handed the cap or the score threshold refuses naming it, and the same call without
+    it builds at its other keywords.
+    """
+    with pytest.raises(ValueError, match=knob):
+        _built("faster_rcnn", box_nms_thresh=0.4, **{knob: 7})
+    assert _built("faster_rcnn", box_nms_thresh=0.4) is not None
+
+
+@pytest.mark.parametrize(
+    "name", ["faster_rcnn", "fcos", "retinanet", "mask_rcnn"]
+)
+def test_each_builtin_detector_carries_one_head_per_attribute(
+    name: str,
+) -> None:
+    """Each built-in detector built with attributes carries one attribute head per attribute.
+
+    Around each built-in detector, the attribute module returns one loss per attribute in train
+    mode beside the detector's own losses, the unassessed attribute's at zero, and writes
+    ``attributes`` boxes by attributes in eval.
+    """
+    from tcip_annotation.json_io import UNASSESSED
+    from tcip_mcp import subject_registry
+    from tests._producer_fixtures import painted_array
+
+    torch.manual_seed(0)
+    model = _built(
+        name,
+        attributes=(
+            subject_registry.Attribute(
+                "color", "categorical", ("red", "blue")
+            ),
+            subject_registry.Attribute(
+                "grade", "ordinal", ("low", "mid", "high")
+            ),
+        ),
+    )
+    image = torch.rand(3, 64, 64)
+    target = {
+        "boxes": torch.tensor([[8.0, 8.0, 40.0, 40.0]]),
+        "labels": torch.tensor([1]),
+        "attributes": torch.tensor([[1, UNASSESSED]]),
+        "masks": torch.as_tensor(painted_array(64, 64, [((8, 8, 40, 40), 1)]))[
+            None
+        ],
+    }
+
+    model.train()
+    losses = model([image], [target])
+    assert {"attribute_loss_color", "attribute_loss_grade"} <= set(losses)
+    assert len(losses) > 2
+    assert float(losses["attribute_loss_grade"].detach()) == 0.0
+
+    model.eval()
+    with torch.no_grad():
+        (out,) = model([image])
+    assert out["attributes"].dtype == torch.int64
+    assert tuple(out["attributes"].shape) == (len(out["boxes"]), 2)
 
 
 def test_build_detector_unknown_name_raises() -> None:

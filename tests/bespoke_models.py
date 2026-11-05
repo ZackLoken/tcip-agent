@@ -1,12 +1,13 @@
 """Bespoke model builders and training sources importable by dotted reference.
 
 Among them are (a) a from-scratch ``GroupNorm`` backbone and tiny FPN feeding a torchvision
-Faster R-CNN whose ``AnchorGenerator`` is built at the anchor geometry it is handed, and (b) a
+RetinaNet whose ``AnchorGenerator`` is built at the anchor geometry it is handed, and (b) a
 custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` sinks.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 import torch
@@ -16,8 +17,11 @@ from torch.nn import functional
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
 
 if TYPE_CHECKING:
+    from torchvision.models.detection.anchor_utils import AnchorGenerator
+
     from tcip_mcp.pipelines.components.detectors import DetectorOutput
     from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.subject_registry import Attribute
 
 # ---------------------------------------------------------------------------
 # (a) architecture with modified internals: GroupNorm backbone/FPN + GT anchors
@@ -42,7 +46,7 @@ class _GNBlock(nn.Module):
 class _GNBackboneFPN(nn.Module):
     """From-scratch backbone + minimal top-down FPN, fully GroupNorm (batch-independent).
 
-    Its forward returns one fused feature map, a tensor.
+    Its forward returns one fused feature map, keyed ``"0"``.
     """
 
     def __init__(
@@ -65,55 +69,43 @@ class _GNBackboneFPN(nn.Module):
         self.smooth = nn.Conv2d(out_channels, out_channels, 3, padding=1)
         self.smooth_norm = nn.GroupNorm(gn_groups, out_channels)
         self.act = nn.ReLU(inplace=True)
-        self.out_channels = out_channels  # torchvision FasterRCNN reads this
+        self.out_channels = out_channels  # a torchvision detector reads this
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> OrderedDict[str, torch.Tensor]:
         c2 = self.c2(self.stem(x))
         c3 = self.c3(c2)
         p2 = self.lat2(c2) + functional.interpolate(
             self.lat3(c3), size=c2.shape[-2:], mode="nearest"
         )
         p2 = self.act(self.fpn_norm(p2))
-        return self.act(self.smooth_norm(self.smooth(p2)))
-
-
-class _HeldDetector(nn.Module):
-    """A torchvision detector held as ``.detector``.
-
-    Its forward splits a batched tensor into its images and returns ``.detector``'s answer over
-    them, with ``targets`` passed too in train mode when given.
-    """
-
-    detector: nn.Module
-
-    def forward(
-        self,
-        images: torch.Tensor | list[torch.Tensor],
-        targets: list[dict] | None = None,
-    ) -> DetectorOutput:
-        if isinstance(images, torch.Tensor):
-            images = [images[i] for i in range(images.shape[0])]
-        if self.training and targets is not None:
-            return self.detector(images, targets)
-        return self.detector(images)
+        return OrderedDict({"0": self.act(self.smooth_norm(self.smooth(p2)))})
 
 
 class _FreezesBackbone:
-    """A mixin giving ``freeze_backbone`` over a ``.backbone`` that may declare ``freeze_to``."""
+    """A mixin giving ``freeze_backbone`` through its ``.backbone``'s own ``freeze_to``."""
 
     backbone: nn.Module
 
     def freeze_backbone(self, to_stage: int) -> None:
-        if hasattr(self.backbone, "freeze_to"):
-            self.backbone.freeze_to(to_stage)
+        self.backbone.freeze_to(to_stage)
 
 
-class BespokeGNDetector(_HeldDetector):
-    """The torchvision Faster R-CNN held as ``.detector``."""
+class _KeepsItsOperatingPoint:
+    """A mixin keeping a detector's eval output to its own two operating-point knobs."""
 
-    def __init__(self, detector: nn.Module) -> None:
-        super().__init__()
-        self.detector = detector
+    score_thresh: float
+    detections_per_img: int
+
+    def governed(self, out: dict) -> dict:
+        """Return ``out``'s rows scoring at least ``score_thresh``, at most ``detections_per_img``.
+
+        The rows kept are the highest-scoring ones, chosen by one index selection over every key.
+        """
+        order = torch.argsort(out["scores"], descending=True)
+        keep = order[out["scores"][order] >= self.score_thresh][
+            : self.detections_per_img
+        ]
+        return {key: value[keep] for key, value in out.items()}
 
 
 def build_bespoke_detector(
@@ -128,36 +120,33 @@ def build_bespoke_detector(
     in_chans: int = 3,
     out_channels: int = 64,
     gn_groups: int = 8,
-) -> BespokeGNDetector:
-    """Build the bespoke detector with a GroupNorm backbone/FPN.
+    attributes: tuple[Attribute, ...] = (),
+) -> BespokeDetection:
+    """Build a :class:`BespokeDetection` over a RetinaNet on a GroupNorm backbone/FPN.
 
-    The Faster R-CNN is built at ``min_size``, ``max_size``, ``image_mean`` and ``image_std``,
-    its one fused level's anchors at ``anchor_base_size`` and its next two doublings over
-    ``aspect_ratios``.
+    The RetinaNet is built at ``min_size``, ``max_size``, ``image_mean`` and ``image_std``, its
+    one fused level's anchors at ``anchor_base_size`` and its next two doublings over
+    ``aspect_ratios``; the module carries one head per record of ``attributes``.
     """
-    from torchvision.models.detection import FasterRCNN
-    from torchvision.models.detection.rpn import AnchorGenerator
-    from torchvision.ops import MultiScaleRoIAlign
+    from torchvision.models.detection import RetinaNet
+    from torchvision.models.detection.anchor_utils import AnchorGenerator
 
     backbone = _GNBackboneFPN(in_chans, out_channels, gn_groups)
-    anchor_generator = AnchorGenerator(
-        sizes=(tuple(anchor_base_size * 2**i for i in range(3)),),
-        aspect_ratios=(aspect_ratios,),
-    )
-    roi_pool = MultiScaleRoIAlign(
-        featmap_names=["0"], output_size=7, sampling_ratio=2
-    )
-    detector = FasterRCNN(
+    library = RetinaNet(
         backbone,
-        num_classes=num_classes + 1,  # +1 background
-        rpn_anchor_generator=anchor_generator,
-        box_roi_pool=roi_pool,
+        num_classes + 1,
+        anchor_generator=AnchorGenerator(
+            sizes=(tuple(anchor_base_size * 2**i for i in range(3)),),
+            aspect_ratios=(aspect_ratios,),
+        ),
         min_size=min_size,
         max_size=max_size,
         image_mean=image_mean,
         image_std=image_std,
     )
-    return BespokeGNDetector(detector)
+    return BespokeDetection(
+        library, backbone, featmap_names=["0"], attributes=attributes
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -310,10 +299,6 @@ def save_built_weights_and_a_second_checkpoint(ctx: TrainContext) -> None:
 # ---------------------------------------------------------------------------
 
 from tcip_mcp.pipelines.components.backbones import BackboneWrapper
-from tcip_mcp.pipelines.components.detectors import (
-    BackboneNeckAdapter,
-    build_detector,
-)
 from tcip_mcp.pipelines.components.heads import (
     ClassificationHead,
     OrdinalHead,
@@ -399,37 +384,219 @@ class BespokeComposed(_FreezesBackbone, nn.Module):
         ]
 
 
-class BespokeDetection(_FreezesBackbone, _HeldDetector):
-    """Real backbone + FPN fed into a torchvision detector via ``BackboneNeckAdapter``.
+class _Pyramid(nn.Module):
+    """A ResNet-18 and a 256-channel FPN over it, read by a torchvision detector as its backbone.
 
-    It serves detection and, with ``detector="mask_rcnn"``, instance segmentation.
+    Its forward returns the FPN's levels keyed by ``featmap_names``, ``"0"`` the finest;
+    ``out_channels`` is the FPN's width.
+    """
+
+    def __init__(self, in_chans: int) -> None:
+        super().__init__()
+        self.backbone = _resnet18(in_chans)
+        self.neck = FPN(self.backbone.out_channels, out_channels=256)
+        self.out_channels = self.neck.out_channels
+        self.featmap_names = [
+            str(i) for i in range(len(self.backbone.out_channels))
+        ]
+
+    def forward(self, x: torch.Tensor) -> OrderedDict[str, torch.Tensor]:
+        levels = self.neck(self.backbone(x)).values()
+        return OrderedDict(zip(self.featmap_names, levels, strict=True))
+
+    def anchors(
+        self, anchor_base_size: int, aspect_ratios: tuple[float, ...]
+    ) -> AnchorGenerator:
+        """Return one anchor size per level, ``anchor_base_size`` at the finest, doubling each.
+
+        Every level's anchors take ``aspect_ratios``.
+        """
+        from torchvision.models.detection.anchor_utils import AnchorGenerator
+
+        levels = len(self.featmap_names)
+        return AnchorGenerator(
+            sizes=tuple((anchor_base_size * 2**i,) for i in range(levels)),
+            aspect_ratios=(tuple(aspect_ratios),) * levels,
+        )
+
+
+class BespokeDetection(_FreezesBackbone, _KeepsItsOperatingPoint, nn.Module):
+    """A thin module over a torchvision detector, owning its operating point and attribute heads.
+
+    ``library`` is the torchvision detector it calls and ``backbone`` the module inside it
+    trained at the backbone rate. ``score_thresh`` and ``detections_per_img`` start at the
+    library's own; the library's floor is then held at zero and its cap set to the module's
+    before each eval forward, so no floor or cap of the library's is stricter than the module's
+    (its own candidate limits and NMS still apply), and each frame's output passes through
+    :meth:`governed`. Each of ``attributes``, the scope's records,
+    gets a ``ClassificationHead`` (categorical) or an ``OrdinalHead`` (ordinal) reading the
+    channel means ``MultiScaleRoIAlign`` pools at a box from the library backbone's levels
+    ``featmap_names``, run over the frame as given. In train mode each head's loss over the rows
+    its target column assesses (not ``UNASSESSED``) joins the library's losses as
+    ``attribute_loss_<name>``, zero when no row does; in eval every output carries
+    ``attributes``, one int64 row per box, its columns in declared order.
     """
 
     def __init__(
         self,
-        num_classes: int,
+        library: nn.Module,
+        backbone: nn.Module,
         *,
-        in_chans: int = 3,
-        detector: str = "faster_rcnn",
-        **det_kwargs: object,
+        featmap_names: list[str],
+        attributes: tuple[Attribute, ...] = (),
     ) -> None:
+        from torchvision.ops import MultiScaleRoIAlign
+
+        from tcip_annotation.state import ATTR_TYPES
+
         super().__init__()
-        self.backbone = _resnet18(in_chans)
-        self.neck = FPN(self.backbone.out_channels, out_channels=256)
-        adapter = BackboneNeckAdapter(self.backbone, self.neck)
-        with torch.no_grad():
-            names = list(adapter(torch.zeros(1, in_chans, 64, 64)).keys())
-        if detector == "fcos":
-            det_kwargs.pop("aspect_ratios", None)
-        self.detector = build_detector(
-            detector,
-            adapter,
-            num_classes,
-            in_chans=in_chans,
-            featmap_names=names,
-            num_levels=len(names),
-            **det_kwargs,
+        self.library = library
+        self.backbone = backbone
+        held = self.library_knobs
+        self.score_thresh = float(held.score_thresh)
+        self.detections_per_img = int(held.detections_per_img)
+        held.score_thresh = 0.0
+        self.attributes = tuple(attributes)
+        # torchvision's own box-head pool: a 7-cell edge, two samples per cell.
+        self.pool = MultiScaleRoIAlign(
+            featmap_names, output_size=7, sampling_ratio=2
         )
+        head_of = dict(
+            zip(ATTR_TYPES, (ClassificationHead, OrdinalHead), strict=True)
+        )
+        self.attribute_heads = nn.ModuleList(
+            head_of[a.type](library.backbone.out_channels, len(a.values))
+            for a in self.attributes
+        )
+
+    @property
+    def library_knobs(self) -> nn.Module:
+        """The module holding the library's own two operating-point knobs."""
+        return self.library
+
+    def forward(
+        self,
+        images: torch.Tensor | list[torch.Tensor],
+        targets: list[dict] | None = None,
+    ) -> DetectorOutput:
+        if isinstance(images, torch.Tensor):
+            images = list(images.unbind(0))
+        if self.training and targets is not None:
+            return {
+                **self.library(images, targets),
+                **self._attribute_losses(images, targets),
+            }
+        self.library_knobs.detections_per_img = self.detections_per_img
+        results = self.library(images)
+        if self.attributes:
+            boxes = [r["boxes"] for r in results]
+            for result, rows in zip(
+                results, self._attribute_ids(images, boxes)
+            ):
+                result["attributes"] = rows
+        return [self.governed(r) for r in results]
+
+    def _pooled(
+        self, images: list[torch.Tensor], boxes: list[torch.Tensor]
+    ) -> torch.Tensor:
+        """Return the channel means pooled at each image's ``boxes``, every image's in turn."""
+        transform, levels = self.library.transform, self.library.backbone
+        return torch.cat(
+            [
+                self.pool(
+                    levels(transform.normalize(image)[None]),
+                    [at],
+                    [tuple(image.shape[-2:])],
+                ).mean(dim=(2, 3))
+                for image, at in zip(images, boxes, strict=True)
+            ]
+        )
+
+    def _attribute_ids(
+        self, images: list[torch.Tensor], boxes: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, ...]:
+        """Return each image's attribute ids at its ``boxes``, boxes by attributes, int64."""
+        pooled = self._pooled(images, boxes)
+        ids = torch.stack(
+            [
+                head.decode(head(pooled))[head.target_key]
+                for head in self.attribute_heads
+            ],
+            dim=1,
+        ).long()
+        return ids.split([len(at) for at in boxes])
+
+    def _attribute_losses(
+        self, images: list[torch.Tensor], targets: list[dict]
+    ) -> dict[str, torch.Tensor]:
+        """Return each head's loss over the target rows its attribute assesses, by name."""
+        from tcip_annotation.json_io import UNASSESSED
+
+        if not self.attributes:
+            return {}
+        pooled = self._pooled(images, [t["boxes"] for t in targets])
+        truth = torch.cat([t["attributes"] for t in targets]).reshape(
+            -1, len(self.attributes)
+        )
+        losses = {}
+        for i, (attribute, head) in enumerate(
+            zip(self.attributes, self.attribute_heads)
+        ):
+            logits = head(pooled)["logits"]
+            assessed = truth[:, i] != UNASSESSED
+            losses[f"attribute_loss_{attribute.name}"] = (
+                sum(
+                    head.compute_loss(
+                        {"logits": logits[assessed]},
+                        {head.target_key: truth[assessed, i]},
+                    ).values()
+                )
+                if assessed.any()
+                else logits.sum() * 0.0
+            )
+        return losses
+
+
+class BespokeInstanceSeg(BespokeDetection):
+    """A :class:`BespokeDetection` over a two-stage library, its knobs on its ``roi_heads``."""
+
+    @property
+    def library_knobs(self) -> nn.Module:
+        """The library's ``roi_heads``, which hold its two operating-point knobs."""
+        return self.library.roi_heads
+
+
+def _over_retinanet(
+    cls: type[BespokeDetection],
+    *,
+    anchor_base_size: int,
+    aspect_ratios: tuple[float, ...],
+    num_classes: int,
+    in_chans: int,
+    attributes: tuple[Attribute, ...],
+    **library_kwargs: object,
+) -> BespokeDetection:
+    """Build ``cls`` over a RetinaNet on a :class:`_Pyramid` of ``in_chans`` bands.
+
+    The RetinaNet's anchors are :meth:`_Pyramid.anchors`' at ``anchor_base_size`` and
+    ``aspect_ratios``; ``library_kwargs`` (its resize bounds, ``image_mean``, ``image_std`` and
+    any other RetinaNet keyword) pass to its constructor.
+    """
+    from torchvision.models.detection import RetinaNet
+
+    pyramid = _Pyramid(in_chans)
+    library = RetinaNet(
+        pyramid,
+        num_classes + 1,
+        anchor_generator=pyramid.anchors(anchor_base_size, aspect_ratios),
+        **library_kwargs,
+    )
+    return cls(
+        library,
+        pyramid.backbone,
+        featmap_names=pyramid.featmap_names,
+        attributes=attributes,
+    )
 
 
 def build_bespoke_classifier(
@@ -495,42 +662,55 @@ def build_bespoke_semantic_seg(
 
 def build_bespoke_instance_seg(
     *,
-    image_mean: list[float],
-    image_std: list[float],
+    anchor_base_size: int,
+    aspect_ratios: tuple[float, ...],
     num_classes: int = 1,
     in_chans: int = 3,
-    **det_kwargs: object,
-) -> BespokeDetection:
-    return BespokeDetection(
-        num_classes,
-        in_chans=in_chans,
-        detector="mask_rcnn",
-        image_mean=image_mean,
-        image_std=image_std,
-        **det_kwargs,
+    attributes: tuple[Attribute, ...] = (),
+    **library_kwargs: object,
+) -> BespokeInstanceSeg:
+    """Build a :class:`BespokeInstanceSeg` over a Mask R-CNN on a :class:`_Pyramid`.
+
+    Its RPN anchors are :meth:`_Pyramid.anchors`' at ``anchor_base_size`` and
+    ``aspect_ratios``, its box and mask pools torchvision's own over the pyramid's four levels;
+    ``library_kwargs`` (its resize bounds, ``image_mean``, ``image_std`` and any other Mask
+    R-CNN keyword) pass to its constructor.
+    """
+    from torchvision.models.detection import MaskRCNN
+
+    pyramid = _Pyramid(in_chans)
+    library = MaskRCNN(
+        pyramid,
+        num_classes + 1,
+        rpn_anchor_generator=pyramid.anchors(anchor_base_size, aspect_ratios),
+        **library_kwargs,
+    )
+    return BespokeInstanceSeg(
+        library,
+        pyramid.backbone,
+        featmap_names=pyramid.featmap_names,
+        attributes=attributes,
     )
 
 
 def build_bespoke_detection(
     *,
-    image_mean: list[float],
-    image_std: list[float],
     num_classes: int = 1,
     in_chans: int = 3,
-    detector: str = "faster_rcnn",
-    **det_kwargs: object,
+    attributes: tuple[Attribute, ...] = (),
+    **library_kwargs: object,
 ) -> BespokeDetection:
-    return BespokeDetection(
-        num_classes,
+    """Build a :class:`BespokeDetection` through :func:`_over_retinanet`."""
+    return _over_retinanet(
+        BespokeDetection,
+        num_classes=num_classes,
         in_chans=in_chans,
-        detector=detector,
-        image_mean=image_mean,
-        image_std=image_std,
-        **det_kwargs,
+        attributes=attributes,
+        **library_kwargs,
     )
 
 
-class _OneConvDetector(nn.Module):
+class _OneConvDetector(_KeepsItsOperatingPoint, nn.Module):
     """A detector whose one parameter is a 1x1 convolution.
 
     It carries ``score_thresh`` and ``detections_per_img`` on itself; :meth:`zero_loss` is its
@@ -548,17 +728,6 @@ class _OneConvDetector(nn.Module):
             "loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images)
             * 0.0
         }
-
-    def governed(self, out: dict) -> dict:
-        """Return ``out``'s rows scoring at least ``score_thresh``, at most ``detections_per_img``.
-
-        The rows kept are the highest-scoring ones.
-        """
-        order = torch.argsort(out["scores"], descending=True)
-        keep = order[out["scores"][order] >= self.score_thresh][
-            : self.detections_per_img
-        ]
-        return {key: value[keep] for key, value in out.items()}
 
 
 class FixedMaskSegmenter(_OneConvDetector):
@@ -707,51 +876,52 @@ def build_bare_no_knob_detector(
     return BareNoKnobDetector(in_chans=in_chans)
 
 
-class DivergingDetection(nn.Module):
-    """A ``BespokeDetection`` whose training losses add a ``diverge`` term, ``log(w)``.
+class DivergingDetection(BespokeDetection):
+    """A :class:`BespokeDetection` whose training losses add a ``diverge`` term, ``log(w)``.
 
     ``w`` is one extra parameter, starting at 0.02.
     """
 
-    def __init__(self, num_classes: int = 1, **kwargs: object) -> None:
-        super().__init__()
-        self.inner = BespokeDetection(num_classes, **kwargs)
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
         self.w = nn.Parameter(torch.tensor(0.02))
-
-    @property
-    def detector(self) -> nn.Module:
-        return self.inner.detector
 
     def forward(
         self,
         images: torch.Tensor | list[torch.Tensor],
         targets: list[dict] | None = None,
     ) -> DetectorOutput:
-        out = self.inner(images, targets)
-        if self.training and targets is not None:
-            out = dict(out)
-            out["diverge"] = torch.log(
-                self.w
-            )  # drives w negative under Adam, losses -> nan
+        out = super().forward(images, targets)
+        if isinstance(out, dict):
+            # drives w negative under Adam, losses -> nan
+            out["diverge"] = torch.log(self.w)
         return out
-
-    def freeze_backbone(self, to_stage: int) -> None:
-        self.inner.freeze_backbone(to_stage)
 
 
 def build_diverging_detection(
-    *, num_classes: int = 1, in_chans: int = 3, **det_kwargs: object
-) -> DivergingDetection:
-    return DivergingDetection(num_classes, in_chans=in_chans, **det_kwargs)
+    *,
+    num_classes: int = 1,
+    in_chans: int = 3,
+    attributes: tuple[Attribute, ...] = (),
+    **library_kwargs: object,
+) -> BespokeDetection:
+    """Build a :class:`DivergingDetection` through :func:`_over_retinanet`."""
+    return _over_retinanet(
+        DivergingDetection,
+        num_classes=num_classes,
+        in_chans=in_chans,
+        attributes=attributes,
+        **library_kwargs,
+    )
 
 
-class BrightRegionDetector(nn.Module):
+class BrightRegionDetector(_KeepsItsOperatingPoint, nn.Module):
     """A detector whose box geometry is analytic and whose confidence is learned.
 
     It reports the extent of a frame's pixels whose band mean exceeds ``bright`` as one box scored
     by the sigmoid of the learned ``logit``, beside a decoy box, that extent with every
-    coordinate plus one, scored ``decoy_score``, keeping the boxes scoring at least
-    ``score_thresh``, at most ``detections_per_img``; a frame with no such pixel gets no box.
+    coordinate plus one, scored ``decoy_score``, kept by :meth:`governed`; a frame with no such
+    pixel gets no box.
     In training its loss is the squared distance of that confidence from the batch's mean label
     presence.
     """
@@ -831,13 +1001,10 @@ class BrightRegionDetector(nn.Module):
                 ]
             )
             labels = torch.ones(2, dtype=torch.int64, device=device)
-            keep = scores >= self.score_thresh
             results.append(
-                {
-                    "boxes": boxes[keep][: self.detections_per_img],
-                    "scores": scores[keep][: self.detections_per_img],
-                    "labels": labels[keep][: self.detections_per_img],
-                }
+                self.governed(
+                    {"boxes": boxes, "scores": scores, "labels": labels}
+                )
             )
         return results
 
@@ -860,7 +1027,7 @@ def build_bright_region_detector(
     )
 
 
-class BrightBlobDetector(nn.Module):
+class BrightBlobDetector(_KeepsItsOperatingPoint, nn.Module):
     """A detector offering one detection per 4-connected bright blob of a frame.
 
     Each detection is labeled 1 and scored by the sigmoid of a learned logit (0 when built) plus
@@ -953,11 +1120,7 @@ class BrightBlobDetector(nn.Module):
                     if masks
                     else torch.zeros((0, 1, h, w), dtype=torch.float32)
                 )
-            order = torch.argsort(out["scores"], descending=True)
-            keep = order[out["scores"][order] >= self.score_thresh][
-                : self.detections_per_img
-            ]
-            results.append({key: value[keep] for key, value in out.items()})
+            results.append(self.governed(out))
         return results
 
 

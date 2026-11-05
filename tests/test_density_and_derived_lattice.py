@@ -615,7 +615,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
         model, score_thresh=0.0, detections_per_img=cap
     )
     with torch.no_grad():
-        unfloored = [model([image])[0] for image in images]
+        unfloored = model(list(images))
     scores = [float(s) for out in unfloored for s in out["scores"]]
     assert scores, "the fixture must give boxes for a floor to drop"
     set_detector_operating_point(
@@ -1016,36 +1016,6 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
         mask_cut=None,
     )
     assert [len(output["boxes"]) for output, _record in calls] == [1, 1]
-
-
-@pytest.mark.parametrize(
-    "knob",
-    [
-        "box_detections_per_img",
-        "detections_per_img",
-        "box_score_thresh",
-        "score_thresh",
-    ],
-)
-def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(
-    knob: str,
-) -> None:
-    """An operating-point knob stated to a detector builder refuses by name.
-
-    A detector builder handed the cap or the score threshold refuses naming it, and the same
-    call without it builds at its other keywords.
-    """
-    from tests._chain_fixtures import detector_values
-    from tests.bespoke_models import build_bespoke_detection
-
-    with pytest.raises(ValueError, match=knob):
-        build_bespoke_detection(
-            box_nms_thresh=0.4, **{knob: 7}, **detector_values()
-        )
-    assert (
-        build_bespoke_detection(box_nms_thresh=0.4, **detector_values())
-        is not None
-    )
 
 
 def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete_one_predicts(
