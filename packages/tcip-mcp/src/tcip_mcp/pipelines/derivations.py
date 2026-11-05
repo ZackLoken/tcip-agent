@@ -278,7 +278,7 @@ DETECTOR_GEOMETRY_DERIVATION: str = get_args(DetectorGeometryDerivation)[0]
 def derive_detector_geometry(
     frame: tuple[int, int], regions: Sequence[Region]
 ) -> DetectorGeometry:
-    """Derive a torchvision detector's input scale and anchors for inputs of ``frame``.
+    """Derive a library detector's input scale and anchors for inputs of ``frame``.
 
     ``frame`` is ``(width, height)``; the geometry is derived over the objects of ``regions``
     (``schemas.DetectorGeometry``, :data:`DETECTOR_GEOMETRY_DERIVATION`): the frame seen at its

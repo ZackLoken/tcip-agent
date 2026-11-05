@@ -76,8 +76,8 @@ root, `<root>/.tcip/store.db`; imagery stays files). `tcip-store` depends on not
   through `serve_domain_knowledge` and written by every terminal launch into the workspace as the
   skills its harness reads, beside the agent's operating contract in its instruction file.
 - One build path: the agent writes its own `nn.Module` and `train(ctx)` loop over the platform's
-  building blocks (`build_detector`, heads, necks, losses, derivations); see the `pipeline-design`
-  and `toolkit-inventory` skills.
+  building blocks (heads, necks, losses, derivations) and a library's own detector, held to the
+  model contract; see the `pipeline-design` and `toolkit-inventory` skills.
 
 ## The breeder's GUI
 
@@ -205,9 +205,9 @@ example. Each tool's full signature is in its description; this is the order, no
 Built:
 
 - Detection, instance and semantic segmentation, classification, ordinal and regression, through
-  one training path with progressive unfreezing, SAHI slicing, FCOS, RetinaNet and Mask R-CNN
-  builders, class-weighted and focal losses, augmentation each transform of which the project's
-  capture invariances must admit, and Ray Tune sweeps.
+  one training path with progressive unfreezing, SAHI slicing, a model contract every detection
+  model meets before training, class-weighted and focal losses, augmentation each transform of
+  which the project's capture invariances must admit, and Ray Tune sweeps.
 - Native per-image label documents with provenance, model proposals reviewed on the canvas, and
   active-learning ranking of the next review batch (`prioritize_review_queue`).
 - Whole-mosaic tiled inference with GDAL windowed reads, detections resolved to real-world
