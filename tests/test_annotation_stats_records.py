@@ -84,7 +84,7 @@ def test_a_stored_session_missing_its_person_is_refused_naming_the_field(
         session["user"] = user
         tcip_store.replace(key, raw)
 
-    refusal = refused.value.refusal
+    refusal = refused.value.served.refusal
     assert isinstance(refusal, tcip_store.Invalid)
     assert [issue.loc for issue in refusal.issues] == [["sessions", 0, "user"]]
     assert str(opened.root) in str(refused.value)

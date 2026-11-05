@@ -263,11 +263,14 @@ def test_read_selection_checked_tells_absence_apart_from_a_broken_record(
     ts.replace(selection_key(broken_dir), {"seed": 1, "samples": []})
     broken, broken_error = read_selection_checked(broken_dir, project=tmp_path)
     assert broken is None
-    assert broken_error is not None and not isinstance(broken_error, str)
+    assert broken_error is not None
+    from tcip_mcp.pipelines.data.selection import selection_place
     from tcip_store import Invalid
 
-    assert isinstance(broken_error, Invalid)
-    assert ["group_by"] in [issue.loc for issue in broken_error.issues]
+    assert broken_error.where == selection_place(broken_dir)
+    refusal = broken_error.refusal
+    assert isinstance(refusal, Invalid)
+    assert ["group_by"] in [issue.loc for issue in refusal.issues]
 
 
 def test_every_refusal_of_the_selection_reader_names_the_selection_place(
@@ -312,8 +315,8 @@ def test_every_refusal_of_the_selection_reader_names_the_selection_place(
     for directory in (tmp_path / "absent", damaged, unlisting, unresolvable):
         with pytest.raises(ReadRefusedError) as refused:
             read_selection(directory, project=tmp_path)
-        assert refused.value.where == selection_place(directory)
-        reached[directory.name] = refused.value.refusal
+        assert refused.value.served.where == selection_place(directory)
+        reached[directory.name] = refused.value.served.refusal
     assert "no selection recorded" in str(reached["absent"])
     assert "group_by" in str(reached["damaged"])
     assert isinstance(reached["unlisting"], Invalid)
@@ -373,9 +376,9 @@ def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
 ) -> None:
     """The split route serves a bound run's refused selection as the record its reader raises.
 
-    The "As recorded" check is blocked and its reason is ``read_selection``'s refusal as a
-    record: the selection model's issues for a record it refuses, the absence's sentence for one
-    no longer recorded.
+    The "As recorded" check is blocked and its reason is ``read_selection``'s refused read as a
+    record, the selection's place beside why: the selection model's issues for a record it
+    refuses, the absence's sentence for one no longer recorded.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
 
@@ -390,8 +393,8 @@ def test_the_split_route_serves_a_refused_bound_selection_as_the_readers_record(
     ]["check"]
 
     assert check["kind"] == "blocked"
-    assert check["reason"] == refused.value.refusal.model_dump(mode="json")
-    assert check["reason"]["kind"] == kind
+    assert check["reason"]["refusal"]["kind"] == kind
+    assert check["reason"] == refused.value.served.model_dump(mode="json")
 
 
 def test_the_split_route_admits_a_bound_run_over_the_selection_it_drew(
@@ -414,9 +417,9 @@ def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_
 ) -> None:
     """The preflight and the split picker state one unreadable bound selection alike.
 
-    The "As recorded" row's reason is the refusal ``read_selection`` raises, and the preflight's
-    issue for it is that refusal behind the selection's place, as the reader's error states
-    them; neither carries a library documentation link.
+    The "As recorded" row's reason names the selection's place beside the refusal
+    ``read_selection`` raises, and the preflight's issue for it is that row's reason read as
+    text; neither carries a library documentation link.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.training_tools import (
@@ -435,8 +438,9 @@ def test_the_preflight_states_an_unreadable_bound_selection_as_the_split_picker_
     check = list_split_choices(tmp_path, "exp-bound").as_recorded.check
 
     assert isinstance(check, Blocked)
-    assert check.reason == refused.value.refusal
-    sentence = str(ts.ReadRefusedError(check.reason, refused.value.where))
+    assert check.reason.refusal == refused.value.served.refusal
+    sentence = str(check.reason)
+    assert sentence == str(refused.value)
     assert "errors.pydantic.dev" not in sentence
     assert "group_by: " in sentence
     assert sentence in issues
@@ -637,10 +641,9 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     assert "scope" not in chosen["data"]
 
     broken = by_dir[str(broken_dir)]
-    assert isinstance(broken["reason"], dict)
-    assert (
-        UnreadSelectionChoice.model_validate(broken).reason.kind == "invalid"
-    )
+    reason = UnreadSelectionChoice.model_validate(broken).reason
+    assert str(broken_dir) in reason.where
+    assert reason.refusal.kind == "invalid"
 
 
 def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path) -> None:

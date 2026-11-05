@@ -377,14 +377,14 @@ class VerifiedCheckpoint:
         try:
             return validated(CheckpointStamp, self.payload, self.path)
         except ReadRefusedError as exc:
-            refusal = exc.refusal
+            refusal = exc.served.refusal
             issues = refusal.issues if refusal.kind == "invalid" else []
             keys = ", ".join(sorted({repr(i.loc[0]) for i in issues}))
             raise ValueError(
                 f"{self.path} carries no {keys} as generic_trainer.checkpoint_stamp writes "
                 "it, as the default trainer and ctx.save_checkpoint save it, so it was written "
                 "past that stamp. Save it through a run (launch_training, or "
-                f"ctx.save_checkpoint in its training body). {exc.refusal}"
+                f"ctx.save_checkpoint in its training body). {refusal}"
             ) from exc
 
     @cached_property

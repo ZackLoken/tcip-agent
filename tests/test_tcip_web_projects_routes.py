@@ -16,7 +16,7 @@ from tests._web_fixtures import INVARIANCES
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from tcip_store import ReadRefusal
+    from tcip_store import RefusedRead
     from tcip_web.state import OpenProject
 
 
@@ -258,8 +258,8 @@ def test_opening_a_project_whose_gui_state_its_model_refuses_answers_the_models_
 ) -> None:
     """Opening a project whose persisted GUI state its model refuses answers 409 with why.
 
-    The detail is the model's issues, each by its place and message, and carries no library
-    documentation link; nothing is opened.
+    The detail names the snapshot and the project it belongs to beside the model's issues, each
+    by its place and message, and carries no library documentation link; nothing is opened.
     """
     import tcip_store
     from tcip_mcp.web_client import gui_snapshot_key
@@ -278,8 +278,11 @@ def test_opening_a_project_whose_gui_state_its_model_refuses_answers_the_models_
     assert resp.status_code == 409
     assert "errors.pydantic.dev" not in resp.text
     detail = resp.json()["detail"]
-    assert isinstance(detail, dict) and detail["kind"] == "invalid"
-    assert ["active_tab"] in [issue["loc"] for issue in detail["issues"]]
+    assert "GUI snapshot" in detail["where"]
+    assert str(made.root) in detail["where"]
+    refusal = detail["refusal"]
+    assert refusal["kind"] == "invalid"
+    assert ["active_tab"] in [issue["loc"] for issue in refusal["issues"]]
     assert client.get("/api/projects").json()["open_id"] is None
 
 
@@ -356,16 +359,16 @@ def test_list_reports_the_record_across_four_project_states(
     assert len(good.id) == 12
     assert good.invariances == INVARIANCES
 
-    def problem(project: Path) -> ReadRefusal:
+    def problem(project: Path) -> RefusedRead:
         return UnreadProject.model_validate(
             by_path[str(project.resolve())]
         ).problem
 
-    assert isinstance(by_path[str(invalid.resolve())]["problem"], dict)
     assert "initialize_project" in str(problem(recordless))
     assert not database_file(str(recordless)).is_file()
     assert "does not decode" in str(problem(undecodable))
-    assert problem(invalid).kind == "invalid"
+    assert problem(invalid).refusal.kind == "invalid"
+    assert str(invalid) in problem(invalid).where
 
 
 def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(

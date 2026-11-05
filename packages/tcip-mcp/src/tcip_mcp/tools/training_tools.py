@@ -32,6 +32,7 @@ from tcip_mcp.pipelines.data.split_construction import (
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.model_contract import LaunchContract
 from tcip_mcp.pipelines.schemas import (
+    TRAINING_CONFIG_PLACE,
     BoundSplit,
     DrawnSplit,
     ImageStatsSampling,
@@ -53,8 +54,8 @@ from tcip_mcp.server import tool
 from tcip_store import (
     Invalid,
     Issue,
-    ReadRefusal,
     ReadRefusedError,
+    RefusedRead,
     StoreError,
     canonical_path,
 )
@@ -797,12 +798,12 @@ class Admitted(BaseModel):
 class Blocked(BaseModel):
     """A relaunch choice its compatibility check refuses, and why.
 
-    ``reason`` is the refusal of a selection that will not read, or each of the check's
-    objections as an issue of its own.
+    ``reason`` is the refused read of a selection that will not read, or each of the check's
+    objections as an issue of its own, at the training config.
     """
 
     kind: Literal["blocked"] = "blocked"
-    reason: ReadRefusal
+    reason: RefusedRead
 
 
 type ChoiceCheck = Annotated[Admitted | Blocked, Field(discriminator="kind")]
@@ -812,7 +813,14 @@ type ChoiceCheck = Annotated[Admitted | Blocked, Field(discriminator="kind")]
 def _checked(reasons: list[str]) -> ChoiceCheck:
     """Return the check that refuses with each of ``reasons`` as an issue, or admits for none."""
     return (
-        Blocked(reason=Invalid(issues=[Issue(loc=[], msg=r) for r in reasons]))
+        Blocked(
+            reason=RefusedRead(
+                where=TRAINING_CONFIG_PLACE,
+                refusal=Invalid(
+                    issues=[Issue(loc=[], msg=r) for r in reasons]
+                ),
+            )
+        )
         if reasons
         else Admitted()
     )
@@ -850,10 +858,10 @@ class SelectionChoice(_Offered):
 
 
 class UnreadSelectionChoice(_Offered):
-    """An offered selection directory whose selection will not read, and why it will not."""
+    """An offered selection directory whose selection will not read, and its refused read."""
 
     kind: Literal["unread"] = "unread"
-    reason: ReadRefusal
+    reason: RefusedRead
 
 
 class SplitChoices(BaseModel):
@@ -876,8 +884,8 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     hold, each compatibility-checked the way a launch would check it.
 
     Every check is :func:`selection_compatibility` over a selection this reader read itself: the
-    run's own through :func:`~tcip_mcp.pipelines.data.selection.read_selection`, whose refusal
-    alone is the "As recorded" reason, with no candidate listed, and each candidate through
+    run's own through :func:`~tcip_mcp.pipelines.data.selection.read_selection`, whose refused
+    read alone is the "As recorded" reason, with no candidate listed, and each candidate through
     :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
     selection is checked against the data block :func:`data_with_selection` builds
     (``data.split`` replaced wholesale); "As recorded" is checked against the stated config
@@ -930,7 +938,7 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         except ReadRefusedError as exc:
             return SplitChoices(
                 as_recorded=AsRecordedChoice(
-                    case=case, line=line, check=Blocked(reason=exc.refusal)
+                    case=case, line=line, check=Blocked(reason=exc.served)
                 ),
                 selections=[],
             )

@@ -33,8 +33,8 @@ from tcip_mcp.registry_paths import (
 from tcip_mcp.subject_registry import Attribute, named
 from tcip_store import (
     Key,
-    ReadRefusal,
     ReadRefusedError,
+    RefusedRead,
     Unreadable,
     encode_record,
 )
@@ -583,11 +583,12 @@ def read_selection_checked(
     selection_dir: str | Path,
     *,
     project: str | Path,
-) -> tuple[Selection | None, ReadRefusal | None]:
+) -> tuple[Selection | None, RefusedRead | None]:
     """Return :func:`read_selection`'s selection for ``selection_dir``, or why it is refused.
 
-    The answer is ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, refusal)``
-    for a record that exists and is refused: its model's issues, or any other refusal's sentence.
+    The answer is ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, refused)``
+    for a record that exists and is refused: the selection's place beside its model's issues, or
+    any other refusal's sentence.
     """
     try:
         document = _read_selection_document(selection_dir, project)
@@ -595,7 +596,7 @@ def read_selection_checked(
             return None, None
         return as_selection(document, where=str(selection_dir)), None
     except ReadRefusedError as exc:
-        return None, exc.refusal
+        return None, exc.served
 
 
 def _read_selection_document(

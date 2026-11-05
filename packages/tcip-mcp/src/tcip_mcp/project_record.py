@@ -16,8 +16,8 @@ import tcip_store
 from tcip_annotation.text import Text
 from tcip_store import (
     Key,
-    ReadRefusal,
     ReadRefusedError,
+    RefusedRead,
     StoreError,
     Unreadable,
     Version,
@@ -139,7 +139,7 @@ def existing_project(value: str | Path) -> tuple[Path, ProjectRecord]:
     reading = record_or_problem(project)
     if reading.kind == "unread":
         raise ValueError(
-            f"{project} names no readable project: {reading.problem}"
+            f"{project} names no readable project: {reading.problem.refusal}"
         )
     return project, reading.record
 
@@ -308,10 +308,10 @@ class ReadRecord(BaseModel):
 
 
 class UnreadRecord(BaseModel):
-    """A project whose record will not read, and why."""
+    """A project whose record will not read: the record's refused read."""
 
     kind: Literal["unread"] = "unread"
-    problem: ReadRefusal
+    problem: RefusedRead
 
 
 type RecordReading = Annotated[
@@ -329,4 +329,4 @@ def record_or_problem(project_path: str | Path) -> RecordReading:
     try:
         return ReadRecord(record=read_record(project_path))
     except ReadRefusedError as exc:
-        return UnreadRecord(problem=exc.refusal)
+        return UnreadRecord(problem=exc.served)
