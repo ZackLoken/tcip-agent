@@ -362,11 +362,12 @@ def _detections_as_ground_truth(
     *,
     subject: str,
     limit: int = 20,
-) -> None:
+) -> list[float]:
     """Write up to ``limit`` of each png image's own detections back as its ground truth.
 
     The registered ``checkpoint``'s model, built from its own spec, is read with its score floor
-    removed, and only boxes wider and taller than 1 px are written.
+    removed, and only boxes wider and taller than 1 px are written. Returns the written boxes'
+    scores.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
@@ -388,10 +389,18 @@ def _detections_as_ground_truth(
     set_detector_operating_point(
         model, score_thresh=0.0, detections_per_img=limit
     )
+    written: list[float] = []
     for image in sorted(Path(images_dir).glob("*.png")):
         tensor = pil_to_tensor(load_image(image, 3))
         with torch.no_grad():
-            boxes = model([tensor])[0]["boxes"].tolist()
+            (out,) = model([tensor])
+        kept = [
+            (box, score)
+            for box, score in zip(
+                out["boxes"].tolist(), out["scores"].tolist(), strict=True
+            )
+            if box[2] - box[0] > 1 and box[3] - box[1] > 1
+        ]
         w, h = int(tensor.shape[-1]), int(tensor.shape[-2])
         label_image(
             image,
@@ -399,12 +408,13 @@ def _detections_as_ground_truth(
                 Annotation(
                     subject=subject, geometry=BBox(*(float(v) for v in box))
                 )
-                for box in boxes
-                if box[2] - box[0] > 1 and box[3] - box[1] > 1
+                for box, _score in kept
             ],
             w,
             h,
         )
+        written += [score for _box, score in kept]
+    return written
 
 
 def test_the_scored_model_is_the_one_the_door_already_built(
@@ -414,7 +424,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(
 
     A separately built copy of the checkpoint, counted at the reported record's conf under the
     cap it gives each frame, answers with the measured numbers over the measured loader; counted
-    at no floor, the copy answers a different recall.
+    above every score, the copy answers a different recall. The pass counts midway between the
+    lowest and highest score the fixture's detections carry.
     """
     from typing import cast
 
@@ -432,11 +443,15 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     for i in range(2):
         write_image(images_dir / f"img{i}.png", (128, 128), (120, 120, 120))
-    # This seed's weights score below the pass's conf, so a count at no floor keeps detections a
-    # count at that conf does not.
     ckpt = registered_checkpoint(tmp_path, seed=0)
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
-    _detections_as_ground_truth(verified, images_dir, subject="bud")
+    scores = _detections_as_ground_truth(verified, images_dir, subject="bud")
+    # The pass counts midway between the fixture's lowest and highest score, so it keeps some
+    # detections and not all; the separating count sits above every score.
+    low, high = min(scores), max(scores)
+    assert low < high, scores
+    stated = Stated(**{**SAMPLE_DETECTOR_PASS, "conf": (low + high) / 2})
+    above_every_score = (high + 1.0) / 2
 
     build = model_build.build_from_model_source
     builds = []
@@ -471,18 +486,18 @@ def test_the_scored_model_is_the_one_the_door_already_built(
 
     monkeypatch.setattr(runners, "run_test_evaluation", _record)
 
-    # Both routes run from one seed: the loss pass samples proposals, so two unseeded passes over
-    # the same weights differ in that one metric by more than float noise.
+    # Both routes run from one seed, so any random stream their passes read draws alike.
     torch.manual_seed(777)
     measured = evaluate_model(
         tmp_path,
         ckpt,
         str(images_dir),
-        stated=DETECTOR_PASS,
+        stated=stated,
         iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in measured, measured
     assert len(builds) == 1
+    assert 0.0 < measured["recall"] < 1.0, measured
 
     torch.manual_seed(777)
     dims = model_build.recorded_model_dims(verified.spec)
@@ -524,9 +539,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(
             else value
         ), key
 
-    # What a count at no floor reports instead, so the equality above is evidence about this
-    # fixture rather than a comparison nothing could separate.
-    assert _independent(0.0)["recall"] != measured["recall"]
+    # What a count above every score reports instead, so the equality above is evidence about
+    # this fixture rather than a comparison nothing could separate.
+    assert _independent(above_every_score)["recall"] != measured["recall"]
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")

@@ -340,8 +340,10 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
 
     Built at ``grade`` then ``color``, the model holds its knobs on itself and an ordinal head of
     three ranks then a categorical head of two classes; in train mode each head's loss joins the
-    detector's own, the unassessed one's at zero, and in eval at a cap of five every box carries
-    ``attributes``, int64, one row per box, its columns the grade rank then the color id.
+    detector's own, the unassessed one's at zero. In eval, its grade head biased to decode the
+    top rank, every box at a cap of five carries ``attributes``, int64, one row per box, its
+    columns rank 2 then a color id; at a floor between the kept scores the boxes above it alone
+    stay, every per-box key (masks too, for instance segmentation) kept by the same selection.
     """
     from tcip_mcp.pipelines.components.heads import (
         ClassificationHead,
@@ -384,14 +386,35 @@ def test_a_built_detector_carries_one_head_per_attribute_in_declared_order(
     assert float(losses["attribute_loss_color"].detach()) > 0.0
 
     model.eval()
-    set_detector_operating_point(model, score_thresh=0.0, detections_per_img=5)
     with torch.no_grad():
-        (out,) = model([image])
+        grade_head.classifiers.weight.zero_()
+        grade_head.classifiers.bias.fill_(10.0)
+
+    def kept(score_thresh: float) -> dict:
+        set_detector_operating_point(
+            model, score_thresh=score_thresh, detections_per_img=5
+        )
+        with torch.no_grad():
+            (out,) = model([image])
+        assert {
+            key: len(value) for key, value in out.items()
+        } == dict.fromkeys(out, len(out["boxes"])), out
+        return out
+
+    out = kept(0.0)
     ids = out["attributes"]
     assert ids.dtype == torch.int64
-    assert tuple(ids.shape) == (len(out["boxes"]), 2) and len(ids) > 0
-    assert set(ids[:, 0].tolist()) <= set(range(3))
-    assert set(ids[:, 1].tolist()) <= set(range(2))
+    assert tuple(ids.shape) == (len(out["boxes"]), 2) and len(ids) == 5
+    assert ids[:, 0].tolist() == [2] * 5
+    assert set(ids[:, 1].tolist()) <= {0, 1}
+    assert ("masks" in out) == (builder == "build_bespoke_instance_seg")
+
+    scores = out["scores"].tolist()
+    floor = (scores[0] + scores[-1]) / 2
+    fewer = kept(floor)
+    assert 0 < len(fewer["boxes"]) < len(scores), (scores, floor)
+    assert fewer["scores"].tolist() == [s for s in scores if s >= floor]
+    assert fewer["attributes"][:, 0].tolist() == [2] * len(fewer["boxes"])
 
 
 def test_the_tiler_carries_exactly_the_per_box_keys_the_loader_names(
