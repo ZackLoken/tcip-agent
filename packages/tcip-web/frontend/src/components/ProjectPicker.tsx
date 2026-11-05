@@ -179,8 +179,8 @@ function RenameDialog({
   );
 }
 
-/** How often the listing is read again while the picker is shown, so a project the agent creates
- *  appears without a reload; the owner's figure. */
+/** How long after a listing read answers the next one starts while the picker is shown, so a
+ *  project the agent creates appears without a reload; the owner's figure. */
 export const LISTING_REFRESH_MS = 2000;
 
 function relativeTime(epochSeconds: number): string {
@@ -226,35 +226,49 @@ export function ProjectPicker() {
     setLoadError(null);
   }
 
-  function refetch(): Promise<void> {
-    return api.projects
+  const listingRead = useRef<Promise<ProjectsListing | null> | null>(null);
+
+  /** Read the listing and show it, joining the read already in flight rather than issuing
+   *  another; resolves with the listing, or null once the read failed and its message is shown. */
+  function refetch(): Promise<ProjectsListing | null> {
+    listingRead.current ??= api.projects
       .list()
-      .then(showListing)
+      .then((res) => {
+        showListing(res);
+        return res;
+      })
       .catch((e) => {
         setLoadError(messageOf(e));
+        return null;
+      })
+      .finally(() => {
+        listingRead.current = null;
       });
+    return listingRead.current;
   }
 
   useEffect(() => {
     let canceled = false;
-    api.projects
-      .list()
-      .then((res) => {
+    let timer: number | undefined;
+    let first = true;
+    function loop() {
+      void refetch().then((res) => {
         if (canceled) return;
-        showListing(res);
-        // The backend's open project is preselected; nothing opens until the person does.
-        const open = res.projects
-          .filter((p) => p.kind === READ)
-          .find((p) => p.record.id === res.open_id);
-        if (open && !useStore.getState().openChoice.projectId) selectCard(open);
-      })
-      .catch((e) => {
-        if (!canceled) setLoadError(messageOf(e));
+        if (first && res) {
+          // The backend's open project is preselected; nothing opens until the person does.
+          const open = res.projects
+            .filter((p) => p.kind === READ)
+            .find((p) => p.record.id === res.open_id);
+          if (open && !useStore.getState().openChoice.projectId) selectCard(open);
+        }
+        first = false;
+        timer = window.setTimeout(loop, LISTING_REFRESH_MS);
       });
-    const refresh = window.setInterval(() => void refetch(), LISTING_REFRESH_MS);
+    }
+    loop();
     return () => {
       canceled = true;
-      window.clearInterval(refresh);
+      window.clearTimeout(timer);
     };
     // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
