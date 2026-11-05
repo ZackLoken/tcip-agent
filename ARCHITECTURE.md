@@ -1301,13 +1301,13 @@ them. Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology
 `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv` call through instead of assembling
 the names themselves).
 
-## S40. Per-band normalization stats for a non-3-channel detector
+## S40. Per-band normalization stats for a non-3-channel model
 
 Must agree: the values passed as image_mean/image_std are per-band stats of the same length as
 in_chans. Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py`
 (`def band_normalization_stats(`). Side B:
-`packages/tcip-mcp/src/tcip_mcp/pipelines/components/detectors.py`
-(`def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,`).
+`packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py`
+(`def build_from_model_source(`).
 
 ## S41. model_source bespoke build seam
 

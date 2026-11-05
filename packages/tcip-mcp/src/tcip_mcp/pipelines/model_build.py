@@ -528,11 +528,22 @@ def build_from_model_source(
     :func:`import_source_builder`'s. The builder is called with its ``builder_kwargs``, its
     normalization's values and weights (``schemas.Normalization.handed``), ``dims``
     (:func:`model_dims`) and, for a detector, the geometry its run's resolution recorded
-    (``geometry.detector``). Refuses (``TypeError``) a builder that returns anything but a
+    (``geometry.detector``). Refuses (``ValueError``), before the builder is called, a
+    normalization whose ``image_mean`` or ``image_std`` is of another length than ``dims``'
+    ``in_chans``, naming both lengths, and (``TypeError``) a builder that returns anything but a
     ``torch.nn.Module``, naming ``model_source.builder``.
     """
     import torch
 
+    mean, std = source.normalization.image_mean, source.normalization.image_std
+    if len(mean) != dims["in_chans"] or len(std) != dims["in_chans"]:
+        raise ValueError(
+            f"model_source.normalization states image_mean of length {len(mean)} and "
+            f"image_std of length {len(std)}; both must be {dims['in_chans']}, the band count "
+            "this model reads (data.num_channels). A model reading more bands than its "
+            "pretrained weights carry statistics for states every band's mean and std with its "
+            "reason (schemas.StatedBeyondWeights)."
+        )
     fn = import_source_builder(source.builder, layout)
     detector = {} if geometry.detector is None else geometry.detector.handed()
     model = fn(
