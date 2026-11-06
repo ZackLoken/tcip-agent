@@ -347,4 +347,4 @@ def test_real_models_still_smoke_green_on_the_collated_batch() -> None:
         deterministic=False,
         device=torch.device("cpu"),
     )
-    assert learned["passed"], learned["issue"]
+    assert learned.passed, learned.issue

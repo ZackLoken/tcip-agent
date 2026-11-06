@@ -736,7 +736,6 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(
     # The same batch reaches overfit_check; re-synthesizing here would report a false "does not
     # learn" for exactly the bespoke tasks the real-batch path exists to serve.
     assert r["overfit_check"]["issue"] is None, r["overfit_check"]
-    assert r["overfit_check"]["passed"] is True, r["overfit_check"]
 
 
 def test_preflight_smoke_batch_matches_what_the_run_will_build(
@@ -893,7 +892,7 @@ def test_ctx_check_contract_and_overfit_check(tmp_path: Path) -> None:
     assert report["ok"], report["issues"]
     # overfit is voluntary + non-gating; steps flow through as an override kwarg.
     over = ctx.overfit_check(steps=15)
-    assert over["passed"], over["issue"]
+    assert over.passed, over.issue
 
 
 def _classification_context(tmp_path: Path) -> TrainContext:
@@ -976,7 +975,7 @@ def test_ctx_overfit_check_repeats_its_losses_at_its_seed_whatever_the_ambient_s
         ctx.set_seed()
         model = ctx.build_model()
         torch.manual_seed(ambient)
-        return ctx.overfit_check(model, steps=2)["losses"]
+        return ctx.overfit_check(model, steps=2).losses
 
     assert losses(1) == losses(2)
 
@@ -1058,7 +1057,7 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(
     assert report["not_smokeable"] is None, report
     assert report["ok"], report["issues"]
     assert report["train_loss"] is not None
-    assert over["issue"] is None, over
+    assert over.issue is None, over
 
 
 def test_a_classification_record_stating_no_class_count_builds_no_model() -> (

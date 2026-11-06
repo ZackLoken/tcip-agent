@@ -316,7 +316,7 @@ def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
     check_model_contract's own gradient-presence check requires a real learnable path, so the
     report carries that issue for a literally all-frozen model; the overfit branch's
     nothing-to-train case does not raise out of preflight_config, and its report says the model
-    trains no parameter.
+    trains no parameter in its issue, the one spelling of the failed check.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -329,8 +329,8 @@ def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
         "no parameter received a gradient" in i or "does not require grad" in i
         for i in r["issues"]
     )
-    assert r["overfit_check"]["passed"] is False
     assert "trains no parameter" in r["overfit_check"]["issue"]
+    assert "passed" not in r["overfit_check"], r["overfit_check"]
 
 
 def test_preflight_config_refuses_a_per_stage_lr_by_name(

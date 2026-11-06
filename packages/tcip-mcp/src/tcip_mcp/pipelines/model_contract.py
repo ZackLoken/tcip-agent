@@ -13,10 +13,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, Unpack, cast
 
-from pydantic import JsonValue
+from pydantic import BaseModel, ConfigDict
 
 from tcip_mcp.pipelines.model_build import ContractDims
-from tcip_store.values import finite_or_none, stored_number
+from tcip_store.values import finite_or_none
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,18 +87,25 @@ class ContractReport(TypedDict):
     unfiltered_counts: list[int] | None
 
 
-class OverfitReport(TypedDict):
+class OverfitReport(BaseModel):
     """What :func:`overfit_check` found.
 
-    ``passed`` is whether the loss fell with no ``issue``; ``losses`` each step's loss, and
-    ``initial`` and ``final`` the first and last, ``None`` with no step taken.
+    ``losses`` is each step's loss, and ``initial`` and ``final`` the first and last, ``None``
+    with no step taken; a loss that was not finite is ``None`` at its position. ``issue`` says
+    why the check did not pass, ``None`` when it did. Refuses a non-finite number.
     """
 
-    passed: bool
-    losses: list[float]
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    losses: list[float | None]
     initial: float | None
     final: float | None
     issue: str | None
+
+    @property
+    def passed(self) -> bool:
+        """Whether the loss fell with no ``issue``."""
+        return self.issue is None
 
 
 class LaunchContract(TypedDict):
@@ -107,8 +114,8 @@ class LaunchContract(TypedDict):
     ``subject`` names what was checked and ``gating`` whether it gates the launch;
     ``batch_source`` is the batch that drove it (``"dataset"`` or ``"synthetic"``), ``dims`` a
     synthetic batch's dimensions (``None`` for a dataset batch), ``issues`` and
-    ``gradient_magnitudes`` the :class:`ContractReport`'s, and ``overfit_check`` the rendered
-    :func:`overfit_check` report (:func:`render_overfit_report`), ``None`` when none ran.
+    ``gradient_magnitudes`` the :class:`ContractReport`'s, and ``overfit_check`` the
+    :func:`overfit_check` report, ``None`` when none ran.
     """
 
     subject: str
@@ -117,7 +124,7 @@ class LaunchContract(TypedDict):
     dims: ContractDims | None
     issues: list[str]
     gradient_magnitudes: dict[str, float] | None
-    overfit_check: dict[str, JsonValue] | None
+    overfit_check: OverfitReport | None
 
 
 def no_batch_reason(
@@ -572,13 +579,13 @@ def overfit_check(
     block's rates (``optimizer_factory.build_optimizer``). The ``keywords`` are
     :class:`OverfitKeywords`; ``dims`` is as for :func:`check_model_contract`. Seeded at the
     run's own ``seed`` and ``deterministic``, the model moved to ``device``. Returns the
-    :class:`OverfitReport`, ``passed`` iff every step completes with no recorded ``issue``,
-    every loss is finite and the final loss is strictly below the initial one.
+    :class:`OverfitReport`, its ``issue`` ``None`` iff every step completes, every loss is finite
+    and the final loss is strictly below the initial one.
 
     It never raises: an ``optimizer`` of ``None`` (a config stating no block), a model with no
     trainable parameter (``generic_trainer.trained_parameters``), and a task no batch can be
     synthesized for given no ``sample_batch`` from the run's own dataset
-    (:func:`no_batch_reason`) each return ``passed: False`` with the reason in ``issue``.
+    (:func:`no_batch_reason`) each return the reason in ``issue``.
     """
     import torch
 
@@ -598,26 +605,16 @@ def overfit_check(
         else no_batch_reason(task, dims, sample_batch)
     )
     if reason is not None:
-        return {
-            "passed": False,
-            "losses": [],
-            "initial": None,
-            "final": None,
-            "issue": reason,
-        }
+        return OverfitReport(losses=[], initial=None, final=None, issue=reason)
     set_seed(seed, deterministic=deterministic)
     model.to(device)
 
     try:
         batch = _driving_batch(task, dims, sample_batch, device)
-    except ValueError as exc:  # report, never raise: this returns a dict
-        return {
-            "passed": False,
-            "losses": [],
-            "initial": None,
-            "final": None,
-            "issue": str(exc),
-        }
+    except ValueError as exc:  # report, never raise: this returns a report
+        return OverfitReport(
+            losses=[], initial=None, final=None, issue=str(exc)
+        )
     losses: list[float] = []
     issue: str | None = None
     assert optimizer is not None, "an unstated block returned above"
@@ -648,29 +645,10 @@ def overfit_check(
             issue = "loss became non-finite during overfitting"
         elif not decreased:
             issue = f"loss did not decrease (initial={losses[0]:.4f}, final={losses[-1]:.4f})"
-    return {
-        "passed": issue is None,
-        "losses": losses,
-        "initial": losses[0] if losses else None,
-        "final": losses[-1] if losses else None,
-        "issue": issue,
-    }
-
-
-def render_overfit_report(report: OverfitReport) -> dict[str, JsonValue]:
-    """Render an :func:`overfit_check` report in the form a record can carry.
-
-    A diverging model's raw report may hold ``nan`` or ``inf``, values the canonical JSON codec
-    refuses outright. ``initial`` and ``final`` are named scalars, so each goes through
-    :func:`tcip_store.values.stored_number`, which keeps a null beside a sibling field naming the
-    non-finite state; ``losses`` is a positional list with no sibling slot per entry, so each goes
-    through :func:`tcip_store.values.finite_or_none`, which drops the state and keeps the null.
-    """
-    rendered: dict[str, JsonValue] = {
-        "passed": report["passed"],
-        "issue": report["issue"],
-    }
-    rendered.update(stored_number("initial", report["initial"]))
-    rendered.update(stored_number("final", report["final"]))
-    rendered["losses"] = [finite_or_none(v) for v in report["losses"]]
-    return rendered
+    stored = [finite_or_none(v) for v in losses]
+    return OverfitReport(
+        losses=stored,
+        initial=stored[0] if stored else None,
+        final=stored[-1] if stored else None,
+        issue=issue,
+    )
