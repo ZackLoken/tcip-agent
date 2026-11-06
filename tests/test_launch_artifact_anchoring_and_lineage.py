@@ -201,13 +201,13 @@ def test_launch_omitting_overfit_check_records_null(
     assert _launch_record(res)["model_contract"]["overfit_check"] is None
 
 
-def test_launch_with_overfit_check_records_the_rendered_report(
+def test_launch_with_overfit_check_records_the_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A launch with the overfit check records the rendered report.
+    """A launch with the overfit check records the report its preflight answered.
 
-    ``launch_training(overfit_check=True)`` records the rendered report on both its answer and
-    the run record's model contract.
+    ``launch_training(overfit_check=True)`` records one report on both its answer and the run
+    record's model contract.
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools import training_tools
@@ -226,24 +226,25 @@ def test_launch_with_overfit_check_records_the_rendered_report(
     )
     assert isinstance(res, RunLaunched), res
     assert res.overfit_check is not None
-    assert "passed" in res.overfit_check
 
     record = _launch_record(res)["model_contract"]
-    assert record["overfit_check"] == res.overfit_check
+    assert record["overfit_check"] == res.overfit_check.model_dump(mode="json")
 
 
-def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_safe_record(
+def test_launch_with_overfit_check_over_a_diverging_model_records_each_non_finite_loss_as_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An overfit check over a diverging model lets the launch proceed with a JSON-safe record.
+    """An overfit check over a diverging model records each non-finite loss as None and fails.
 
-    A model whose loss diverges under the overfit diagnostic launches with no error, and its
-    recorded report fails, renders the non-finite losses as null with the final state named,
-    and passes check_json_value.
+    A model whose loss diverges under the overfit diagnostic launches with no error. Its run
+    record, read back through the run reader, carries the report with ``None`` at each position
+    whose loss was not finite, the final loss among them, the issue naming it and the check
+    failed by that issue alone: the stored report states neither a pass nor a state beside a
+    null.
     """
     pytest.importorskip("torchvision")
+    from tcip_mcp.experiments import read_run
     from tcip_mcp.tools import training_tools
-    from tcip_store import check_json_value
 
     fake_popen(monkeypatch, [])
     project = tmp_path / "project"
@@ -258,16 +259,19 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     )
     assert isinstance(res, RunLaunched), res
 
-    record = _launch_record(res)["model_contract"]
-    check_json_value(record, path="model_contract")
-    report = record["overfit_check"]
-    assert report["passed"] is False
-    assert any(loss is None for loss in report["losses"])
-    assert report["final_state"] in (
-        "nan",
-        "positive_infinity",
-        "negative_infinity",
-    )
+    stored = _launch_record(res)["model_contract"]["overfit_check"]
+    assert set(stored) == {"losses", "initial", "final", "issue"}, stored
+
+    contract = read_run(Path(res.output_dir)).model_contract
+    assert contract is not None
+    report = contract["overfit_check"]
+    assert report is not None
+    assert report.issue == "loss became non-finite during overfitting"
+    assert report.passed is False
+    assert None in report.losses and report.final is None
+    assert report.final == report.losses[-1]
+    assert isinstance(report.initial, float), report
+    assert report.initial == report.losses[0]
 
 
 def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(

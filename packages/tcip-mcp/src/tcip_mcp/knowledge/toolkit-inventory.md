@@ -87,7 +87,7 @@ contract: the measurement boundary. The model must train (finite-gradient loss) 
 output the library scorers consume. Both synthesize a batch for the task strings `build_dataset`
 routes; for any other task they take `sample_batch=`, an `(images, targets)` pair from your own
 dataset. Given neither, `check_model_contract` returns a `not_smokeable` reason and `overfit_check`
-returns `passed: False` with the reason in `issue`. `preflight_config(smoke=True)` builds that
+returns a report whose `issue` names why; its `passed` is that issue's absence. `preflight_config(smoke=True)` builds that
 batch from the run's `data` config and feeds it to `check_model_contract`; `overfit_check` runs
 only when `overfit=True` is also passed, since it is a voluntary diagnostic, not part of the
 always-on smoke build, on that dataset batch, or on a batch it synthesizes after seeding at the

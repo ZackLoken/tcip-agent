@@ -15,6 +15,7 @@ torch = pytest.importorskip(
     "torch"
 )  # evaluation.py imports torch at module load
 
+from tcip_mcp.assessment_evidence import CountEvidence, FailureName  # noqa: E402
 from tcip_mcp.pipelines.operating_point import _min_dt_score, count_criterion  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import (  # noqa: E402
@@ -27,7 +28,7 @@ from tests._training_values import COUNT_TEST  # noqa: E402
 
 def _criterion(
     cal: list[dict], hold: list[dict], floor: float
-) -> tuple[float, dict, list[str]]:
+) -> tuple[float, CountEvidence, list[FailureName]]:
     return count_criterion(
         cal,
         hold,
@@ -58,7 +59,7 @@ def test_a_reference_collected_at_a_real_floor_passes() -> None:
     )
 
     assert conf == pytest.approx(0.9)
-    assert evidence["staged_conf_floor"] == 0.01
+    assert evidence.staged_conf_floor == 0.01
     assert failures == []
 
 
@@ -86,6 +87,6 @@ def test_a_floor_far_below_every_observed_score_is_reported_and_never_fails() ->
         *good_cal_holdout(fp_score=0.5), 0.01
     )
 
-    assert evidence["staged_conf_floor"] == 0.01
-    assert evidence["observed_min_score"] == pytest.approx(0.5)
+    assert evidence.staged_conf_floor == 0.01
+    assert evidence.observed_min_score == pytest.approx(0.5)
     assert failures == []
