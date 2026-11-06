@@ -30,7 +30,7 @@ from tcip_mcp.pipelines.data.split_construction import (
     selection_compatibility,
 )
 from tcip_mcp.pipelines.execution import Stated
-from tcip_mcp.pipelines.model_contract import LaunchContract
+from tcip_mcp.pipelines.model_contract import LaunchContract, OverfitReport
 from tcip_mcp.pipelines.schemas import (
     BoundSplit,
     DrawnSplit,
@@ -143,8 +143,8 @@ def preflight_config(
             did, and ``smoke.evaluation_row_keys`` the keys of the row it admitted, ``None`` when
             it admitted none.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
-            and report it under ``overfit_check``, never gating. The stored report is already
-            rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
+            and report it under ``overfit_check``, never gating: ``model_contract.OverfitReport``
+            as it dumps, a non-finite loss ``None`` at its position.
 
     """
     return _preflight(
@@ -290,7 +290,6 @@ def _preflight(
                 check_model_contract,
                 contract_batch,
                 overfit_check,
-                render_overfit_report,
             )
             from tcip_mcp.pipelines.training.generic_trainer import (
                 capture_rng_state,
@@ -403,7 +402,7 @@ def _preflight(
                 with _OVERFIT_CHECK_LOCK:
                     rng_state = capture_rng_state(None)
                     try:
-                        raw_report = overfit_check(
+                        overfit_report = overfit_check(
                             model,
                             task,
                             seed=resolved_spec.seed,
@@ -413,18 +412,17 @@ def _preflight(
                             **prepared.keywords,
                         )
                     except Exception as exc:  # noqa: BLE001, becomes the report's issue only
-                        raw_report = {
-                            "passed": False,
-                            "losses": [],
-                            "initial": None,
-                            "final": None,
-                            "issue": f"overfit check failed: {exc}",
-                        }
+                        overfit_report = OverfitReport(
+                            losses=[],
+                            initial=None,
+                            final=None,
+                            issue=f"overfit check failed: {exc}",
+                        )
                     finally:
                         restore_rng_state(rng_state, None)
-                # Rendered before storage: this tool answers over JSON-RPC, which a raw non-finite
-                # loss cannot cross, so a diverging model's report is sanitized here, once.
-                result["overfit_check"] = render_overfit_report(raw_report)
+                result["overfit_check"] = overfit_report.model_dump(
+                    mode="json"
+                )
         except Exception as exc:  # noqa: BLE001, a build/contract crash is itself a blocking issue
             issues.append(f"model smoke build failed: {exc}")
 
@@ -540,7 +538,7 @@ class RunLaunched(BaseModel):
     output_dir: str
     tensorboard: TensorboardLaunch
     pid: int
-    overfit_check: dict[str, JsonValue] | None
+    overfit_check: OverfitReport | None
     warnings: list[str]
 
 
@@ -731,9 +729,10 @@ def _start_run(
 def _launch_contract(validation: dict) -> LaunchContract:
     """Return the model contract a run records from its passed preflight's ``validation``.
 
-    The contract is the smoke's, with the rendered overfit check when one ran.
+    The contract is the smoke's, with the overfit check when one ran.
     """
     smoke_report = validation["smoke"]
+    overfit = validation.get("overfit_check")
     return LaunchContract(
         subject="the model as built at launch, before any training step",
         gating=True,
@@ -741,7 +740,9 @@ def _launch_contract(validation: dict) -> LaunchContract:
         dims=smoke_report["dims"],
         issues=smoke_report["issues"],
         gradient_magnitudes=smoke_report["gradient_magnitudes"],
-        overfit_check=validation.get("overfit_check"),
+        overfit_check=None
+        if overfit is None
+        else OverfitReport.model_validate(overfit),
     )
 
 

@@ -142,9 +142,10 @@ def test_overfit_check_judges_the_whole_objective_not_the_first_term() -> None:
         deterministic=False,
         device=torch.device("cpu"),
     )
-    assert report["passed"] is False
-    assert "did not decrease" in report["issue"], report["issue"]
-    assert report["final"] > report["initial"]
+    assert report.passed is False
+    assert report.issue is not None and "did not decrease" in report.issue
+    assert report.final is not None and report.initial is not None
+    assert report.final > report.initial
     assert abs(float(model.weight.detach())) < 2.0
 
 
@@ -160,6 +161,7 @@ def test_a_multi_term_model_that_optimizes_every_term_passes() -> None:
         deterministic=False,
         device=torch.device("cpu"),
     )
-    assert report["passed"], report["issue"]
-    assert report["final"] < report["initial"]
-    assert len(report["losses"]) == 25
+    assert report.passed, report.issue
+    assert report.final is not None and report.initial is not None
+    assert report.final < report.initial
+    assert len(report.losses) == 25
