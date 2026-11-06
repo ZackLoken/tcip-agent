@@ -91,7 +91,7 @@ def read_verdicts(key: Key) -> list[Verdict]:
     their positions), raises ``tcip_store.ReadRefusedError``.
     """
     shard = f"the verdict shard {'/'.join(key.parts)}"
-    with tcip_store.unreadable(shard, tcip_store.StoreError):
+    with tcip_store.unreadable(shard, *tcip_store.STORE_READ_REFUSALS):
         page = tcip_store.read_log(key)
     if page.corrupt:
         raise tcip_store.ReadRefusedError(

@@ -118,9 +118,9 @@ def read_record(project_path: str | Path) -> ProjectRecord:
     """Return the project's record.
 
     Raises ``tcip_store.ReadRefusedError`` naming the record: for a document that decodes but is
-    not one, its issues; for a project with no record yet, a document that does not decode, a
-    root the store refuses or a database that does not read from disk, that error's sentence.
-    Never creates a store.
+    not one, its issues; for a project with no record yet, a document that does not decode or a
+    database that will not open or answer, that error's sentence. A root the store refuses
+    raises its own error. Never creates a store.
     """
     return _checked(
         project_path,
@@ -331,8 +331,8 @@ type RecordReading = Annotated[
 def record_or_problem(project_path: str | Path) -> RecordReading:
     """Return the project's record, or why it will not read.
 
-    A record that is missing, invalid, refused by the store or unreadable from disk is
-    :class:`UnreadRecord`, by :func:`read_record`'s refusal; nothing is raised.
+    A record that is missing, invalid, will not decode or sits in a database that will not open or
+    answer is :class:`UnreadRecord`, by :func:`read_record`'s refusal; any other error raises.
     """
     try:
         return ReadRecord(record=read_record(project_path))
