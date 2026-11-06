@@ -490,6 +490,10 @@ def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
     assert {r["delivered_phenotype"] for r in rows.values()} == {"stem_count"}
     (event,) = read_delivery_events(tmp_path)
     assert event.door == "test_orthomosaic"
+    assert event.plant_mapping is not None
+    assert {r["plant_attribution"] for r in rows.values()} == {
+        event.plant_mapping.plant_attribution
+    }
 
 
 def test_a_delivery_reads_the_rasters_georeferencing_once(
@@ -906,6 +910,9 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(
     assert {r["plant_attribution"] for r in rows.values()} == {"segment"}
     (event,) = read_delivery_events(tmp_path)
     pm = event.model_dump(mode="json")["plant_mapping"]
+    assert {r["plant_attribution"] for r in rows.values()} == {
+        pm["plant_attribution"]
+    }
     assert "detections_unattributed" not in pm
     assert (
         pm["canopy_segments"]["n_segments"] == 3

@@ -607,20 +607,22 @@ def deliver_acknowledged(
 ) -> PerPlantDelivered:
     """Deliver the per-image ``records``' ``value_key`` values per plant, under an acknowledgment.
 
-    ``deliver_per_plant_aggregate`` runs for the plants the records carry, attributed per image
-    (``build_plant_mapping``'s granularity), over ``buckets`` (by default a bucket published under
-    no assessment, :func:`unassessed_bucket`), shipped unvalidated under the breeder's
-    acknowledgment (:func:`acknowledged`).
+    ``deliver_per_plant_aggregate`` runs for the plants the records carry, disclosing the mapping
+    of :func:`~tests._mapping_fixtures.mapping_disclosure`, over ``buckets`` (by default a bucket
+    published under no assessment, :func:`unassessed_bucket`), shipped unvalidated under the
+    breeder's acknowledgment (:func:`acknowledged`).
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
+    from tests._mapping_fixtures import mapping_disclosure
 
     delivered = (
         buckets
         if buckets is not None
         else [unassessed_bucket(project, experiment_id="exp-acknowledged")]
     )
+    disclosure = mapping_disclosure(project)
     return acknowledged(
         project,
         lambda ack: deliver_per_plant_aggregate(
@@ -628,12 +630,12 @@ def deliver_acknowledged(
             records,
             str(out),
             value_key=value_key,
-            plant_attribution="image",
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,
             plants=list(dict.fromkeys(r.plant_id for r in records)),
             door="test_delivery",
+            plant_mapping=disclosure,
             acknowledgment_id=ack,
             actor=None,
             **kwargs,
