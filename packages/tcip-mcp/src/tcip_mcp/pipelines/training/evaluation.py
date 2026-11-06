@@ -58,6 +58,11 @@ def rounded(value: JsonValue, places: int = 6) -> JsonValue:
     return round(value, places) if math.isfinite(value) else value
 
 
+def nan_as_none(value: float) -> float | None:
+    """Return a library's score as a float, ``None`` where the library answers nan (undefined)."""
+    return None if math.isnan(value) else float(value)
+
+
 def _reported_metrics(values: dict) -> dict:
     """Return the task's metrics in their stored form.
 
@@ -1186,15 +1191,11 @@ def classification_metrics(
         gt, pred, labels=range(num_classes), zero_division=np.nan
     )
     predicted = np.bincount(pred, minlength=num_classes)
-
-    def defined(value: float) -> float | None:
-        return None if math.isnan(value) else float(value)
-
     per_class = {
         str(c): {
-            "precision": defined(precision[c]),
-            "recall": defined(recall[c]),
-            "f1": defined(f1[c]),
+            "precision": nan_as_none(precision[c]),
+            "recall": nan_as_none(recall[c]),
+            "f1": nan_as_none(f1[c]),
             "support": int(support[c]),
             "count_bias": (int(predicted[c]) - int(support[c]))
             / int(support[c])
@@ -1243,7 +1244,7 @@ def quadratic_weighted_kappa(
     kappa = cohen_kappa_score(
         gt, pred, weights="quadratic", labels=range(num_ranks)
     )
-    return None if math.isnan(kappa) else float(kappa)
+    return nan_as_none(kappa)
 
 
 def _scores_non_finite() -> AbstractContextManager[None]:
