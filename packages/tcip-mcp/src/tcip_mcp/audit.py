@@ -83,12 +83,14 @@ def audit_entries(
 
     Entries are read as :class:`AuditLine`, in the order they landed. A log carrying undecodable
     entries raises ``ValueError`` naming how many, and an entry that is no audit line
-    ``pydantic.ValidationError``.
+    ``pydantic.ValidationError``. A log in a database that will not open or answer raises
+    ``tcip_store.ReadRefusedError``.
     """
-    from tcip_store import read_log
+    from tcip_store import STORE_READ_REFUSALS, read_log, unreadable
 
     key = audit_log_key(scope)
-    page = read_log(key, after=after)
+    with unreadable(f"the audit log at {key.root}", *STORE_READ_REFUSALS):
+        page = read_log(key, after=after)
     if page.corrupt:
         raise ValueError(
             f"the audit log at {key.root} carries {len(page.corrupt)} undecodable "
