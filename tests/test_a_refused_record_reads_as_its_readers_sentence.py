@@ -253,9 +253,9 @@ def test_a_refused_delivery_event_refuses_the_listing_with_its_readers_issues(
     from tests._trait_fixtures import seed_confirmed_count
     from tests.test_delivery_events import _record
 
-    event_id = _record(opened_project, seed_confirmed_count(opened_project))[
-        "delivery_event_id"
-    ]
+    event_id = _record(
+        opened_project, seed_confirmed_count(opened_project)
+    ).delivery_event_id
     key = delivery.delivery_event_key(opened_project, event_id)
     tcip_store.replace(
         key, tcip_store.read(key) | {"produced_at": "not an instant"}
