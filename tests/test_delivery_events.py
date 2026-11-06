@@ -339,52 +339,83 @@ def _per_image_counts_call(project: Path) -> tuple[str, dict]:
     }
 
 
-def _per_plant_csv_call(project: Path) -> tuple[str, dict]:
-    """Return ``deliver_per_plant_csv``'s call over one mapped plant's row, acknowledged.
+def _per_plant_csv_arguments(project: Path) -> dict:
+    """Return ``deliver_per_plant_csv``'s arguments over one mapped plant's row, unacknowledged.
 
     The scene is ``test_deliver_per_plant_csv``'s; the row states every field the record holds.
     """
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.postprocessing.aggregation import (
-        PlantObservation,
-        deliver_per_plant_aggregate,
-    )
     from tests import _trait_fixtures as fx, test_deliver_per_plant_csv as door
 
     fx.seed_delivery_traits(project)
     fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
     dataset_root, date = door._mapped(project)
-    bucket = door._bucket(project, dataset_root, date, {"P1": 2})
-    row = {
-        "plant_id": "P1",
-        "value": 2,
-        "source": "sequence",
-        "distance_m": 0.5,
-    }
-    out = str(project / "out" / "plants.csv")
-    return "deliver_per_plant_csv", {
-        "results": [row],
-        "output_path": out,
+    return {
+        "results": [
+            {
+                "plant_id": "P1",
+                "value": 2,
+                "source": "sequence",
+                "distance_m": 0.5,
+            }
+        ],
+        "output_path": str(project / "out" / "plants.csv"),
         "delivered_phenotype": "stem_count",
         "delivery_kind": door.KIND,
         "plants": ["P1"],
         "dataset_root": str(dataset_root),
-        "buckets": [bucket],
+        "buckets": [door._bucket(project, dataset_root, date, {"P1": 2})],
         "value_key": "count",
-        "plant_attribution": "image",
+        "plant_mapping": "valley",
+    }
+
+
+def _per_plant_csv_call(project: Path) -> tuple[str, dict]:
+    """Return ``deliver_per_plant_csv``'s call over its mapped scene's arguments, acknowledged."""
+    return _acknowledged_per_plant_csv(
+        project, _per_plant_csv_arguments(project)
+    )
+
+
+def _acknowledged_per_plant_csv(
+    project: Path, arguments: dict
+) -> tuple[str, dict]:
+    """Return ``deliver_per_plant_csv``'s call over ``arguments``, acknowledged for exactly them."""
+    from tcip_mcp.buckets import by_recorded_date, read_bucket
+    from tcip_mcp.pipelines.postprocessing.aggregation import (
+        PlantObservation,
+        deliver_per_plant_aggregate,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_mapping_disclosure,
+    )
+
+    published = [
+        read_bucket(Path(arguments["dataset_root"]), name)
+        for name in arguments["buckets"]
+    ]
+    return "deliver_per_plant_csv", {
+        **arguments,
         "acknowledgment_id": _acknowledged_for(
             project,
             lambda: deliver_per_plant_aggregate(
                 project,
-                [PlantObservation.model_validate(row)],
-                out,
-                value_key="count",
-                plant_attribution="image",
-                delivered_phenotype="stem_count",
-                delivery_kind=door.KIND,
-                buckets=[read_bucket(dataset_root, bucket)],
-                plants=["P1"],
+                [
+                    PlantObservation.model_validate(r)
+                    for r in arguments["results"]
+                ],
+                arguments["output_path"],
+                value_key=arguments["value_key"],
+                delivered_phenotype=arguments["delivered_phenotype"],
+                delivery_kind=arguments["delivery_kind"],
+                buckets=published,
+                plants=arguments["plants"],
                 door="deliver_per_plant_csv",
+                plant_mapping=plant_mapping_disclosure(
+                    project,
+                    arguments["plant_mapping"],
+                    by_recorded_date(published),
+                    arguments["plants"],
+                ),
                 actor=None,
             ),
         ),
@@ -541,6 +572,44 @@ def test_a_delivery_tool_answers_the_fields_of_the_event_it_wrote(
             answer["plant_mapping"], (("dataset_root",),), bound.root
         ),
     }
+
+
+def test_a_general_door_delivery_states_the_mappings_attribution_once(
+    tmp_path: Path,
+) -> None:
+    """A general-door delivery's rows carry the attribution its event's disclosure states.
+
+    The door is called through the server over the mapping ``build_plant_mapping`` persisted and
+    names no attribution; every row's ``plant_attribution`` equals the event's disclosure field
+    and the mapper's own constant.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild
+    from tcip_mcp.server import binding_for
+    from tests import csv_rows
+    from tests._server_calls import called_through_the_server
+
+    pytest.importorskip("torch")
+    unacknowledged = _per_plant_csv_arguments(tmp_path)
+    bound = binding_for(tmp_path)
+    refused = called_through_the_server(
+        "deliver_per_plant_csv", unacknowledged, bound=bound
+    )
+    assert isinstance(refused, dict), refused
+    assert "no assessment answers" in refused["error"], refused
+    tool, arguments = _acknowledged_per_plant_csv(tmp_path, unacknowledged)
+
+    answer = called_through_the_server(tool, arguments, bound=bound)
+
+    assert isinstance(answer, dict) and "error" not in answer, answer
+    (event,) = read_delivery_events(bound.root)
+    assert event.plant_mapping is not None
+    rows = csv_rows(Path(arguments["output_path"]))
+    assert rows
+    assert (
+        {row["plant_attribution"] for row in rows}
+        == {event.plant_mapping.plant_attribution}
+        == {MappingBuild.plant_attribution}
+    )
 
 
 def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket(

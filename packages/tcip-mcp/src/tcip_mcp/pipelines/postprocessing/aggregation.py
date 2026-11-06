@@ -139,7 +139,6 @@ def deliver_per_plant_aggregate(
     output_path: str,
     *,
     value_key: str,
-    plant_attribution: str,
     delivered_phenotype: str,
     delivery_kind: str,
     buckets: Sequence[Bucket],
@@ -147,7 +146,7 @@ def deliver_per_plant_aggregate(
     crop: str = "",
     pipeline_version: str = "",
     door: str,
-    plant_mapping: PlantMapping | None = None,
+    plant_mapping: PlantMapping,
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
     actor: str | None,
@@ -155,8 +154,8 @@ def deliver_per_plant_aggregate(
     """Deliver the per-plant aggregate of per-image ``records`` as a CSV at ``output_path``.
 
     Each record's value is a ``value_key`` quantity, each record's plant attributed at the
-    granularity ``plant_attribution`` names; the CSV is a ``delivery_kind`` delivery by ``actor``,
-    for exactly the population ``plants``
+    granularity ``plant_mapping.plant_attribution`` names; the CSV is a ``delivery_kind``
+    delivery by ``actor``, for exactly the population ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.phenology.population`'s list), over the published
     ``buckets`` the values came from.
 
@@ -244,7 +243,7 @@ def deliver_per_plant_aggregate(
                 "n_images": by_plant[plant]["n_images"],
                 "pipeline_version": pipeline_version,
                 "plant_id_source": by_plant[plant].get("plant_id_source", ""),
-                "plant_attribution": plant_attribution,
+                "plant_attribution": plant_mapping.plant_attribution,
                 "plant_id_distance_m_max": by_plant[plant].get(
                     "plant_id_distance_m_max", ""
                 ),

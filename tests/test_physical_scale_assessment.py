@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -75,16 +76,20 @@ def _reference(
     The frames sit in a registered dataset, beside their breeder CSV (each physical extent
     ``extents_mm[i]``, else the fixed scale's) and a selection drawn over them.
     """
+    from PIL import Image
+
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
-    from tests._producer_fixtures import (
-        registry_of,
-        registry_over,
-        write_image,
+    from tests._image_fixtures import geo_exif
+    from tests._mapping_fixtures import (
+        PHOTO_POSITION_ERROR_M,
+        plant_positions,
     )
+    from tests._producer_fixtures import registry_of, registry_over
 
     root = project / "ds"
+    place = plant_positions(["p1"])["p1"]
     images = image_dir(root, DATE)
     images.mkdir(parents=True)
     registry_over(root, registry_of(SUBJECT))
@@ -94,8 +99,17 @@ def _reference(
     rows = []
     for i in range(n):
         stem = f"r{i}"
+        frame = images / f"{stem}.png"
+        Image.new("RGB", (120, 120), (20 + i, 20, 20)).save(
+            frame,
+            exif=geo_exif(
+                datetime(2026, 1, 1, 9),
+                *place,
+                h_pos_err=PHOTO_POSITION_ERROR_M,
+            ),
+        )
         label_image(
-            write_image(images / f"{stem}.png", (120, 120), (20 + i, 20, 20)),
+            frame,
             [
                 Annotation(
                     subject=SUBJECT,
@@ -177,7 +191,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     capture its reference does not cover, the scale's finding is among the refusal's sentences.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.buckets import Bucket, read_bucket
+    from tcip_mcp.buckets import Bucket, by_recorded_date, read_bucket
     from tcip_mcp.delivery import (
         DeliveryRefusedError,
         PerPlantDelivered,
@@ -187,8 +201,16 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         PlantObservation,
         deliver_per_plant_aggregate,
     )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_mapping_disclosure,
+    )
     from tests._chain_fixtures import acknowledged, predicted, published
-    from tests._producer_fixtures import write_image
+    from tests._image_fixtures import write_geo_image
+    from tests._mapping_fixtures import (
+        PHOTO_POSITION_ERROR_M,
+        map_plants,
+        plant_positions,
+    )
 
     _author_tolerance(tmp_path)
     fx.seed_confirmed_aggregate(
@@ -212,6 +234,20 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         scope={"subject": SUBJECT},
     )
     bucket = read_bucket(published_bucket.root, published_bucket.name)
+    later = "2026-01-02"
+    write_geo_image(
+        image_dir(tmp_path / "ds", later) / "r0.png",
+        *plant_positions(["p1"])["p1"],
+        datetime(2026, 1, 2, 9),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
+    )
+    uncovered = published(
+        tmp_path,
+        f"m/{later}",
+        [predicted(image_dir(tmp_path / "ds", later) / "r0.png", [SUBJECT])],
+        scope={"subject": SUBJECT},
+    )
+    map_plants(tmp_path, tmp_path / "ds", ["p1"])
     records = [PlantObservation(plant_id="p1", value=12.5)]
 
     def delivered(
@@ -222,12 +258,14 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
             records,
             str(out),
             value_key="area_mm2",
-            plant_attribution="image",
             delivered_phenotype="plant_surface_area",
             delivery_kind="per_plant_count_aggregate",
             buckets=[over],
             plants=["p1"],
             door="test_scale",
+            plant_mapping=plant_mapping_disclosure(
+                tmp_path, "valley", by_recorded_date([over]), ["p1"]
+            ),
             acknowledgment_id=ack,
             actor=None,
             **kw,
@@ -251,18 +289,6 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     (event,) = read_delivery_events(tmp_path)
     assert event.scale_assessment_id == scale["assessment_id"]
 
-    later = "2026-01-02"
-    uncovered = published(
-        tmp_path,
-        f"m/{later}",
-        [
-            predicted(
-                write_image(image_dir(tmp_path / "ds", later) / "r0.png"),
-                [SUBJECT],
-            )
-        ],
-        scope={"subject": SUBJECT},
-    )
     with pytest.raises(
         DeliveryRefusedError,
         match=f"scale assessment {scale['assessment_id']}'s reference does not cover",

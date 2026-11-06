@@ -1374,12 +1374,15 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
     leaving each working directory empty.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
     from tcip_mcp.pipelines.postprocessing.phenology import population
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_mapping_disclosure,
+    )
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
     from tests import _trait_fixtures as fx, csv_rows
     from tests._chain_fixtures import digest_of
@@ -1404,19 +1407,25 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
             project, dataset_root, date, {"P1": 2, "P2": 1}, name="run"
         )
         records = _records(("P1", 2), ("P2", 1))
+        published = [read_bucket(dataset_root, bucket)]
         with pytest.raises(DeliveryRefusedError) as refused:
             deliver_per_plant_aggregate(
                 project,
                 records,
                 str(project / "unacknowledged.csv"),
                 value_key="count",
-                plant_attribution="image",
                 delivered_phenotype="stem_count",
                 delivery_kind=KIND,
-                buckets=[read_bucket(dataset_root, bucket)],
+                buckets=published,
                 plants=population(["P1", "P2"]),
                 crop="currant",
                 door="deliver_per_plant_csv",
+                plant_mapping=plant_mapping_disclosure(
+                    project,
+                    "valley",
+                    by_recorded_date(published),
+                    population(["P1", "P2"]),
+                ),
                 actor=None,
             )
         act = record_acknowledgment(
@@ -1439,7 +1448,7 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
             _relative(dataset_root, project),
             [bucket],
             value_key="count",
-            plant_attribution="image",
+            plant_mapping="valley",
             crop="currant",
             acknowledgment_id=act.acknowledgment_id,
             actor=None,

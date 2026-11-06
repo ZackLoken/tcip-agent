@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from tcip_mcp.dataset_layout import image_dir
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         MappingBuild,
@@ -197,6 +197,53 @@ def mapping_over(
         dates=dates,
         match_radius=match_radius,
     )
+
+
+def plant_positions(plants: Sequence[str]) -> dict[str, tuple[float, float]]:
+    """Return each of ``plants`` at its own place along one row, about 8 m apart (``lat, lon``)."""
+    return {
+        plant: (43.19670, -90.058 + i * 1e-4) for i, plant in enumerate(plants)
+    }
+
+
+def map_plants(
+    project: Path,
+    dataset_root: Path,
+    plants: Sequence[str],
+    *,
+    name: str = "valley",
+) -> None:
+    """Persist the mapping ``name`` of ``dataset_root``'s captures against ``plants``.
+
+    The plants stand at :func:`plant_positions`, written as a plant CSV and registered under
+    :func:`register_plant_registry_for`'s name; ``dataset_root`` is registered in ``project``
+    (a dataset the project already registers is left as it is) and mapped by
+    ``build_plant_mapping``.
+    """
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_mcp.traits import registered_crops
+
+    registered = register_dataset(
+        project,
+        str(dataset_root),
+        crop=sorted(registered_crops())[0],
+        actor=None,
+    )
+    assert "error" not in registered, registered
+    plant_csv = write_plots_csv(
+        project / f"{name}_plants.csv", plant_positions(plants)
+    )
+    built = build_plant_mapping(
+        project,
+        name=name,
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(
+            project, [plant_csv], name=f"{name}-registry"
+        ),
+        actor=None,
+    )
+    assert "error" not in built, built
 
 
 def map_captures(
