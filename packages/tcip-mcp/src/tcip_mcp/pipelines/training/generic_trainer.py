@@ -686,8 +686,8 @@ def selection_value(
 
     ``val_metrics`` is the validation row :func:`validate` returned, empty for a run with no
     validation side, for which ``metric == "loss"`` answers with the training loss ``avg_loss``.
-    A present value of ``None`` (a diverged metric ``evaluation.stored_number`` normalized to
-    ``null``) comes back as ``nan``.
+    A present value of ``None`` (an undefined score, or a diverged metric
+    ``evaluation.stored_number`` normalized to ``null``) comes back as ``nan``.
 
     Refuses (``ValueError``) a ``metric`` the row does not carry, naming the row's keys.
     """
