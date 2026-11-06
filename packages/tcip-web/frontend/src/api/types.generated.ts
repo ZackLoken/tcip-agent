@@ -833,6 +833,14 @@ export interface AsRecordedChoice {
 
 export type Assessment = CheckpointAssessment | ScaleAssessment;
 
+export interface AssessmentEvidence {
+  count: CountEvidence | null;
+  reserved_region: ReservedRegionEvidence | null;
+  classifier: ClassifierEvidence | null;
+  scalar: ScalarEvidence | null;
+  scale: ScaleEvidence | null;
+}
+
 export interface AssessmentSummary {
   assessment: Assessment;
   passed: boolean;
@@ -990,9 +998,9 @@ export interface CheckpointAssessment {
   recorded_at: string;
   revision: TraitRevisionRef;
   reference: Reference;
-  disjointness: Record<string, unknown>;
-  criterion: Record<string, unknown>;
-  failures: string[];
+  disjointness: DisjointnessEvidence;
+  criterion: AssessmentEvidence;
+  failures: FailureName[];
   delivery_kind: string;
   producer: Producer;
   execution: Execution;
@@ -1006,6 +1014,18 @@ export interface CheckpointFacts {
 }
 
 export type ChoiceCheck = Admitted | Blocked;
+
+export interface ClassifierEvidence {
+  kappa: number | null;
+  kappa_floor: number;
+  positive_count_bias: number;
+  positive_count_bias_std: number;
+  positive_count_bias_images: number;
+  typical_positive_count: number;
+  positive_count_bias_tolerance: number;
+  n_calibration: number;
+  n_holdout: number;
+}
 
 export type ComparedEntry = ComparedRun | UncomparedRun;
 
@@ -1040,6 +1060,25 @@ export interface Confirmed {
   kind: "confirmed";
   confirmed_by: string;
   confirmed_at: string;
+}
+
+export interface CountEvidence {
+  conf: number;
+  conf_derived_from: string;
+  calibration_curve: Record<string, unknown>;
+  f1_max_conf: number;
+  localization: Record<string, unknown>;
+  holdout_at_conf: Record<string, unknown>;
+  calibration_at_conf: Record<string, unknown>;
+  count_bias_tolerance_frac: number;
+  typical_count: number;
+  per_class_typical_count: Record<string, number>;
+  holdout_missing_classes: string[];
+  equivalence_z: number;
+  staged_conf_floor: number;
+  observed_min_score: number | null;
+  calibration_cap_saturated_frac: number;
+  holdout_cap_saturated_frac: number;
 }
 
 export interface Crossing {
@@ -1099,6 +1138,12 @@ export interface DerivedRadius {
 
 export type Direction = "higher" | "lower" | "unstated";
 
+export interface DisjointnessEvidence {
+  holdout_shares_calibration: string[];
+  training: RunOverlap | null;
+  selection: RunOverlap | null;
+}
+
 export interface DrawGroup {
   point: Record<string, unknown>;
   block: DrawSpread;
@@ -1154,6 +1199,34 @@ export interface Failed {
   status: "failed";
   error: string;
 }
+
+export type FailureName =
+  | "conf_censored"
+  | "insufficient_calibration_gt"
+  | "insufficient_holdout_gt"
+  | "insufficient_holdout_images"
+  | "count_bias_exceeds_tolerance"
+  | "count_bias_exceeds_tolerance_per_class"
+  | "insufficient_holdout_images_per_class"
+  | "holdout_missing_class"
+  | "localization_quality_floor_failed"
+  | "count_error_dispersion_too_high"
+  | "insufficient_calibration_positive_evidence"
+  | "insufficient_holdout_positive_evidence"
+  | "insufficient_holdout_items"
+  | "positive_count_bias_exceeds_tolerance"
+  | "classifier_agreement_below_floor"
+  | "criterion_undefined"
+  | "criterion_not_finite"
+  | "criterion_below_floor"
+  | "holdout_shares_calibration_image"
+  | "reference_shares_training"
+  | "reference_shares_selection"
+  | "training_membership_unknown"
+  | "insufficient_calibration_references"
+  | "insufficient_holdout_references"
+  | "holdout_dispersion_exceeds_tolerance"
+  | "holdout_mean_outside_tolerance";
 
 export interface FiniteBest {
   best_params: Record<string, unknown>;
@@ -1393,6 +1466,13 @@ export interface OrthomosaicPlantCountsDelivery {
   position_error_m: number | null;
 }
 
+export interface OverfitReport {
+  losses: (number | null)[];
+  initial: number | null;
+  final: number | null;
+  issue: string | null;
+}
+
 export interface OverviewStats {
   kind: "overview";
   overview_size: [number, number];
@@ -1612,6 +1692,15 @@ export interface Repeated {
   state: SessionState;
 }
 
+export interface ReservedRegionEvidence {
+  block_scale_px: number;
+  block_scale_source: string;
+  k_cal: number;
+  k_test: number;
+  band_gt_counts: Record<string, Record<string, number>>;
+  density_uniformity_flags: string[];
+}
+
 export interface Resolution {
   by: string;
   at: string;
@@ -1672,8 +1761,13 @@ export interface RunLaunched {
   output_dir: string;
   tensorboard: TensorboardLaunch;
   pid: number;
-  overfit_check: Record<string, unknown> | null;
+  overfit_check: OverfitReport | null;
   warnings: string[];
+}
+
+export interface RunOverlap {
+  groups: string[];
+  source_digests: string[];
 }
 
 export type RunRow = StandaloneRun | TrialRun | RangeTestRun;
@@ -1699,16 +1793,32 @@ export interface SampledStats {
   seed: number;
 }
 
+export interface ScalarEvidence {
+  criterion: string;
+  score: number | null;
+  floor: number;
+  n_holdout: number;
+}
+
 export interface ScaleAssessment {
   assessment_id: string;
   recorded_at: string;
   revision: TraitRevisionRef;
   reference: Reference;
-  disjointness: Record<string, unknown>;
-  criterion: Record<string, unknown>;
-  failures: string[];
+  disjointness: DisjointnessEvidence;
+  criterion: AssessmentEvidence;
+  failures: FailureName[];
   scale: Record<string, unknown>;
   kind: "physical_scale";
+}
+
+export interface ScaleEvidence {
+  implied_scales: Record<string, Record<string, number>>;
+  tolerance_frac: number;
+  calibration_mean: number | null;
+  holdout_mean: number | null;
+  holdout_relative_dispersion: number | null;
+  relative_deviation: number | null;
 }
 
 export interface ScorerEntry {

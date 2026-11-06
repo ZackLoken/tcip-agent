@@ -1541,24 +1541,20 @@
                   }
                 }
               },
-              "pooled_typical_count": 1.0,
-              "pooled_count_bias_tolerance": 0.125,
-              "per_class": {
-                "1": {
-                  "bias": 0.0,
-                  "typical_count": 1.0,
-                  "tolerance": 0.125,
-                  "passed": true,
-                  "n_present": 8
-                }
-              },
+              "count_bias_tolerance_frac": 0.1,
+              "typical_count": 1.0,
+              "per_class_typical_count": { "1": 1.0 },
               "holdout_missing_classes": [],
               "equivalence_z": 1.645,
               "staged_conf_floor": 0.01,
               "observed_min_score": 0.924356,
               "calibration_cap_saturated_frac": 1.0,
               "holdout_cap_saturated_frac": 1.0
-            }
+            },
+            "reserved_region": null,
+            "classifier": null,
+            "scalar": null,
+            "scale": null
           },
           "failures": [],
           "delivery_kind": "per_image_count",
@@ -2143,24 +2139,20 @@
                   }
                 }
               },
-              "pooled_typical_count": 1.0,
-              "pooled_count_bias_tolerance": 0.125,
-              "per_class": {
-                "1": {
-                  "bias": -1.0,
-                  "typical_count": 1.0,
-                  "tolerance": 0.125,
-                  "passed": false,
-                  "n_present": 8
-                }
-              },
+              "count_bias_tolerance_frac": 0.1,
+              "typical_count": 1.0,
+              "per_class_typical_count": { "1": 1.0 },
               "holdout_missing_classes": [],
               "equivalence_z": 1.645,
               "staged_conf_floor": 0.999,
               "observed_min_score": null,
               "calibration_cap_saturated_frac": 0.0,
               "holdout_cap_saturated_frac": 0.0
-            }
+            },
+            "reserved_region": null,
+            "classifier": null,
+            "scalar": null,
+            "scale": null
           },
           "failures": [
             "conf_censored",
@@ -2754,24 +2746,20 @@
                   }
                 }
               },
-              "pooled_typical_count": 1.0,
-              "pooled_count_bias_tolerance": 0.125,
-              "per_class": {
-                "1": {
-                  "bias": -1.0,
-                  "typical_count": 1.0,
-                  "tolerance": 0.125,
-                  "passed": false,
-                  "n_present": 8
-                }
-              },
+              "count_bias_tolerance_frac": 0.1,
+              "typical_count": 1.0,
+              "per_class_typical_count": { "1": 1.0 },
               "holdout_missing_classes": [],
               "equivalence_z": 1.645,
               "staged_conf_floor": 0.999,
               "observed_min_score": null,
               "calibration_cap_saturated_frac": 0.0,
               "holdout_cap_saturated_frac": 0.0
-            }
+            },
+            "reserved_region": null,
+            "classifier": null,
+            "scalar": null,
+            "scale": null
           },
           "failures": [
             "conf_censored",
