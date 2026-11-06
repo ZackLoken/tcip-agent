@@ -229,7 +229,8 @@ def _deliver(
 ) -> dict:
     """Ship ``orthomosaic_plant_counts`` under ``by``'s acknowledgment and return its answer.
 
-    A refusal answers ``{"error": ...}``.
+    The answer is what was delivered as its tool answers it; a refusal answers
+    ``{"error": ...}``.
     """
     from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.operationalization import OperationalizationRefusedError
@@ -255,7 +256,7 @@ def _deliver(
             ),
             by=by,
             reason="an unassessed bucket",
-        )
+        ).model_dump(mode="json")
     except (
         DeliveryRefusedError,
         OperationalizationRefusedError,

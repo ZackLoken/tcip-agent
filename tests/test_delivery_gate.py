@@ -21,6 +21,7 @@ from tests import _trait_fixtures as fx, csv_rows
 from tests._chain_fixtures import detected, detection_pass, digest_of
 
 if TYPE_CHECKING:
+    from tcip_mcp.delivery import PerImageCountsDelivered, PerPlantDelivered
     from tcip_mcp.pipelines.inference.passes import DetectionPass
 
 SCOPE = {"subject": fx.COUNT_SUBJECT}
@@ -47,7 +48,7 @@ def _bucket(
 
 def _deliver(
     project: Path, bucket: str, acknowledgment_id: str | None = None
-) -> dict:
+) -> PerImageCountsDelivered:
     from tcip_mcp.pipelines.postprocessing.export import (
         deliver_per_image_counts_csv,
     )
@@ -64,7 +65,7 @@ def _deliver(
     )
 
 
-def _acknowledged(project: Path, bucket: str) -> dict:
+def _acknowledged(project: Path, bucket: str) -> PerImageCountsDelivered:
     from tests._chain_fixtures import acknowledged
 
     return acknowledged(project, lambda ack: _deliver(project, bucket, ack))
@@ -123,9 +124,9 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
         reason="a look before assessing",
     )
 
-    assert {r["validated"] for r in csv_rows(result["csv_path"])} == {"False"}
+    assert {r["validated"] for r in csv_rows(result.csv_path)} == {"False"}
     (event,) = read_delivery_events(tmp_path)
-    assert result["shipped"] == event.shipped.model_dump(mode="json")
+    assert result.shipped == event.shipped
     assert event.shipped.kind == "acknowledged", event.shipped
     assert (
         event.shipped.acknowledgment.acknowledged_by,
@@ -287,7 +288,7 @@ def test_a_validated_delivery_carries_no_acknowledgment(
 
     result = _deliver(tmp_path, chain.bucket)
 
-    assert result["shipped"] == {"kind": "validated"}
+    assert result.shipped.kind == "validated"
     assert read_delivery_events(tmp_path)[0].shipped.kind == "validated"
 
 
@@ -302,7 +303,7 @@ def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(
         tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])]
     )
     result = _acknowledged(tmp_path, bucket)
-    with open(result["csv_path"], newline="") as f:
+    with open(result.csv_path, newline="") as f:
         written = next(csv.reader(f))
 
     lines = document_path("delivery").read_text(encoding="utf-8").splitlines()
@@ -350,7 +351,7 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(
     from tcip_mcp.buckets import read_bucket
 
     assert read_bucket(tmp_path / "ds", bucket).dropped_boxes == 1
-    (row,) = csv_rows(_acknowledged(tmp_path, bucket)["csv_path"])
+    (row,) = csv_rows(_acknowledged(tmp_path, bucket).csv_path)
 
     assert int(row["detection_count"]) == 1
     assert float(row["avg_confidence"]) == pytest.approx(0.9)
@@ -412,6 +413,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.operationalization import OperationalizationRefusedError
+    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
     from tests._chain_fixtures import (
         deliver_acknowledged,
@@ -420,9 +422,9 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     )
 
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
-    records = [{"plant_id": "p1", "count": 1.0, "plant_attribution": "image"}]
+    records = [PlantObservation(plant_id="p1", value=1.0)]
 
-    def deliver(subject: str, name: str) -> dict:
+    def deliver(subject: str, name: str) -> PerPlantDelivered:
         pytest.importorskip("torch")
         bucket = published(
             tmp_path,
@@ -445,5 +447,5 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     ):
         deliver("leaf", "other")
     assert not (tmp_path / "other.csv").exists()
-    shipped = deliver(fx.COUNT_SUBJECT, "measured")["shipped"]
-    assert shipped["kind"] == "acknowledged"
+    shipped = deliver(fx.COUNT_SUBJECT, "measured").shipped
+    assert shipped.kind == "acknowledged"

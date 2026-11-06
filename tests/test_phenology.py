@@ -567,6 +567,62 @@ def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
     assert p2["milestones"]["05per"] is None
 
 
+def test_the_curve_rows_carry_each_plants_accession_and_counts_on_every_date(
+    tmp_path: Path,
+) -> None:
+    """Every population plant has a curve row on every mapping date, in population order.
+
+    P2 is first attributed on the second date, so its imageless first-date row carries the
+    accession its second date names; one of its second-date images has no prediction document,
+    and an unattributed image on the first date counts toward no plant. The rows are the ones
+    the per-date tuple walk this replaced measured over the same scene.
+    """
+    buckets = {
+        "2024-05-01": _bucket(
+            tmp_path, "2024-05-01", {"P1_a": ["open", "closed"]}
+        ),
+        "2024-05-15": _bucket(
+            tmp_path,
+            "2024-05-15",
+            {"P1_b": ["open", "open"], "P2_b": ["open", "closed", "closed"]},
+        ),
+    }
+    mapping = mapping_of(
+        {
+            "2024-05-01": [
+                ("P1_a.jpg", ("P1", "acc-9"), 0.0),
+                ("STRAY.jpg", None, None),
+            ],
+            "2024-05-15": [
+                ("P1_b.jpg", ("P1", "acc-9"), 0.0),
+                ("P2_b.jpg", ("P2", "acc-7"), 0.0),
+                ("P2_gone.jpg", ("P2", "acc-7"), 0.0),
+            ],
+        }
+    )
+
+    out = phenology.per_plant_phenology(
+        mapping, buckets, BUD_OPENING, ["P2", "P1"]
+    )
+
+    fields = (
+        "plant_id",
+        "accession",
+        "capture",
+        "n_images",
+        "n_total",
+        "n_positive",
+        "n_unclassified",
+        "n_missing",
+    )
+    assert [tuple(getattr(c, f) for f in fields) for c in out.curves] == [
+        ("P2", "acc-7", "2024-05-01", 0, 0, 0, 0, 0),
+        ("P2", "acc-7", "2024-05-15", 2, 3, 1, 0, 1),
+        ("P1", "acc-9", "2024-05-01", 1, 2, 1, 0, 0),
+        ("P1", "acc-9", "2024-05-15", 1, 2, 2, 0, 0),
+    ]
+
+
 # ── the positive state's attribute ────────────────────────────────
 
 
@@ -717,14 +773,21 @@ def test_per_plant_series_counts_the_images_the_mapping_names(
             ]
         }
     )
-    per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
-    (_date, total, positive, unclassified, missing, n_images) = per_plant[
-        "P1"
-    ]["series"][0]
-    assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
+    (row,) = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])["P1"]
+    assert (
+        row.n_total,
+        row.n_positive,
+        row.n_unclassified,
+        row.n_missing,
+    ) == (
+        6,
+        3,
+        0,
+        1,
+    )
     # 4 images named for this (plant, date), of which one is missing, not the 3 documents that
     # happened to exist.
-    assert n_images == 4
+    assert row.n_images == 4
 
 
 def test_per_plant_series_excludes_unattributed_assignments_from_coverage(

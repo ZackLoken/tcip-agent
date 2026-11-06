@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from tcip_annotation.state import BBox, Polygon
+    from tcip_mcp.delivery import PerImageCountsDelivered
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
 
@@ -162,7 +163,7 @@ def deliver_per_image_counts_csv(
     acknowledgment_id: str | None,
     door: str,
     actor: str | None,
-) -> dict:
+) -> PerImageCountsDelivered:
     """Deliver the per-image counts of a published bucket as the CSV at ``output_path``.
 
     The bucket is ``name`` published under ``dataset_root``; the delivery is by ``actor``, under
@@ -175,7 +176,13 @@ def deliver_per_image_counts_csv(
     ``door`` (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
     """
     from tcip_mcp.buckets import detection_rows, read_bucket
-    from tcip_mcp.delivery import DELIVERY_COLUMNS, Result, deliver_csv, gate
+    from tcip_mcp.delivery import (
+        DELIVERY_COLUMNS,
+        PerImageCountsDelivered,
+        Result,
+        deliver_csv,
+        gate,
+    )
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.traits import PER_IMAGE_COUNT
 
@@ -222,10 +229,10 @@ def deliver_per_image_counts_csv(
         delivery_kind=PER_IMAGE_COUNT,
         actor=actor,
     )
-    return {
-        **delivered,
-        "image_count": len(rows),
-        "total_detections": sum(r["count"] for r in rows),
-        "dataset_root": str(dataset_root),
-        "bucket": name,
-    }
+    return PerImageCountsDelivered(
+        **dict(delivered),
+        image_count=len(rows),
+        total_detections=sum(r["count"] for r in rows),
+        dataset_root=str(dataset_root),
+        bucket=name,
+    )

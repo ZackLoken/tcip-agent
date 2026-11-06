@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 import tcip_store
 from tcip_mcp.assessment import (
@@ -678,6 +678,63 @@ def delivery_event_key(project: str | Path, event_id: str) -> Key:
     )
 
 
+class Delivered(BaseModel):
+    """What a delivery shipped, each field its one delivery event's (:meth:`of`).
+
+    It holds the delivered file, how it shipped, the event's id, the trait revision and the
+    producer it shipped under, and its plant-mapping disclosure.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    csv_path: str
+    shipped: Shipped
+    delivery_event_id: str
+    trait_revision: int
+    producer: Producer
+    plant_mapping: PlantMapping | None
+
+    @classmethod
+    def of(cls, event: DeliveryEventRecord) -> Delivered:
+        """Return what the delivery ``event`` records was delivered."""
+        return cls(
+            csv_path=event.output_path,
+            shipped=event.shipped,
+            delivery_event_id=event.event_id,
+            trait_revision=event.trait_revision,
+            producer=event.producer,
+            plant_mapping=event.plant_mapping,
+        )
+
+
+class PerImageCountsDelivered(Delivered):
+    """A per-image count delivery: the bucket it counted and its image and detection totals."""
+
+    image_count: int
+    total_detections: int
+    dataset_root: str
+    bucket: str
+
+
+class PerPlantDelivered(Delivered):
+    """A per-plant delivery: what it shipped and how many plants its population holds."""
+
+    n_plants: int
+
+
+class OrthomosaicDelivered(PerPlantDelivered):
+    """A per-plant count delivery from a whole raster, with the detections it attributed."""
+
+    n_detections: int
+
+
+class PhenologyDelivered(PerPlantDelivered):
+    """A phenology projection's delivery, with its row count and its columns in order."""
+
+    n_rows: int
+    columns: list[str]
+
+
 def deliver_csv(
     project: Path,
     output_path: str | Path,
@@ -688,7 +745,7 @@ def deliver_csv(
     door: str,
     delivery_kind: str,
     actor: str | None,
-) -> dict[str, Any]:
+) -> Delivered:
     """Write ``result`` as a CSV at ``output_path`` with its one delivery event and audit line.
 
     ``result`` is composed as a CSV (each row carrying the :data:`DELIVERY_COLUMNS` cells of this
@@ -697,8 +754,7 @@ def deliver_csv(
     how it shipped, and the result's population and plant-mapping disclosure), the event
     validated before anything is written; then the CSV is written at ``output_path``, the event,
     and its one audit line by ``actor``, ``delivery_event``, in the log of the dataset root the
-    buckets are published under. Returns what was delivered: ``csv_path``, ``shipped``,
-    ``delivery_event_id``, ``trait_revision`` and ``producer``.
+    buckets are published under. Returns what the event records was delivered.
     """
     event_id = uuid.uuid4().hex
     data = result.encoded(
@@ -734,13 +790,7 @@ def deliver_csv(
         ),
     )
     append_or_raise(line, scope=clearance.buckets[0].dataset_root)
-    return {
-        "csv_path": str(path),
-        "shipped": clearance.shipped.model_dump(mode="json"),
-        "delivery_event_id": event_id,
-        "trait_revision": revision.number,
-        "producer": clearance.producer.model_dump(),
-    }
+    return Delivered.of(event)
 
 
 def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
