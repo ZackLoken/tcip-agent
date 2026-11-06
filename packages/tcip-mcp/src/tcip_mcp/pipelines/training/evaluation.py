@@ -642,30 +642,28 @@ def worst_class_count_bias(entry: dict) -> float:
     )
 
 
-def _scored_entries(sweep: dict) -> list[dict]:
-    """Return the sweep's curve entries whose F1 is defined, the ones a picker chooses among."""
-    return [c for c in sweep["curve"] if c["f1"] is not None]
+def _f1_rank(entry: dict) -> float:
+    """Return the F1 a picker ranks a curve entry by: an undefined (``None``) F1 ranks below all."""
+    return -math.inf if entry["f1"] is None else entry["f1"]
 
 
-def pick_count_unbiased(sweep: dict) -> float | None:
+def pick_count_unbiased(sweep: dict) -> float:
     """Return the conf that minimizes the worst per-class |mean per-image count bias|.
 
-    Ties break on lower pooled |bias|, higher F1, lower |error|, then higher conf. It chooses
-    among the entries whose F1 is defined, and answers ``None`` when none is.
+    Ties break on lower pooled |bias|, higher F1 (an undefined F1 ranks last), lower |error|,
+    then higher conf.
     """
-    entries = _scored_entries(sweep)
-    if not entries:
-        return None
-    return min(
-        entries,
+    best = min(
+        sweep["curve"],
         key=lambda c: (
             worst_class_count_bias(c),
             abs(c["count_bias_mean"]),
-            -c["f1"],
+            -_f1_rank(c),
             c["abs_count_error_mean"],
             -c["conf"],
         ),
-    )["conf"]
+    )
+    return best["conf"]
 
 
 def classes_with_evidence(entry: dict) -> set[str]:
@@ -682,12 +680,9 @@ def classes_with_evidence(entry: dict) -> set[str]:
     }
 
 
-def pick_f1_max(sweep: dict) -> float | None:
-    """Return the conf of the sweep's curve entry with the highest defined F1, ``None`` for none."""
-    entries = _scored_entries(sweep)
-    if not entries:
-        return None
-    return max(entries, key=lambda c: c["f1"])["conf"]
+def pick_f1_max(sweep: dict) -> float:
+    """Return the conf of the sweep's curve entry with the highest F1, an undefined one last."""
+    return max(sweep["curve"], key=_f1_rank)["conf"]
 
 
 def _mask_rings(

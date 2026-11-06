@@ -183,7 +183,7 @@ def count_criterion(
     criterion it matched under. Every matching is kept in ``held`` where one is given
     (:func:`~tcip_mcp.pipelines.training.evaluation.matched`).
     A conf at or below the floor fails as ``conf_censored``. A calibration curve the objective
-    picks no conf on (no entry with a defined F1) refuses (``ValueError``).
+    picks no conf on refuses (``ValueError``).
     """
     picker, conf_label = COUNT_OBJECTIVE_PICKERS[entry.count_objective]
     criterion = resolve_match_criterion(entry, cal_records)
