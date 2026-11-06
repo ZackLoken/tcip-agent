@@ -31,7 +31,6 @@ from tcip_mcp.pipelines.schemas import (  # noqa: E402
     TrainGeometry,
     checked_train_config,
 )
-from tcip_store import check_json_value  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 from tests._training_values import overfit_optimizer  # noqa: E402
 
@@ -296,57 +295,7 @@ def test_overfit_check_classification_passes() -> None:
         deterministic=False,
         device=torch.device("cpu"),
     )
-    assert report["passed"], report["issue"]
-    assert report["final"] < report["initial"]
-    assert len(report["losses"]) == 25
-
-
-# render_overfit_report: the record-safe form of a raw overfit_check report
-
-
-def test_render_overfit_report_passes_through_a_finite_report() -> None:
-    from tcip_mcp.pipelines.model_contract import render_overfit_report
-
-    model = _classifier()
-    raw = overfit_check(
-        model,
-        "classification",
-        optimizer=overfit_optimizer(),
-        steps=5,
-        dims=CLS_DIMS,
-        seed=0,
-        deterministic=False,
-        device=torch.device("cpu"),
-    )
-    rendered = render_overfit_report(raw)
-    check_json_value(
-        rendered, path="overfit_check"
-    )  # never raises for a finite report
-    assert rendered["passed"] == raw["passed"]
-    assert rendered["initial"] == raw["initial"]
-    assert rendered["final"] == raw["final"]
-    assert rendered["losses"] == raw["losses"]
-
-
-def test_render_overfit_report_keeps_a_diverging_models_state() -> None:
-    """The rendered overfit report keeps a diverging model's state as a named field.
-
-    A raw report carrying nan and inf renders to a form check_json_value admits, the
-    non-finite values null and the final value's state named beside it.
-    """
-    from tcip_mcp.pipelines.model_contract import render_overfit_report
-
-    raw = {
-        "passed": False,
-        "issue": "loss became non-finite during overfitting",
-        "losses": [1.0, float("nan"), float("inf")],
-        "initial": 1.0,
-        "final": float("nan"),
-    }
-    rendered = render_overfit_report(raw)
-    check_json_value(rendered, path="overfit_check")
-    assert rendered["final"] is None
-    assert rendered["final_state"] == "nan"
-    assert rendered["initial"] == 1.0
-    assert "initial_state" not in rendered
-    assert rendered["losses"] == [1.0, None, None]
+    assert report.passed, report.issue
+    assert report.final is not None and report.initial is not None
+    assert report.final < report.initial
+    assert len(report.losses) == 25

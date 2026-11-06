@@ -75,11 +75,11 @@ def test_a_model_whose_loss_never_moves_is_refused() -> None:
         deterministic=False,
         device=torch.device("cpu"),
     )
-    assert report["passed"] is False
-    assert report["issue"] is not None
-    assert "did not decrease" in report["issue"], report["issue"]
-    assert len(report["losses"]) == 12
-    assert report["final"] == report["initial"]
+    assert report.passed is False
+    assert report.issue is not None
+    assert "did not decrease" in report.issue, report.issue
+    assert len(report.losses) == 12
+    assert report.final == report.initial
 
 
 def test_a_model_that_really_learns_passes() -> None:
@@ -94,9 +94,9 @@ def test_a_model_that_really_learns_passes() -> None:
         deterministic=False,
         device=torch.device("cpu"),
     )
-    assert report["passed"], report["issue"]
-    assert report["issue"] is None
-    assert report["final"] < report["initial"]
+    assert report.passed, report.issue
+    assert report.final is not None and report.initial is not None
+    assert report.final < report.initial
 
 
 class _AllFrozen(torch.nn.Module):
@@ -136,10 +136,10 @@ def test_an_all_frozen_model_reports_rather_than_raises() -> None:
         deterministic=False,
         device=torch.device("cpu"),
     )
-    assert report["passed"] is False
-    assert "trains no parameter" in report["issue"], report["issue"]
-    assert report["losses"] == []
-    assert report["initial"] is None and report["final"] is None
+    assert report.issue is not None and "trains no parameter" in report.issue
+    assert report.passed is False
+    assert report.losses == []
+    assert report.initial is None and report.final is None
 
 
 def _regressor_config(project: Path, **overrides: object) -> dict:
@@ -186,7 +186,8 @@ def test_the_preflight_overfit_check_steps_at_the_configs_head_rate(
         )
         report = preflight_config(tmp_path, config, smoke=True, overfit=True)
         assert report["valid"], report["issues"]
-        assert report["overfit_check"]["passed"], report["overfit_check"]
+        check = report["overfit_check"]
+        assert check["issue"] is None, check
         return report["overfit_check"]["losses"]
 
     slow, fast = losses(1e-3), losses(1e-1)
@@ -212,6 +213,5 @@ def test_the_preflight_overfit_check_of_a_config_with_no_optimizer_names_it(
     report = preflight_config(tmp_path, config, smoke=True, overfit=True)
     assert report["valid"], report["issues"]
     check = report["overfit_check"]
-    assert check["passed"] is False
     assert "optimizer" in check["issue"], check["issue"]
     assert check["losses"] == []

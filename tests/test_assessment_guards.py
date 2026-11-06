@@ -282,9 +282,11 @@ def test_a_foreign_checkpoint_fails_its_assessment_on_unknown_training_membershi
     assert "training_membership_unknown" in record["failures"], record[
         "failures"
     ]
-    assert set(record["disjointness"]) == {"holdout_shares_calibration"}, (
-        record["disjointness"]
-    )
+    disjointness = record["disjointness"]
+    assert (disjointness["training"], disjointness["selection"]) == (
+        None,
+        None,
+    ), disjointness
 
 
 def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
@@ -437,7 +439,7 @@ def test_a_known_count_bias_fails_the_outcome_tolerance_with_no_dispersion_at_al
         **COUNT_TEST,
     )
 
-    assert evidence["holdout_at_conf"]["count_bias_std_present"] == 0.0
+    assert evidence.holdout_at_conf["count_bias_std_present"] == 0.0
     assert "count_bias_exceeds_tolerance" in failures, failures
 
 
@@ -476,7 +478,7 @@ def test_compensating_classification_errors_cannot_validate_through_pooled_count
         hold, hold, _count_entry(), equivalence_z=EQUIVALENCE_Z
     )
 
-    assert evidence["positive_count_bias"] == 0.0
+    assert evidence.positive_count_bias == 0.0
     assert "classifier_agreement_below_floor" in failures, (failures, evidence)
 
 
@@ -903,7 +905,7 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
         )
 
     _pass, measured, _failures = fit(polygons=True)
-    assert "count" in measured
+    assert measured.count is not None
     with pytest.raises(ValueError, match="instance_seg loader does not read"):
         fit(polygons=False)
 
@@ -926,12 +928,12 @@ def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
         tmp_path, chain.assessment["assessment_id"]
     )
 
-    count = recorded.criterion["count"]
-    assert isinstance(count, dict)
-    assert count["equivalence_z"] == EQUIVALENCE_Z
-    curve = count["calibration_curve"]
-    assert isinstance(curve, dict)
-    assert curve["dispersion_quantile"] == DISPERSION_QUANTILE
+    count = recorded.criterion.count
+    assert count is not None
+    assert count.equivalence_z == EQUIVALENCE_Z
+    assert (
+        count.calibration_curve["dispersion_quantile"] == DISPERSION_QUANTILE
+    )
     assert recorded.rationale == RATIONALE
     for door in (assessment.assess, calibration_tools.assess_checkpoint):
         parameters = inspect.signature(door).parameters

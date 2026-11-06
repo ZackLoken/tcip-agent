@@ -28,6 +28,17 @@ from pydantic import (
     TypeAdapter,
 )
 
+from tcip_mcp.assessment_evidence import (
+    INSUFFICIENCY_FAILURES,
+    AssessmentEvidence,
+    CountEvidence,
+    DisjointnessEvidence,
+    FailureName,
+    ReservedRegionEvidence,
+    RunOverlap,
+    ScalarEvidence,
+    ScaleEvidence,
+)
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import (
     GROUND_TRUTH_PATHS,
@@ -209,16 +220,17 @@ class _Assessment:
     """One finished assessment, as its ``assessment.json`` states it.
 
     ``revision`` is the trait revision it was judged under, ``disjointness`` and ``criterion``
-    the evidence the failures were read from, and ``recorded_at`` the instant it was written.
+    the evidence the failures were read from, each failure named once, and ``recorded_at`` the
+    instant it was written.
     """
 
     assessment_id: str
     recorded_at: AwareDatetime
     revision: TraitRevisionRef
     reference: Reference
-    disjointness: dict[str, JsonValue]
-    criterion: dict[str, JsonValue]
-    failures: list[str]
+    disjointness: DisjointnessEvidence
+    criterion: AssessmentEvidence
+    failures: list[FailureName]
     __pydantic_config__ = ConfigDict(
         ser_json_inf_nan="constants", extra="forbid"
     )
@@ -557,7 +569,7 @@ def _admit_reference(samples: list[Sample], scope: ClassScope) -> list[Sample]:
 
 def _disjointness(
     digest_of: dict[str, str], cal: list[Sample], hold: list[Sample]
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[DisjointnessEvidence, list[FailureName]]:
     """Return ``(evidence, failures)`` of whether the reference's two sides are disjoint.
 
     They are when its calibration and holdout sides share no source digest (``digest_of``).
@@ -567,7 +579,7 @@ def _disjointness(
         & {digest_of[s.location] for s in hold}
     )
     return (
-        {"holdout_shares_calibration": shared},
+        DisjointnessEvidence(holdout_shares_calibration=shared),
         ["holdout_shares_calibration_image"] if shared else [],
     )
 
@@ -577,7 +589,7 @@ def _held_out(
     cal: list[Sample],
     hold: list[Sample],
     run: list[Sample],
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[DisjointnessEvidence, list[FailureName]]:
     """Return ``(evidence, failures)`` of whether the reference is held out of ``run``.
 
     It is when its sides are disjoint (:func:`_disjointness`) and neither shares a group key or a
@@ -588,21 +600,31 @@ def _held_out(
     evidence, failures = _disjointness(digest_of, cal, hold)
     groups = {s.group for s in cal + hold}
     digests = {digest_of[s.location] for s in cal + hold}
-    for side, name, failure in (
-        ("train", "training", "reference_shares_training"),
-        ("val", "selection", "reference_shares_selection"),
-    ):
+
+    def overlap(side: Side) -> RunOverlap:
         members = [s for s in run if s.side == side]
-        shared = {
-            "groups": sorted(groups & {s.group for s in members}),
-            "source_digests": sorted(
+        return RunOverlap(
+            groups=sorted(groups & {s.group for s in members}),
+            source_digests=sorted(
                 digests & set(source_digests(members).values())
             ),
-        }
-        evidence[name] = shared
-        if shared["groups"] or shared["source_digests"]:
-            failures.append(failure)
-    return evidence, failures
+        )
+
+    training, selection = overlap("train"), overlap("val")
+    checked: tuple[tuple[RunOverlap, FailureName], ...] = (
+        (training, "reference_shares_training"),
+        (selection, "reference_shares_selection"),
+    )
+    failures += [
+        failure
+        for shared, failure in checked
+        if shared.groups or shared.source_digests
+    ]
+    return DisjointnessEvidence(
+        holdout_shares_calibration=evidence.holdout_shares_calibration,
+        training=training,
+        selection=selection,
+    ), failures
 
 
 def assess(
@@ -697,9 +719,10 @@ def assess(
         )
     else:
         p = prep.runnable()
-        criterion, criterion_failures = _scalar(
+        scalar, criterion_failures = _scalar(
             p, m_hold, revision.entry, digest_of
         )
+        criterion = AssessmentEvidence(scalar=scalar)
     return _finish(
         project,
         run_dir,
@@ -730,7 +753,12 @@ def _count_fit(
     *,
     equivalence_z: float,
     dispersion_quantile: float,
-) -> tuple[dict, list[str], list[EvaluationRecord], list[EvaluationRecord]]:
+) -> tuple[
+    CountEvidence,
+    list[FailureName],
+    list[EvaluationRecord],
+    list[EvaluationRecord],
+]:
     """Fit the count criterion over a reference at ``equivalence_z`` and ``dispersion_quantile``.
 
     It reads the calibration and holdout records ``collect`` predicts under the pass's record, at
@@ -757,7 +785,7 @@ def _count_fit(
     p.execution = replace(
         p.execution,
         conf=conf,
-        sources={**p.execution.sources, "conf": evidence["conf_derived_from"]},
+        sources={**p.execution.sources, "conf": evidence.conf_derived_from},
     )
     if p.execution.uncut:
         p.execution = _mask_fit(p.execution, cal_records, evidence, held)
@@ -810,7 +838,7 @@ def _detection(
     *,
     equivalence_z: float,
     dispersion_quantile: float,
-) -> tuple[Pass, dict, list[str]]:
+) -> tuple[Pass, AssessmentEvidence, list[FailureName]]:
     """Return the runnable pass, its measured criteria and failures over the reference.
 
     The pass is made runnable from the calibration side's ground truth (its frames' object
@@ -819,8 +847,9 @@ def _detection(
     (:func:`_count_fit`, which derives an uncut pass's mask cut), each side's loader built once,
     every fitted value from the calibration side, plus, given the positive state's
     ``(column, value id)`` for a state-fraction delivery, the classifier agreement over matched
-    instances. ``digest_of`` is keyed by each sample's location, which reading the retained copies
-    leaves unchanged.
+    instances, each failure the two criteria name kept once, in the order first named.
+    ``digest_of`` is keyed by each sample's location, which reading the retained copies leaves
+    unchanged.
     """
     from tcip_mcp.pipelines.data.datasets import DocumentDataset
     from tcip_mcp.pipelines.data.split_construction import predictor_dataset
@@ -846,35 +875,31 @@ def _detection(
         equivalence_z=equivalence_z,
         dispersion_quantile=dispersion_quantile,
     )
-    measured: dict[str, Any] = {"count": evidence}
-    if positive is not None:
-        from tcip_mcp.pipelines.operating_point import classifier_criterion
+    if positive is None:
+        return p, AssessmentEvidence(count=evidence), failures
+    from tcip_mcp.pipelines.operating_point import classifier_criterion
 
-        classifier, classifier_failures = classifier_criterion(
-            _classification_items(
-                cal_records,
-                positive,
-                evidence["localization"],
-                evidence["conf"],
-            ),
-            _classification_items(
-                hold_records,
-                positive,
-                evidence["localization"],
-                evidence["conf"],
-            ),
-            entry,
-            equivalence_z=equivalence_z,
-        )
-        measured["classifier"] = classifier
-        failures = [*failures, *classifier_failures]
-    return p, measured, failures
+    classifier, classifier_failures = classifier_criterion(
+        _classification_items(
+            cal_records, positive, evidence.localization, evidence.conf
+        ),
+        _classification_items(
+            hold_records, positive, evidence.localization, evidence.conf
+        ),
+        entry,
+        equivalence_z=equivalence_z,
+    )
+    return (
+        p,
+        AssessmentEvidence(count=evidence, classifier=classifier),
+        list(dict.fromkeys([*failures, *classifier_failures])),
+    )
 
 
 def _mask_fit(
     execution: Execution,
     cal_records: list[EvaluationRecord],
-    evidence: dict,
+    evidence: CountEvidence,
     held: dict,
 ) -> Execution:
     """Return ``execution`` with its ``mask_cut`` derived over the calibration records.
@@ -902,8 +927,8 @@ def _mask_fit(
             cal_records,
             matched(
                 cal_records,
-                evidence["calibration_curve"]["criterion"],
-                conf=evidence["conf"],
+                evidence.calibration_curve["criterion"],
+                conf=evidence.conf,
                 held=held,
             ),
         )
@@ -957,7 +982,7 @@ def _classification_items(
 
 def _scalar(
     p: Pass, hold: list[Sample], entry: TraitEntry, digest_of: dict[str, str]
-) -> tuple[dict, list[str]]:
+) -> tuple[ScalarEvidence, list[FailureName]]:
     """Return the scalar criterion over the holdout side and its failures.
 
     Each sample's one predicted rank or value is scored against its table row
@@ -1253,19 +1278,18 @@ def assess_reserved_regions(
         [s for s in samples if s.side == "holdout"],
         resolved.partition.samples,
     )
-    count: dict[str, Any] = {
-        **evidence,
-        "block_scale_px": buffer_px,
-        "block_scale_source": scale_source,
-        "k_cal": k_cal,
-        "k_test": k_test,
-        "band_gt_counts": band_counts,
-        "density_uniformity_flags": sorted(
+    reserved = ReservedRegionEvidence(
+        block_scale_px=buffer_px,
+        block_scale_source=scale_source,
+        k_cal=k_cal,
+        k_test=k_test,
+        band_gt_counts=band_counts,
+        density_uniformity_flags=sorted(
             f
             for counts in band_counts.values()
             for f in blocks.density_uniformity_flags(counts)
         ),
-    }
+    )
     return _finish(
         project,
         run_dir,
@@ -1282,7 +1306,9 @@ def assess_reserved_regions(
                 samples=_reference_samples(samples, digest_of),
             ),
             disjointness=disjointness,
-            criterion={"count": count},
+            criterion=AssessmentEvidence(
+                count=evidence, reserved_region=reserved
+            ),
             failures=[*disjoint_failures, *failures],
         ),
         actor=actor,
@@ -1497,35 +1523,34 @@ def assess_physical_scale(
             )
         implied[sample.side][sample.member] = row.physical_extent / pixels
     tolerance = cast(float, revision.entry.scale_tolerance_frac)
-    failures += [
-        f"insufficient_{side}_references"
-        for side in ("calibration", "holdout")
-        if len(implied[side]) < 2
-    ]
-    evidence: dict[str, Any] = {
-        "implied_scales": implied,
-        "tolerance_frac": tolerance,
-    }
+    sides: tuple[tuple[str, FailureName], ...] = (
+        ("calibration", "insufficient_calibration_references"),
+        ("holdout", "insufficient_holdout_references"),
+    )
+    failures += [failure for side, failure in sides if len(implied[side]) < 2]
+    evidence = ScaleEvidence(implied_scales=implied, tolerance_frac=tolerance)
     value = None
-    if not any(f.startswith("insufficient_") for f in failures):
+    if INSUFFICIENCY_FAILURES.isdisjoint(failures):
         value = statistics.mean(implied["calibration"].values())
         held = list(implied["holdout"].values())
         mean = statistics.mean(held)
         dispersion = abs(statistics.stdev(held) / mean) if mean else math.inf
         deviation = abs(value - mean) / abs(mean) if mean else math.inf
-        evidence.update(
+        evidence = ScaleEvidence(
+            implied_scales=implied,
+            tolerance_frac=tolerance,
             calibration_mean=value,
             holdout_mean=mean,
             holdout_relative_dispersion=dispersion,
             relative_deviation=deviation,
         )
-        failures += (
-            ["holdout_dispersion_exceeds_tolerance"]
-            if dispersion > tolerance
-            else []
-        ) + (
-            ["holdout_mean_outside_tolerance"] if deviation > tolerance else []
+        checked: tuple[tuple[float, FailureName], ...] = (
+            (dispersion, "holdout_dispersion_exceeds_tolerance"),
+            (deviation, "holdout_mean_outside_tolerance"),
         )
+        failures += [
+            failure for found, failure in checked if found > tolerance
+        ]
     return _finish(
         project,
         run_dir,
@@ -1536,7 +1561,7 @@ def assess_physical_scale(
                 str(selection_dir), cal + hold, digest_of, retained
             ),
             disjointness=disjointness,
-            criterion={"scale": evidence},
+            criterion=AssessmentEvidence(scale=evidence),
             scale={
                 "unit": unit,
                 "value": value,

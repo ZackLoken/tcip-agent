@@ -52,6 +52,7 @@ src/tcip_mcp/
   operationalization.py    # the check every delivery door runs on the latest confirmed revision
   buckets.py               # a published bucket: its record and its documents, one commit, once
   assessment.py            # the assessment a delivered number rests on, written once
+  assessment_evidence.py   # the evidence records an assessment holds and its failure names
   delivery.py              # the one delivery gate and the delivery event
   project_record.py       # a project's own record: its id, display name, site and invariances
   workspace.py            # the workspace root and its project directories

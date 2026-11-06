@@ -228,11 +228,10 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
         record.producer.origin,
     ) == (produced.sha256, "run")
     disjointness = record.disjointness
-    assert disjointness["holdout_shares_calibration"] == [], disjointness
-    for side in ("training", "selection"):
-        assert disjointness[side] == {"groups": [], "source_digests": []}, (
-            disjointness
-        )
+    assert disjointness.holdout_shares_calibration == [], disjointness
+    for side in (disjointness.training, disjointness.selection):
+        assert side is not None, disjointness
+        assert (side.groups, side.source_digests) == ([], []), disjointness
     bucket = read_bucket(chain.root, chain.bucket)
     assert bucket.assessment_id == record.assessment_id
     assert (bucket.producer, bucket.execution) == (

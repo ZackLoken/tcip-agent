@@ -270,7 +270,9 @@ def _assess(
 def _band_total(record: dict) -> int:
     return sum(
         n
-        for side in record["criterion"]["count"]["band_gt_counts"].values()
+        for side in record["criterion"]["reserved_region"][
+            "band_gt_counts"
+        ].values()
         for n in side.values()
     )
 
@@ -461,7 +463,7 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path) -> None:
         sorted(s.side for s in samples)
         == ["calibration"] * 3 + ["holdout"] * 3
     )
-    counts = record["criterion"]["count"]["band_gt_counts"]
+    counts = record["criterion"]["reserved_region"]["band_gt_counts"]
     assert (
         sum(counts["calibration"].values()) > 0
         and sum(counts["holdout"].values()) > 0
@@ -572,8 +574,8 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(
 
     plain, crowd = records
     assert (
-        crowd["criterion"]["count"]["block_scale_px"]
-        > plain["criterion"]["count"]["block_scale_px"]
+        crowd["criterion"]["reserved_region"]["block_scale_px"]
+        > plain["criterion"]["reserved_region"]["block_scale_px"]
     )
     assert 0 < _band_total(crowd) < _band_total(plain)
 
@@ -592,7 +594,7 @@ def test_the_band_scale_prefers_plant_pitch_when_the_run_names_plant_files(
     )
     exp = _attested(tmp_path, plant_csv_paths=[str(plant_csv)])
 
-    source = _assess(exp)["criterion"]["count"]["block_scale_source"]
+    source = _assess(exp)["criterion"]["reserved_region"]["block_scale_source"]
 
     assert source.startswith("plant grid pitch"), source
 
@@ -600,7 +602,7 @@ def test_the_band_scale_prefers_plant_pitch_when_the_run_names_plant_files(
 def test_the_band_scale_falls_back_to_object_spacing_with_no_plant_files(
     tmp_path: Path,
 ) -> None:
-    source = _assess(_attested(tmp_path))["criterion"]["count"][
+    source = _assess(_attested(tmp_path))["criterion"]["reserved_region"][
         "block_scale_source"
     ]
 
@@ -658,7 +660,7 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
 
     from tcip_mcp.assessment import read_assessment
 
-    counts = record["criterion"]["count"]["band_gt_counts"]
+    counts = record["criterion"]["reserved_region"]["band_gt_counts"]
     extents = {
         s.sample.member: s.sample.extent
         for s in read_assessment(
@@ -703,7 +705,9 @@ def test_the_recorded_density_caps_the_whole_mosaic_at_its_own_pixels(
 
     in_mosaic = len(json_io.read_label_document(exp["label"]).annotations)
     densest_band = max(
-        record["criterion"]["count"]["band_gt_counts"]["calibration"].values()
+        record["criterion"]["reserved_region"]["band_gt_counts"][
+            "calibration"
+        ].values()
     )
     assert in_mosaic > densest_band
     assert (
@@ -768,13 +772,13 @@ def test_the_assessment_records_the_band_counts_and_test_settings_it_ran_under(
     assert "error" not in answered, answered
     record = read_assessment(exp["project"], answered["assessment_id"])
 
-    count = record.criterion["count"]
-    assert isinstance(count, dict)
-    assert (count["k_cal"], count["k_test"]) == (2, 3)
-    assert count["equivalence_z"] == EQUIVALENCE_Z
-    curve = count["calibration_curve"]
-    assert isinstance(curve, dict)
-    assert curve["dispersion_quantile"] == DISPERSION_QUANTILE
+    count, reserved = record.criterion.count, record.criterion.reserved_region
+    assert count is not None and reserved is not None
+    assert (reserved.k_cal, reserved.k_test) == (2, 3)
+    assert count.equivalence_z == EQUIVALENCE_Z
+    assert (
+        count.calibration_curve["dispersion_quantile"] == DISPERSION_QUANTILE
+    )
     assert record.rationale == RATIONALE
     for door in (
         assess_reserved_regions,
