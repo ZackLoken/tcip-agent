@@ -366,7 +366,6 @@ def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(
             tmp_path / "out.csv",
             mismatched_trait,
             value_key="area_mm2",
-            buckets=[],
         )
 
 

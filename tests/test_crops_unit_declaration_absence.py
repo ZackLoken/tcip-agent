@@ -198,5 +198,4 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(
             "bark_thickness",
             value_key="thickness_cm",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
-            buckets=[],
         )
