@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
@@ -1369,6 +1370,29 @@ def test_a_relative_root_raised_inside_the_reader_escapes_as_a_bad_key(
 
     with pytest.raises(ts.BadKeyError):
         ts.read_raw(ts.read, relative, "the record this test reads")
+
+
+def test_a_write_the_driver_refuses_for_a_read_only_database_raises_database_refused(
+    store: Harness,
+) -> None:
+    """A driver error that is not contention, a write to a read-only database file, is refused."""
+    key = store.key(LWW, "anything")
+    ts.replace(key, {"written": 1})
+    ts.release_root(str(store.root))
+    path = database_file(str(store.root))
+    path.chmod(stat.S_IREAD)
+
+    try:
+        with pytest.raises(ts.StoreError) as refused:
+            ts.replace(key, {"written": 2})
+    finally:
+        ts.release_root(str(store.root))
+        path.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+    assert str(refused.value).startswith(
+        f"the store database under {key.root} refused the operation: "
+    )
+    assert type(refused.value) is ts.DatabaseRefusedError
 
 
 def test_enumerating_review_verdicts_answers_identities_that_read_back(
