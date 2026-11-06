@@ -290,6 +290,7 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
+    from tests._mapping_fixtures import mapping_disclosure
 
     bucket = _assessed(tmp_path, PER_PLANT_COUNT_AGGREGATE, "exp-kind-matched")
     delivered = deliver_per_plant_aggregate(
@@ -297,12 +298,12 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
         _RECORDS,
         str(tmp_path / "matched.csv"),
         value_key="count",
-        plant_attribution="image",
         delivered_phenotype="stem_count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket],
         plants=["PLANT_A"],
         door="test",
+        plant_mapping=mapping_disclosure(tmp_path),
         actor=None,
     )
 
@@ -322,6 +323,7 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
+    from tests._mapping_fixtures import mapping_disclosure
 
     bucket = _assessed(tmp_path, PER_IMAGE_COUNT, "exp-kind-crossed")
     with pytest.raises(
@@ -334,12 +336,12 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
             _RECORDS,
             str(tmp_path / "crossed.csv"),
             value_key="count",
-            plant_attribution="image",
             delivered_phenotype="stem_count",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[bucket],
             plants=["PLANT_A"],
             door="test",
+            plant_mapping=mapping_disclosure(tmp_path),
             actor=None,
         )
     assert not (tmp_path / "crossed.csv").exists()

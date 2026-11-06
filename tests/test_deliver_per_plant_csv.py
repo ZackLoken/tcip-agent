@@ -148,7 +148,6 @@ def _deliver(
         str(dataset_root),
         buckets,
         value_key="count",
-        plant_attribution="image",
         **kwargs,
         actor=None,
     )
@@ -361,6 +360,20 @@ def test_a_capture_added_since_the_mapping_was_built_refuses(
     assert not (tmp_path / "o.csv").exists()
 
 
+def _arguments(rows: list[dict]) -> dict:
+    """Return the door's arguments over ``rows``, naming no ``plant_mapping``."""
+    return {
+        "results": rows,
+        "output_path": "o.csv",
+        "delivered_phenotype": "stem_count",
+        "delivery_kind": KIND,
+        "plants": ["P1"],
+        "dataset_root": "ds",
+        "buckets": ["manual/2026-02-11"],
+        "value_key": "count",
+    }
+
+
 def _called_with(rows: list[dict]) -> str:
     """Call ``deliver_per_plant_csv`` through the MCP server over ``rows``; return its answer.
 
@@ -372,19 +385,26 @@ def _called_with(rows: list[dict]) -> str:
     return str(
         called_through_the_server(
             "deliver_per_plant_csv",
-            {
-                "results": rows,
-                "output_path": "o.csv",
-                "delivered_phenotype": "stem_count",
-                "delivery_kind": KIND,
-                "plants": ["P1"],
-                "dataset_root": "ds",
-                "buckets": ["manual/2026-02-11"],
-                "value_key": "count",
-                "plant_attribution": "image",
-            },
+            {**_arguments(rows), "plant_mapping": "valley"},
         )
     )
+
+
+def test_the_door_refuses_a_call_naming_no_plant_mapping_at_its_schema() -> (
+    None
+):
+    """A call naming no ``plant_mapping`` is refused by the door's own schema, by the name.
+
+    The refusal is the argument schema's, before any delivery runs.
+    """
+    from tests._server_calls import called_through_the_server
+
+    refused = called_through_the_server(
+        "deliver_per_plant_csv", _arguments([{"plant_id": "P1", "value": 2}])
+    )
+
+    assert "validation error" in str(refused)
+    assert "plant_mapping" in str(refused)
 
 
 @pytest.mark.parametrize(

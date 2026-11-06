@@ -305,7 +305,7 @@ deliver_per_plant_csv(
     dataset_root=dataset_root,
     buckets=["stage-b/<date>"],
     value_key="count",
-    plant_attribution=build.plant_attribution,
+    plant_mapping=mapping_name,
 )
 ```
 

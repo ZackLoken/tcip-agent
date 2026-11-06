@@ -22,10 +22,9 @@ def deliver_per_plant_csv(
     dataset_root: str,
     buckets: list[str],
     value_key: str,
-    plant_attribution: str,
+    plant_mapping: str,
     crop: str = "",
     pipeline_version: str = "",
-    plant_mapping: str = "",
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
     *,
@@ -44,9 +43,10 @@ def deliver_per_plant_csv(
     unvalidated delivery ships only under ``acknowledgment_id``, a breeder's recorded
     acknowledgment of exactly this result, which this door executes and never records.
 
-    ``plant_mapping``, when named, is a claim about where the rows' plant identities came from,
-    disclosed through ``plant_mapping.plant_mapping_disclosure``, which refuses a delivered plant
-    the mapping assigned on no delivered date.
+    ``plant_mapping`` is the claim about where the rows' plant identities came from, disclosed
+    through ``plant_mapping.plant_mapping_disclosure``, which refuses an unstored mapping and a
+    delivered plant the mapping assigned on no delivered date; the rows' ``plant_attribution`` is
+    that disclosure's.
 
     Args:
         results: Per-image observations, each the plant ``build_plant_mapping`` assigned its
@@ -62,10 +62,8 @@ def deliver_per_plant_csv(
         buckets: The names of the published buckets the values came from, one per capture date;
             each stands for the date its own record states.
         value_key: The quantity every value is, one the operationalization covers.
-        plant_attribution: The granularity the rows' plants were attributed at, ``image`` for
-            ``build_plant_mapping``'s mapping; written into every row.
+        plant_mapping: The persisted plant mapping the rows' plant ids came from.
         crop / pipeline_version: Written into every row.
-        plant_mapping: The persisted plant mapping the rows' plant ids came from, or empty.
         scale_assessment_id: The physical-scale assessment a dimensional value rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
 
@@ -80,19 +78,14 @@ def deliver_per_plant_csv(
         root = located(dataset_root, project)
         delivered = [read_bucket(root, b) for b in buckets]
         wanted = population(plants)
-        disclosure = (
-            mapping.plant_mapping_disclosure(
-                project, plant_mapping, by_recorded_date(delivered), wanted
-            )
-            if plant_mapping
-            else None
+        disclosure = mapping.plant_mapping_disclosure(
+            project, plant_mapping, by_recorded_date(delivered), wanted
         )
         return deliver_per_plant_aggregate(
             project,
             results,
             str(located(output_path, project)),
             value_key=value_key,
-            plant_attribution=plant_attribution,
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,

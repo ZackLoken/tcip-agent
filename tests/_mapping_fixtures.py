@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         MappingBuild,
+        PlantMappingDisclosure,
         StatedRadius,
     )
 
@@ -197,6 +198,25 @@ def mapping_over(
         dates=dates,
         match_radius=match_radius,
     )
+
+
+def mapping_disclosure(project: Path) -> PlantMappingDisclosure:
+    """Return the ``plant_mapping`` disclosure a delivery carries over a mapping of ``PLOTS``.
+
+    The mapping is ``build_mapping``'s over one date's geolocated captures of :data:`PLOTS`, written
+    under ``project``; its disclosure is the build's own, over that date.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MappingVerification,
+    )
+
+    date = "2026-02-11"
+    scene = project / "mapping_scene"
+    geolocated_captures(scene / "ds", [date])
+    build = mapping_over(
+        scene / "ds", [write_plots_csv(scene / "plants.csv")], project
+    )
+    return build.delivery_disclosure(MappingVerification([], []), [date])
 
 
 def map_captures(

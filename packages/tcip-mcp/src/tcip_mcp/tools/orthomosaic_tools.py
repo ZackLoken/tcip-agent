@@ -197,7 +197,6 @@ def orthomosaic_plant_counts(
             registry_ref,
             cast(float, position_error_m),
         )
-        attribution = disclosure.plant_attribution
     else:
         require_named_plants(registered)
         in_frame, outside = plants_in_frame(
@@ -214,13 +213,12 @@ def orthomosaic_plant_counts(
         counts = {p.plant_id: 0 for p in in_frame}
         for a in attributed:
             counts[cast(str, a.plant_id)] += 1
-        attribution = DetectionAssignment.plant_attribution
         disclosure = PlantRegistryDisclosure(
             plant_registry=registry_ref,
             raster_identity=recorded_identity,
             nn_tolerance_m=tolerance,
             detections_unattributed=len(assignments) - len(attributed),
-            plant_attribution=attribution,
+            plant_attribution=DetectionAssignment.plant_attribution,
             plants_outside_raster=sorted(p.plant_id for p in outside),
         )
     refused = {
@@ -243,7 +241,6 @@ def orthomosaic_plant_counts(
         [PlantObservation(plant_id=p, value=counts[p]) for p in wanted],
         str(output_csv_path),
         value_key=_PER_PLANT_VALUE_KEY,
-        plant_attribution=attribution,
         delivered_phenotype=delivered_phenotype,
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[found],

@@ -188,6 +188,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         deliver_per_plant_aggregate,
     )
     from tests._chain_fixtures import acknowledged, predicted, published
+    from tests._mapping_fixtures import mapping_disclosure
     from tests._producer_fixtures import write_image
 
     _author_tolerance(tmp_path)
@@ -213,6 +214,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     )
     bucket = read_bucket(published_bucket.root, published_bucket.name)
     records = [PlantObservation(plant_id="p1", value=12.5)]
+    disclosure = mapping_disclosure(tmp_path)
 
     def delivered(
         out: Path, ack: str | None, over: Bucket, **kw: str | None
@@ -222,12 +224,12 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
             records,
             str(out),
             value_key="area_mm2",
-            plant_attribution="image",
             delivered_phenotype="plant_surface_area",
             delivery_kind="per_plant_count_aggregate",
             buckets=[over],
             plants=["p1"],
             door="test_scale",
+            plant_mapping=disclosure,
             acknowledgment_id=ack,
             actor=None,
             **kw,
