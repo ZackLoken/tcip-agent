@@ -35,6 +35,8 @@ torch = pytest.importorskip(
     "torch"
 )  # evaluation.py imports torch at module load
 
+from torch.nn import Module  # noqa: E402
+
 from tcip_annotation.matching import match_pairs  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
@@ -89,6 +91,7 @@ from tests._training_values import (  # noqa: E402
     drawn_split,
     evaluation_block,
 )
+from tests.bespoke_models import _KeepsItsOperatingPoint  # noqa: E402
 
 WEIGHTS = ScoreWeights.model_validate(SCORE_WEIGHTS)
 
@@ -366,13 +369,14 @@ def test_golden_operating_point_pickers() -> None:
     assert at06["count_bias_mean"] == pytest.approx(0.0)
 
 
-def test_pickers_choose_among_the_entries_whose_f1_is_defined() -> None:
-    """Both pickers choose among the curve entries whose F1 is a number, and none is None.
+def test_pickers_rank_an_undefined_f1_below_every_defined_one() -> None:
+    """Both pickers read a curve entry with an undefined (None) F1 without comparing it as a number.
 
     One detection scored 0.5 over a frame holding no object: at conf 0.0 it is a false positive
-    (F1 0.0), and at conf 0.95 the entry counts nothing, so its F1 is undefined. The undefined
-    entry is never picked, whichever order the grid lists them in; a curve with no defined entry
-    has no pick.
+    (F1 0.0), and at conf 0.95 the entry counts nothing, so its F1 is undefined. The F1 maximum
+    is the defined entry whichever order the grid lists them in, and the count-unbiased pick
+    ranks the zero-bias entry first and the undefined F1 last among its ties. A curve with no
+    defined F1 still answers a conf.
     """
     detected = [_rec([], _dt(([90.0, 90.0, 20.0, 20.0], 0.5)), w=400, h=400)]
     sweep = derive_operating_point_curve(
@@ -385,37 +389,68 @@ def test_pickers_choose_among_the_entries_whose_f1_is_defined() -> None:
     assert undefined["f1"] is None
     assert defined["f1"] == 0.0
     assert pick_f1_max(sweep) == 0.0
-    assert pick_count_unbiased(sweep) == 0.0
+    assert pick_count_unbiased(sweep) == 0.95
 
     nothing = derive_operating_point_curve(
         [_rec([], [], w=400, h=400)],
         criterion=CENTER_10,
         dispersion_quantile=DISPERSION_QUANTILE,
-        conf_grid=[0.0],
+        conf_grid=[0.0, 0.5],
     )
-    assert nothing["curve"][0]["f1"] is None
-    assert pick_f1_max(nothing) is None
-    assert pick_count_unbiased(nothing) is None
+    assert [c["f1"] for c in nothing["curve"]] == [None, None]
+    assert pick_f1_max(nothing) == 0.0
+    assert pick_count_unbiased(nothing) == 0.5
 
 
-def test_evaluate_over_a_loader_yielding_nothing_reports_none_for_a_detector() -> (
+class _FindsNothing(_KeepsItsOperatingPoint, Module):
+    """A detector with a loss of one that predicts no box for any frame."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
+
+    def forward(
+        self, images: list[Tensor], targets: list[dict] | None = None
+    ) -> dict[str, Tensor] | list[dict[str, Tensor]]:
+        if self.training:
+            return {"loss": torch.ones(())}
+        return [
+            self.governed(
+                {
+                    "boxes": torch.zeros((0, 4)),
+                    "scores": torch.zeros(0),
+                    "labels": torch.zeros(0, dtype=torch.long),
+                }
+            )
+            for _ in images
+        ]
+
+
+def test_evaluate_over_frames_holding_no_object_reports_none_and_an_objective_of_none() -> (
     None
 ):
-    """A detector evaluated over a loader that yields no batch has no defined score.
+    """A detector evaluated over frames with no object and no prediction has no defined score.
 
-    Every count-based score and both average precisions are None, and so is the objective.
+    The loss is positive, so the objective is None because its F1 and mAP50 are, not because
+    of the loss. Every count-based score and both average precisions are None.
     """
-    pytest.importorskip("torchvision")
     from tcip_mcp.pipelines.schemas import ModelDims
     from tcip_mcp.pipelines.training.evaluation import evaluate
-    from tests import bespoke_models
-    from tests._chain_fixtures import detector_values
 
+    images = [torch.rand(3, 64, 64) for _ in range(2)]
+    targets = [
+        {
+            "boxes": torch.zeros((0, 4)),
+            "labels": torch.zeros(0, dtype=torch.long),
+            "iscrowd": torch.zeros(0, dtype=torch.long),
+            "image_id": i,
+        }
+        for i in range(2)
+    ]
     result = evaluate(
-        bespoke_models.build_bespoke_detection(
-            num_classes=1, **detector_values()
-        ),
-        [],
+        _FindsNothing(),
+        [(images, targets)],
         torch.device("cpu"),
         "detection",
         dims=ModelDims(in_chans=3, num_classes=2),
@@ -426,6 +461,7 @@ def test_evaluate_over_a_loader_yielding_nothing_reports_none_for_a_detector() -
         density=1.0,
         mask_cut=None,
     )
+    assert result["loss"] > 0
     for key in ("precision", "recall", "f1", "map50", "map", "objective"):
         assert result[key] is None, key
 
