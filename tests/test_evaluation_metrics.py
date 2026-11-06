@@ -127,6 +127,17 @@ def test_composite_objective_has_no_score_for_a_degenerate_epoch() -> None:
     assert compute_composite_objective(float("inf"), 0.5, 0.5, w) is None
 
 
+def test_composite_objective_has_no_score_when_a_term_is_undefined() -> None:
+    """The composite objective is None when its F1 or its mAP50 is undefined (None).
+
+    A term that cannot be computed is never read as 0.0 and blended in.
+    """
+    w = WEIGHTS
+    assert compute_composite_objective(2.0, None, 0.4, w) is None
+    assert compute_composite_objective(2.0, 0.5, None, w) is None
+    assert compute_composite_objective(2.0, None, None, w) is None
+
+
 # --------------------------------------------------------------------------
 # detection metrics under the IoU convention
 # --------------------------------------------------------------------------
@@ -283,15 +294,22 @@ def test_detection_metrics_over_an_empty_side() -> None:
             by_mask=False,
         )
 
-    # (a) no predictions over ground truth: every object missed.
+    # (a) no predictions over ground truth: every object missed, so recall, F1 and average
+    # precision are defined and 0.0, and no prediction leaves precision undefined.
     m = metrics(gt, [])
-    assert m["fn"] == 1 and m["recall"] == 0.0 and m["map50"] == 0.0
-    # (b) predictions over no ground truth: no object to find, so no precision to average.
+    assert m["fn"] == 1 and m["precision"] is None
+    assert (m["recall"], m["f1"], m["map50"], m["map"]) == (0.0, 0.0, 0.0, 0.0)
+    # (b) predictions over no ground truth: precision and F1 are defined and 0.0; no object to
+    # find leaves recall and average precision undefined.
     m = metrics([], dt)
-    assert m["map50"] == 0.0
-    # (c) both empty.
+    assert (m["precision"], m["f1"]) == (0.0, 0.0)
+    assert m["recall"] is None and m["map50"] is None and m["map"] is None
+    # (c) both empty: every score is undefined.
     m = metrics([], [])
-    assert m["tp"] == 0 and m["fp"] == 0 and m["map50"] == 0.0
+    assert m["tp"] == 0 and m["fp"] == 0
+    assert all(
+        m[k] is None for k in ("precision", "recall", "f1", "map50", "map")
+    )
 
 
 # --------------------------------------------------------------------------
@@ -346,6 +364,70 @@ def test_golden_operating_point_pickers() -> None:
     assert pick_f1_max(sweep) == pytest.approx(0.0)  # recall-max point
     at06 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.6))
     assert at06["count_bias_mean"] == pytest.approx(0.0)
+
+
+def test_pickers_choose_among_the_entries_whose_f1_is_defined() -> None:
+    """Both pickers choose among the curve entries whose F1 is a number, and none is None.
+
+    One detection scored 0.5 over a frame holding no object: at conf 0.0 it is a false positive
+    (F1 0.0), and at conf 0.95 the entry counts nothing, so its F1 is undefined. The undefined
+    entry is never picked, whichever order the grid lists them in; a curve with no defined entry
+    has no pick.
+    """
+    detected = [_rec([], _dt(([90.0, 90.0, 20.0, 20.0], 0.5)), w=400, h=400)]
+    sweep = derive_operating_point_curve(
+        detected,
+        criterion=CENTER_10,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        conf_grid=[0.95, 0.0],
+    )
+    undefined, defined = sweep["curve"]
+    assert undefined["f1"] is None
+    assert defined["f1"] == 0.0
+    assert pick_f1_max(sweep) == 0.0
+    assert pick_count_unbiased(sweep) == 0.0
+
+    nothing = derive_operating_point_curve(
+        [_rec([], [], w=400, h=400)],
+        criterion=CENTER_10,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        conf_grid=[0.0],
+    )
+    assert nothing["curve"][0]["f1"] is None
+    assert pick_f1_max(nothing) is None
+    assert pick_count_unbiased(nothing) is None
+
+
+def test_evaluate_over_a_loader_yielding_nothing_reports_none_for_a_detector() -> (
+    None
+):
+    """A detector evaluated over a loader that yields no batch has no defined score.
+
+    Every count-based score and both average precisions are None, and so is the objective.
+    """
+    pytest.importorskip("torchvision")
+    from tcip_mcp.pipelines.schemas import ModelDims
+    from tcip_mcp.pipelines.training.evaluation import evaluate
+    from tests import bespoke_models
+    from tests._chain_fixtures import detector_values
+
+    result = evaluate(
+        bespoke_models.build_bespoke_detection(
+            num_classes=1, **detector_values()
+        ),
+        [],
+        torch.device("cpu"),
+        "detection",
+        dims=ModelDims(in_chans=3, num_classes=2),
+        trait=None,
+        conf_threshold=VALIDATION_CONF,
+        iou_threshold=IOU_THRESHOLD,
+        score_weights=WEIGHTS,
+        density=1.0,
+        mask_cut=None,
+    )
+    for key in ("precision", "recall", "f1", "map50", "map", "objective"):
+        assert result[key] is None, key
 
 
 # match_pairs: one matcher, two stated policies (score_first for the count, distance_first for

@@ -48,21 +48,24 @@ VAL_LOSS_KEY = VAL_METRIC_PREFIX + "loss"
 """The validation loss's key in a run's metrics log."""
 
 
-def _rounded(value: JsonValue) -> JsonValue:
-    """Round a finite numeric metric, leaving other values unchanged."""
+def rounded(value: JsonValue, places: int = 6) -> JsonValue:
+    """Round a finite numeric metric to ``places``, leaving other values (None included) as given.
+
+    Six places is the precision a reported metric is stored at.
+    """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return value
-    return round(value, 6) if math.isfinite(value) else value
+    return round(value, places) if math.isfinite(value) else value
 
 
 def _reported_metrics(values: dict) -> dict:
     """Return the task's metrics in their stored form.
 
     Scalars are rounded and a non-finite one becomes null beside a field naming its state;
-    the per-class mappings some tasks return, which already carry None for an absent class,
-    pass through untouched.
+    the per-class mappings some tasks return, which carry None for an undefined score
+    (:func:`classification_metrics`), pass through untouched.
     """
-    return stored_numbers({k: _rounded(v) for k, v in values.items()})
+    return stored_numbers({k: rounded(v) for k, v in values.items()})
 
 
 # ====================================================================
@@ -71,38 +74,38 @@ def _reported_metrics(values: dict) -> dict:
 
 
 def compute_composite_objective(
-    val_loss: float, f1: float, map50: float, w: ScoreWeights
+    val_loss: float, f1: float | None, map50: float | None, w: ScoreWeights
 ) -> float | None:
     """Return the lower-is-better score blending loss, F1 and mAP50, or ``None``.
 
     ``None`` means the epoch has no useful score. The score is
     ``w.loss*loss + w.f1*(1-f1)*10 + w.map50*(1-map50)*10``, ``w`` the run's stated
-    ``evaluation.score_weights``. A non-positive or non-finite loss, or both quality terms below
-    0.01, answers ``None``.
+    ``evaluation.score_weights``. A non-positive or non-finite loss, an undefined (``None``)
+    F1 or mAP50, or both quality terms below 0.01, answers ``None``.
     """
     if val_loss <= 0 or not math.isfinite(val_loss):
         return None
-    f1v = f1 if math.isfinite(f1) else 0.0
-    m50 = map50 if math.isfinite(map50) else 0.0
-    if f1v < 0.01 and m50 < 0.01:
+    if f1 is None or map50 is None or (f1 < 0.01 and map50 < 0.01):
         return None
     return (
         w.loss * val_loss
-        + w.f1 * (1.0 - f1v) * 10
-        + w.map50 * (1.0 - m50) * 10
+        + w.f1 * (1.0 - f1) * 10
+        + w.map50 * (1.0 - map50) * 10
     )
 
 
-def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
-    """Return precision, recall and F1, using zero for empty denominators."""
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall
-        else 0.0
-    )
-    return {"precision": precision, "recall": recall, "f1": f1}
+def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float | None]:
+    """Return precision, recall and F1 of ``tp`` true, ``fp`` false and ``fn`` missed counts.
+
+    Precision is undefined (``None``) with no prediction (``tp + fp`` is 0), recall with no object
+    (``tp + fn`` is 0), and F1, ``2tp / (2tp + fp + fn)``, with neither (all three 0): one
+    undefined side does not undefine it.
+    """
+    return {
+        "precision": tp / (tp + fp) if tp + fp else None,
+        "recall": tp / (tp + fn) if tp + fn else None,
+        "f1": 2 * tp / (2 * tp + fp + fn) if tp + fp + fn else None,
+    }
 
 
 _AP_RECALL_POINTS = 101
@@ -153,14 +156,15 @@ def average_precision(
     criterion: dict,
     *,
     held: dict | None = None,
-) -> float:
+) -> float | None:
     """Return the average precision of every detection in ``per_image`` under ``criterion``.
 
     It is the area under the precision-recall curve of the detections matched under
     ``criterion`` (:func:`matched`, every detection), averaged over the classes the ground
     truth's objects carry: per class, detections ranked by score across images, one a crowd
     region ignores counting neither way, precision made monotone from the right and read at
-    :data:`_AP_RECALL_POINTS` recall points. ``0.0`` for a reference holding no object.
+    :data:`_AP_RECALL_POINTS` recall points. ``None`` for a reference holding no object, where
+    it is undefined.
     """
     images = list(zip(per_image, matched(per_image, criterion, held=held)))
     per_class = []
@@ -199,7 +203,7 @@ def average_precision(
                 )
             )
         )
-    return float(np.mean(per_class)) if per_class else 0.0
+    return float(np.mean(per_class)) if per_class else None
 
 
 def gt_objects(
@@ -429,7 +433,7 @@ def counted(
         "tp": tp,
         "fp": fp,
         "fn": fn,
-        **{k: round(v, 6) for k, v in precision_recall_f1(tp, fp, fn).items()},
+        **{k: rounded(v) for k, v in precision_recall_f1(tp, fp, fn).items()},
         "criterion": criterion,
     }
 
@@ -638,13 +642,22 @@ def worst_class_count_bias(entry: dict) -> float:
     )
 
 
-def pick_count_unbiased(sweep: dict) -> float:
+def _scored_entries(sweep: dict) -> list[dict]:
+    """Return the sweep's curve entries whose F1 is defined, the ones a picker chooses among."""
+    return [c for c in sweep["curve"] if c["f1"] is not None]
+
+
+def pick_count_unbiased(sweep: dict) -> float | None:
     """Return the conf that minimizes the worst per-class |mean per-image count bias|.
 
-    Ties break on lower pooled |bias|, higher F1, lower |error|, then higher conf.
+    Ties break on lower pooled |bias|, higher F1, lower |error|, then higher conf. It chooses
+    among the entries whose F1 is defined, and answers ``None`` when none is.
     """
-    best = min(
-        sweep["curve"],
+    entries = _scored_entries(sweep)
+    if not entries:
+        return None
+    return min(
+        entries,
         key=lambda c: (
             worst_class_count_bias(c),
             abs(c["count_bias_mean"]),
@@ -652,8 +665,7 @@ def pick_count_unbiased(sweep: dict) -> float:
             c["abs_count_error_mean"],
             -c["conf"],
         ),
-    )
-    return best["conf"]
+    )["conf"]
 
 
 def classes_with_evidence(entry: dict) -> set[str]:
@@ -670,9 +682,12 @@ def classes_with_evidence(entry: dict) -> set[str]:
     }
 
 
-def pick_f1_max(sweep: dict) -> float:
-    """Return the conf of the sweep's curve entry with the highest F1."""
-    return max(sweep["curve"], key=lambda c: c["f1"])["conf"]
+def pick_f1_max(sweep: dict) -> float | None:
+    """Return the conf of the sweep's curve entry with the highest defined F1, ``None`` for none."""
+    entries = _scored_entries(sweep)
+    if not entries:
+        return None
+    return max(entries, key=lambda c: c["f1"])["conf"]
 
 
 def _mask_rings(
@@ -1438,7 +1453,9 @@ def detection_metrics(
     own counts ride beside them as ``iou_precision``/``iou_recall``/``iou_f1`` and
     ``map50_role`` labels the convention's numbers comparability only. ``matchings`` holds each
     image's governing matching (:func:`matched`), the one the counts sum; every matching is made
-    once per distinct criterion and detection set.
+    once per distinct criterion and detection set. A score with nothing to divide is ``None``
+    (:func:`precision_recall_f1`, :func:`average_precision`), and ``map`` is the mean of the
+    defined thresholds' average precision.
     """
     criterion = (
         comparability_criterion(iou_threshold, by_mask=by_mask)
@@ -1454,14 +1471,15 @@ def detection_metrics(
         )
         for t in AP_IOU_THRESHOLDS
     }
+    defined_ap = [v for v in ap.values() if v is not None]
     out: dict = {
         **{
             k: counts[k]
             for k in ("tp", "fp", "fn", "precision", "recall", "f1")
         },
         "governing_criterion": criterion,
-        "map50": round(ap[COMPARABILITY_IOU], 6),
-        "map": round(float(np.mean(list(ap.values()))), 6),
+        "map50": rounded(ap[COMPARABILITY_IOU]),
+        "map": rounded(float(np.mean(defined_ap)) if defined_ap else None),
         "matchings": governing,
     }
     if trait is not None:
@@ -1646,7 +1664,7 @@ def evaluate(
 
     model.eval()
     loss = total_loss / max(n_loss, 1)
-    result: dict = stored_number("loss", _rounded(loss))
+    result: dict = stored_number("loss", rounded(loss))
 
     if is_detection:
         m = detection_metrics(
@@ -1668,7 +1686,7 @@ def evaluate(
             result.update(
                 stored_number(
                     "objective",
-                    _rounded(
+                    rounded(
                         compute_composite_objective(
                             loss, m["f1"], m["map50"], score_weights
                         )
