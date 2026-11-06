@@ -83,6 +83,22 @@ def test_absent_class_excluded_from_mean() -> None:
     assert m["mIoU"] == pytest.approx(1.0)  # only classes 0,1 counted
 
 
+def test_an_empty_set_has_no_defined_score() -> None:
+    # No pixel, or every pixel ignored: no class is present and no pixel is left to be right.
+    nothing = torch.empty(0, dtype=torch.long)
+    ignored = torch.tensor([255, 255])
+    for pred, gt, ignore_index in (
+        (nothing, nothing, None),
+        (torch.tensor([0, 1]), ignored, 255),
+    ):
+        m = semantic_seg_metrics(
+            pred, gt, num_classes=2, ignore_index=ignore_index
+        )
+        assert (m["mIoU"], m["dice"], m["pixel_acc"]) == (None, None, None)
+        assert m["per_class_iou"] == {"0": None, "1": None}
+        assert m["per_class_dice"] == {"0": None, "1": None}
+
+
 def test_ignore_index_drops_pixels() -> None:
     # Pixels 2,3 are ignore (255); the rest match perfectly.
     gt = torch.tensor([0, 0, 255, 255, 1, 1, 1, 1])
