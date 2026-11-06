@@ -620,12 +620,13 @@ def read_stored(
 ) -> tcip_store.Versioned:
     """Return the store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed).
 
-    A record that does not decode, and an absent one read with no default (``NotFoundError``),
-    raise :class:`UnreadableLabelDocumentError` with the store's own message.
+    Any of :data:`tcip_store.STORE_READ_REFUSALS` (a record that does not decode, an absent one
+    read with no default, a database that will not open or answer) raises
+    :class:`UnreadableLabelDocumentError` with the store's own message.
     """
     try:
         return tcip_store.read_versioned(key, default=default)
-    except (tcip_store.DecodeError, tcip_store.NotFoundError) as exc:
+    except tcip_store.STORE_READ_REFUSALS as exc:
         raise UnreadableLabelDocumentError(str(exc)) from exc
 
 
