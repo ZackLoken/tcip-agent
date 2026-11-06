@@ -89,11 +89,12 @@ def audit_entries(
     from tcip_store import STORE_READ_REFUSALS, read_log, unreadable
 
     key = audit_log_key(scope)
-    with unreadable(f"the audit log at {key.root}", *STORE_READ_REFUSALS):
+    log = f"the audit log at {key.root}"
+    with unreadable(log, *STORE_READ_REFUSALS):
         page = read_log(key, after=after)
     if page.corrupt:
         raise ValueError(
-            f"the audit log at {key.root} carries {len(page.corrupt)} undecodable "
+            f"{log} carries {len(page.corrupt)} undecodable "
             "entries; repair the log before trusting a read of it"
         )
     return [AuditLine.model_validate(r) for r in page.records], page.cursor
