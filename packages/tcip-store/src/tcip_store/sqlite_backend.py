@@ -426,7 +426,8 @@ class SqliteBackend:
     def _mapped(self, keys: tuple[Key, ...]) -> Generator[None]:
         """Turn a driver error raised inside into this layer's own refusal.
 
-        Contention raises ``StoreBusyError`` naming the first key the call named.
+        Contention raises ``StoreBusyError`` naming the first key the call named; any other
+        driver error raises ``DatabaseRefusedError``.
         """
         started = time.monotonic()
         try:
