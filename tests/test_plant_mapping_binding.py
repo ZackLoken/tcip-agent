@@ -432,6 +432,37 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
     assert not out_csv.exists()
 
 
+def test_the_delivery_gate_answers_409_carrying_the_readers_refusal_of_an_undecodable_mapping(
+    tmp_path: Path,
+) -> None:
+    """A built mapping whose stored bytes no longer decode refuses the delivery gate with 409.
+
+    The gate's message carries the text ``load_mapping`` raises as ``ReadRefusedError``, the
+    mapping's place before the store's decode sentence.
+    """
+    from tests._mapping_fixtures import map_captures
+    from tests._record_damage_fixtures import damage_record
+
+    _init(tmp_path)
+    map_captures(tmp_path, tmp_path / "ds", [DATES[0]], name="valley")
+    damage_record(
+        plant_mapping.plant_mapping_key(tmp_path, "valley"), b"{not valid json"
+    )
+
+    with pytest.raises(plant_mapping.MappingDeliveryError) as gated:
+        plant_mapping.resolve_delivery_mapping(tmp_path, "valley", {})
+
+    assert gated.value.status == 409
+    assert str(gated.value).startswith(
+        f"could not read mapping 'valley': plant mapping 'valley' under {tmp_path}: "
+    )
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        plant_mapping.load_mapping(tmp_path, "valley")
+    assert (
+        str(gated.value) == f"could not read mapping 'valley': {refused.value}"
+    )
+
+
 # ── rail 3: a plant CSV rewritten in place refuses, naming the file ─────────────────────
 
 

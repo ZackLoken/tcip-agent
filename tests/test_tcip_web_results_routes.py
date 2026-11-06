@@ -1144,6 +1144,80 @@ def test_the_plant_mapping_list_names_each_mapping_the_project_built(
     assert listed.json() == {"names": ["valley"]}
 
 
+def test_loading_a_plant_mapping_whose_record_will_not_decode_answers_the_readers_409(
+    client: TestClient,
+    opened_project: Path,
+) -> None:
+    """A built mapping whose stored bytes no longer decode answers 409 with the reader's refusal.
+
+    The detail is the text ``load_mapping`` raises as ``ReadRefusedError``, the mapping's place
+    before the store's decode sentence.
+    """
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tests._mapping_fixtures import map_captures
+    from tests._record_damage_fixtures import damage_record
+
+    map_captures(
+        opened_project, opened_project / "ds", ["2026-02-11"], name="valley"
+    )
+    damage_record(
+        plant_mapping.plant_mapping_key(opened_project, "valley"),
+        b"{not valid json",
+    )
+
+    resp = client.post(
+        "/api/results/plant_mapping/load", json={"name": "valley"}
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"].startswith(
+        f"plant mapping 'valley' under {opened_project}: "
+    )
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
+        plant_mapping.load_mapping(opened_project, "valley")
+    assert resp.json()["detail"] == str(refused.value)
+
+
+def test_loading_a_mapping_whose_receipt_log_is_in_a_database_that_will_not_open_answers_409(
+    client: TestClient,
+    opened_project: Path,
+) -> None:
+    """A mapping record that reads, beside a project database that will not open, answers 409.
+
+    The receipt the load requires is read from the project's own audit log, a different database
+    from the mapping record's; the detail is the text ``load_mapping`` raises as
+    ``ReadRefusedError`` naming the store's sentence.
+    """
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tcip_store.file_backend import database_file
+    from tests._mapping_fixtures import map_captures
+
+    map_captures(
+        opened_project, opened_project / "ds", ["2026-02-11"], name="valley"
+    )
+    tcip_store.release_root(opened_project)
+    foreign = database_file(str(opened_project))
+    foreign.write_bytes(b"not a database" * 100)
+
+    try:
+        resp = client.post(
+            "/api/results/plant_mapping/load", json={"name": "valley"}
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"].startswith(
+            f"the audit log at {audit_log_key(opened_project).root}: "
+        )
+        assert "not a SQLite database" in resp.json()["detail"]
+        with pytest.raises(tcip_store.ReadRefusedError) as refused:
+            plant_mapping.load_mapping(opened_project, "valley")
+    finally:
+        tcip_store.release_root(opened_project)
+        foreign.unlink()
+
+    assert resp.json()["detail"] == str(refused.value)
+
+
 def test_the_plant_mapping_list_refuses_while_no_project_is_open(
     client: TestClient,
 ) -> None:

@@ -797,12 +797,13 @@ def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
     """Return every delivery event recorded under ``project``, decoded through its declared shape.
 
     Its paths are resolved against the project; the events stand in the order produced. An event
-    its shape refuses, or one the store will not read, raises ``tcip_store.ReadRefusedError``
-    naming the event's id: the shape's issues, or the store's sentence.
+    its shape refuses, or one that will not decode or sits in a database that will not open or
+    answer, raises ``tcip_store.ReadRefusedError`` naming the event's id: the shape's issues, or
+    the store's sentence.
     """
     scope = str(project_state_dir(project))
     with tcip_store.unreadable(
-        f"the delivery events under {scope}", tcip_store.StoreError
+        f"the delivery events under {scope}", *tcip_store.STORE_READ_REFUSALS
     ):
         keys = tcip_store.keys(DELIVERY_EVENTS_STORE, scope)
     return sorted(

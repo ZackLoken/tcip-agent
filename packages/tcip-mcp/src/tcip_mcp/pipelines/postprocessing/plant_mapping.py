@@ -384,7 +384,7 @@ class MappingBuild:
         build = validated(
             _MAPPING_RECORD,
             encode_record(raw),
-            f"plant mapping {name!r} under {project}",
+            _mapping_place(project, name),
         )
         return replace(build, record_sha256=record_digest(raw))
 
@@ -1541,6 +1541,11 @@ def plant_mapping_key(project: Path | str, name: str) -> Key:
     )
 
 
+def _mapping_place(project: Path | str, name: str) -> str:
+    """Return the place a refusal of the stored mapping ``name`` under ``project`` names."""
+    return f"plant mapping {name!r} under {project}"
+
+
 def plant_mapping_names(project: Path | str) -> list[str]:
     """Return every mapping name persisted under this project that ``NAME_SEGMENT`` admits, sorted.
 
@@ -1636,7 +1641,7 @@ def persist_mapping(
         citing = _citing_delivery_event_ids(project, name, existing_digest)
         if citing and not supersede:
             raise MappingRebuildError(
-                f"plant mapping {name!r} under {project} is cited by delivery event(s) "
+                f"{_mapping_place(project, name)} is cited by delivery event(s) "
                 f"{citing}: rebuilding under this name would strand them. Pass supersede=True to "
                 "archive the current record and rebuild.",
                 event_ids=citing,
@@ -1750,7 +1755,7 @@ def _require_receipt(
         _scan_receipts(project, after=_receipt_cursor.get(root_key))
     if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
         raise ValueError(
-            f"plant mapping {name!r} under {project} carries no plant_mapping_built "
+            f"{_mapping_place(project, name)} carries no plant_mapping_built "
             f"receipt naming record {record_sha256}: this record was not written by "
             "build_plant_mapping (a forged or hand-restored record, or one whose receipt could "
             "not be written); rebuild with build_plant_mapping"
@@ -1768,7 +1773,12 @@ def load_mapping(project: Path | str, name: str) -> MappingBuild | None:
     identities included, and so is a record stored under a name other than its own or the
     archive name (:func:`archived_mapping_name`) a superseding rebuild moved it to.
     """
-    raw = tcip_store.read(plant_mapping_key(project, name), default=None)
+    raw = tcip_store.read_raw(
+        tcip_store.read,
+        plant_mapping_key(project, name),
+        _mapping_place(project, name),
+        default=None,
+    )
     if raw is None:
         return None
     build = MappingBuild.from_record(raw, project, name)
@@ -2053,7 +2063,7 @@ class MappingDeliveryError(_StatusError):
     """A delivery cannot proceed from a named mapping.
 
     ``str(exc)`` is the caller-facing message. ``status`` is the HTTP status for it (400 by
-    default, 404 for a mapping that is not stored, 409 for a store-level problem reading it).
+    default, 404 for a mapping that is not stored, 409 for one that will not read).
     """
 
 
@@ -2075,15 +2085,14 @@ def resolve_delivery_mapping(
 
     Returns the loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
-    from, a ``StoreError`` reading the mapping store included.
+    from, a mapping that will not read included.
     """
     from tcip_mcp.buckets import shared_root
     from tcip_mcp.dataset_layout import require_dataset_identity
-    from tcip_store import StoreError
 
     try:
         mapping_build = load_mapping(project, name)
-    except (StoreError, ValueError) as exc:
+    except ValueError as exc:
         raise MappingDeliveryError(
             f"could not read mapping {name!r}: {exc}", status=409
         ) from exc

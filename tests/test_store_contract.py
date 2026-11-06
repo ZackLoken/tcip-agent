@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
@@ -1301,10 +1302,97 @@ def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
     path.parent.mkdir(parents=True)
     path.write_bytes(b"not a database, only bytes under its name" * 100)
 
-    with pytest.raises(ts.StoreError) as raised:
+    with pytest.raises(ts.DatabaseRefusedError) as raised:
         ts.read(store.key(LWW, "anything"), default=None)
     assert "not a SQLite database" in str(raised.value)
     assert str(path) in str(raised.value)
+
+
+def test_a_file_that_is_not_a_database_refuses_a_transaction_as_the_same_error(
+    store: Harness,
+) -> None:
+    """A transaction opened over a non-database file raises the error a plain read raises."""
+    path = database_file(str(store.root))
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"not a database, only bytes under its name" * 100)
+    key = store.key(LWW, "anything")
+
+    with pytest.raises(ts.DatabaseRefusedError) as in_transaction:
+        with ts.transaction(key):
+            pass
+    with pytest.raises(ts.DatabaseRefusedError) as read:
+        ts.read(key, default=None)
+
+    assert str(in_transaction.value) == str(read.value)
+
+
+def test_a_file_that_is_not_a_database_reads_raw_as_an_unreadable_refusal(
+    store: Harness,
+) -> None:
+    """The reader refuses a non-database file at the database's path as ``Unreadable``.
+
+    The refusal carries the store's sentence behind the caller's place.
+    """
+    path = database_file(str(store.root))
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"not a database, only bytes under its name" * 100)
+    key = store.key(LWW, "anything")
+
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        ts.read_raw(ts.read, key, "the record this test reads", default=None)
+
+    served = refused.value.served
+    assert served.where == "the record this test reads"
+    assert served.refusal.kind == "unreadable"
+    assert "not a SQLite database" in served.refusal.message
+
+
+def test_a_transaction_misuse_raised_inside_the_reader_escapes_as_itself(
+    store: Harness,
+) -> None:
+    """A transaction read of a key the transaction does not hold is a programming error.
+
+    The reader lets it escape rather than serving it as a data refusal.
+    """
+    held = store.key(LWW, "held")
+    other = store.key(LWW, "other")
+
+    with ts.transaction(held) as txn:
+        with pytest.raises(ts.TransactionMisuseError):
+            ts.read_raw(txn.read, other, "the record this test reads")
+
+
+def test_a_relative_root_raised_inside_the_reader_escapes_as_a_bad_key(
+    store: Harness,
+) -> None:
+    """A read of a key whose root is relative is a programming error, not a data refusal."""
+    relative = ts.Key(LWW, "not/absolute", ("anything",))
+
+    with pytest.raises(ts.BadKeyError):
+        ts.read_raw(ts.read, relative, "the record this test reads")
+
+
+def test_a_write_the_driver_refuses_for_a_read_only_database_raises_database_refused(
+    store: Harness,
+) -> None:
+    """A driver error that is not contention, a write to a read-only database file, is refused."""
+    key = store.key(LWW, "anything")
+    ts.replace(key, {"written": 1})
+    ts.release_root(str(store.root))
+    path = database_file(str(store.root))
+    path.chmod(stat.S_IREAD)
+
+    try:
+        with pytest.raises(ts.StoreError) as refused:
+            ts.replace(key, {"written": 2})
+    finally:
+        ts.release_root(str(store.root))
+        path.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+    assert str(refused.value).startswith(
+        f"the store database under {key.root} refused the operation: "
+    )
+    assert type(refused.value) is ts.DatabaseRefusedError
 
 
 def test_enumerating_review_verdicts_answers_identities_that_read_back(

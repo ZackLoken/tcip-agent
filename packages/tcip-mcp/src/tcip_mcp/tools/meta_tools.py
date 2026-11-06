@@ -321,7 +321,8 @@ def read_audit_log(
     ends against each entry's own timestamp (:func:`_bound_instant`); a date ``until`` means the
     end of that whole UTC day, so ``until="2026-03-02"`` includes every entry from that date.
 
-    A page carrying undecodable entries is refused.
+    A page carrying undecodable entries, or a log in a database that will not open or answer, is
+    refused.
 
     Args:
         scope: Dataset root, project root, a path under either, or ``None`` for the project's own

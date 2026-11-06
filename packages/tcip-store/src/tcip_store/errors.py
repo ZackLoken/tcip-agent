@@ -28,6 +28,14 @@ class DecodeError(StoreError):
     """The entry exists but its bytes do not decode. Distinct from ``NotFoundError``."""
 
 
+class DatabaseRefusedError(StoreError):
+    """A root's database will not open or answer.
+
+    It is a file that is not a SQLite database, one whose schema is not this store's, or an
+    operation the driver or the file system refused.
+    """
+
+
 class BackendUnavailableError(StoreError):
     """The backend cannot provide a guarantee it must declare, so it refuses to exist."""
 

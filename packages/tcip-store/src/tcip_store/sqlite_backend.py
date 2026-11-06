@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from tcip_store.errors import (
     BackendUnavailableError,
+    DatabaseRefusedError,
     DecodeError,
     StoreBusyError,
     StoreError,
@@ -142,14 +143,14 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
 
 
 def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
-    """Refuse (``StoreError``) a database that is not this module's, before a single row is read.
+    """Refuse (``DatabaseRefusedError``) a database that is not this module's, before a row is read.
 
     Refused are a file that is not a SQLite database, or one whose schema is not this module's DDL.
     """
     try:
         found = _schema_of(conn)
     except sqlite3.DatabaseError as exc:
-        raise StoreError(
+        raise DatabaseRefusedError(
             f"{db_path} is not a SQLite database: {exc}. Something else holds the name this "
             "store's database has."
         ) from exc
@@ -166,7 +167,7 @@ def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
         if (kind, name) in expected_objects
         and sql != next(s for k, n, s in expected if (k, n) == (kind, name))
     )
-    raise StoreError(
+    raise DatabaseRefusedError(
         f"{db_path} does not carry this store's schema: missing {missing}, "
         f"unexpected {extra}, differently defined {changed}. A database this store did not "
         "build is never half-read"
@@ -339,7 +340,13 @@ class SqliteBackend:
             if conn is not None:
                 self._busy[slot] += 1
         if conn is None:
-            if not db_path.is_file():
+            try:
+                present = db_path.is_file()
+            except OSError as exc:
+                raise DatabaseRefusedError(
+                    f"{db_path} cannot be examined: {exc}"
+                ) from exc
+            if not present:
                 if not create:
                     yield None
                     return
@@ -419,7 +426,8 @@ class SqliteBackend:
     def _mapped(self, keys: tuple[Key, ...]) -> Generator[None]:
         """Turn a driver error raised inside into this layer's own refusal.
 
-        Contention raises ``StoreBusyError`` naming the first key the call named.
+        Contention raises ``StoreBusyError`` naming the first key the call named; any other
+        driver error, and contention in a call that named no key, raises ``DatabaseRefusedError``.
         """
         started = time.monotonic()
         try:
@@ -434,7 +442,7 @@ class SqliteBackend:
                     keys[0], time.monotonic() - started
                 ) from exc
             root = keys[0].root if keys else "?"
-            raise StoreError(
+            raise DatabaseRefusedError(
                 f"the store database under {root} refused the operation: {exc}"
             ) from exc
 
