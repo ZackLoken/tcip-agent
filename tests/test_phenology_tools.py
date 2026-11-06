@@ -152,7 +152,7 @@ def test_an_assessed_series_delivers_validated_milestones_under_its_revision(
     rows = csv_rows(out_csv)
     assert [r["plant_id"] for r in rows] == ["PLANT_A", "PLANT_B"]
     assert {r["validated"] for r in rows} == {"True"}
-    assert {r["delivery_event_id"] for r in rows} == {res["delivery_event_id"]}
+    assert {r["delivery_event_id"] for r in rows} == {res["event_id"]}
     (event,) = read_delivery_events(tmp_path)
     assert event.door == "deliver_phenology_milestones"
     assert event.producer.model_dump() == series.assessment["producer"]
