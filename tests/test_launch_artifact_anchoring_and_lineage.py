@@ -270,6 +270,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_records_each_non_finit
     assert report.passed is False
     assert None in report.losses and report.final is None
     assert report.final == report.losses[-1]
+    assert isinstance(report.initial, float), report
     assert report.initial == report.losses[0]
 
 

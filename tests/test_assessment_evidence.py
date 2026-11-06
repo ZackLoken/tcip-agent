@@ -124,6 +124,127 @@ def test_each_scopes_derived_pass_agrees_with_the_bias_equivalence_over_its_curv
         assert count.scope_equivalence(scope) == expected, scope
 
 
+def test_a_regression_assessment_records_its_scalar_evidence_alone_and_pairs_by_convention(
+    tmp_path: Path,
+) -> None:
+    """A regression checkpoint's assessment reads back with its scalar evidence alone.
+
+    A regressor trained over a drawn selection of a table-labeled dataset is assessed for a
+    per-plant regression delivery: the record reads back holding the scalar member and no other,
+    its failures vocabulary names, its stored score without a state companion. A bucket
+    published under it pairs proposals under the comparability convention, since it measured no
+    count.
+    """
+    import json
+
+    from tcip_mcp.assessment import (
+        ASSESSMENT_FILE,
+        assessment_dir,
+        read_assessment,
+    )
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import proposal_pairs
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.tools.calibration_tools import assess_checkpoint
+    from tcip_mcp.tools.data_tools import draw_splits
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.traits import PER_PLANT_REGRESSION_AGGREGATE
+    from tests import _trait_fixtures as fx
+    from tests._verified_checkpoint_fixtures import worker_run
+    from tests.tiny_trainer_fixtures import (
+        regressor_config,
+        write_regression_dataset,
+    )
+
+    fx.seed_delivery_traits(tmp_path)
+    revision = fx.seed_confirmed_aggregate(
+        tmp_path,
+        "plant_surface_area",
+        value_keys=["area_mm2"],
+        delivery_kind=PER_PLANT_REGRESSION_AGGREGATE,
+    )
+    root = tmp_path / "ds"
+    intensities = [0.05 + 0.09 * i for i in range(10)]
+    images_dir, table = write_regression_dataset(
+        root, intensities, [2.0 * v for v in intensities]
+    )
+    selection = tmp_path / "selection"
+    drawn = draw_splits(
+        tmp_path,
+        str(root),
+        output_path=str(selection),
+        ground_truth=str(table),
+        **drawn_split(
+            seed=2, val_ratio=0.2, calibration_ratio=0.2, holdout_ratio=0.3
+        ),
+        actor=None,
+    )
+    assert "error" not in drawn, drawn
+    checkpoint = observe(
+        worker_run(
+            tmp_path,
+            regressor_config(
+                1,
+                data={"split": {"selection_dir": str(selection)}},
+                project=tmp_path,
+            ),
+            experiment_id="exp-regression-assessed",
+        )
+    ).checkpoint
+    assert checkpoint is not None
+
+    answered = assess_checkpoint(
+        tmp_path,
+        checkpoint_path=checkpoint.path,
+        trait=revision.entry.name,
+        delivery_kind=PER_PLANT_REGRESSION_AGGREGATE,
+        selection_dir=str(selection),
+        equivalence_z=EQUIVALENCE_Z,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        rationale=RATIONALE,
+        stated=Stated(),
+        actor=None,
+    )
+    assert "error" not in answered, answered
+
+    record = read_assessment(tmp_path, answered["assessment_id"])
+    criterion = record.criterion
+    assert criterion.scalar is not None, criterion
+    assert (
+        criterion.count,
+        criterion.classifier,
+        criterion.scale,
+        criterion.reserved_region,
+    ) == (None, None, None, None)
+    assert set(record.failures) <= set(_vocabulary()), record.failures
+    stored = json.loads(
+        (
+            assessment_dir(tmp_path, record.assessment_id) / ASSESSMENT_FILE
+        ).read_text(encoding="utf-8")
+    )
+    assert set(stored["criterion"]["scalar"]) == {
+        "criterion",
+        "score",
+        "floor",
+        "n_holdout",
+    }, stored["criterion"]
+
+    published = run_inference(
+        tmp_path,
+        checkpoint_path=checkpoint.path,
+        images_dir=str(images_dir),
+        bucket="regression",
+        assessment_id=record.assessment_id,
+        stated=Stated(),
+        actor=None,
+    )
+    assert "error" not in published, published
+    bucket = read_bucket(root, "regression")
+    assert bucket.assessment_id == record.assessment_id
+    assert proposal_pairs(tmp_path, bucket, [], []) == {}
+
+
 def test_a_state_crossing_assessment_records_both_criteria_and_names_a_shared_failure_once(
     tmp_path: Path,
 ) -> None:
