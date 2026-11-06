@@ -184,6 +184,34 @@ def test_read_audit_log_refuses_on_a_page_carrying_an_undecodable_entry(
     assert "entries" not in result
 
 
+def test_read_audit_log_refuses_a_log_in_a_database_that_will_not_open(
+    project: Path,
+) -> None:
+    """A non-database file at the project's database answers the tool's error naming the log."""
+    import tcip_store
+    from tcip_mcp.tools.meta_tools import report_friction
+    from tcip_store.file_backend import database_file
+
+    report_friction(
+        project, "unexpected_behavior", "a project-scoped line", actor=None
+    )
+    tcip_store.release_root(project)
+    foreign = database_file(str(project))
+    foreign.write_bytes(b"not a database" * 100)
+
+    try:
+        result = read_audit_log(project)
+    finally:
+        tcip_store.release_root(project)
+        foreign.unlink()
+
+    assert "entries" not in result
+    assert result["error"].startswith(
+        f"the audit log at {audit_module.audit_log_key(project).root}: "
+    )
+    assert "not a SQLite database" in result["error"]
+
+
 def test_read_audit_log_refuses_a_scope_naming_no_dataset_or_project(
     project: Path,
     tmp_path: Path,
