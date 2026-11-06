@@ -384,7 +384,7 @@ class MappingBuild:
         build = validated(
             _MAPPING_RECORD,
             encode_record(raw),
-            f"plant mapping {name!r} under {project}",
+            _mapping_place(project, name),
         )
         return replace(build, record_sha256=record_digest(raw))
 
@@ -1541,6 +1541,11 @@ def plant_mapping_key(project: Path | str, name: str) -> Key:
     )
 
 
+def _mapping_place(project: Path | str, name: str) -> str:
+    """Return the place a refusal of the stored mapping ``name`` under ``project`` names."""
+    return f"plant mapping {name!r} under {project}"
+
+
 def plant_mapping_names(project: Path | str) -> list[str]:
     """Return every mapping name persisted under this project that ``NAME_SEGMENT`` admits, sorted.
 
@@ -1768,7 +1773,12 @@ def load_mapping(project: Path | str, name: str) -> MappingBuild | None:
     identities included, and so is a record stored under a name other than its own or the
     archive name (:func:`archived_mapping_name`) a superseding rebuild moved it to.
     """
-    raw = tcip_store.read(plant_mapping_key(project, name), default=None)
+    raw = tcip_store.read_raw(
+        tcip_store.read,
+        plant_mapping_key(project, name),
+        _mapping_place(project, name),
+        default=None,
+    )
     if raw is None:
         return None
     build = MappingBuild.from_record(raw, project, name)

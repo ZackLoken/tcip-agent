@@ -752,7 +752,7 @@ def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
     """
     scope = str(project_state_dir(project))
     with tcip_store.unreadable(
-        f"the delivery events under {scope}", tcip_store.StoreError
+        f"the delivery events under {scope}", *tcip_store.STORE_READ_REFUSALS
     ):
         keys = tcip_store.keys(DELIVERY_EVENTS_STORE, scope)
     return sorted(
