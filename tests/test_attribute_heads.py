@@ -555,13 +555,12 @@ class _CallsEveryFrameOnce(_KeepsItsOperatingPoint, torch.nn.Module):
         ]
 
 
-def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
-    tmp_path: Path,
-) -> None:
-    """``evaluate`` reports each attribute's agreement over the pairs its reference assesses.
+def _agreement(tmp_path: Path, *ungraded: str) -> dict:
+    """Return ``evaluate``'s ``attribute_agreement`` over two frames of one object each.
 
-    Two frames whose one object each assesses ``color`` and only the first assesses ``grade``:
-    color agrees over two matched pairs and grade over the one its reference assesses.
+    Each object carries ``color`` blue and ``grade`` high, except the frames named in
+    ``ungraded`` (``img0``, ``img1``), whose object assesses ``color`` alone. The detector calls
+    one box per frame that matches the object.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.selection import ClassScope
@@ -570,18 +569,19 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
     from tests._producer_fixtures import label_image, run_over
 
     images_dir = _frames(tmp_path / "ds", {"color": "blue", "grade": "high"})
-    label_image(
-        Path(images_dir) / "img1.png",
-        [
-            Annotation(
-                subject=SUBJECT,
-                geometry=BBox(8, 8, 24, 24),
-                attributes={"color": "blue"},
-            )
-        ],
-        64,
-        48,
-    )
+    for stem in ungraded:
+        label_image(
+            Path(images_dir) / f"{stem}.png",
+            [
+                Annotation(
+                    subject=SUBJECT,
+                    geometry=BBox(8, 8, 24, 24),
+                    attributes={"color": "blue"},
+                )
+            ],
+            64,
+            48,
+        )
     dataset, data = run_over(
         "detection", images_dir, subject=SUBJECT, stated={"num_channels": 3}
     )
@@ -602,14 +602,48 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
         mask_cut=None,
     )
 
-    agreement = metrics["attribute_agreement"]
+    return metrics["attribute_agreement"]
+
+
+def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
+    tmp_path: Path,
+) -> None:
+    """``evaluate`` reports each attribute's agreement over the pairs its reference assesses.
+
+    Two frames whose one object each assesses ``color`` and only the first assesses ``grade``:
+    color agrees over two matched pairs and grade over the one its reference assesses.
+    """
+    agreement = _agreement(tmp_path, "img1")
+
     assert set(agreement) == {"color", "grade"}
     assert agreement["color"]["pairs"] == 2
     assert agreement["grade"]["pairs"] == 1
     assert (
         agreement["color"]["accuracy"] == agreement["grade"]["accuracy"] == 1.0
     )
-    # Every pair agrees on one value, so the macro mean is that value's 1.0 over the attribute's
-    # declared values (a class no pair carries scores 0.0 and counts), not over the one present.
-    assert agreement["color"]["f1"] == pytest.approx(1 / len(COLOR.values))
-    assert agreement["grade"]["f1"] == pytest.approx(1 / len(GRADE.values))
+    # Every pair agrees on one value, so the macro mean is that value's 1.0: a value no pair
+    # carries is undefined and out of the mean.
+    assert agreement["color"]["f1"] == 1.0
+    assert agreement["grade"]["f1"] == 1.0
+    assert agreement["color"]["per_class"]["0"]["f1"] is None
+    assert agreement["grade"]["per_class"]["0"]["f1"] is None
+
+
+def test_an_attribute_no_reference_object_assesses_has_no_defined_agreement(
+    tmp_path: Path,
+) -> None:
+    """An attribute with no matched pair reports ``None`` for each score, through ``evaluate``.
+
+    Neither frame's object assesses ``grade``, so its set is empty: no accuracy, no F1 and no
+    class to report, where ``color`` keeps its two pairs.
+    """
+    agreement = _agreement(tmp_path, "img0", "img1")
+
+    assert agreement["color"]["pairs"] == 2
+    assert agreement["grade"] == {
+        "pairs": 0,
+        "accuracy": None,
+        "f1": None,
+        "per_class": {},
+        "count_bias": {},
+    }

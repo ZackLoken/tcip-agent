@@ -176,8 +176,9 @@ def count_criterion(
     ``count_bias_tolerance_frac`` of that scope's typical count, the bias plus ``equivalence_z``
     one-sided standard errors; when every class the calibration side evidences at the conf is
     evidenced on the holdout; when the held-out precision and recall both clear
-    ``holdout_match_quality_floor``; and when the held-out per-image count error at
-    ``dispersion_quantile`` is within ``count_error_tolerance``. The entry carries every one of
+    ``holdout_match_quality_floor`` (an undefined one, with nothing to score, does not clear it);
+    and when the held-out per-image count error at ``dispersion_quantile`` is within
+    ``count_error_tolerance``. The entry carries every one of
     those fields; the evidence records ``equivalence_z`` and each curve its quantile and the
     criterion it matched under. Every matching is kept in ``held`` where one is given
     (:func:`~tcip_mcp.pipelines.training.evaluation.matched`).
@@ -264,7 +265,10 @@ def count_criterion(
         failures.append("insufficient_holdout_images_per_class")
     if missing_classes:
         failures.append("holdout_missing_class")
-    if hb["precision"] < floor or hb["recall"] < floor:
+    if any(
+        score is None or score < floor
+        for score in (hb["precision"], hb["recall"])
+    ):
         failures.append("localization_quality_floor_failed")
     if hb["count_error_at_quantile"] > cast(
         float, entry.count_error_tolerance

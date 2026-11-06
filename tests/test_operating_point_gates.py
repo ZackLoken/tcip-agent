@@ -136,6 +136,34 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
     assert "count_bias_exceeds_tolerance" in failures
 
 
+def test_a_holdout_keeping_no_detection_at_the_conf_has_no_precision_and_fails_the_floor() -> (
+    None
+):
+    """A holdout with no detection at the picked conf has an undefined precision.
+
+    Its detections all score 0.05, below the calibration's pick of 0.9, so none is kept to be
+    right or wrong: precision is ``None``, the reference's objects are all missed (recall 0.0),
+    and a score that cannot be computed does not clear the floor.
+    """
+    n, obj = 20, 80
+    hold = dense_records(
+        n_images=n,
+        objects_per_image=obj,
+        id_prefix="hA",
+        shift=5.0,
+        miss_pattern=[0] * n,
+        fp_pattern=[0] * n,
+        score=0.05,
+    )
+
+    _conf, evidence, failures = _criterion(_cal_picks_conf_point_nine(), hold)
+    hb = evidence["holdout_at_conf"]
+    assert (hb["tp"], hb["fp"]) == (0, 0)
+    assert hb["precision"] is None
+    assert hb["recall"] == 0.0
+    assert "localization_quality_floor_failed" in failures
+
+
 def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail() -> (
     None
 ):
