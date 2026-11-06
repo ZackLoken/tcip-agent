@@ -357,9 +357,9 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     """Return ``project``'s persisted GUI state, or ``None`` when it has none.
 
     Its selection is rebuilt through :func:`selection_for`. A snapshot that does not decode as its
-    shape, that the store will not read, or whose selection will not build raises
-    ``tcip_store.ReadRefusedError`` naming the project: the shape's issues, or the sentence of the
-    error that stopped it.
+    shape, that will not decode or sits in a database that will not open or answer, or whose
+    selection will not build raises ``tcip_store.ReadRefusedError`` naming the project: the
+    shape's issues, or the sentence of the error that stopped it.
     """
     from tcip_mcp.registry_paths import resolved_registry_path
 
