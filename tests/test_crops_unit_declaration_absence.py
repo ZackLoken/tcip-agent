@@ -7,17 +7,24 @@ A date, ordinal, ratio, or count trait in crops.yml declares no physical unit, a
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
-from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
+from tcip_mcp.pipelines.postprocessing.aggregation import (
+    PlantObservation,
+    _resolve_units,
+)
 from tcip_mcp.traits import (
     PER_PLANT_COUNT_AGGREGATE,
     PER_PLANT_REGRESSION_AGGREGATE,
     crops_units,
 )
 from tests import _trait_fixtures as fx, csv_rows
+
+if TYPE_CHECKING:
+    from tcip_mcp.delivery import PerPlantDelivered
 
 
 @pytest.fixture(autouse=True)
@@ -38,24 +45,24 @@ def _recorded_meaning(tmp_path: Path) -> None:
     )
 
 
-def _records(value_key: str, *values: tuple[str, float]) -> list[dict]:
-    """Return one per-image record under ``value_key`` per ``(plant_id, value)``."""
+def _records(*values: tuple[str, float]) -> list[PlantObservation]:
+    """Return one per-image record per ``(plant_id, value)``."""
     return [
-        {"plant_id": plant, value_key: value, "plant_attribution": "image"}
+        PlantObservation(plant_id=plant, value=value)
         for plant, value in values
     ]
 
 
 def _deliver(
     project: Path,
-    records: list[dict],
+    records: list[PlantObservation],
     out: Path,
     delivered_phenotype: str,
     *,
     value_key: str,
     delivery_kind: str,
     buckets: list | None = None,
-) -> dict:
+) -> PerPlantDelivered:
     """Run the acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
     if buckets is None:
         pytest.importorskip("torch")
@@ -141,7 +148,7 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(
     out_path = tmp_path / "counts.csv"
     _deliver(
         tmp_path,
-        _records("detections_count", ("PLANT_001", 7), ("PLANT_014", 2)),
+        _records(("PLANT_001", 7), ("PLANT_014", 2)),
         out_path,
         "stem_count",
         value_key="detections_count",
@@ -168,7 +175,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
     out_path = tmp_path / "area.csv"
     _deliver(
         tmp_path,
-        _records("area_mm2", ("PLANT_001", 812.5)),
+        _records(("PLANT_001", 812.5)),
         out_path,
         "plant_surface_area",
         value_key="area_mm2",
@@ -186,7 +193,7 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(
     with pytest.raises(ValueError, match="declared units"):
         _deliver(
             tmp_path,
-            _records("thickness_cm", ("PLANT_001", 3.4)),
+            _records(("PLANT_001", 3.4)),
             tmp_path / "mismatch.csv",
             "bark_thickness",
             value_key="thickness_cm",

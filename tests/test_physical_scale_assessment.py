@@ -178,8 +178,13 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import Bucket, read_bucket
-    from tcip_mcp.delivery import DeliveryRefusedError, read_delivery_events
+    from tcip_mcp.delivery import (
+        DeliveryRefusedError,
+        PerPlantDelivered,
+        read_delivery_events,
+    )
     from tcip_mcp.pipelines.postprocessing.aggregation import (
+        PlantObservation,
         deliver_per_plant_aggregate,
     )
     from tests._chain_fixtures import acknowledged, predicted, published
@@ -207,18 +212,17 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         scope={"subject": SUBJECT},
     )
     bucket = read_bucket(published_bucket.root, published_bucket.name)
-    records = [
-        {"plant_id": "p1", "area_mm2": 12.5, "plant_attribution": "image"}
-    ]
+    records = [PlantObservation(plant_id="p1", value=12.5)]
 
     def delivered(
         out: Path, ack: str | None, over: Bucket, **kw: str | None
-    ) -> dict:
+    ) -> PerPlantDelivered:
         return deliver_per_plant_aggregate(
             tmp_path,
             records,
             str(out),
             value_key="area_mm2",
+            plant_attribution="image",
             delivered_phenotype="plant_surface_area",
             delivery_kind="per_plant_count_aggregate",
             buckets=[over],
@@ -229,7 +233,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
             **kw,
         )
 
-    def deliver(out: Path, **kw: str | None) -> dict:
+    def deliver(out: Path, **kw: str | None) -> PerPlantDelivered:
         return acknowledged(
             tmp_path,
             lambda ack: delivered(out, ack, bucket, **kw),

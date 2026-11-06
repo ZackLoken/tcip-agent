@@ -272,6 +272,7 @@ run_inference(
 
 # Plant identity is never guessed from a filename: build_plant_mapping assigns each image its plant.
 from pathlib import Path
+from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
 from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
 build = load_mapping(
@@ -279,16 +280,14 @@ build = load_mapping(
 )  # from a prior build_plant_mapping call
 by_stem = {a.stem: a for rows in build.assignments.values() for a in rows}
 
-# Each record carries its assignment's plant, source and distance_m, and the build's
-# plant_attribution.
+# Each record carries its assignment's plant, source and distance_m, and the image's value.
 records = [
-    {
-        **r,
-        "plant_id": a.plant_id,
-        "source": a.source,
-        "distance_m": a.distance_m,
-        "plant_attribution": build.plant_attribution,
-    }
+    PlantObservation(
+        plant_id=a.plant_id,
+        value=r["count"],
+        source=a.source,
+        distance_m=a.distance_m,
+    )
     for r in read_stage_b_preds_as_image_results(
         "stage-b/<date>"
     )  # your own per-image count reader
@@ -306,6 +305,7 @@ deliver_per_plant_csv(
     dataset_root=dataset_root,
     buckets=["stage-b/<date>"],
     value_key="count",
+    plant_attribution=build.plant_attribution,
 )
 ```
 

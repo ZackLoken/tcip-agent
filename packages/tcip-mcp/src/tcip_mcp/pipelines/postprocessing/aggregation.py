@@ -16,56 +16,67 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, ConfigDict
+
+from tcip_annotation.text import Text
+
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.delivery import PerPlantDelivered
     from tcip_mcp.pipelines.delivery_events_schema import PlantMapping
     from tcip_mcp.traits import PlantAggregation
 
 logger = logging.getLogger(__name__)
 
 
+class PlantObservation(BaseModel):
+    """One observation of one plant under the delivery's attribution, a per-plant delivery's row.
+
+    ``plant_id`` is the plant the delivery's attribution assigned the observation to, never one
+    read off a file name; ``value`` is what was observed, ``None`` for an observation that yields
+    no value. ``source`` and ``distance_m`` are the plant assignment's own, when it carries them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    plant_id: Text
+    value: int | float | None
+    source: str | None = None
+    distance_m: float | None = None
+
+
 def _per_plant(
-    records: list[dict], *, plant_aggregation: PlantAggregation, value_key: str
+    records: list[PlantObservation], *, plant_aggregation: PlantAggregation
 ) -> list[dict]:
     """Return per-plant summaries of per-image ``records``, one per ``plant_id``, sorted by it.
 
     Each summary holds the plant, its record count as ``n_images``, and as ``value`` the
-    :data:`PLANT_AGGREGATIONS` statistic ``plant_aggregation`` names over the records'
-    ``value_key`` (a record without it is a missing observation; ``None`` when every record of the
-    plant misses it).
+    :data:`PLANT_AGGREGATIONS` statistic ``plant_aggregation`` names over the records' values (a
+    ``None`` value is a missing observation; ``None`` when every record of the plant misses one).
 
-    A record carrying no ``plant_id`` refuses (``ValueError``), naming ``build_plant_mapping``.
     Where records carry an assignment's ``source``/``distance_m``, they are summarized per plant as
     ``plant_id_source`` (``"mixed"`` where the plant's images disagree) and
     ``plant_id_distance_m_max``.
     """
-    groups: dict[str, list[dict]] = defaultdict(list)
+    groups: dict[str, list[PlantObservation]] = defaultdict(list)
     for r in records:
-        if r.get("plant_id") in (None, ""):
-            raise ValueError(
-                f"record {r.get('image', '<no image key>')!r} carries no plant_id. Plant "
-                "identity is never guessed from a filename: attach the plant each image was "
-                "assigned by tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping."
-            )
-        groups[str(r["plant_id"])].append(r)
+        groups[r.plant_id].append(r)
 
     statistic = PLANT_AGGREGATIONS[plant_aggregation]
     results = []
     for plant_id, items in sorted(groups.items()):
-        values = [r[value_key] for r in items if value_key in r]
+        values = [r.value for r in items if r.value is not None]
         summary: dict[str, Any] = {
             "plant_id": plant_id,
             "n_images": len(items),
             "value": statistic(values) if values else None,
         }
-        sources = {r["source"] for r in items if r.get("source") is not None}
+        sources = {r.source for r in items if r.source is not None}
         if sources:
             summary["plant_id_source"] = (
                 sources.pop() if len(sources) == 1 else "mixed"
             )
-        distances = [
-            r["distance_m"] for r in items if r.get("distance_m") is not None
-        ]
+        distances = [r.distance_m for r in items if r.distance_m is not None]
         if distances:
             summary["plant_id_distance_m_max"] = max(distances)
         results.append(summary)
@@ -124,10 +135,11 @@ def _resolve_units(
 
 def deliver_per_plant_aggregate(
     project: Path,
-    records: list[dict],
+    records: list[PlantObservation],
     output_path: str,
     *,
     value_key: str,
+    plant_attribution: str,
     delivered_phenotype: str,
     delivery_kind: str,
     buckets: Sequence[Bucket],
@@ -139,29 +151,36 @@ def deliver_per_plant_aggregate(
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
     actor: str | None,
-) -> dict:
+) -> PerPlantDelivered:
     """Deliver the per-plant aggregate of per-image ``records`` as a CSV at ``output_path``.
 
-    Each record carries its ``plant_id`` and its value under ``value_key``; the CSV is a
-    ``delivery_kind`` delivery by ``actor``, for exactly the population ``plants``
+    Each record's value is a ``value_key`` quantity, each record's plant attributed at the
+    granularity ``plant_attribution`` names; the CSV is a ``delivery_kind`` delivery by ``actor``,
+    for exactly the population ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.phenology.population`'s list), over the published
     ``buckets`` the values came from.
 
     ``delivered_phenotype`` resolves to the one trait whose latest confirmed revision delivers it,
     and that revision's ``delivery_kind`` operationalization must cover it and ``value_key``. The
     records are aggregated per plant under the revision's ``plant_aggregation``
-    (:func:`_per_plant`); the plants must be exactly the population, every one carrying a value,
-    and the records agree on ``plant_attribution``. The units come from ``value_key``,
-    cross-checked against crops.yml. The buckets, the physical-scale assessment
-    ``scale_assessment_id`` and the unit clear :func:`~tcip_mcp.delivery.gate`, the recorded
-    acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
+    (:func:`_per_plant`); the plants must be exactly the population, every one carrying a value.
+    The units come from ``value_key``, cross-checked against crops.yml. The buckets, the
+    physical-scale assessment ``scale_assessment_id`` and the unit clear
+    :func:`~tcip_mcp.delivery.gate`, the recorded acknowledgment ``acknowledgment_id`` shipping
+    them unvalidated when it does not validate them.
 
     Each row carries the plant, its value and unit, its provenance of attribution, and the
     delivery's own cells, written with the delivery's one event under ``door`` with its
     population and ``plant_mapping`` disclosure (:func:`~tcip_mcp.delivery.deliver_csv`); returns
     what was delivered.
     """
-    from tcip_mcp.delivery import DELIVERY_COLUMNS, Result, deliver_csv, gate
+    from tcip_mcp.delivery import (
+        DELIVERY_COLUMNS,
+        PerPlantDelivered,
+        Result,
+        deliver_csv,
+        gate,
+    )
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
 
@@ -184,9 +203,7 @@ def deliver_per_plant_aggregate(
     by_plant = {
         s["plant_id"]: s
         for s in _per_plant(
-            records,
-            plant_aggregation=revision.entry.plant_aggregation,
-            value_key=value_key,
+            records, plant_aggregation=revision.entry.plant_aggregation
         )
     }
     if sorted(by_plant) != sorted(plants):
@@ -201,13 +218,6 @@ def deliver_per_plant_aggregate(
             "missing measurement never ships as an empty cell; leave them out of "
             "the population."
         )
-    attributions = {r.get("plant_attribution") for r in records}
-    if len(attributions) > 1 or None in attributions:
-        raise ValueError(
-            "the delivered records disagree on or omit plant_attribution "
-            f"({sorted(str(a) for a in attributions)}); every record must state the same one."
-        )
-    (attribution,) = attributions
     result = Result(
         [
             "plant_id",
@@ -234,7 +244,7 @@ def deliver_per_plant_aggregate(
                 "n_images": by_plant[plant]["n_images"],
                 "pipeline_version": pipeline_version,
                 "plant_id_source": by_plant[plant].get("plant_id_source", ""),
-                "plant_attribution": attribution,
+                "plant_attribution": plant_attribution,
                 "plant_id_distance_m_max": by_plant[plant].get(
                     "plant_id_distance_m_max", ""
                 ),
@@ -264,4 +274,4 @@ def deliver_per_plant_aggregate(
         delivery_kind=delivery_kind,
         actor=actor,
     )
-    return {**delivered, "n_plants": len(plants)}
+    return PerPlantDelivered(**dict(delivered), n_plants=len(plants))

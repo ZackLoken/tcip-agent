@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.delivery import Delivered
     from tcip_mcp.traits import TraitRevision
     from tcip_store import Key, Version
 
@@ -79,7 +80,7 @@ def _record(
     project: Path,
     revision: TraitRevision,
     bucket: Bucket | None = None,
-) -> dict:
+) -> Delivered:
     """Run ``deliver_csv`` of an empty per-image count delivery under ``revision``.
 
     The delivery is over ``bucket`` (by default a fresh :func:`_bucket`), shipped under a
@@ -102,6 +103,444 @@ def _record(
         delivery_kind=PER_IMAGE_COUNT,
         actor=None,
     )
+
+
+def _written(project: Path) -> Delivered:
+    """Deliver an empty per-image count CSV through ``deliver_csv`` (:func:`_record`)."""
+    return _record(project, seed_confirmed_count(project))
+
+
+def _counted(project: Path) -> Delivered:
+    """Deliver per-image counts of :func:`_bucket`, under a breeder's acknowledgment."""
+    from tcip_mcp.pipelines.postprocessing.export import (
+        deliver_per_image_counts_csv,
+    )
+    from tests._chain_fixtures import acknowledged
+
+    revision = seed_confirmed_count(project)
+    bucket = _bucket(project)
+    return acknowledged(
+        project,
+        lambda ack: deliver_per_image_counts_csv(
+            project,
+            bucket.root,
+            bucket.name,
+            str(project / "out" / "counts.csv"),
+            trait=revision.entry.name,
+            acknowledgment_id=ack,
+            door="test_door",
+            actor=None,
+        ),
+        reason="an unassessed fixture bucket",
+    )
+
+
+def _aggregated(project: Path) -> Delivered:
+    """Deliver one plant's per-image counts as a per-plant aggregate, under an acknowledgment."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
+    from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
+    from tests import _trait_fixtures as fx
+    from tests._chain_fixtures import deliver_acknowledged
+
+    fx.seed_delivery_traits(project)
+    fx.seed_confirmed_aggregate(
+        project, "stem_count", value_keys=["count"], measured_subject="bud"
+    )
+    return deliver_acknowledged(
+        project,
+        [PlantObservation(plant_id="P1", value=3)] * 2,
+        project / "out" / "plants.csv",
+        "stem_count",
+        value_key="count",
+        delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+    )
+
+
+def _measured(project: Path) -> Delivered:
+    """Deliver a mapped phenology's milestones, under a breeder's acknowledgment.
+
+    The scene is ``test_plant_mapping_binding``'s: a registered dataset, its published buckets
+    and a mapping built over them, measured for the second trait.
+    """
+    from tcip_mcp.pipelines.postprocessing import phenology
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests import test_plant_mapping_binding as binding
+    from tests._chain_fixtures import acknowledged
+    from tests._mapping_fixtures import register_plant_registry_for
+
+    binding._init(project)
+    dataset_root = binding._dataset(project)
+    plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    built = build_plant_mapping(
+        project,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(project, [plant_csv]),
+        actor=None,
+    )
+    assert "error" not in built, built
+    binding._seed_currant_bloom_trait(project)
+    measurement = phenology.measure_phenology(
+        project,
+        trait="currant_bloom",
+        mapping_name="valley",
+        dataset_root=dataset_root,
+        buckets=list(preds_by_date.values()),
+        plants=binding.POPULATION,
+    )
+    return acknowledged(
+        project,
+        lambda ack: phenology.deliver_phenology(
+            project,
+            measurement,
+            projection="milestones",
+            output_path=project / "out" / "milestones.csv",
+            acknowledgment_id=ack,
+            door="test_door",
+            actor=None,
+        ),
+        reason="an unassessed fixture bucket",
+    )
+
+
+def _counted_per_plant(project: Path) -> Delivered:
+    """Deliver per-plant counts from a whole-raster bucket, under a breeder's acknowledgment.
+
+    The scene is ``test_orthomosaic_tools``'s plant grid over one detection.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
+    from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
+    from tests import _trait_fixtures as fx, test_orthomosaic_tools as ortho
+    from tests._chain_fixtures import acknowledged
+
+    fx.seed_delivery_traits(project)
+    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    raster_path = ortho._raster(project)
+    ortho._write_geo_raster(raster_path)
+    bucket = ortho._raster_bucket(
+        project, raster_path, [(8.0, 8.0, 12.0, 12.0)]
+    )
+    registry = ortho._plant_registry(
+        project,
+        ortho._plant_grid_csv(project, raster_path, ortho._PLANT_PIXELS),
+    )
+    return acknowledged(
+        project,
+        lambda ack: orthomosaic_plant_counts(
+            project,
+            bucket.root,
+            bucket.name,
+            load_registry(project, registry),
+            project / "out" / "counts.csv",
+            "stem_count",
+            ortho._GRID,
+            acknowledgment_id=ack,
+            door="test_door",
+            actor=None,
+        ),
+        reason="an unassessed fixture bucket",
+    )
+
+
+@pytest.mark.parametrize(
+    "deliver",
+    [_written, _counted, _aggregated, _measured, _counted_per_plant],
+    ids=lambda deliver: deliver.__name__.strip("_"),
+)
+def test_a_delivery_answers_the_fields_of_the_event_it_wrote(
+    tmp_path: Path, deliver: Callable[[Path], Delivered]
+) -> None:
+    """Each delivery's answer states its one delivery event's own fields.
+
+    The file is the event's ``output_path``, the id its ``event_id``, and how it shipped, the
+    producer, the trait revision and the plant-mapping disclosure are the event's, each path
+    compared in the form the event stores it.
+    """
+    from tcip_mcp.registry_paths import recorded_paths
+
+    pytest.importorskip("torch")
+
+    delivered = deliver(tmp_path)
+
+    answered = recorded_paths(
+        delivered.model_dump(mode="json"),
+        (("csv_path",), ("plant_mapping", "dataset_root")),
+        tmp_path,
+    )
+    (event,) = read_delivery_events(tmp_path)
+    recorded = recorded_paths(
+        event.model_dump(mode="json"), delivery.DELIVERY_EVENT_PATHS, tmp_path
+    )
+    assert isinstance(answered, dict) and isinstance(recorded, dict)
+    assert {
+        "csv_path": recorded["output_path"],
+        "delivery_event_id": recorded["event_id"],
+        "shipped": recorded["shipped"],
+        "producer": recorded["producer"],
+        "trait_revision": recorded["trait_revision"],
+        "plant_mapping": recorded["plant_mapping"],
+    } == {
+        key: answered[key]
+        for key in (
+            "csv_path",
+            "delivery_event_id",
+            "shipped",
+            "producer",
+            "trait_revision",
+            "plant_mapping",
+        )
+    }
+
+
+def _acknowledged_for(project: Path, refused: Callable[[], object]) -> str:
+    """Return the id of a breeder's acknowledgment of the delivery ``refused()`` refuses."""
+    from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
+    from tests._chain_fixtures import digest_of
+
+    with pytest.raises(DeliveryRefusedError) as refusal:
+        refused()
+    return record_acknowledgment(
+        project,
+        acknowledged_by="user:breeder",
+        reason="an unassessed fixture bucket",
+        result_sha256=digest_of(refusal.value),
+    ).acknowledgment_id
+
+
+def _per_image_counts_call(project: Path) -> tuple[str, dict]:
+    """Return ``deliver_per_image_counts``'s call over :func:`_bucket`, acknowledged."""
+    from tcip_mcp.pipelines.postprocessing.export import (
+        deliver_per_image_counts_csv,
+    )
+    from tests._web_fixtures import named_project
+
+    named_project(project, "Counts")
+    trait = seed_confirmed_count(project).entry.name
+    bucket = _bucket(project)
+    out = str(project / "out" / "counts.csv")
+    return "deliver_per_image_counts", {
+        "dataset_root": str(bucket.root),
+        "bucket": bucket.name,
+        "output_path": out,
+        "trait": trait,
+        "acknowledgment_id": _acknowledged_for(
+            project,
+            lambda: deliver_per_image_counts_csv(
+                project,
+                bucket.root,
+                bucket.name,
+                out,
+                trait=trait,
+                acknowledgment_id=None,
+                door="deliver_per_image_counts",
+                actor=None,
+            ),
+        ),
+    }
+
+
+def _per_plant_csv_call(project: Path) -> tuple[str, dict]:
+    """Return ``deliver_per_plant_csv``'s call over one mapped plant's row, acknowledged.
+
+    The scene is ``test_deliver_per_plant_csv``'s; the row states every field the record holds.
+    """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.postprocessing.aggregation import (
+        PlantObservation,
+        deliver_per_plant_aggregate,
+    )
+    from tests import _trait_fixtures as fx, test_deliver_per_plant_csv as door
+
+    fx.seed_delivery_traits(project)
+    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    dataset_root, date = door._mapped(project)
+    bucket = door._bucket(project, dataset_root, date, {"P1": 2})
+    row = {
+        "plant_id": "P1",
+        "value": 2,
+        "source": "sequence",
+        "distance_m": 0.5,
+    }
+    out = str(project / "out" / "plants.csv")
+    return "deliver_per_plant_csv", {
+        "results": [row],
+        "output_path": out,
+        "delivered_phenotype": "stem_count",
+        "delivery_kind": door.KIND,
+        "plants": ["P1"],
+        "dataset_root": str(dataset_root),
+        "buckets": [bucket],
+        "value_key": "count",
+        "plant_attribution": "image",
+        "acknowledgment_id": _acknowledged_for(
+            project,
+            lambda: deliver_per_plant_aggregate(
+                project,
+                [PlantObservation.model_validate(row)],
+                out,
+                value_key="count",
+                plant_attribution="image",
+                delivered_phenotype="stem_count",
+                delivery_kind=door.KIND,
+                buckets=[read_bucket(dataset_root, bucket)],
+                plants=["P1"],
+                door="deliver_per_plant_csv",
+                actor=None,
+            ),
+        ),
+    }
+
+
+def _orthomosaic_call(project: Path) -> tuple[str, dict]:
+    """Return ``deliver_orthomosaic_plant_counts``'s call over a plant grid, acknowledged.
+
+    The scene is ``test_orthomosaic_tools``'s plant grid over one detection.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
+    from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
+    from tests import _trait_fixtures as fx, test_orthomosaic_tools as ortho
+    from tests._web_fixtures import named_project
+
+    named_project(project, "Orchard")
+    fx.seed_delivery_traits(project)
+    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    raster_path = ortho._raster(project)
+    ortho._write_geo_raster(raster_path)
+    bucket = ortho._raster_bucket(
+        project, raster_path, [(8.0, 8.0, 12.0, 12.0)]
+    )
+    registry = ortho._plant_registry(
+        project,
+        ortho._plant_grid_csv(project, raster_path, ortho._PLANT_PIXELS),
+    )
+    out = project / "out" / "counts.csv"
+    return "deliver_orthomosaic_plant_counts", {
+        "dataset_root": str(bucket.root),
+        "bucket": bucket.name,
+        "plant_registry": registry,
+        "output_csv_path": str(out),
+        "delivered_phenotype": "stem_count",
+        "plants": ortho._GRID,
+        "acknowledgment_id": _acknowledged_for(
+            project,
+            lambda: orthomosaic_plant_counts(
+                project,
+                bucket.root,
+                bucket.name,
+                load_registry(project, registry),
+                out,
+                "stem_count",
+                ortho._GRID,
+                door="deliver_orthomosaic_plant_counts",
+                actor=None,
+            ),
+        ),
+    }
+
+
+def _milestones_call(project: Path) -> tuple[str, dict]:
+    """Return ``deliver_phenology_milestones``'s call over a mapped series, acknowledged.
+
+    The scene is ``test_plant_mapping_binding``'s, measured for the second trait.
+    """
+    from tcip_mcp.pipelines.postprocessing import phenology
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests import test_plant_mapping_binding as binding
+    from tests._mapping_fixtures import register_plant_registry_for
+
+    binding._init(project)
+    dataset_root = binding._dataset(project)
+    plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    built = build_plant_mapping(
+        project,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(project, [plant_csv]),
+        actor=None,
+    )
+    assert "error" not in built, built
+    binding._seed_currant_bloom_trait(project)
+    out = project / "out" / "milestones.csv"
+    measurement = phenology.measure_phenology(
+        project,
+        trait="currant_bloom",
+        mapping_name="valley",
+        dataset_root=dataset_root,
+        buckets=list(preds_by_date.values()),
+        plants=binding.POPULATION,
+    )
+    return "deliver_phenology_milestones", {
+        "trait": "currant_bloom",
+        "mapping_name": "valley",
+        "dataset_root": str(dataset_root),
+        "buckets": list(preds_by_date.values()),
+        "output_csv_path": str(out),
+        "plants": binding.POPULATION,
+        "acknowledgment_id": _acknowledged_for(
+            project,
+            lambda: phenology.deliver_phenology(
+                project,
+                measurement,
+                projection="milestones",
+                output_path=out,
+                acknowledgment_id=None,
+                door="deliver_phenology_milestones",
+                actor=None,
+            ),
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        _per_image_counts_call,
+        _per_plant_csv_call,
+        _orthomosaic_call,
+        _milestones_call,
+    ],
+    ids=lambda call: call.__name__.strip("_").removesuffix("_call"),
+)
+def test_a_delivery_tool_answers_the_fields_of_the_event_it_wrote(
+    tmp_path: Path, call: Callable[[Path], tuple[str, dict]]
+) -> None:
+    """Each delivery tool, called through the server's door, answers its event's own fields.
+
+    The tool runs as an MCP client calls it, under the project it is bound to and a breeder's
+    recorded acknowledgment; its answer's file, event id, shipping, producer, trait revision and
+    plant-mapping disclosure are the event's as read back, the disclosure's dataset root resolved
+    against the project as the event reader resolves the stored one.
+    """
+    from tcip_mcp.registry_paths import runtime_paths
+    from tcip_mcp.server import binding_for
+    from tests._server_calls import called_through_the_server
+
+    pytest.importorskip("torch")
+    tool, arguments = call(tmp_path)
+    bound = binding_for(tmp_path)
+
+    answer = called_through_the_server(tool, arguments, bound=bound)
+
+    assert isinstance(answer, dict) and "error" not in answer, answer
+    (event,) = read_delivery_events(bound.root)
+    served = event.model_dump(mode="json")
+    assert {
+        "csv_path": served["output_path"],
+        "delivery_event_id": served["event_id"],
+        "shipped": served["shipped"],
+        "producer": served["producer"],
+        "trait_revision": served["trait_revision"],
+        "plant_mapping": served["plant_mapping"],
+    } == {
+        "csv_path": answer["csv_path"],
+        "delivery_event_id": answer["delivery_event_id"],
+        "shipped": answer["shipped"],
+        "producer": answer["producer"],
+        "trait_revision": answer["trait_revision"],
+        "plant_mapping": runtime_paths(
+            answer["plant_mapping"], (("dataset_root",),), bound.root
+        ),
+    }
 
 
 def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket(
