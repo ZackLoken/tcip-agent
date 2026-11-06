@@ -214,6 +214,37 @@ class TestEvaluateFolderEnumeration:
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.npz"]
 
+    def test_a_capture_with_nothing_to_score_answers_none_for_each_undefined_score(
+        self, tmp_path: Path
+    ) -> None:
+        """An image with no object and no prediction has no defined precision, recall or AP.
+
+        The same answer holds for the single image and for the folder holding it.
+        """
+        import numpy as np
+
+        from tcip_mcp.tools.annotation_tools import score_predictions
+
+        images_dir = image_dir(tmp_path, "2024-01-01")
+        images_dir.mkdir(parents=True)
+        capture = images_dir / "cap.npz"
+        np.savez(str(capture), bands=np.zeros((8, 8, 3), dtype=np.uint16))
+        _write_empty_label(capture, 8, 8)
+        bucket = _empty_bucket(tmp_path, capture)
+
+        for scored in (capture, images_dir):
+            result = score_predictions(
+                tmp_path,
+                str(scored),
+                bucket,
+                iou_threshold=0.5,
+                conf_threshold=0.25,
+            )
+            assert "error" not in result
+            for key in ("precision", "recall", "f1", "map50"):
+                assert result[key] is None, key
+        assert result["map"] is None
+
     def test_a_folder_nested_inside_the_images_directory_is_not_scored(
         self, tmp_path: Path
     ) -> None:

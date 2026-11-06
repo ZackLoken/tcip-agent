@@ -35,6 +35,8 @@ torch = pytest.importorskip(
     "torch"
 )  # evaluation.py imports torch at module load
 
+from torch.nn import Module  # noqa: E402
+
 from tcip_annotation.matching import match_pairs  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
@@ -89,6 +91,7 @@ from tests._training_values import (  # noqa: E402
     drawn_split,
     evaluation_block,
 )
+from tests.bespoke_models import _KeepsItsOperatingPoint  # noqa: E402
 
 WEIGHTS = ScoreWeights.model_validate(SCORE_WEIGHTS)
 
@@ -125,6 +128,17 @@ def test_composite_objective_has_no_score_for_a_degenerate_epoch() -> None:
         is None
     )
     assert compute_composite_objective(float("inf"), 0.5, 0.5, w) is None
+
+
+def test_composite_objective_has_no_score_when_a_term_is_undefined() -> None:
+    """The composite objective is None when its F1 or its mAP50 is undefined (None).
+
+    A term that cannot be computed is never read as 0.0 and blended in.
+    """
+    w = WEIGHTS
+    assert compute_composite_objective(2.0, None, 0.4, w) is None
+    assert compute_composite_objective(2.0, 0.5, None, w) is None
+    assert compute_composite_objective(2.0, None, None, w) is None
 
 
 # --------------------------------------------------------------------------
@@ -283,15 +297,22 @@ def test_detection_metrics_over_an_empty_side() -> None:
             by_mask=False,
         )
 
-    # (a) no predictions over ground truth: every object missed.
+    # (a) no predictions over ground truth: every object missed, so recall, F1 and average
+    # precision are defined and 0.0, and no prediction leaves precision undefined.
     m = metrics(gt, [])
-    assert m["fn"] == 1 and m["recall"] == 0.0 and m["map50"] == 0.0
-    # (b) predictions over no ground truth: no object to find, so no precision to average.
+    assert m["fn"] == 1 and m["precision"] is None
+    assert (m["recall"], m["f1"], m["map50"], m["map"]) == (0.0, 0.0, 0.0, 0.0)
+    # (b) predictions over no ground truth: precision and F1 are defined and 0.0; no object to
+    # find leaves recall and average precision undefined.
     m = metrics([], dt)
-    assert m["map50"] == 0.0
-    # (c) both empty.
+    assert (m["precision"], m["f1"]) == (0.0, 0.0)
+    assert m["recall"] is None and m["map50"] is None and m["map"] is None
+    # (c) both empty: every score is undefined.
     m = metrics([], [])
-    assert m["tp"] == 0 and m["fp"] == 0 and m["map50"] == 0.0
+    assert m["tp"] == 0 and m["fp"] == 0
+    assert all(
+        m[k] is None for k in ("precision", "recall", "f1", "map50", "map")
+    )
 
 
 # --------------------------------------------------------------------------
@@ -346,6 +367,103 @@ def test_golden_operating_point_pickers() -> None:
     assert pick_f1_max(sweep) == pytest.approx(0.0)  # recall-max point
     at06 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.6))
     assert at06["count_bias_mean"] == pytest.approx(0.0)
+
+
+def test_pickers_rank_an_undefined_f1_below_every_defined_one() -> None:
+    """Both pickers read a curve entry with an undefined (None) F1 without comparing it as a number.
+
+    One detection scored 0.5 over a frame holding no object: at conf 0.0 it is a false positive
+    (F1 0.0), and at conf 0.95 the entry counts nothing, so its F1 is undefined. The F1 maximum
+    is the defined entry whichever order the grid lists them in, and the count-unbiased pick
+    ranks the zero-bias entry first and the undefined F1 last among its ties. A curve with no
+    defined F1 still answers a conf.
+    """
+    detected = [_rec([], _dt(([90.0, 90.0, 20.0, 20.0], 0.5)), w=400, h=400)]
+    sweep = derive_operating_point_curve(
+        detected,
+        criterion=CENTER_10,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        conf_grid=[0.95, 0.0],
+    )
+    undefined, defined = sweep["curve"]
+    assert undefined["f1"] is None
+    assert defined["f1"] == 0.0
+    assert pick_f1_max(sweep) == 0.0
+    assert pick_count_unbiased(sweep) == 0.95
+
+    nothing = derive_operating_point_curve(
+        [_rec([], [], w=400, h=400)],
+        criterion=CENTER_10,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        conf_grid=[0.0, 0.5],
+    )
+    assert [c["f1"] for c in nothing["curve"]] == [None, None]
+    assert pick_f1_max(nothing) == 0.0
+    assert pick_count_unbiased(nothing) == 0.5
+
+
+class _FindsNothing(_KeepsItsOperatingPoint, Module):
+    """A detector with a loss of one that predicts no box for any frame."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
+
+    def forward(
+        self, images: list[Tensor], targets: list[dict] | None = None
+    ) -> dict[str, Tensor] | list[dict[str, Tensor]]:
+        if self.training:
+            return {"loss": torch.ones(())}
+        return [
+            self.governed(
+                {
+                    "boxes": torch.zeros((0, 4)),
+                    "scores": torch.zeros(0),
+                    "labels": torch.zeros(0, dtype=torch.long),
+                }
+            )
+            for _ in images
+        ]
+
+
+def test_evaluate_over_frames_holding_no_object_reports_none_and_an_objective_of_none() -> (
+    None
+):
+    """A detector evaluated over frames with no object and no prediction has no defined score.
+
+    The loss is positive, so the objective is None because its F1 and mAP50 are, not because
+    of the loss. Every count-based score and both average precisions are None.
+    """
+    from tcip_mcp.pipelines.schemas import ModelDims
+    from tcip_mcp.pipelines.training.evaluation import evaluate
+
+    images = [torch.rand(3, 64, 64) for _ in range(2)]
+    targets = [
+        {
+            "boxes": torch.zeros((0, 4)),
+            "labels": torch.zeros(0, dtype=torch.long),
+            "iscrowd": torch.zeros(0, dtype=torch.long),
+            "image_id": i,
+        }
+        for i in range(2)
+    ]
+    result = evaluate(
+        _FindsNothing(),
+        [(images, targets)],
+        torch.device("cpu"),
+        "detection",
+        dims=ModelDims(in_chans=3, num_classes=2),
+        trait=None,
+        conf_threshold=VALIDATION_CONF,
+        iou_threshold=IOU_THRESHOLD,
+        score_weights=WEIGHTS,
+        density=1.0,
+        mask_cut=None,
+    )
+    assert result["loss"] > 0
+    for key in ("precision", "recall", "f1", "map50", "map", "objective"):
+        assert result[key] is None, key
 
 
 # match_pairs: one matcher, two stated policies (score_first for the count, distance_first for
@@ -640,6 +758,62 @@ def test_classification_metrics() -> None:
     m = classification_metrics(pred, gt, num_classes=2)
     assert m["accuracy"] == pytest.approx(0.75)
     assert m["f1"] == pytest.approx((0.8 + 2 / 3) / 2, abs=1e-3)
+
+
+def test_classification_undefined_scores_are_none_and_out_of_the_macro_mean() -> (
+    None
+):
+    """A score with nothing to divide is None, and the macro mean is over the defined F1s alone.
+
+    Over four classes, class 1 is in neither the truth nor the predictions (every score and its
+    count bias undefined) and class 3 is predicted once and never true (recall and count bias
+    undefined, precision and F1 0.0, which count in the mean).
+    """
+    gt = torch.tensor([0, 0, 2, 2])
+    pred = torch.tensor([0, 2, 2, 3])
+    m = classification_metrics(pred, gt, num_classes=4)
+
+    absent, predicted_only = m["per_class"]["1"], m["per_class"]["3"]
+    assert absent == {
+        "precision": None,
+        "recall": None,
+        "f1": None,
+        "support": 0,
+        "count_bias": None,
+    }
+    assert predicted_only["precision"] == 0.0
+    assert predicted_only["recall"] is None
+    assert predicted_only["f1"] == 0.0
+    assert predicted_only["count_bias"] is None
+    assert m["f1"] == pytest.approx((2 / 3 + 0.5 + 0.0) / 3)
+    assert m["count_bias"]["1"] is None and m["count_bias"]["3"] is None
+    assert m["count_bias"]["0"] == pytest.approx(-0.5)
+
+
+def test_an_empty_set_answers_none_for_every_family() -> None:
+    """An empty set answers None for each score of classification, ordinal and regression.
+
+    The functions are called directly: ``evaluate`` reaches these families only with a collected
+    set, so the one route to an empty set through it is an attribute with no matched pair
+    (``test_attribute_heads``).
+    """
+    nothing = torch.tensor([])
+    assert classification_metrics(nothing, nothing, num_classes=3) == {
+        "accuracy": None,
+        "f1": None,
+        "per_class": {},
+        "count_bias": {},
+    }
+    assert ordinal_metrics(nothing, nothing, 3) == {
+        "mae": None,
+        "rank_acc": None,
+        "quadratic_weighted_kappa": None,
+    }
+    assert regression_metrics(nothing, nothing) == {
+        "mae": None,
+        "rmse": None,
+        "r_squared": None,
+    }
 
 
 def test_ordinal_metrics() -> None:
