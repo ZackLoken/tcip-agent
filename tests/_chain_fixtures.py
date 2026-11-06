@@ -7,7 +7,7 @@ publish its predictions under the assessment.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -259,21 +259,44 @@ def object_at(index: int) -> tuple[int, int, int]:
     return x0, y0, size
 
 
-def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
+def plant_captures(plants: Sequence[str]) -> dict[str, tuple[float, float]]:
+    """Return where each of :data:`STEMS` was taken, the captures shared out among ``plants``.
+
+    Stem ``i`` is taken at the place of plant ``i`` modulo ``len(plants)``
+    (:func:`~tests._mapping_fixtures.plant_positions`).
+    """
+    from tests._mapping_fixtures import plant_positions
+
+    places = plant_positions(plants)
+    return {
+        stem: places[plants[i % len(plants)]] for i, stem in enumerate(STEMS)
+    }
+
+
+def synthetic_capture(
+    root: Path,
+    *,
+    date: str = DATE,
+    positions: Mapping[str, tuple[float, float]] | None = None,
+) -> Path:
     """Ingest one capture date of painted frames through ``ingest_images``.
 
     Each of :data:`STEMS` is painted with a :data:`~tests._producer_fixtures.BRIGHT` square at
-    :func:`object_at` of its index, ingested, and labeled with that square. Returns the capture's
-    image directory.
+    :func:`object_at` of its index, ingested, and labeled with that square. A stem ``positions``
+    names carries that ``(lat, lon)`` in its EXIF, reporting
+    :data:`~tests._mapping_fixtures.PHOTO_POSITION_ERROR_M`. Returns the capture's image
+    directory.
     """
     from datetime import datetime
 
     from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
-    from tests._image_fixtures import capture_exif
+    from tests._image_fixtures import capture_exif, geo_exif
+    from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M
     from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
     raw = root.parent / f"raw-{date}"
     raw.mkdir(parents=True, exist_ok=True)
+    when = datetime.fromisoformat(date).replace(hour=9)
     for index, stem in enumerate(STEMS):
         x0, y0, size = object_at(index)
         shade = 28 + (index % 7)
@@ -284,7 +307,11 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
             [((x0, y0, x0 + size, y0 + size), BRIGHT)],
         ).save(
             raw / f"{stem}.png",
-            exif=capture_exif(datetime.fromisoformat(date).replace(hour=9)),
+            exif=geo_exif(
+                when, *positions[stem], h_pos_err=PHOTO_POSITION_ERROR_M
+            )
+            if positions and stem in positions
+            else capture_exif(when),
         )
 
     ingested = ingest_images(root, source=str(raw), actor=None)
@@ -522,17 +549,26 @@ class Chain:
 
 
 def unassessed_bucket(
-    project: Path, *, experiment_id: str, bucket_name: str = "plain"
+    project: Path,
+    *,
+    experiment_id: str,
+    bucket_name: str = "plain",
+    plants: Sequence[str] = (),
 ) -> Bucket:
     """Return a bucket published under no assessment.
 
-    Ingests, draws, trains and publishes under ``project``.
+    Ingests, draws, trains and publishes under ``project``. With ``plants``, the captures stand
+    at their places (:func:`plant_captures`) and the project's mapping ``valley`` of them
+    (:func:`~tests._mapping_fixtures.map_plants`) is built before the bucket is published.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._mapping_fixtures import map_plants
 
     root = project / "ds"
-    images_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(
+        root, positions=plant_captures(plants) if plants else None
+    )
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     checkpoint_path = train_on(selection_dir, project, experiment_id)
@@ -546,6 +582,8 @@ def unassessed_bucket(
         actor=None,
     )
     assert "error" not in published, published
+    if plants:
+        map_plants(project, root, plants)
     return read_bucket(root, bucket)
 
 
@@ -607,22 +645,33 @@ def deliver_acknowledged(
 ) -> PerPlantDelivered:
     """Deliver the per-image ``records``' ``value_key`` values per plant, under an acknowledgment.
 
-    ``deliver_per_plant_aggregate`` runs for the plants the records carry, disclosing the mapping
-    of :func:`~tests._mapping_fixtures.mapping_disclosure`, over ``buckets`` (by default a bucket
-    published under no assessment, :func:`unassessed_bucket`), shipped unvalidated under the
-    breeder's acknowledgment (:func:`acknowledged`).
+    ``deliver_per_plant_aggregate`` runs for the plants the records carry over ``buckets`` (by
+    default a bucket published under no assessment, :func:`unassessed_bucket`, its captures
+    mapped to those plants), shipped unvalidated under the breeder's acknowledgment
+    (:func:`acknowledged`). Its disclosure is ``plant_mapping_disclosure``'s over the project's
+    persisted mapping ``valley``, which ``buckets`` a caller names must already have.
     """
+    from tcip_mcp.buckets import by_recorded_date
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
-    from tests._mapping_fixtures import mapping_disclosure
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_mapping_disclosure,
+    )
 
+    plants = list(dict.fromkeys(r.plant_id for r in records))
     delivered = (
         buckets
         if buckets is not None
-        else [unassessed_bucket(project, experiment_id="exp-acknowledged")]
+        else [
+            unassessed_bucket(
+                project, experiment_id="exp-acknowledged", plants=plants
+            )
+        ]
     )
-    disclosure = mapping_disclosure(project)
+    disclosure = plant_mapping_disclosure(
+        project, "valley", by_recorded_date(delivered), plants
+    )
     return acknowledged(
         project,
         lambda ack: deliver_per_plant_aggregate(
@@ -633,7 +682,7 @@ def deliver_acknowledged(
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,
-            plants=list(dict.fromkeys(r.plant_id for r in records)),
+            plants=plants,
             door="test_delivery",
             plant_mapping=disclosure,
             acknowledgment_id=ack,

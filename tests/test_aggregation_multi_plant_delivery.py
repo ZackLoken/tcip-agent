@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PlantMappingDisclosure,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -219,7 +222,8 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
     """Return a bucket published under an assessment of ``kind``, as recorded.
 
     The count trait is confirmed first with both its per-image and its per-plant count
-    operationalizations.
+    operationalizations, and the captures are mapped to :data:`_PLANTS` by the mapping
+    ``valley`` once the bucket is published.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
@@ -228,9 +232,11 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         DATE,
         SUBJECT,
         draw_reference_selection,
+        plant_captures,
         synthetic_capture,
         train_on,
     )
+    from tests._mapping_fixtures import map_plants
 
     entry = fx.with_operationalization(
         fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=SUBJECT
@@ -246,7 +252,7 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         ),
     )
     root = project / "ds"
-    images_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(root, positions=plant_captures(_PLANTS))
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, experiment_id)
     assessment = assess_checkpoint(
@@ -275,9 +281,23 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         actor=None,
     )
     assert "error" not in published, published
+    map_plants(project, root, _PLANTS)
     return read_bucket(root, bucket)
 
 
+def _disclosure(project: Path, bucket: Bucket) -> PlantMappingDisclosure:
+    """Return the ``plant_mapping`` disclosure of delivering :data:`_PLANTS` over ``bucket``."""
+    from tcip_mcp.buckets import by_recorded_date
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_mapping_disclosure,
+    )
+
+    return plant_mapping_disclosure(
+        project, "valley", by_recorded_date([bucket]), _PLANTS
+    )
+
+
+_PLANTS = ["PLANT_A"]
 _RECORDS = [
     PlantObservation(plant_id="PLANT_A", value=count) for count in (2, 4, 9)
 ]
@@ -290,7 +310,6 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
-    from tests._mapping_fixtures import mapping_disclosure
 
     bucket = _assessed(tmp_path, PER_PLANT_COUNT_AGGREGATE, "exp-kind-matched")
     delivered = deliver_per_plant_aggregate(
@@ -301,9 +320,9 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
         delivered_phenotype="stem_count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket],
-        plants=["PLANT_A"],
+        plants=_PLANTS,
         door="test",
-        plant_mapping=mapping_disclosure(tmp_path),
+        plant_mapping=_disclosure(tmp_path, bucket),
         actor=None,
     )
 
@@ -323,7 +342,6 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
-    from tests._mapping_fixtures import mapping_disclosure
 
     bucket = _assessed(tmp_path, PER_IMAGE_COUNT, "exp-kind-crossed")
     with pytest.raises(
@@ -339,9 +357,9 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
             delivered_phenotype="stem_count",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[bucket],
-            plants=["PLANT_A"],
+            plants=_PLANTS,
             door="test",
-            plant_mapping=mapping_disclosure(tmp_path),
+            plant_mapping=_disclosure(tmp_path, bucket),
             actor=None,
         )
     assert not (tmp_path / "crossed.csv").exists()
