@@ -427,7 +427,7 @@ class SqliteBackend:
         """Turn a driver error raised inside into this layer's own refusal.
 
         Contention raises ``StoreBusyError`` naming the first key the call named; any other
-        driver error raises ``DatabaseRefusedError``.
+        driver error, and contention in a call that named no key, raises ``DatabaseRefusedError``.
         """
         started = time.monotonic()
         try:
