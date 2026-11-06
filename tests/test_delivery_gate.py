@@ -125,7 +125,7 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
         reason="a look before assessing",
     )
 
-    assert {r["validated"] for r in csv_rows(result.csv_path)} == {"False"}
+    assert {r["validated"] for r in csv_rows(result.output_path)} == {"False"}
     (event,) = read_delivery_events(tmp_path)
     assert result.shipped == event.shipped
     assert event.shipped.kind == "acknowledged", event.shipped
@@ -304,7 +304,7 @@ def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(
         tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])]
     )
     result = _acknowledged(tmp_path, bucket)
-    with open(result.csv_path, newline="") as f:
+    with open(result.output_path, newline="") as f:
         written = next(csv.reader(f))
 
     lines = document_path("delivery").read_text(encoding="utf-8").splitlines()
@@ -352,7 +352,7 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(
     from tcip_mcp.buckets import read_bucket
 
     assert read_bucket(tmp_path / "ds", bucket).dropped_boxes == 1
-    (row,) = csv_rows(_acknowledged(tmp_path, bucket).csv_path)
+    (row,) = csv_rows(_acknowledged(tmp_path, bucket).output_path)
 
     assert int(row["detection_count"]) == 1
     assert float(row["avg_confidence"]) == pytest.approx(0.9)

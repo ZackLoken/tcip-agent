@@ -250,45 +250,25 @@ def _counted_per_plant(project: Path) -> Delivered:
 def test_a_delivery_answers_the_fields_of_the_event_it_wrote(
     tmp_path: Path, deliver: Callable[[Path], Delivered]
 ) -> None:
-    """Each delivery's answer states its one delivery event's own fields.
+    """Each delivery's answer is its one delivery event's own fields as the event is served.
 
-    The file is the event's ``output_path``, the id its ``event_id``, and how it shipped, the
-    producer, the trait revision and the plant-mapping disclosure are the event's, each path
-    compared in the form the event stores it.
+    Every field ``Delivered`` declares equals the event's field of the same name that the reader
+    serves for that id, each path in the served form and neither side normalized.
     """
-    from tcip_mcp.registry_paths import recorded_paths
-
     pytest.importorskip("torch")
 
     delivered = deliver(tmp_path)
 
-    answered = recorded_paths(
-        delivered.model_dump(mode="json"),
-        (("csv_path",), ("plant_mapping", "dataset_root")),
-        tmp_path,
+    (event,) = (
+        e
+        for e in read_delivery_events(tmp_path)
+        if e.event_id == delivered.event_id
     )
-    (event,) = read_delivery_events(tmp_path)
-    recorded = recorded_paths(
-        event.model_dump(mode="json"), delivery.DELIVERY_EVENT_PATHS, tmp_path
-    )
-    assert isinstance(answered, dict) and isinstance(recorded, dict)
-    assert {
-        "csv_path": recorded["output_path"],
-        "delivery_event_id": recorded["event_id"],
-        "shipped": recorded["shipped"],
-        "producer": recorded["producer"],
-        "trait_revision": recorded["trait_revision"],
-        "plant_mapping": recorded["plant_mapping"],
-    } == {
-        key: answered[key]
-        for key in (
-            "csv_path",
-            "delivery_event_id",
-            "shipped",
-            "producer",
-            "trait_revision",
-            "plant_mapping",
-        )
+    served = event.model_dump(mode="json")
+    answered = delivered.model_dump(mode="json")
+    fields = delivery.Delivered.model_fields
+    assert {key: answered[key] for key in fields} == {
+        key: served[key] for key in fields
     }
 
 
@@ -538,11 +518,9 @@ def test_a_delivery_tool_answers_the_fields_of_the_event_it_wrote(
     """Each delivery tool, called through the server's door, answers its event's own fields.
 
     The tool runs as an MCP client calls it, under the project it is bound to and a breeder's
-    recorded acknowledgment; its answer's file, event id, shipping, producer, trait revision and
-    plant-mapping disclosure are the event's as read back, the disclosure's dataset root resolved
-    against the project as the event reader resolves the stored one.
+    recorded acknowledgment; every field ``Delivered`` declares equals the event's field of the
+    same name that the reader serves for that id, neither side normalized.
     """
-    from tcip_mcp.registry_paths import runtime_paths
     from tcip_mcp.server import binding_for
     from tests._server_calls import called_through_the_server
 
@@ -553,25 +531,47 @@ def test_a_delivery_tool_answers_the_fields_of_the_event_it_wrote(
     answer = called_through_the_server(tool, arguments, bound=bound)
 
     assert isinstance(answer, dict) and "error" not in answer, answer
-    (event,) = read_delivery_events(bound.root)
+    (event,) = (
+        e
+        for e in read_delivery_events(bound.root)
+        if e.event_id == answer["event_id"]
+    )
     served = event.model_dump(mode="json")
-    assert {
-        "csv_path": served["output_path"],
-        "delivery_event_id": served["event_id"],
-        "shipped": served["shipped"],
-        "producer": served["producer"],
-        "trait_revision": served["trait_revision"],
-        "plant_mapping": served["plant_mapping"],
-    } == {
-        "csv_path": answer["csv_path"],
-        "delivery_event_id": answer["delivery_event_id"],
-        "shipped": answer["shipped"],
-        "producer": answer["producer"],
-        "trait_revision": answer["trait_revision"],
-        "plant_mapping": runtime_paths(
-            answer["plant_mapping"], (("dataset_root",),), bound.root
-        ),
+    fields = delivery.Delivered.model_fields
+    assert {key: answer[key] for key in fields} == {
+        key: served[key] for key in fields
     }
+
+
+def test_a_per_image_counts_answer_leaves_its_bucket_to_the_event(
+    tmp_path: Path,
+) -> None:
+    """The per-image counts answer names no bucket root or name: the event it wrote holds them.
+
+    The door is called through the server; its answer carries the event's id and the counts, and
+    the served event's first bucket is the one the call named.
+    """
+    from tcip_mcp.server import binding_for
+    from tests._server_calls import called_through_the_server
+
+    pytest.importorskip("torch")
+    tool, arguments = _per_image_counts_call(tmp_path)
+    bound = binding_for(tmp_path)
+
+    answer = called_through_the_server(tool, arguments, bound=bound)
+
+    assert isinstance(answer, dict) and "error" not in answer, answer
+    assert {"dataset_root", "bucket"}.isdisjoint(answer), answer
+    (event,) = (
+        e
+        for e in read_delivery_events(bound.root)
+        if e.event_id == answer["event_id"]
+    )
+    (finding,) = event.buckets
+    assert finding.bucket == arguments["bucket"]
+    assert finding.dataset_root == str(
+        Path(arguments["dataset_root"]).resolve()
+    )
 
 
 def test_a_general_door_delivery_states_the_mappings_attribution_once(

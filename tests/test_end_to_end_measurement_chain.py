@@ -282,7 +282,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
     assert len(rows) == len(STEMS), len(rows)
     for row in rows:
         assert row["validated"] == "True", row
-        assert row["delivery_event_id"] == delivered["delivery_event_id"], row
+        assert row["delivery_event_id"] == delivered["event_id"], row
         assert int(row["detection_count"]) == 1, row
     (event,) = read_delivery_events(tmp_path)
     assert event.buckets[0].assessment_id == chain.assessment["assessment_id"]
