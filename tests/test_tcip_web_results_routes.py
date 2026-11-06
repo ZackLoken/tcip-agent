@@ -1144,6 +1144,38 @@ def test_the_plant_mapping_list_names_each_mapping_the_project_built(
     assert listed.json() == {"names": ["valley"]}
 
 
+def test_loading_a_plant_mapping_whose_record_will_not_decode_answers_the_readers_409(
+    client: TestClient,
+    opened_project: Path,
+) -> None:
+    """A built mapping whose stored bytes no longer decode answers 409 with the reader's refusal.
+
+    The detail is the text ``load_mapping`` raises as ``ReadRefusedError``, the mapping's place
+    before the store's decode sentence.
+    """
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tests._mapping_fixtures import map_captures
+    from tests._record_damage_fixtures import damage_record
+
+    map_captures(
+        opened_project, opened_project / "ds", ["2026-02-11"], name="valley"
+    )
+    damage_record(
+        plant_mapping.plant_mapping_key(opened_project, "valley"),
+        b"{not valid json",
+    )
+
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
+        plant_mapping.load_mapping(opened_project, "valley")
+    resp = client.post(
+        "/api/results/plant_mapping/load", json={"name": "valley"}
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == str(refused.value)
+    assert "'valley'" in resp.json()["detail"]
+
+
 def test_the_plant_mapping_list_refuses_while_no_project_is_open(
     client: TestClient,
 ) -> None:
