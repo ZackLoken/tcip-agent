@@ -1641,7 +1641,7 @@ def persist_mapping(
         citing = _citing_delivery_event_ids(project, name, existing_digest)
         if citing and not supersede:
             raise MappingRebuildError(
-                f"plant mapping {name!r} under {project} is cited by delivery event(s) "
+                f"{_mapping_place(project, name)} is cited by delivery event(s) "
                 f"{citing}: rebuilding under this name would strand them. Pass supersede=True to "
                 "archive the current record and rebuild.",
                 event_ids=citing,
@@ -1755,7 +1755,7 @@ def _require_receipt(
         _scan_receipts(project, after=_receipt_cursor.get(root_key))
     if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
         raise ValueError(
-            f"plant mapping {name!r} under {project} carries no plant_mapping_built "
+            f"{_mapping_place(project, name)} carries no plant_mapping_built "
             f"receipt naming record {record_sha256}: this record was not written by "
             "build_plant_mapping (a forged or hand-restored record, or one whose receipt could "
             "not be written); rebuild with build_plant_mapping"
@@ -2085,15 +2085,14 @@ def resolve_delivery_mapping(
 
     Returns the loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
-    from, a ``StoreError`` reading the mapping store included.
+    from, a mapping that will not read included.
     """
     from tcip_mcp.buckets import shared_root
     from tcip_mcp.dataset_layout import require_dataset_identity
-    from tcip_store import StoreError
 
     try:
         mapping_build = load_mapping(project, name)
-    except (StoreError, ValueError) as exc:
+    except ValueError as exc:
         raise MappingDeliveryError(
             f"could not read mapping {name!r}: {exc}", status=409
         ) from exc
