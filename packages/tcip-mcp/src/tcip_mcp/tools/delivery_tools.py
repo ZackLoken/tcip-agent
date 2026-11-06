@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tcip_mcp.pipelines.postprocessing.aggregation import (
+    PlantObservation,
+    deliver_per_plant_aggregate,
+)
 from tcip_mcp.server import tool
 
 
 @tool()
 def deliver_per_plant_csv(
     project: Path,
-    results: list[dict],
+    results: list[PlantObservation],
     output_path: str,
     delivered_phenotype: str,
     delivery_kind: str,
@@ -18,6 +22,7 @@ def deliver_per_plant_csv(
     dataset_root: str,
     buckets: list[str],
     value_key: str,
+    plant_attribution: str,
     crop: str = "",
     pipeline_version: str = "",
     plant_mapping: str = "",
@@ -44,9 +49,10 @@ def deliver_per_plant_csv(
     the mapping assigned on no delivered date.
 
     Args:
-        results: Per-image records, each carrying as ``plant_id`` the plant
-            ``build_plant_mapping`` assigned its image, its ``plant_attribution`` and its value
-            under ``value_key``.
+        results: Per-image observations, each the plant ``build_plant_mapping`` assigned its
+            image as ``plant_id`` and the image's measurement as ``value`` (``null`` for an image
+            yielding none), with the assignment's ``source`` and ``distance_m`` when it carries
+            them; a row naming any other key, or no plant, is refused.
         output_path: Where to write the CSV.
         delivered_phenotype: The crop-vocabulary phenotype this CSV ships under.
         delivery_kind: ``per_plant_count_aggregate``, ``per_plant_ordinal_aggregate`` or
@@ -55,7 +61,9 @@ def deliver_per_plant_csv(
         dataset_root: The dataset root the buckets are published under.
         buckets: The names of the published buckets the values came from, one per capture date;
             each stands for the date its own record states.
-        value_key: The key every record's value sits under, one the operationalization covers.
+        value_key: The quantity every value is, one the operationalization covers.
+        plant_attribution: The granularity the rows' plants were attributed at, ``image`` for
+            ``build_plant_mapping``'s mapping; written into every row.
         crop / pipeline_version: Written into every row.
         plant_mapping: The persisted plant mapping the rows' plant ids came from, or empty.
         scale_assessment_id: The physical-scale assessment a dimensional value rests on.
@@ -64,9 +72,6 @@ def deliver_per_plant_csv(
     """
     from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.pipelines.postprocessing import plant_mapping as mapping
-    from tcip_mcp.pipelines.postprocessing.aggregation import (
-        deliver_per_plant_aggregate,
-    )
     from tcip_mcp.pipelines.postprocessing.phenology import population
     from tcip_mcp.registry_paths import located
     from tcip_mcp.traits import TraitUnknownError
@@ -87,6 +92,7 @@ def deliver_per_plant_csv(
             results,
             str(located(output_path, project)),
             value_key=value_key,
+            plant_attribution=plant_attribution,
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,

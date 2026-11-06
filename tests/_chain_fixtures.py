@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.pipelines.execution import Pass
     from tcip_mcp.pipelines.inference.passes import Detection, DetectionPass
+    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
     from tcip_mcp.pipelines.schemas import DetectorGeometry
     from tcip_mcp.subject_registry import SubjectRegistry
     from tcip_mcp.traits import TraitRevision
@@ -595,7 +596,7 @@ def digest_of(refused: Exception) -> str:
 
 def deliver_acknowledged(
     project: Path,
-    records: list[dict],
+    records: list[PlantObservation],
     out: Path,
     delivered_phenotype: str,
     *,
@@ -604,11 +605,12 @@ def deliver_acknowledged(
     buckets: list | None = None,
     **kwargs: str | dict | None,
 ) -> PerPlantDelivered:
-    """Deliver the per-image ``records``' ``value_key`` per plant, under an acknowledgment.
+    """Deliver the per-image ``records``' ``value_key`` values per plant, under an acknowledgment.
 
-    ``deliver_per_plant_aggregate`` runs for the plants the records carry, over ``buckets`` (by
-    default a bucket published under no assessment, :func:`unassessed_bucket`), shipped
-    unvalidated under the breeder's acknowledgment (:func:`acknowledged`).
+    ``deliver_per_plant_aggregate`` runs for the plants the records carry, attributed per image
+    (``build_plant_mapping``'s granularity), over ``buckets`` (by default a bucket published under
+    no assessment, :func:`unassessed_bucket`), shipped unvalidated under the breeder's
+    acknowledgment (:func:`acknowledged`).
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
@@ -626,10 +628,11 @@ def deliver_acknowledged(
             records,
             str(out),
             value_key=value_key,
+            plant_attribution="image",
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,
-            plants=list(dict.fromkeys(r["plant_id"] for r in records)),
+            plants=list(dict.fromkeys(r.plant_id for r in records)),
             door="test_delivery",
             acknowledgment_id=ack,
             actor=None,

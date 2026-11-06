@@ -233,22 +233,17 @@ def orthomosaic_plant_counts(
             f"these population plants cannot be counted from this raster: {refused}."
         )
     from tcip_mcp.pipelines.postprocessing.aggregation import (
+        PlantObservation,
         deliver_per_plant_aggregate,
     )
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
 
     delivered = deliver_per_plant_aggregate(
         project,
-        [
-            {
-                "plant_id": p,
-                _PER_PLANT_VALUE_KEY: counts[p],
-                "plant_attribution": attribution,
-            }
-            for p in wanted
-        ],
+        [PlantObservation(plant_id=p, value=counts[p]) for p in wanted],
         str(output_csv_path),
         value_key=_PER_PLANT_VALUE_KEY,
+        plant_attribution=attribution,
         delivered_phenotype=delivered_phenotype,
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[found],
