@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from tcip_mcp.assessment_evidence import CountEvidence, FailureName
     from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
     from tcip_mcp.traits import TraitEntry
 
@@ -51,7 +52,7 @@ def _criterion(
     floor: float = 0.01,
     equivalence_z: float = EQUIVALENCE_Z,
     dispersion_quantile: float = DISPERSION_QUANTILE,
-) -> tuple[float, dict, list[str]]:
+) -> tuple[float, CountEvidence, list[FailureName]]:
     """Run ``count_criterion`` staged at ``floor``; return ``(conf, evidence, failures)``."""
     return count_criterion(
         cal,
@@ -130,7 +131,7 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
     assert old["count_bias_mean"] == pytest.approx(0.0)
 
     conf, evidence, failures = _criterion(cal, hold)
-    hb = evidence["holdout_at_conf"]
+    hb = evidence.holdout_at_conf
     assert conf == hb["conf"] == pytest.approx(0.9)
     assert hb["count_bias_mean"] == pytest.approx(-80.0)
     assert "count_bias_exceeds_tolerance" in failures
@@ -157,7 +158,7 @@ def test_a_holdout_keeping_no_detection_at_the_conf_has_no_precision_and_fails_t
     )
 
     _conf, evidence, failures = _criterion(_cal_picks_conf_point_nine(), hold)
-    hb = evidence["holdout_at_conf"]
+    hb = evidence.holdout_at_conf
     assert (hb["tp"], hb["fp"]) == (0, 0)
     assert hb["precision"] is None
     assert hb["recall"] == 0.0
@@ -194,7 +195,7 @@ def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_
     assert old["count_bias_mean"] == pytest.approx(2.0)
 
     _conf, evidence, failures = _criterion(cal, hold)
-    assert evidence["holdout_at_conf"]["count_bias_mean"] == pytest.approx(0.0)
+    assert evidence.holdout_at_conf["count_bias_mean"] == pytest.approx(0.0)
     assert failures == []
 
 
@@ -239,8 +240,8 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor() -> None:
         _tp_zero_bias_zero_records("h"),
         floor=0.0,
     )
-    assert evidence["holdout_at_conf"]["tp"] == 0
-    assert evidence["holdout_at_conf"]["count_bias_mean"] == pytest.approx(0.0)
+    assert evidence.holdout_at_conf["tp"] == 0
+    assert evidence.holdout_at_conf["count_bias_mean"] == pytest.approx(0.0)
     assert "localization_quality_floor_failed" in failures
 
 
@@ -285,7 +286,7 @@ def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many() -> (
 
     _conf, evidence, failures = _criterion(cal, hold, entry=strict)
 
-    assert evidence["holdout_at_conf"][
+    assert evidence.holdout_at_conf[
         "count_error_at_quantile"
     ] == pytest.approx(1.0)
     assert "count_error_dispersion_too_high" in failures
@@ -308,10 +309,10 @@ def test_the_dispersion_check_reads_the_quantile_the_assessment_states() -> (
         _conf, evidence, failures = _criterion(
             cal, hold, entry=strict, dispersion_quantile=quantile
         )
-        assert evidence["holdout_at_conf"][
+        assert evidence.holdout_at_conf[
             "count_error_at_quantile"
         ] == pytest.approx(float(np.quantile(errors, quantile)))
-        assert evidence["calibration_curve"]["dispersion_quantile"] == quantile
+        assert evidence.calibration_curve["dispersion_quantile"] == quantile
         assert ("count_error_dispersion_too_high" in failures) is (
             quantile == 0.95
         )
@@ -345,7 +346,7 @@ def test_single_image_holdout_fails_the_non_degeneracy_floor_alone() -> None:
     _conf, evidence, failures = _criterion(
         _records("c"), [_records("h", shift=3.0)[0]], floor=0.3
     )
-    assert evidence["holdout_at_conf"]["n_images"] == 1
+    assert evidence.holdout_at_conf["n_images"] == 1
     assert "insufficient_holdout_images" in failures
 
 
@@ -356,7 +357,7 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
     _conf, evidence, failures = _criterion(
         _records("c"), _records("h", shift=3.0), floor=0.3
     )
-    assert evidence["holdout_at_conf"]["count_bias_mean"] == pytest.approx(0.0)
+    assert evidence.holdout_at_conf["count_bias_mean"] == pytest.approx(0.0)
     assert "insufficient_holdout_images" not in failures
     assert "count_bias_exceeds_tolerance" in failures
 
@@ -385,8 +386,8 @@ def test_padding_with_empty_records_cannot_dilute_the_equivalence_test() -> (
         _records("c"), hold_real, entry=loosened, floor=0.3
     )
 
-    assert padded["holdout_at_conf"]["n_images"] == 10
-    assert padded["holdout_at_conf"]["n_present"] == 2
+    assert padded.holdout_at_conf["n_images"] == 10
+    assert padded.holdout_at_conf["n_present"] == 2
     assert padded_failures == bare_failures
     assert "count_bias_exceeds_tolerance" in padded_failures
 
@@ -408,7 +409,7 @@ def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(
     assert conf == pytest.approx(
         0.0
     )  # F1-max pick for this fixture (recall-max, low conf)
-    assert evidence["conf_derived_from"] == "F1-max count curve"
+    assert evidence.conf_derived_from == "F1-max count curve"
 
 
 # ── Cap-saturation evidence (never a failure) ─────────────────────────────────
@@ -434,7 +435,7 @@ def test_cap_saturation_is_surfaced_but_never_fails_the_criterion() -> None:
     _conf, evidence, failures = _criterion(
         cal, _records("h", shift=3.0), floor=0.3
     )
-    assert evidence["calibration_cap_saturated_frac"] == pytest.approx(1.0)
+    assert evidence.calibration_cap_saturated_frac == pytest.approx(1.0)
     assert not any("cap" in f for f in failures)
 
 
@@ -456,7 +457,7 @@ def _rotating_noise_pattern(
 
 def _noisy(
     n: int, obj: int, miss: list[int], fp: list[int]
-) -> tuple[float, dict, list[str]]:
+) -> tuple[float, CountEvidence, list[FailureName]]:
     cal = dense_records(
         n_images=n,
         objects_per_image=obj,
@@ -482,7 +483,7 @@ def _noisy(
 def test_a_realistic_noisy_detector_passes_at_n_equals_40() -> None:
     miss, fp = _rotating_noise_pattern(40)
     _conf, evidence, failures = _noisy(40, 100, miss, fp)
-    hb = evidence["holdout_at_conf"]
+    hb = evidence.holdout_at_conf
     assert hb["count_bias_mean"] == pytest.approx(0.0)
     assert hb["count_bias_std"] == pytest.approx(2.0254787341673333, abs=1e-6)
     assert hb["recall"] == pytest.approx(0.97, abs=1e-6)
@@ -517,14 +518,14 @@ def test_the_equivalence_test_runs_at_the_multiplier_the_assessment_states() -> 
         _conf, evidence, failures = _criterion(
             cal, hold, equivalence_z=equivalence_z
         )
-        assert evidence["equivalence_z"] == equivalence_z
+        assert evidence.equivalence_z == equivalence_z
         assert ("count_bias_exceeds_tolerance" not in failures) is passes
 
 
 def test_the_same_noisy_detector_on_ten_images_fails_equivalence() -> None:
     miss, fp = _rotating_noise_pattern(40)
     _conf, evidence, failures = _noisy(10, 100, miss[:10], fp[:10])
-    assert evidence["holdout_at_conf"]["count_bias_mean"] == pytest.approx(0.0)
+    assert evidence.holdout_at_conf["count_bias_mean"] == pytest.approx(0.0)
     assert "count_bias_exceeds_tolerance" in failures
 
 
@@ -537,8 +538,8 @@ def test_the_same_noise_crosses_from_fail_to_pass_as_density_rises() -> None:
     miss, fp = _rotating_noise_pattern(40)
     _c, sparse, sparse_failures = _noisy(40, 30, miss, fp)
     _c, dense, dense_failures = _noisy(40, 100, miss, fp)
-    assert sparse["holdout_at_conf"]["count_bias_std"] == pytest.approx(
-        dense["holdout_at_conf"]["count_bias_std"]
+    assert sparse.holdout_at_conf["count_bias_std"] == pytest.approx(
+        dense.holdout_at_conf["count_bias_std"]
     )
     assert "count_bias_exceeds_tolerance" in sparse_failures
     assert dense_failures == []
@@ -651,11 +652,11 @@ def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it() -> (
 
     _conf, evidence, failures = _criterion(cal, hold)
 
-    hb = evidence["holdout_at_conf"]
+    hb = evidence.holdout_at_conf
     assert hb["n_images"] == 50 and hb["n_present"] == 10
     assert hb["count_bias_mean_present"] == pytest.approx(2.0)
-    assert evidence["pooled_typical_count"] == pytest.approx(100.0)
-    assert evidence["pooled_count_bias_tolerance"] == pytest.approx(1.0)
+    assert evidence.typical_count == pytest.approx(100.0)
+    assert evidence.scope_equivalence()[1] == pytest.approx(1.0)
     assert "count_bias_exceeds_tolerance" in failures
 
 
@@ -674,7 +675,7 @@ def test_the_same_overcount_without_the_negatives_fails_identically() -> None:
 
     _conf, evidence, failures = _criterion(cal, hold)
 
-    assert evidence["holdout_at_conf"][
+    assert evidence.holdout_at_conf[
         "count_bias_mean_present"
     ] == pytest.approx(2.0)
     assert "count_bias_exceeds_tolerance" in failures
@@ -697,7 +698,7 @@ def test_a_clean_detector_still_passes_on_a_reference_full_of_negatives() -> (
 
     _conf, evidence, failures = _criterion(cal, hold)
 
-    assert evidence["holdout_at_conf"]["n_present"] == 10
+    assert evidence.holdout_at_conf["n_present"] == 10
     assert failures == []
 
 
@@ -732,7 +733,7 @@ def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard() -> 
         _hallucinating("c"), _hallucinating("h", shift=5.0)
     )
 
-    hb = evidence["holdout_at_conf"]
+    hb = evidence.holdout_at_conf
     assert hb["n_present"] == 20
     assert hb["count_bias_mean_present"] == pytest.approx(
         1.5
@@ -755,5 +756,5 @@ def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence() -> None:
 
     _conf, evidence, failures = _criterion(cal, hold)
 
-    assert evidence["holdout_at_conf"]["n_images"] == 100
+    assert evidence.holdout_at_conf["n_images"] == 100
     assert "insufficient_holdout_images" in failures

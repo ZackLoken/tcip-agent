@@ -1202,10 +1202,9 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
     annotations = json_io.read_label_document(
         image_label_key(image)
     ).annotations
-    count = read_assessment(tmp_path, bucket.assessment_id).criterion["count"]
-    assert isinstance(count, dict)
-    criterion = count["localization"]
-    assert isinstance(criterion, dict)
+    count = read_assessment(tmp_path, bucket.assessment_id).criterion.count
+    assert count is not None
+    criterion = count.localization
 
     paired = proposal_pairs(tmp_path, bucket, annotations, proposals)
 

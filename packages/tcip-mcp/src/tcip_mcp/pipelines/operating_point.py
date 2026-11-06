@@ -5,12 +5,18 @@ Each criterion reads its tolerances, floors and objective from the trait entry i
 
 from __future__ import annotations
 
-import math
 import statistics
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_store import non_finite_state, stored_number
+from tcip_mcp.assessment_evidence import (
+    ClassifierEvidence,
+    CountEvidence,
+    FailureName,
+    ScalarEvidence,
+    bias_equivalence,
+)
+from tcip_store import finite_or_none
 
 if TYPE_CHECKING:
     import torch
@@ -50,42 +56,6 @@ REGRESSION_CRITERIA: dict[
     "concordance_correlation_coefficient": concordance_correlation_coefficient,
 }
 """The regression skill statistics a caller may assess a continuous prediction by."""
-
-
-def _effective_count_bias_tolerance(
-    tolerance_frac: float, typical_count: float, n: int
-) -> float:
-    """Return the absolute per-image count-bias tolerance one scope is held to.
-
-    A scope is pooled, or one class. The tolerance is ``tolerance_frac`` of the scope's typical
-    per-image count, floored at ``1 / n``, one whole miscount spread across the ``n`` samples the
-    scope's evidence rests on; ``0.0`` at ``n == 0``.
-    """
-    return max(tolerance_frac * typical_count, 1.0 / n) if n > 0 else 0.0
-
-
-def _bias_equivalence(
-    mean: float,
-    std: float,
-    n: int,
-    *,
-    tolerance_frac: float,
-    typical_count: float,
-    equivalence_z: float,
-) -> tuple[bool, float]:
-    """Return whether a bias over ``n`` present samples is equivalent to zero, and the tolerance.
-
-    Equivalent means the mean plus ``equivalence_z`` one-sided standard errors lies within the
-    scope's tolerance. ``n == 0`` never passes.
-    """
-    tolerance = _effective_count_bias_tolerance(
-        tolerance_frac, typical_count, n
-    )
-    if n == 0:
-        return False, tolerance
-    return abs(mean) + equivalence_z * std / math.sqrt(
-        n
-    ) <= tolerance, tolerance
 
 
 SCORE_THRESH = "score_thresh"
@@ -163,7 +133,7 @@ def count_criterion(
     equivalence_z: float,
     dispersion_quantile: float,
     held: dict | None = None,
-) -> tuple[float, dict, list[str]]:
+) -> tuple[float, CountEvidence, list[FailureName]]:
     """Pick the count objective's conf on the calibration side and check the holdout at it.
 
     Returns ``(conf, evidence, failures)``. The records are per-image evaluation records (``gt``
@@ -174,12 +144,14 @@ def count_criterion(
     (:func:`~tcip_mcp.pipelines.training.evaluation.scaled_to`). The holdout passes when its
     present-scoped mean count bias, pooled and per class, is equivalent to zero at
     ``count_bias_tolerance_frac`` of that scope's typical count, the bias plus ``equivalence_z``
-    one-sided standard errors; when every class the calibration side evidences at the conf is
-    evidenced on the holdout; when the held-out precision and recall both clear
+    one-sided standard errors (:meth:`CountEvidence.scope_equivalence`); when every class the
+    calibration side evidences at the conf is evidenced on the holdout; when the held-out
+    precision and recall both clear
     ``holdout_match_quality_floor`` (an undefined one, with nothing to score, does not clear it);
     and when the held-out per-image count error at ``dispersion_quantile`` is within
     ``count_error_tolerance``. The entry carries every one of
-    those fields; the evidence records ``equivalence_z`` and each curve its quantile and the
+    those fields; the evidence records ``equivalence_z``, the tolerance fraction, each scope's
+    typical count, and each curve its quantile and the
     criterion it matched under. Every matching is kept in ``held`` where one is given
     (:func:`~tcip_mcp.pipelines.training.evaluation.matched`).
     A conf at or below the floor fails as ``conf_censored``. A calibration curve the objective
@@ -216,39 +188,31 @@ def count_criterion(
             (cal_records, cal_criterion),
         )
     )
-    tolerance_frac = cast(float, entry.count_bias_tolerance_frac)
-    pooled_typical = gt_class_typical_count(hold_records)
-    pooled_ok, pooled_tolerance = _bias_equivalence(
-        hb["count_bias_mean_present"],
-        hb["count_bias_std_present"],
-        hb["n_present"],
-        tolerance_frac=tolerance_frac,
-        typical_count=pooled_typical,
+    evidence = CountEvidence(
+        conf=conf,
+        conf_derived_from=conf_label,
+        calibration_curve=cal_curve,
+        f1_max_conf=pick_f1_max(cal_curve),
+        localization=criterion,
+        holdout_at_conf=hb,
+        calibration_at_conf=cb,
+        count_bias_tolerance_frac=cast(float, entry.count_bias_tolerance_frac),
+        typical_count=gt_class_typical_count(hold_records),
+        per_class_typical_count={
+            cid: gt_class_typical_count(hold_records, class_id=int(cid))
+            for cid in hb["per_class"]
+        },
+        holdout_missing_classes=sorted(
+            classes_with_evidence(cb) - classes_with_evidence(hb)
+        ),
         equivalence_z=equivalence_z,
-    )
-    per_class: dict[str, dict] = {}
-    for cid, s in hb["per_class"].items():
-        typical = gt_class_typical_count(hold_records, class_id=int(cid))
-        ok, tolerance = _bias_equivalence(
-            s["count_bias_mean_present"],
-            s["count_bias_std_present"],
-            s["n_present"],
-            tolerance_frac=tolerance_frac,
-            typical_count=typical,
-            equivalence_z=equivalence_z,
-        )
-        per_class[cid] = {
-            "bias": s["count_bias_mean_present"],
-            "typical_count": typical,
-            "tolerance": tolerance,
-            "passed": ok,
-            "n_present": s["n_present"],
-        }
-    missing_classes = sorted(
-        classes_with_evidence(cb) - classes_with_evidence(hb)
+        staged_conf_floor=staged_conf_floor,
+        observed_min_score=_min_dt_score(cal_records + hold_records),
+        calibration_cap_saturated_frac=cap_saturated_frac(cal_records),
+        holdout_cap_saturated_frac=cap_saturated_frac(hold_records),
     )
     floor = cast(float, entry.holdout_match_quality_floor)
-    failures: list[str] = []
+    failures: list[FailureName] = []
     if conf <= staged_conf_floor:
         failures.append("conf_censored")
     if not sum(len(gt_objects(r)) for r in cal_records):
@@ -257,13 +221,13 @@ def count_criterion(
         failures.append("insufficient_holdout_gt")
     if hb["n_present"] < 2:
         failures.append("insufficient_holdout_images")
-    if not pooled_ok:
+    if not evidence.scope_equivalence()[0]:
         failures.append("count_bias_exceeds_tolerance")
-    if any(not c["passed"] for c in per_class.values()):
+    if any(not evidence.scope_equivalence(cid)[0] for cid in hb["per_class"]):
         failures.append("count_bias_exceeds_tolerance_per_class")
-    if any(c["n_present"] == 1 for c in per_class.values()):
+    if any(c["n_present"] == 1 for c in hb["per_class"].values()):
         failures.append("insufficient_holdout_images_per_class")
-    if missing_classes:
+    if evidence.holdout_missing_classes:
         failures.append("holdout_missing_class")
     if any(
         score is None or score < floor
@@ -274,25 +238,6 @@ def count_criterion(
         float, entry.count_error_tolerance
     ):
         failures.append("count_error_dispersion_too_high")
-
-    evidence = {
-        "conf": conf,
-        "conf_derived_from": conf_label,
-        "calibration_curve": cal_curve,
-        "f1_max_conf": pick_f1_max(cal_curve),
-        "localization": criterion,
-        "holdout_at_conf": hb,
-        "calibration_at_conf": cb,
-        "pooled_typical_count": pooled_typical,
-        "pooled_count_bias_tolerance": pooled_tolerance,
-        "per_class": per_class,
-        "holdout_missing_classes": missing_classes,
-        "equivalence_z": equivalence_z,
-        "staged_conf_floor": staged_conf_floor,
-        "observed_min_score": _min_dt_score(cal_records + hold_records),
-        "calibration_cap_saturated_frac": cap_saturated_frac(cal_records),
-        "holdout_cap_saturated_frac": cap_saturated_frac(hold_records),
-    }
     return conf, evidence, failures
 
 
@@ -326,7 +271,7 @@ def classifier_criterion(
     entry: TraitEntry,
     *,
     equivalence_z: float,
-) -> tuple[dict, list[str]]:
+) -> tuple[ClassifierEvidence, list[FailureName]]:
     """Assess the held-out agreement of a positive-state call over matched instances.
 
     Returns ``(evidence, failures)``. Each item is one reference instance matched to one
@@ -351,7 +296,7 @@ def classifier_criterion(
     typical = mean_of_present_counts(
         sum(i["is_true_positive"] for i in its) for its in by_image.values()
     )
-    bias_ok, tolerance = _bias_equivalence(
+    bias_ok, tolerance = bias_equivalence(
         mean,
         std,
         len(biases),
@@ -362,7 +307,7 @@ def classifier_criterion(
     kappa = _classification_kappa(hold_items)
     floor = cast(float, entry.classifier_agreement_floor)
 
-    failures: list[str] = []
+    failures: list[FailureName] = []
     if not any(it["is_true_positive"] for it in cal_items):
         failures.append("insufficient_calibration_positive_evidence")
     if not any(it["is_true_positive"] for it in hold_items):
@@ -375,17 +320,17 @@ def classifier_criterion(
         failures.append("positive_count_bias_exceeds_tolerance")
     if kappa is None or kappa <= 0.0 or kappa <= floor:
         failures.append("classifier_agreement_below_floor")
-    evidence = {
-        "kappa": kappa,
-        "kappa_floor": floor,
-        "positive_count_bias": mean,
-        "positive_count_bias_std": std,
-        "positive_count_bias_images": len(biases),
-        "typical_positive_count": typical,
-        "positive_count_bias_tolerance": tolerance,
-        "n_calibration": len(cal_items),
-        "n_holdout": len(hold_items),
-    }
+    evidence = ClassifierEvidence(
+        kappa=kappa,
+        kappa_floor=floor,
+        positive_count_bias=mean,
+        positive_count_bias_std=std,
+        positive_count_bias_images=len(biases),
+        typical_positive_count=typical,
+        positive_count_bias_tolerance=tolerance,
+        n_calibration=len(cal_items),
+        n_holdout=len(hold_items),
+    )
     return evidence, failures
 
 
@@ -395,33 +340,34 @@ def scalar_criterion(
     score: Callable[[Any, Any], float | None],
     floor: float,
     criterion: str,
-) -> tuple[dict, list[str]]:
+) -> tuple[ScalarEvidence, list[FailureName]]:
     """Assess a per-image scalar prediction's held-out skill.
 
     ``criterion``'s ``score`` over the holdout items' ``(predicted, true)`` values must be finite,
-    above zero and above ``floor``. Returns ``(evidence, failures)``.
+    above zero and above ``floor``. Returns ``(evidence, failures)``, the evidence's score
+    ``None`` when it is undefined or not finite.
     """
     import torch
 
     true = torch.tensor([float(it["true"]) for it in hold_items])
     predicted = torch.tensor([float(it["predicted"]) for it in hold_items])
     value = score(predicted, true) if hold_items else None
-    state = non_finite_state(value) if isinstance(value, float) else None
-    failures: list[str] = []
+    finite = finite_or_none(value)
+    failures: list[FailureName] = []
     if len(hold_items) < 2:
         failures.append("insufficient_holdout_items")
     if value is None:
         failures.append("criterion_undefined")
-    elif state is not None:
+    elif finite is None:
         failures.append("criterion_not_finite")
-    elif not (value > 0.0 and value > floor):
+    elif not (finite > 0.0 and finite > floor):
         failures.append("criterion_below_floor")
-    evidence = {
-        "criterion": criterion,
-        **stored_number("score", value),
-        "floor": floor,
-        "n_holdout": len(hold_items),
-    }
+    evidence = ScalarEvidence(
+        criterion=criterion,
+        score=finite,
+        floor=floor,
+        n_holdout=len(hold_items),
+    )
     return evidence, failures
 
 

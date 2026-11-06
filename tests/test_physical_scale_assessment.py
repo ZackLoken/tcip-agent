@@ -406,9 +406,13 @@ def test_too_few_references_on_a_side_fail_as_unreplicated(
 
     result = _calibrate(tmp_path, selection, csv_path)
 
-    assert any(f.startswith("insufficient_") for f in result["failures"]), (
-        result["failures"]
-    )
+    assert {
+        "insufficient_calibration_references",
+        "insufficient_holdout_references",
+    } & set(result["failures"]), result["failures"]
+    scale = result["criterion"]["scale"]
+    assert (scale["calibration_mean"], scale["holdout_mean"]) == (None, None)
+    assert result["scale"]["value"] is None
 
 
 def test_a_reference_set_disagreeing_with_itself_beyond_the_tolerance_fails(

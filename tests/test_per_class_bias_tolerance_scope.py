@@ -14,6 +14,7 @@ from tests._training_values import COUNT_TEST
 
 pytest.importorskip("torch")
 
+from tcip_mcp.assessment_evidence import CountEvidence, FailureName  # noqa: E402
 from tcip_mcp.pipelines.operating_point import count_criterion  # noqa: E402
 from tests._dense_op_fixtures import whole_frame_record  # noqa: E402
 
@@ -71,7 +72,9 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
     return recs
 
 
-def _criterion(*, spurious: bool) -> tuple[float, dict, list[str]]:
+def _criterion(
+    *, spurious: bool
+) -> tuple[float, CountEvidence, list[FailureName]]:
     return count_criterion(
         _records("c", 0.0, spurious=spurious),
         _records("h", 100000.0, spurious=spurious),
@@ -92,22 +95,25 @@ def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance() 
     tenth of the pooled one, and the per-class check fails.
     """
     _conf, evidence, failures = _criterion(spurious=True)
-    rare = evidence["per_class"]["2"]
+    rows = evidence.holdout_at_conf["per_class"]
+    rare = rows["2"]
+    rare_passed, rare_tolerance = evidence.scope_equivalence("2")
 
-    assert evidence["pooled_typical_count"] == pytest.approx(260.0)
-    assert rare["typical_count"] == pytest.approx(float(RARE_PER_IMAGE))
+    assert evidence.typical_count == pytest.approx(260.0)
+    assert evidence.per_class_typical_count["2"] == pytest.approx(
+        float(RARE_PER_IMAGE)
+    )
     assert rare["n_present"] == N_IMAGES
-    assert rare["bias"] == pytest.approx(float(SPURIOUS_PER_IMAGE))
-    assert evidence["per_class"]["1"]["bias"] == pytest.approx(0.0)
+    assert rare["count_bias_mean_present"] == pytest.approx(
+        float(SPURIOUS_PER_IMAGE)
+    )
+    assert rows["1"]["count_bias_mean_present"] == pytest.approx(0.0)
 
     # The pooled scope is blind here, so nothing but the per-class scope can fail it.
     assert "count_bias_exceeds_tolerance" not in failures
-    assert rare["tolerance"] < evidence["pooled_count_bias_tolerance"] / 10
-    assert rare["bias"] > rare["tolerance"]
-    assert (
-        rare["passed"] is False
-        and evidence["per_class"]["1"]["passed"] is True
-    )
+    assert rare_tolerance < evidence.scope_equivalence()[1] / 10
+    assert rare["count_bias_mean_present"] > rare_tolerance
+    assert rare_passed is False and evidence.scope_equivalence("1")[0] is True
     assert "count_bias_exceeds_tolerance_per_class" in failures
 
 
@@ -117,5 +123,5 @@ def test_the_same_dense_and_rare_class_pairing_passes_when_every_class_is_honest
     """A dense and rare class pairing counted correctly passes, both classes in the evidence."""
     _conf, evidence, failures = _criterion(spurious=False)
 
-    assert set(evidence["per_class"]) == {"1", "2"}
+    assert set(evidence.per_class_typical_count) == {"1", "2"}
     assert failures == []

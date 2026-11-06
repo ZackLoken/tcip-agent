@@ -170,7 +170,7 @@ def test_golden_count_criterion_over_a_dense_distinct_reference() -> None:
     )
     # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert conf == pytest.approx(0.9)
-    assert evidence["conf_derived_from"] == "count-unbiased count curve"
+    assert evidence.conf_derived_from == "count-unbiased count curve"
     assert failures == []
     # the p99 density over frames of one size, times that size, is the densest frame's count
     from tests._verified_checkpoint_fixtures import objects_over
