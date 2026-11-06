@@ -441,9 +441,9 @@ def inspect_project(project: Path) -> dict:
 
     Carries the project's ``reading``, ``tcip_mcp.project_record.record_or_problem``'s: the
     record on ``kind`` ``read``, or on ``unread`` the ``problem`` naming why it will not read (a
-    damaged record, or a root the store refuses to read). ``plant_mappings`` is on ``kind``
-    ``listed`` every mapping name persisted under the project (:class:`MappingsListed`), or on
-    ``unlisted`` why the store refuses to read the root (:class:`MappingsUnlisted`).
+    damaged record, or one in a database that will not open or answer). ``plant_mappings`` is on
+    ``kind`` ``listed`` every mapping name persisted under the project (:class:`MappingsListed`),
+    or on ``unlisted`` why the store refuses to read the root (:class:`MappingsUnlisted`).
     ``recent_activity`` is :func:`_recent_activity`'s.
     """
     from tcip_mcp.project_record import record_or_problem
@@ -525,8 +525,9 @@ def _recent_activity(project: Path) -> dict:
     ``record_distillation_pass`` lines in the order they landed: the reports since the last
     retrospective and since the last distillation pass, the retrospectives since that pass, the
     last retrospective's ``project_id`` and time, the last pass's time, and the time of the last
-    report or retrospective. A log carrying undecodable entries answers
-    ``status_unavailable`` naming how many.
+    report or retrospective. A log carrying undecodable entries answers ``status_unavailable``
+    naming how many, and a log in a database that will not open or answer naming the store's
+    sentence.
     """
     from tcip_mcp.audit import acts_of
 
