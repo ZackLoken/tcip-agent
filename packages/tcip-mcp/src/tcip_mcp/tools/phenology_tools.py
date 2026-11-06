@@ -344,8 +344,4 @@ def deliver_phenology_milestones(
         ValueError,
     ) as exc:
         return {"error": str(exc)}
-    return {
-        **delivered,
-        "n_plants": len(measurement.plants),
-        "plant_mapping": measurement.plant_mapping.model_dump(mode="json"),
-    }
+    return delivered.model_dump(mode="json")

@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from torch import nn
 
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.delivery import PerPlantDelivered
     from tcip_mcp.pipelines.data.selection import Selection
     from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.pipelines.execution import Pass
@@ -602,7 +603,7 @@ def deliver_acknowledged(
     delivery_kind: str,
     buckets: list | None = None,
     **kwargs: str | dict | None,
-) -> dict:
+) -> PerPlantDelivered:
     """Deliver the per-image ``records``' ``value_key`` per plant, under an acknowledgment.
 
     ``deliver_per_plant_aggregate`` runs for the plants the records carry, over ``buckets`` (by

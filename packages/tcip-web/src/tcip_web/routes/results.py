@@ -49,6 +49,7 @@ from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
 
 if TYPE_CHECKING:
+    from tcip_mcp.delivery import Delivered
     from tcip_mcp.pipelines.postprocessing.phenology import (
         PhenologyMeasurement,
     )
@@ -577,6 +578,7 @@ def export_count_csv(
     acknowledgment_id = _recorded_acknowledgment(
         root, payload, person, request
     )
+    result: Delivered
     try:
         if delivery.kind == "per_image_count":
             from tcip_mcp.pipelines.postprocessing.export import (
@@ -634,7 +636,7 @@ def export_count_csv(
             ).model_dump(),
         ) from exc
     return exported(
-        CountExport(saved_path=str(saved_path), shipped=result["shipped"])
+        CountExport(saved_path=str(saved_path), shipped=result.shipped)
     )
 
 

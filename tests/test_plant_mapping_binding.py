@@ -118,7 +118,8 @@ def _deliver(
 ) -> dict:
     """Run ``deliver_phenology_milestones``'s measurement and delivery through the library.
 
-    The delivery ships under ``by``'s acknowledgment; a refusal answers ``{"error": ...}``.
+    The delivery ships under ``by``'s acknowledgment and answers what was delivered as the tool
+    answers it; a refusal answers ``{"error": ...}``.
     """
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -148,7 +149,7 @@ def _deliver(
             ),
             by=by,
             reason="mapping rails, not the assessment",
-        )
+        ).model_dump(mode="json")
     except (
         ValueError,
         MappingDeliveryError,

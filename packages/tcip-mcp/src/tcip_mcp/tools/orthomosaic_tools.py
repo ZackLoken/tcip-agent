@@ -16,6 +16,7 @@ from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
+    from tcip_mcp.delivery import OrthomosaicDelivered
     from tcip_mcp.pipelines.delivery_events_schema import (
         CanopySegmentDisclosure,
         PlantMapping,
@@ -52,7 +53,7 @@ def orthomosaic_plant_counts(
     *,
     door: str,
     actor: str | None,
-) -> dict:
+) -> OrthomosaicDelivered:
     """Deliver per-plant detection counts from a whole-raster prediction bucket as a CSV.
 
     The counts come from the bucket ``bucket`` published under ``dataset_root``, for exactly the
@@ -90,6 +91,7 @@ def orthomosaic_plant_counts(
     )
     from tcip_annotation.state import bbox_of
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.delivery import OrthomosaicDelivered
     from tcip_mcp.pipelines.delivery_events_schema import (
         PlantRegistryDisclosure,
     )
@@ -258,11 +260,7 @@ def orthomosaic_plant_counts(
         acknowledgment_id=acknowledgment_id,
         actor=actor,
     )
-    return {
-        **delivered,
-        "n_detections": len(boxes),
-        "plant_mapping": disclosure.model_dump(mode="json"),
-    }
+    return OrthomosaicDelivered(**dict(delivered), n_detections=len(boxes))
 
 
 def _segment_counts(
@@ -438,6 +436,6 @@ def deliver_orthomosaic_plant_counts(
             acknowledgment_id=acknowledgment_id,
             door="deliver_orthomosaic_plant_counts",
             actor=actor,
-        )
+        ).model_dump(mode="json")
     except ValueError as exc:
         return {"error": str(exc)}

@@ -352,7 +352,7 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
         actor=None,
     )
 
-    assert delivered["shipped"] == {"kind": "validated"}
+    assert delivered.shipped.kind == "validated"
 
 
 def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(

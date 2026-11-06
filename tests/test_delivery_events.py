@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.delivery import Delivered
     from tcip_mcp.traits import TraitRevision
     from tcip_store import Key, Version
 
@@ -79,7 +80,7 @@ def _record(
     project: Path,
     revision: TraitRevision,
     bucket: Bucket | None = None,
-) -> dict:
+) -> Delivered:
     """Run ``deliver_csv`` of an empty per-image count delivery under ``revision``.
 
     The delivery is over ``bucket`` (by default a fresh :func:`_bucket`), shipped under a
@@ -102,6 +103,172 @@ def _record(
         delivery_kind=PER_IMAGE_COUNT,
         actor=None,
     )
+
+
+def _written(project: Path) -> Delivered:
+    """Deliver an empty per-image count CSV through ``deliver_csv`` (:func:`_record`)."""
+    return _record(project, seed_confirmed_count(project))
+
+
+def _counted(project: Path) -> Delivered:
+    """Deliver per-image counts of :func:`_bucket`, under a breeder's acknowledgment."""
+    from tcip_mcp.pipelines.postprocessing.export import (
+        deliver_per_image_counts_csv,
+    )
+    from tests._chain_fixtures import acknowledged
+
+    revision = seed_confirmed_count(project)
+    bucket = _bucket(project)
+    return acknowledged(
+        project,
+        lambda ack: deliver_per_image_counts_csv(
+            project,
+            bucket.root,
+            bucket.name,
+            str(project / "out" / "counts.csv"),
+            trait=revision.entry.name,
+            acknowledgment_id=ack,
+            door="test_door",
+            actor=None,
+        ),
+        reason="an unassessed fixture bucket",
+    )
+
+
+def _measured(project: Path) -> Delivered:
+    """Deliver a mapped phenology's milestones, under a breeder's acknowledgment.
+
+    The scene is ``test_plant_mapping_binding``'s: a registered dataset, its published buckets
+    and a mapping built over them, measured for the second trait.
+    """
+    from tcip_mcp.pipelines.postprocessing import phenology
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests import test_plant_mapping_binding as binding
+    from tests._chain_fixtures import acknowledged
+    from tests._mapping_fixtures import register_plant_registry_for
+
+    binding._init(project)
+    dataset_root = binding._dataset(project)
+    plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    built = build_plant_mapping(
+        project,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(project, [plant_csv]),
+        actor=None,
+    )
+    assert "error" not in built, built
+    binding._seed_currant_bloom_trait(project)
+    measurement = phenology.measure_phenology(
+        project,
+        trait="currant_bloom",
+        mapping_name="valley",
+        dataset_root=dataset_root,
+        buckets=list(preds_by_date.values()),
+        plants=binding.POPULATION,
+    )
+    return acknowledged(
+        project,
+        lambda ack: phenology.deliver_phenology(
+            project,
+            measurement,
+            projection="milestones",
+            output_path=project / "out" / "milestones.csv",
+            acknowledgment_id=ack,
+            door="test_door",
+            actor=None,
+        ),
+        reason="an unassessed fixture bucket",
+    )
+
+
+def _counted_per_plant(project: Path) -> Delivered:
+    """Deliver per-plant counts from a whole-raster bucket, under a breeder's acknowledgment.
+
+    The scene is ``test_orthomosaic_tools``'s plant grid over one detection.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
+    from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
+    from tests import _trait_fixtures as fx, test_orthomosaic_tools as ortho
+    from tests._chain_fixtures import acknowledged
+
+    fx.seed_delivery_traits(project)
+    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    raster_path = ortho._raster(project)
+    ortho._write_geo_raster(raster_path)
+    bucket = ortho._raster_bucket(
+        project, raster_path, [(8.0, 8.0, 12.0, 12.0)]
+    )
+    registry = ortho._plant_registry(
+        project,
+        ortho._plant_grid_csv(project, raster_path, ortho._PLANT_PIXELS),
+    )
+    return acknowledged(
+        project,
+        lambda ack: orthomosaic_plant_counts(
+            project,
+            bucket.root,
+            bucket.name,
+            load_registry(project, registry),
+            project / "out" / "counts.csv",
+            "stem_count",
+            ortho._GRID,
+            acknowledgment_id=ack,
+            door="test_door",
+            actor=None,
+        ),
+        reason="an unassessed fixture bucket",
+    )
+
+
+@pytest.mark.parametrize(
+    "deliver",
+    [_written, _counted, _measured, _counted_per_plant],
+    ids=lambda deliver: deliver.__name__.strip("_"),
+)
+def test_a_delivery_answers_the_fields_of_the_event_it_wrote(
+    tmp_path: Path, deliver: Callable[[Path], Delivered]
+) -> None:
+    """Each delivery's answer states its one delivery event's own fields.
+
+    The file is the event's ``output_path``, the id its ``event_id``, and how it shipped, the
+    producer, the trait revision and the plant-mapping disclosure are the event's, each path
+    compared in the form the event stores it.
+    """
+    from tcip_mcp.registry_paths import recorded_paths
+
+    pytest.importorskip("torch")
+
+    delivered = deliver(tmp_path)
+
+    answered = recorded_paths(
+        delivered.model_dump(mode="json"),
+        (("csv_path",), ("plant_mapping", "dataset_root")),
+        tmp_path,
+    )
+    (event,) = read_delivery_events(tmp_path)
+    recorded = recorded_paths(
+        event.model_dump(mode="json"), delivery.DELIVERY_EVENT_PATHS, tmp_path
+    )
+    assert isinstance(answered, dict) and isinstance(recorded, dict)
+    assert {
+        "csv_path": recorded["output_path"],
+        "delivery_event_id": recorded["event_id"],
+        "shipped": recorded["shipped"],
+        "producer": recorded["producer"],
+        "trait_revision": recorded["trait_revision"],
+        "plant_mapping": recorded["plant_mapping"],
+    } == {
+        key: answered[key]
+        for key in (
+            "csv_path",
+            "delivery_event_id",
+            "shipped",
+            "producer",
+            "trait_revision",
+            "plant_mapping",
+        )
+    }
 
 
 def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket(

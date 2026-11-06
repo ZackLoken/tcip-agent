@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.delivery import PerPlantDelivered
     from tcip_mcp.pipelines.delivery_events_schema import PlantMapping
     from tcip_mcp.traits import PlantAggregation
 
@@ -139,7 +140,7 @@ def deliver_per_plant_aggregate(
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
     actor: str | None,
-) -> dict:
+) -> PerPlantDelivered:
     """Deliver the per-plant aggregate of per-image ``records`` as a CSV at ``output_path``.
 
     Each record carries its ``plant_id`` and its value under ``value_key``; the CSV is a
@@ -161,7 +162,13 @@ def deliver_per_plant_aggregate(
     population and ``plant_mapping`` disclosure (:func:`~tcip_mcp.delivery.deliver_csv`); returns
     what was delivered.
     """
-    from tcip_mcp.delivery import DELIVERY_COLUMNS, Result, deliver_csv, gate
+    from tcip_mcp.delivery import (
+        DELIVERY_COLUMNS,
+        PerPlantDelivered,
+        Result,
+        deliver_csv,
+        gate,
+    )
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
 
@@ -264,4 +271,4 @@ def deliver_per_plant_aggregate(
         delivery_kind=delivery_kind,
         actor=actor,
     )
-    return {**delivered, "n_plants": len(plants)}
+    return PerPlantDelivered(**dict(delivered), n_plants=len(plants))
