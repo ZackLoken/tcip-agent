@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 class PlantObservation(BaseModel):
-    """One image's observation of one plant, a per-plant delivery's per-image record.
+    """One observation of one plant under the delivery's attribution, a per-plant delivery's row.
 
-    ``plant_id`` is the plant ``build_plant_mapping`` assigned the image, never one read off a
-    file name; ``value`` is what the image measured, ``None`` for an image that yields no
-    observation. ``source`` and ``distance_m`` are the assignment's own, when it carries them.
+    ``plant_id`` is the plant the delivery's attribution assigned the observation to, never one
+    read off a file name; ``value`` is what was observed, ``None`` for an observation that yields
+    no value. ``source`` and ``distance_m`` are the plant assignment's own, when it carries them.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
