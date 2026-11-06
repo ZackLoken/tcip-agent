@@ -2,7 +2,7 @@
 
 The criterion cases drive :func:`~tcip_mcp.pipelines.operating_point.count_criterion` over
 per-image records; the curve cases call ``derive_operating_point_curve`` and the tolerance cases
-``_effective_count_bias_tolerance`` directly.
+``effective_count_bias_tolerance`` directly.
 """
 
 from __future__ import annotations
@@ -13,10 +13,12 @@ pytest.importorskip(
     "torch"
 )  # operating_point imports evaluation, which imports torch
 
-from tcip_mcp.pipelines.operating_point import (  # noqa: E402
-    _effective_count_bias_tolerance,
-    count_criterion,
+from tcip_mcp.assessment_evidence import (  # noqa: E402
+    CountEvidence,
+    FailureName,
+    effective_count_bias_tolerance,
 )
+from tcip_mcp.pipelines.operating_point import count_criterion  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     EvaluationRecord,
     derive_operating_point_curve,
@@ -41,7 +43,7 @@ the per-class conditioning is what these cases isolate."""
 
 def _criterion(
     cal: list[dict], hold: list[dict]
-) -> tuple[float, dict, list[str]]:
+) -> tuple[float, CountEvidence, list[FailureName]]:
     return count_criterion(
         cal,
         hold,
@@ -49,6 +51,15 @@ def _criterion(
         staged_conf_floor=0.05,
         **COUNT_TEST,
     )
+
+
+def _failing_classes(evidence: CountEvidence) -> set[str]:
+    """Return the classes whose holdout bias the evidence does not find equivalent to zero."""
+    return {
+        cid
+        for cid in evidence.per_class_typical_count
+        if not evidence.scope_equivalence(cid)[0]
+    }
 
 
 def _gt_records(
@@ -104,12 +115,10 @@ def test_a_class_compensating_reference_the_pooled_bias_calls_unbiased_fails_per
         _gt_records("hold", 4, swap_classes=True, offset=5000.0),
     )
 
-    assert evidence["holdout_at_conf"][
+    assert evidence.holdout_at_conf[
         "count_bias_mean_present"
     ] == pytest.approx(0.0)
-    assert {
-        cid for cid, c in evidence["per_class"].items() if not c["passed"]
-    } == {"1", "2"}
+    assert _failing_classes(evidence) == {"1", "2"}
     assert failures == ["count_bias_exceeds_tolerance_per_class"]
 
 
@@ -120,8 +129,8 @@ def test_the_same_geometry_called_correctly_passes() -> None:
     )
 
     assert failures == []
-    assert set(evidence["per_class"]) == {"1", "2"}
-    assert evidence["holdout_missing_classes"] == []
+    assert set(evidence.per_class_typical_count) == {"1", "2"}
+    assert evidence.holdout_missing_classes == []
 
 
 def test_a_single_class_reference_is_unaffected_by_the_conditioning() -> None:
@@ -135,13 +144,13 @@ def test_a_single_class_reference_is_unaffected_by_the_conditioning() -> None:
         "hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0
     )
     conf, evidence, failures = _criterion(cal, hold)
-    hb = evidence["holdout_at_conf"]
+    hb = evidence.holdout_at_conf
 
     assert failures == []
     assert list(hb["per_class"]) == ["1"]
     explicit = derive_operating_point_curve(
         hold,
-        criterion=scaled_to(evidence["localization"], hold),
+        criterion=scaled_to(evidence.localization, hold),
         class_id=1,
         conf_grid=[conf],
         dispersion_quantile=DISPERSION_QUANTILE,
@@ -174,8 +183,8 @@ def test_a_class_the_holdout_never_carries_cannot_pass_by_its_absence() -> (
         ),
     )
 
-    assert all(c["passed"] for c in evidence["per_class"].values())
-    assert evidence["holdout_missing_classes"] == ["2"]
+    assert _failing_classes(evidence) == set()
+    assert evidence.holdout_missing_classes == ["2"]
     assert "holdout_missing_class" in failures
     assert "insufficient_holdout_images_per_class" not in failures
 
@@ -227,9 +236,10 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass() -> None:
         calibration("cal", 4, 0.0), holdout("hold", 20, 5000.0)
     )
 
-    assert evidence["per_class"]["2"]["n_present"] == 2
-    assert evidence["per_class"]["2"]["bias"] == pytest.approx(-4.0)
-    assert evidence["per_class"]["2"]["passed"] is False
+    row = evidence.holdout_at_conf["per_class"]["2"]
+    assert row["n_present"] == 2
+    assert row["count_bias_mean_present"] == pytest.approx(-4.0)
+    assert evidence.scope_equivalence("2")[0] is False
     assert "count_bias_exceeds_tolerance_per_class" in failures
 
 
@@ -365,9 +375,7 @@ def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it()
 
     assert conf == pytest.approx(0.4)
     assert "count_bias_exceeds_tolerance" in failures
-    assert {
-        cid for cid, c in evidence["per_class"].items() if not c["passed"]
-    } == {"1", "2", "3"}
+    assert _failing_classes(evidence) == {"1", "2", "3"}
 
 
 def test_the_same_pick_passes_once_every_class_is_dense_enough() -> None:
@@ -386,16 +394,16 @@ def test_the_same_pick_passes_once_every_class_is_dense_enough() -> None:
 
 
 def test_the_effective_tolerance_floor_governs_a_near_zero_fraction() -> None:
-    tolerance = _effective_count_bias_tolerance(0.01, typical_count=1.0, n=5)
+    tolerance = effective_count_bias_tolerance(0.01, typical_count=1.0, n=5)
     assert tolerance == pytest.approx(0.2)
     assert tolerance > 0.01 * 1.0
 
 
 def test_the_effective_tolerance_floor_shrinks_as_evidence_grows() -> None:
-    assert _effective_count_bias_tolerance(
+    assert effective_count_bias_tolerance(
         0.0, typical_count=0.0, n=5
     ) == pytest.approx(0.2)
-    assert _effective_count_bias_tolerance(
+    assert effective_count_bias_tolerance(
         0.0, typical_count=0.0, n=50
     ) == pytest.approx(0.02)
 
@@ -405,24 +413,24 @@ def test_the_effective_tolerance_floor_stays_at_or_below_one_half_at_two_or_more
 ):
     for n in range(2, 60):
         assert (
-            _effective_count_bias_tolerance(0.0, typical_count=0.0, n=n) <= 0.5
+            effective_count_bias_tolerance(0.0, typical_count=0.0, n=n) <= 0.5
         )
 
 
 def test_the_fraction_term_governs_a_dense_reference() -> None:
-    assert _effective_count_bias_tolerance(
+    assert effective_count_bias_tolerance(
         0.01, typical_count=100.0, n=40
     ) == pytest.approx(1.0)
 
 
-def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term() -> (
+def test_a_sparse_classes_derived_tolerance_is_the_floor_not_the_fraction_term() -> (
     None
 ):
-    """A sparse class's recorded tolerance is the floor, not the fraction term.
+    """A sparse class's derived tolerance is the floor, not the fraction term.
 
-    Class 2 holds two objects per image and one spurious detection on one of five images: its
-    recorded tolerance is the floor (1 / 5), an order of magnitude above the fraction term
-    (0.01 * 2).
+    Class 2 holds two objects per image and one spurious detection on one of five images: the
+    tolerance its evidence derives is the floor (1 / 5), an order of magnitude above the
+    fraction term (0.01 * 2).
     """
 
     def build(prefix: str, offset: float) -> list[dict]:
@@ -449,8 +457,8 @@ def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term(
         build("c", 0.0), build("h", 5000.0)
     )
 
-    assert evidence["per_class"]["2"]["typical_count"] == pytest.approx(2.0)
-    assert evidence["per_class"]["2"]["tolerance"] == pytest.approx(0.2)
+    assert evidence.per_class_typical_count["2"] == pytest.approx(2.0)
+    assert evidence.scope_equivalence("2")[1] == pytest.approx(0.2)
 
 
 def test_a_class_present_on_exactly_one_holdout_image_cannot_pass_on_it_alone() -> (
@@ -493,5 +501,5 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_pass_on_it_alone() 
 
     _conf, evidence, failures = _criterion(build("c", 0.0), build("h", 5000.0))
 
-    assert evidence["per_class"]["2"]["n_present"] == 1
+    assert evidence.holdout_at_conf["per_class"]["2"]["n_present"] == 1
     assert "insufficient_holdout_images_per_class" in failures

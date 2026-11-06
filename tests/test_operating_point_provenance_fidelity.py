@@ -80,7 +80,7 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
             staged_conf_floor=0.05,
             **COUNT_TEST,
         )
-        labels.add(evidence["conf_derived_from"])
+        labels.add(evidence.conf_derived_from)
 
     assert (
         sorted(lbl for lbl in labels if lbl not in DERIVATION_IMPLEMENTATIONS)
@@ -114,8 +114,8 @@ def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it() 
         **COUNT_TEST,
     )
 
-    assert evidence["observed_min_score"] == pytest.approx(0.05)
-    assert evidence["staged_conf_floor"] == pytest.approx(0.05)
+    assert evidence.observed_min_score == pytest.approx(0.05)
+    assert evidence.staged_conf_floor == pytest.approx(0.05)
     assert failures == []
 
     _conf, evidence, _failures = count_criterion(
@@ -125,4 +125,4 @@ def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it() 
         staged_conf_floor=0.05,
         **COUNT_TEST,
     )
-    assert evidence["observed_min_score"] == pytest.approx(0.9)
+    assert evidence.observed_min_score == pytest.approx(0.9)

@@ -150,9 +150,9 @@ def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive() -> (
         _flipped_items(20, set()), hold, ENTRY, **Z
     )
 
-    assert evidence["typical_positive_count"] == pytest.approx(100.0)
-    assert evidence["positive_count_bias_images"] == 10
-    assert evidence["positive_count_bias"] == pytest.approx(2.0)
+    assert evidence.typical_positive_count == pytest.approx(100.0)
+    assert evidence.positive_count_bias_images == 10
+    assert evidence.positive_count_bias == pytest.approx(2.0)
     assert "positive_count_bias_exceeds_tolerance" in failures
 
 
@@ -181,15 +181,15 @@ def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one() -> (
     )
 
     assert "positive_count_bias_exceeds_tolerance" in sparse_failures
-    assert dense["positive_count_bias"] == pytest.approx(
-        sparse["positive_count_bias"]
+    assert dense.positive_count_bias == pytest.approx(
+        sparse.positive_count_bias
     )
-    assert dense["positive_count_bias_std"] == pytest.approx(
-        sparse["positive_count_bias_std"]
+    assert dense.positive_count_bias_std == pytest.approx(
+        sparse.positive_count_bias_std
     )
     assert (
-        dense["positive_count_bias_tolerance"]
-        > sparse["positive_count_bias_tolerance"]
+        dense.positive_count_bias_tolerance
+        > sparse.positive_count_bias_tolerance
     )
     assert "positive_count_bias_exceeds_tolerance" not in dense_failures
 
@@ -205,9 +205,9 @@ def test_the_trait_authored_agreement_floor_is_the_floor_applied() -> None:
         cal, hold, fx.with_fields(ENTRY, classifier_agreement_floor=0.9), **Z
     )
 
-    assert 0.75 < lenient["kappa"] < 0.85
+    assert lenient.kappa is not None and 0.75 < lenient.kappa < 0.85
     assert "classifier_agreement_below_floor" not in lenient_failures
-    assert strict["kappa_floor"] == 0.9
+    assert strict.kappa_floor == 0.9
     assert "classifier_agreement_below_floor" in strict_failures
 
 
@@ -237,7 +237,7 @@ def test_an_agreeing_ordinal_holdout_passes_and_a_cyclic_miscall_fails_below_the
         criterion="quadratic_weighted_kappa",
     )
     assert failures == []
-    assert evidence["score"] == pytest.approx(1.0)
+    assert evidence.score == pytest.approx(1.0)
 
     true = [0, 1, 2] * 8
     evidence, failures = scalar_criterion(
@@ -246,7 +246,7 @@ def test_an_agreeing_ordinal_holdout_passes_and_a_cyclic_miscall_fails_below_the
         floor=0.6,
         criterion="quadratic_weighted_kappa",
     )
-    assert evidence["score"] <= evidence["floor"]
+    assert evidence.score is not None and evidence.score <= evidence.floor
     assert failures == ["criterion_below_floor"]
 
 
@@ -257,6 +257,32 @@ def test_an_empty_holdout_refuses_as_too_thin_and_undefined() -> None:
         [], score=_qwk(3), floor=0.6, criterion="quadratic_weighted_kappa"
     )
     assert failures == ["insufficient_holdout_items", "criterion_undefined"]
+
+
+def test_a_non_finite_score_is_recorded_as_none_and_named_by_its_failure() -> (
+    None
+):
+    """A score that is not finite is recorded as ``None``, the failure alone saying why.
+
+    The evidence carries the score once, as ``None``, beside ``criterion_not_finite``; no
+    second field restates the non-finite value.
+    """
+    from tcip_mcp.pipelines.operating_point import scalar_criterion
+
+    ranks = [0, 1, 2, 1] * 3
+    evidence, failures = scalar_criterion(
+        _items(ranks, ranks),
+        score=lambda _pred, _gt: float("nan"),
+        floor=0.6,
+        criterion="quadratic_weighted_kappa",
+    )
+    assert failures == ["criterion_not_finite"]
+    assert evidence.model_dump() == {
+        "criterion": "quadratic_weighted_kappa",
+        "score": None,
+        "floor": 0.6,
+        "n_holdout": len(ranks),
+    }
 
 
 @pytest.mark.parametrize(
@@ -277,8 +303,8 @@ def test_each_regression_statistic_is_the_one_recorded_and_a_skill_free_predicti
         floor=0.5,
         criterion=criterion,
     )
-    assert (evidence["criterion"], failures) == (criterion, [])
-    assert evidence["score"] == pytest.approx(1.0)
+    assert (evidence.criterion, failures) == (criterion, [])
+    assert evidence.score == pytest.approx(1.0)
 
     evidence, failures = scalar_criterion(
         _items(values, [10.0 + v / 100 for v in values]),
