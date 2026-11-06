@@ -34,17 +34,6 @@ if TYPE_CHECKING:
     from tcip_store import Key, Version
 
 
-_ANSWERED_BY_THE_EVENT = (
-    "output_path",
-    "event_id",
-    "shipped",
-    "producer",
-    "trait_revision",
-    "plant_mapping",
-)
-"""The delivery event's fields every delivery's answer states under the event's own names."""
-
-
 def _bucket(project: Path) -> Bucket:
     """Publish an unassessed bucket of one document detecting nothing and return it.
 
@@ -263,9 +252,8 @@ def test_a_delivery_answers_the_fields_of_the_event_it_wrote(
 ) -> None:
     """Each delivery's answer is its one delivery event's own fields as the event is served.
 
-    The answer's ``output_path``, ``event_id``, ``shipped``, ``producer``, ``trait_revision`` and
-    ``plant_mapping`` equal those of the event the reader serves for that id, each path in the
-    served form and neither side normalized.
+    Every field ``Delivered`` declares equals the event's field of the same name that the reader
+    serves for that id, each path in the served form and neither side normalized.
     """
     pytest.importorskip("torch")
 
@@ -278,8 +266,9 @@ def test_a_delivery_answers_the_fields_of_the_event_it_wrote(
     )
     served = event.model_dump(mode="json")
     answered = delivered.model_dump(mode="json")
-    assert {key: answered[key] for key in _ANSWERED_BY_THE_EVENT} == {
-        key: served[key] for key in _ANSWERED_BY_THE_EVENT
+    fields = delivery.Delivered.model_fields
+    assert {key: answered[key] for key in fields} == {
+        key: served[key] for key in fields
     }
 
 
@@ -529,9 +518,8 @@ def test_a_delivery_tool_answers_the_fields_of_the_event_it_wrote(
     """Each delivery tool, called through the server's door, answers its event's own fields.
 
     The tool runs as an MCP client calls it, under the project it is bound to and a breeder's
-    recorded acknowledgment; its answer's ``output_path``, ``event_id``, ``shipped``,
-    ``producer``, ``trait_revision`` and ``plant_mapping`` equal those of the event the reader
-    serves for that id, neither side normalized.
+    recorded acknowledgment; every field ``Delivered`` declares equals the event's field of the
+    same name that the reader serves for that id, neither side normalized.
     """
     from tcip_mcp.server import binding_for
     from tests._server_calls import called_through_the_server
@@ -549,8 +537,9 @@ def test_a_delivery_tool_answers_the_fields_of_the_event_it_wrote(
         if e.event_id == answer["event_id"]
     )
     served = event.model_dump(mode="json")
-    assert {key: answer[key] for key in _ANSWERED_BY_THE_EVENT} == {
-        key: served[key] for key in _ANSWERED_BY_THE_EVENT
+    fields = delivery.Delivered.model_fields
+    assert {key: answer[key] for key in fields} == {
+        key: served[key] for key in fields
     }
 
 

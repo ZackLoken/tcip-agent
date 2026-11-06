@@ -697,14 +697,7 @@ class Delivered(BaseModel):
     @classmethod
     def of(cls, event: DeliveryEventRecord) -> Delivered:
         """Return what the delivery ``event`` records was delivered, each field under its name."""
-        return cls(
-            output_path=event.output_path,
-            event_id=event.event_id,
-            shipped=event.shipped,
-            trait_revision=event.trait_revision,
-            producer=event.producer,
-            plant_mapping=event.plant_mapping,
-        )
+        return cls.model_validate(event, from_attributes=True)
 
 
 class PerImageCountsDelivered(Delivered):
