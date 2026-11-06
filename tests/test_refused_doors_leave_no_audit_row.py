@@ -94,6 +94,7 @@ def _deliver_per_plant_csv(tmp_path: Path) -> dict:
         str(tmp_path),
         ["preds/2025-09-14"],
         "count",
+        "image",
         actor=None,
     )
 

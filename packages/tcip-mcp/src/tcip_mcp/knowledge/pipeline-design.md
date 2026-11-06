@@ -279,15 +279,13 @@ build = load_mapping(
 )  # from a prior build_plant_mapping call
 by_stem = {a.stem: a for rows in build.assignments.values() for a in rows}
 
-# Each record carries its assignment's plant, source and distance_m, and the build's
-# plant_attribution.
+# Each record carries its assignment's plant, source and distance_m, and the image's value.
 records = [
     {
-        **r,
         "plant_id": a.plant_id,
+        "value": r["count"],
         "source": a.source,
         "distance_m": a.distance_m,
-        "plant_attribution": build.plant_attribution,
     }
     for r in read_stage_b_preds_as_image_results(
         "stage-b/<date>"
@@ -306,6 +304,7 @@ deliver_per_plant_csv(
     dataset_root=dataset_root,
     buckets=["stage-b/<date>"],
     value_key="count",
+    plant_attribution=build.plant_attribution,
 )
 ```
 

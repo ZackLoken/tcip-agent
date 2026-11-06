@@ -135,6 +135,27 @@ def _counted(project: Path) -> Delivered:
     )
 
 
+def _aggregated(project: Path) -> Delivered:
+    """Deliver one plant's per-image counts as a per-plant aggregate, under an acknowledgment."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
+    from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
+    from tests import _trait_fixtures as fx
+    from tests._chain_fixtures import deliver_acknowledged
+
+    fx.seed_delivery_traits(project)
+    fx.seed_confirmed_aggregate(
+        project, "stem_count", value_keys=["count"], measured_subject="bud"
+    )
+    return deliver_acknowledged(
+        project,
+        [PlantObservation(plant_id="P1", value=3)] * 2,
+        project / "out" / "plants.csv",
+        "stem_count",
+        value_key="count",
+        delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+    )
+
+
 def _measured(project: Path) -> Delivered:
     """Deliver a mapped phenology's milestones, under a breeder's acknowledgment.
 
@@ -223,7 +244,7 @@ def _counted_per_plant(project: Path) -> Delivered:
 
 @pytest.mark.parametrize(
     "deliver",
-    [_written, _counted, _measured, _counted_per_plant],
+    [_written, _counted, _aggregated, _measured, _counted_per_plant],
     ids=lambda deliver: deliver.__name__.strip("_"),
 )
 def test_a_delivery_answers_the_fields_of_the_event_it_wrote(

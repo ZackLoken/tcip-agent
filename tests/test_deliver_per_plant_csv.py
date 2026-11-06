@@ -8,12 +8,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx
 from tests._mapping_fixtures import PLOTS, write_plots_csv
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
 
 torch = pytest.importorskip("torch")
 
@@ -114,21 +118,19 @@ def _bucket(
     return published(project, f"{name}/{date}", results, scope=SCOPE).name
 
 
-def _records(*plant_counts: tuple[str, int | None]) -> list[dict]:
-    """Return one per-image record per ``(plant_id, count)``, omitting a ``None`` count."""
+def _records(*plant_counts: tuple[str, int | None]) -> list[PlantObservation]:
+    """Return one per-image record per ``(plant_id, count)``, ``None`` an unobserved count."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
+
     return [
-        {
-            "plant_id": plant,
-            "plant_attribution": "image",
-            **({"count": count} if count is not None else {}),
-        }
+        PlantObservation(plant_id=plant, value=count)
         for plant, count in plant_counts
     ]
 
 
 def _deliver(
     tmp_path: Path,
-    records: list[dict],
+    records: list[PlantObservation],
     plants: list[str],
     dataset_root: Path,
     buckets: list[str],
@@ -146,6 +148,7 @@ def _deliver(
         str(dataset_root),
         buckets,
         value_key="count",
+        plant_attribution="image",
         **kwargs,
         actor=None,
     )
@@ -356,3 +359,68 @@ def test_a_capture_added_since_the_mapping_was_built_refuses(
 
     assert "does not cover what is on disk now" in res["error"]
     assert not (tmp_path / "o.csv").exists()
+
+
+def _called_with(rows: list[dict]) -> str:
+    """Call ``deliver_per_plant_csv`` through the MCP server over ``rows``; return its answer.
+
+    The server is started for no project, so a call its argument schema admits is refused for
+    that instead.
+    """
+    from tests._server_calls import called_through_the_server
+
+    return str(
+        called_through_the_server(
+            "deliver_per_plant_csv",
+            {
+                "results": rows,
+                "output_path": "o.csv",
+                "delivered_phenotype": "stem_count",
+                "delivery_kind": KIND,
+                "plants": ["P1"],
+                "dataset_root": "ds",
+                "buckets": ["manual/2026-02-11"],
+                "value_key": "count",
+                "plant_attribution": "image",
+            },
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("row", "named"),
+    [
+        ({"plant_id": "P1", "count": 2}, "count"),
+        ({"value": 2}, "plant_id"),
+        ({"plant_id": "", "value": 2}, "plant_id"),
+        ({"plant_id": None, "value": 2}, "plant_id"),
+    ],
+)
+def test_the_door_refuses_a_row_its_record_does_not_admit_by_the_key(
+    row: dict, named: str
+) -> None:
+    """A row carrying an unknown key, or no ``plant_id``, is refused by the door's own schema.
+
+    The refusal names the row's place and the key, before any delivery runs.
+    """
+    refused = _called_with([row])
+
+    assert "validation error" in refused
+    assert f"results.0.{named}" in refused
+
+
+def test_the_door_admits_a_row_its_record_states() -> None:
+    """A row stating its plant, value, source and distance passes the door's schema."""
+    answered = _called_with(
+        [
+            {
+                "plant_id": "P1",
+                "value": 2,
+                "source": "sequence",
+                "distance_m": 1.5,
+            },
+            {"plant_id": "P1", "value": None},
+        ]
+    )
+
+    assert "validation error" not in answered
