@@ -2063,7 +2063,7 @@ class MappingDeliveryError(_StatusError):
     """A delivery cannot proceed from a named mapping.
 
     ``str(exc)`` is the caller-facing message. ``status`` is the HTTP status for it (400 by
-    default, 404 for a mapping that is not stored, 409 for a store-level problem reading it).
+    default, 404 for a mapping that is not stored, 409 for one that will not read).
     """
 
 
