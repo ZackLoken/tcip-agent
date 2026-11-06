@@ -30,7 +30,7 @@ from tcip_store import Key
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
-    from tcip_mcp.delivery import Result
+    from tcip_mcp.delivery import PhenologyDelivered, Result
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         Assignment,
@@ -646,7 +646,7 @@ def deliver_phenology(
     acknowledgment_id: str | None,
     door: str,
     actor: str | None,
-) -> dict[str, Any]:
+) -> PhenologyDelivered:
     """Deliver ``measurement``'s ``projection`` as the CSV at ``output_path``.
 
     The rows are its milestone rows, or its per-(plant, date) curve rows for ``curves``; the
@@ -659,7 +659,7 @@ def deliver_phenology(
     delivery's one event under ``door``, its population and plant-mapping disclosure
     (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
     """
-    from tcip_mcp.delivery import deliver_csv, gate
+    from tcip_mcp.delivery import PhenologyDelivered, deliver_csv, gate
     from tcip_mcp.traits import STATE_CROSSING_DATES
 
     result = measurement.result(projection)
@@ -681,8 +681,9 @@ def deliver_phenology(
         delivery_kind=STATE_CROSSING_DATES,
         actor=actor,
     )
-    return {
-        **delivered,
-        "n_rows": len(result.rows),
-        "columns": list(result.columns),
-    }
+    return PhenologyDelivered(
+        **dict(delivered),
+        n_plants=len(measurement.plants),
+        n_rows=len(result.rows),
+        columns=list(result.columns),
+    )

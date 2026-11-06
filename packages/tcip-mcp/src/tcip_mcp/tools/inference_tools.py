@@ -547,7 +547,7 @@ def deliver_per_image_counts(
             acknowledgment_id=acknowledgment_id,
             door="deliver_per_image_counts",
             actor=actor,
-        )
+        ).model_dump(mode="json")
     except (
         DeliveryRefusedError,
         OperationalizationRefusedError,

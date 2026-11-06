@@ -98,7 +98,7 @@ def deliver_per_plant_csv(
             scale_assessment_id=scale_assessment_id,
             acknowledgment_id=acknowledgment_id,
             actor=actor,
-        )
+        ).model_dump(mode="json")
     except (
         TraitUnknownError,
         mapping.MappingDeliveryError,

@@ -168,7 +168,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
             actor=None,
         ),
     )
-    assert delivered["n_rows"] == len(PLANTS), delivered
+    assert delivered.n_rows == len(PLANTS), delivered
     assert out.exists()
 
 

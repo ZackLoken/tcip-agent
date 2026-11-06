@@ -283,8 +283,9 @@ def test_a_per_plant_count_delivery_writes_its_population_one_row_each(
     assert rows[0]["units"] == ""
     assert rows[0]["value_key"] == "count"
     assert {r["validated"] for r in rows} == {"False"}
-    shipped = delivered["shipped"]
-    assert shipped["acknowledgment"]["acknowledged_by"] == "user:breeder"
+    shipped = delivered.shipped
+    assert shipped.kind == "acknowledged"
+    assert shipped.acknowledgment.acknowledged_by == "user:breeder"
 
 
 @pytest.mark.parametrize("statistic", ["mean", "median"])
