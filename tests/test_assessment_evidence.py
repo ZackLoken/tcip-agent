@@ -132,11 +132,12 @@ def test_a_regression_assessment_records_its_scalar_evidence_alone_and_pairs_by_
     A regressor trained over a drawn selection of a table-labeled dataset is assessed for a
     per-plant regression delivery: the record reads back holding the scalar member and no other,
     its failures vocabulary names, its stored score without a state companion. A bucket
-    published under it pairs proposals under the comparability convention, since it measured no
-    count.
+    published under it measured no count, so it pairs under the comparability convention: an
+    annotation and a proposal whose boxes overlap above ``COMPARABILITY_IOU`` pair, index 0 to 0.
     """
     import json
 
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.assessment import (
         ASSESSMENT_FILE,
         assessment_dir,
@@ -242,7 +243,13 @@ def test_a_regression_assessment_records_its_scalar_evidence_alone_and_pairs_by_
     assert "error" not in published, published
     bucket = read_bucket(root, "regression")
     assert bucket.assessment_id == record.assessment_id
-    assert proposal_pairs(tmp_path, bucket, [], []) == {}
+    annotation = Annotation(
+        subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0)
+    )
+    proposal = Annotation(
+        subject="bud", geometry=BBox(11.0, 11.0, 31.0, 31.0), score=0.9
+    )
+    assert proposal_pairs(tmp_path, bucket, [annotation], [proposal]) == {0: 0}
 
 
 def test_a_state_crossing_assessment_records_both_criteria_and_names_a_shared_failure_once(
