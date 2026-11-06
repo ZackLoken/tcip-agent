@@ -3,22 +3,23 @@
 Each test trains a model through the launcher's own producer, runs the checkpoint it completed in
 eval mode over the loader of the data it trained on, and hands the platform's metric and
 scikit-learn's the same predictions and targets. The two are compared after the platform's own
-six-place rounding. A class no label and no prediction carries scores 0.0 and counts in the macro
-mean (``labels=range(num_classes)``, ``zero_division=0``); an undefined agreement or R-squared
-is the platform's ``None``, where scikit-learn answers nan.
+six-place rounding. An undefined score is the platform's ``None`` where scikit-learn answers nan
+(``zero_division=np.nan``): a class no label and no prediction carries is ``None`` on every row
+and out of the macro mean, and so is an undefined agreement or R-squared.
 """
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 metrics = pytest.importorskip("sklearn.metrics")
 
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    _rounded,
     classification_metrics,
     ordinal_metrics,
     quadratic_weighted_kappa,
@@ -87,7 +88,17 @@ def _grades() -> list[float]:
     return [GRADES[i * len(GRADES) // FRAMES] for i in range(FRAMES)]
 
 
+def _six(value: float | None) -> float | None:
+    """Return ``value`` to six places, ``None`` for ``None`` and for the library's nan."""
+    return None if value is None or math.isnan(value) else round(value, 6)
+
+
 def _classified(tmp_path: Path) -> tuple[Tensor, Tensor, int]:
+    """Return a trained classifier's predictions, targets and one class count past its own.
+
+    The class past the run's own is in no label and no prediction, so it is absent from both
+    sides whatever the run learned; the run's grade 1 is absent from the labels alone.
+    """
     pred, gt, dims = _scored(
         tmp_path,
         BESPOKE_CLASSIFIER,
@@ -95,7 +106,7 @@ def _classified(tmp_path: Path) -> tuple[Tensor, Tensor, int]:
         _grades(),
         optimizer=LEARNING,
     )
-    return pred, gt, dims["num_classes"]
+    return pred, gt, dims["num_classes"] + 1
 
 
 def _ranked(tmp_path: Path) -> tuple[Tensor, Tensor, int]:
@@ -113,38 +124,42 @@ def test_per_class_precision_recall_and_f1_agree_with_scikit_learn(
     ours = classification_metrics(pred, gt, num_classes)["per_class"]
 
     precision, recall, f1, support = metrics.precision_recall_fscore_support(
-        gt.numpy(), pred.numpy(), labels=range(num_classes), zero_division=0
+        gt.numpy(),
+        pred.numpy(),
+        labels=range(num_classes),
+        zero_division=np.nan,
     )
     expected = {"precision": precision, "recall": recall, "f1": f1}[statistic]
-    assert [_rounded(ours[str(c)][statistic]) for c in range(num_classes)] == [
-        _rounded(float(v)) for v in expected
+    assert [_six(ours[str(c)][statistic]) for c in range(num_classes)] == [
+        _six(float(v)) for v in expected
     ]
     assert [ours[str(c)]["support"] for c in range(num_classes)] == (
         support.tolist()
     )
+    assert ours[str(num_classes - 1)][statistic] is None
 
 
 def test_accuracy_agrees_with_scikit_learn(tmp_path: Path) -> None:
     pred, gt, num_classes = _classified(tmp_path)
     ours = classification_metrics(pred, gt, num_classes)["accuracy"]
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(metrics.accuracy_score(gt.numpy(), pred.numpy()))
     )
 
 
-def test_macro_f1_agrees_with_scikit_learn_over_every_class(
+def test_macro_f1_agrees_with_scikit_learn_over_the_defined_classes(
     tmp_path: Path,
 ) -> None:
     pred, gt, num_classes = _classified(tmp_path)
     ours = classification_metrics(pred, gt, num_classes)["f1"]
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(
             metrics.f1_score(
                 gt.numpy(),
                 pred.numpy(),
                 labels=range(num_classes),
                 average="macro",
-                zero_division=0,
+                zero_division=np.nan,
             )
         )
     )
@@ -153,7 +168,7 @@ def test_macro_f1_agrees_with_scikit_learn_over_every_class(
 def test_rank_accuracy_agrees_with_scikit_learn(tmp_path: Path) -> None:
     pred, gt, num_ranks = _ranked(tmp_path)
     ours = ordinal_metrics(pred, gt, num_ranks)["rank_acc"]
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(
             metrics.accuracy_score(
                 gt.round().long().numpy(), pred.round().long().numpy()
@@ -168,7 +183,7 @@ def test_quadratic_weighted_kappa_agrees_with_scikit_learn(
     pred, gt, num_ranks = _ranked(tmp_path)
     ours = quadratic_weighted_kappa(pred, gt, num_ranks)
     assert ours is not None
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(
             metrics.cohen_kappa_score(
                 gt.round().long().numpy(),
@@ -201,7 +216,7 @@ def test_a_rank_outside_the_run_rank_count_refuses_naming_it(
 def test_ordinal_mae_agrees_with_scikit_learn(tmp_path: Path) -> None:
     pred, gt, num_ranks = _ranked(tmp_path)
     ours = ordinal_metrics(pred, gt, num_ranks)["mae"]
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(metrics.mean_absolute_error(gt.numpy(), pred.numpy()))
     )
 
@@ -219,7 +234,7 @@ def _regressed(tmp_path: Path) -> tuple[Tensor, Tensor]:
 def test_regression_mae_agrees_with_scikit_learn(tmp_path: Path) -> None:
     pred, gt = _regressed(tmp_path)
     ours = regression_metrics(pred, gt)["mae"]
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(metrics.mean_absolute_error(gt.numpy(), pred.numpy()))
     )
 
@@ -227,7 +242,7 @@ def test_regression_mae_agrees_with_scikit_learn(tmp_path: Path) -> None:
 def test_regression_rmse_agrees_with_scikit_learn(tmp_path: Path) -> None:
     pred, gt = _regressed(tmp_path)
     ours = regression_metrics(pred, gt)["rmse"]
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(metrics.root_mean_squared_error(gt.numpy(), pred.numpy()))
     )
 
@@ -236,6 +251,6 @@ def test_r_squared_agrees_with_scikit_learn(tmp_path: Path) -> None:
     pred, gt = _regressed(tmp_path)
     ours = r_squared(pred, gt)
     assert ours is not None
-    assert _rounded(ours) == _rounded(
+    assert _six(ours) == _six(
         float(metrics.r2_score(gt.numpy(), pred.numpy()))
     )

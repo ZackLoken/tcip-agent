@@ -1152,39 +1152,51 @@ def classification_metrics(
     Each per-class mapping is keyed by the class index as a string (a JSON object's key).
     Accuracy is scikit-learn's ``accuracy_score`` and the per-class rows its
     ``precision_recall_fscore_support`` over ``labels=range(num_classes)`` with
-    ``zero_division=0``: a class with no true example and no prediction scores 0.0 on every row
-    and counts in the macro mean, which is the unweighted mean of the per-class F1 over every
-    class.
+    ``zero_division=nan``, read as ``None``.
 
-    ``count_bias[c] = (predicted count - true count) / true count``, ``0.0`` for a class with no
-    true example. An empty set answers zero accuracy and F1 and no classes.
+    An undefined score is ``None``, here and in every metric family; a mean is over the defined
+    values alone and is ``None`` when there are none. A class with no true example and no
+    prediction is ``None`` on every row and out of the macro mean, the unweighted mean of the
+    per-class F1 that are defined; one predicted but never true has an F1 of 0.0 and counts.
+    ``count_bias[c] = (predicted count - true count) / true count``, ``None`` for a class with no
+    true example. An empty set answers ``None`` for accuracy and F1 and has no classes.
     """
     from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
     pred = pred_labels.detach().cpu().long().numpy()
     gt = targets.detach().cpu().long().numpy()
     if gt.size == 0:
-        return {"accuracy": 0.0, "f1": 0.0, "per_class": {}, "count_bias": {}}
+        return {
+            "accuracy": None,
+            "f1": None,
+            "per_class": {},
+            "count_bias": {},
+        }
     precision, recall, f1, support = precision_recall_fscore_support(
-        gt, pred, labels=range(num_classes), zero_division=0
+        gt, pred, labels=range(num_classes), zero_division=np.nan
     )
     predicted = np.bincount(pred, minlength=num_classes)
+
+    def defined(value: float) -> float | None:
+        return None if math.isnan(value) else float(value)
+
     per_class = {
         str(c): {
-            "precision": float(precision[c]),
-            "recall": float(recall[c]),
-            "f1": float(f1[c]),
+            "precision": defined(precision[c]),
+            "recall": defined(recall[c]),
+            "f1": defined(f1[c]),
             "support": int(support[c]),
             "count_bias": (int(predicted[c]) - int(support[c]))
             / int(support[c])
             if support[c] > 0
-            else 0.0,
+            else None,
         }
         for c in range(num_classes)
     }
+    scored = f1[~np.isnan(f1)]
     return {
         "accuracy": float(accuracy_score(gt, pred)),
-        "f1": float(np.mean(f1)),
+        "f1": float(scored.mean()) if scored.size else None,
         "per_class": per_class,
         "count_bias": {c: per_class[c]["count_bias"] for c in per_class},
     }
@@ -1293,14 +1305,19 @@ def ordinal_metrics(
 
     ``mae`` is scikit-learn's ``mean_absolute_error`` of the ranks as given, in float64;
     ``rank_acc`` is its ``accuracy_score`` over the ranks rounded to the nearest rank;
-    ``quadratic_weighted_kappa`` is :func:`quadratic_weighted_kappa`.
+    ``quadratic_weighted_kappa`` is :func:`quadratic_weighted_kappa`. An empty set answers
+    ``None`` for each.
     """
     from sklearn.metrics import accuracy_score, mean_absolute_error
 
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
     if gt.numel() == 0:
-        return {"mae": 0.0, "rank_acc": 0.0, "quadratic_weighted_kappa": None}
+        return {
+            "mae": None,
+            "rank_acc": None,
+            "quadratic_weighted_kappa": None,
+        }
     with _scores_non_finite():
         mae = float(
             mean_absolute_error(gt.double().numpy(), pred.double().numpy())
@@ -1324,14 +1341,14 @@ def regression_metrics(
     """Return the MAE, RMSE and R-squared of ``pred_values`` against ``gt_values``.
 
     MAE and RMSE are scikit-learn's ``mean_absolute_error`` and ``root_mean_squared_error``, in
-    float64. An empty set answers zero errors and an R-squared of ``None`` (:func:`r_squared`).
+    float64. An empty set answers ``None`` for each, R-squared included (:func:`r_squared`).
     """
     from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 
     pred = pred_values.detach().cpu().double().numpy()
     gt = gt_values.detach().cpu().double().numpy()
     if gt.size == 0:
-        return {"mae": 0.0, "rmse": 0.0, "r_squared": None}
+        return {"mae": None, "rmse": None, "r_squared": None}
     with _scores_non_finite():
         mae = float(mean_absolute_error(gt, pred))
         rmse = float(root_mean_squared_error(gt, pred))
@@ -1356,7 +1373,8 @@ def semantic_seg_metrics(
     from both has an undefined ratio (reported ``None`` per-class, excluded from the mean), the
     standard convention. ``pixel_acc`` is the fraction of correctly labeled pixels. Pixels equal
     to ``ignore_index`` in the GT are dropped before scoring. Each per-class mapping is keyed by
-    the class index as a string (a JSON object's key).
+    the class index as a string (a JSON object's key). ``mIoU`` and ``dice`` are ``None`` when no
+    class is present and ``pixel_acc`` when no pixel is left, an empty set included.
     """
     pred = preds.detach().cpu().reshape(-1).long()
     gt = targets.detach().cpu().reshape(-1).long()
@@ -1386,10 +1404,10 @@ def semantic_seg_metrics(
         per_class_dice[str(c)] = dice
         ious.append(iou)
         dices.append(dice)
-    pixel_acc = float((pred == gt).float().mean()) if gt.numel() else 0.0
+    pixel_acc = float((pred == gt).float().mean()) if gt.numel() else None
     return {
-        "mIoU": sum(ious) / len(ious) if ious else 0.0,
-        "dice": sum(dices) / len(dices) if dices else 0.0,
+        "mIoU": sum(ious) / len(ious) if ious else None,
+        "dice": sum(dices) / len(dices) if dices else None,
         "pixel_acc": pixel_acc,
         "per_class_iou": per_class_iou,
         "per_class_dice": per_class_dice,

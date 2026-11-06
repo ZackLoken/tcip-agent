@@ -642,6 +642,62 @@ def test_classification_metrics() -> None:
     assert m["f1"] == pytest.approx((0.8 + 2 / 3) / 2, abs=1e-3)
 
 
+def test_classification_undefined_scores_are_none_and_out_of_the_macro_mean() -> (
+    None
+):
+    """A score with nothing to divide is None, and the macro mean is over the defined F1s alone.
+
+    Over four classes, class 1 is in neither the truth nor the predictions (every score and its
+    count bias undefined) and class 3 is predicted once and never true (recall and count bias
+    undefined, precision and F1 0.0, which count in the mean).
+    """
+    gt = torch.tensor([0, 0, 2, 2])
+    pred = torch.tensor([0, 2, 2, 3])
+    m = classification_metrics(pred, gt, num_classes=4)
+
+    absent, predicted_only = m["per_class"]["1"], m["per_class"]["3"]
+    assert absent == {
+        "precision": None,
+        "recall": None,
+        "f1": None,
+        "support": 0,
+        "count_bias": None,
+    }
+    assert predicted_only["precision"] == 0.0
+    assert predicted_only["recall"] is None
+    assert predicted_only["f1"] == 0.0
+    assert predicted_only["count_bias"] is None
+    assert m["f1"] == pytest.approx((2 / 3 + 0.5 + 0.0) / 3)
+    assert m["count_bias"]["1"] is None and m["count_bias"]["3"] is None
+    assert m["count_bias"]["0"] == pytest.approx(-0.5)
+
+
+def test_an_empty_set_answers_none_for_every_family() -> None:
+    """An empty set answers None for each score of classification, ordinal and regression.
+
+    The functions are called directly: ``evaluate`` reaches these families only with a collected
+    set, so the one route to an empty set through it is an attribute with no matched pair
+    (``test_attribute_heads``).
+    """
+    nothing = torch.tensor([])
+    assert classification_metrics(nothing, nothing, num_classes=3) == {
+        "accuracy": None,
+        "f1": None,
+        "per_class": {},
+        "count_bias": {},
+    }
+    assert ordinal_metrics(nothing, nothing, 3) == {
+        "mae": None,
+        "rank_acc": None,
+        "quadratic_weighted_kappa": None,
+    }
+    assert regression_metrics(nothing, nothing) == {
+        "mae": None,
+        "rmse": None,
+        "r_squared": None,
+    }
+
+
 def test_ordinal_metrics() -> None:
     m = ordinal_metrics(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]), 3)
     assert m["mae"] == pytest.approx(1 / 3)
