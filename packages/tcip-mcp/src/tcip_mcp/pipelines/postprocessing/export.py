@@ -233,6 +233,4 @@ def deliver_per_image_counts_csv(
         **dict(delivered),
         image_count=len(rows),
         total_detections=sum(r["count"] for r in rows),
-        dataset_root=str(dataset_root),
-        bucket=name,
     )

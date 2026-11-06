@@ -687,33 +687,24 @@ class Delivered(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    csv_path: str
+    output_path: str
+    event_id: str
     shipped: Shipped
-    delivery_event_id: str
     trait_revision: int
     producer: Producer
     plant_mapping: PlantMapping | None
 
     @classmethod
     def of(cls, event: DeliveryEventRecord) -> Delivered:
-        """Return what the delivery ``event`` records was delivered."""
-        return cls(
-            csv_path=event.output_path,
-            shipped=event.shipped,
-            delivery_event_id=event.event_id,
-            trait_revision=event.trait_revision,
-            producer=event.producer,
-            plant_mapping=event.plant_mapping,
-        )
+        """Return what the delivery ``event`` records was delivered, each field under its name."""
+        return cls.model_validate(event, from_attributes=True)
 
 
 class PerImageCountsDelivered(Delivered):
-    """A per-image count delivery: the bucket it counted and its image and detection totals."""
+    """A per-image count delivery: its image and detection totals."""
 
     image_count: int
     total_detections: int
-    dataset_root: str
-    bucket: str
 
 
 class PerPlantDelivered(Delivered):
@@ -754,7 +745,9 @@ def deliver_csv(
     how it shipped, and the result's population and plant-mapping disclosure), the event
     validated before anything is written; then the CSV is written at ``output_path``, the event,
     and its one audit line by ``actor``, ``delivery_event``, in the log of the dataset root the
-    buckets are published under. Returns what the event records was delivered.
+    buckets are published under. Returns what the event records was delivered, the event read
+    back from the store with its paths resolved against ``project`` as the event reader serves
+    them.
     """
     event_id = uuid.uuid4().hex
     data = result.encoded(
@@ -790,7 +783,9 @@ def deliver_csv(
         ),
     )
     append_or_raise(line, scope=clearance.buckets[0].dataset_root)
-    return Delivered.of(event)
+    return Delivered.of(
+        _delivery_event(delivery_event_key(project, event_id), project)
+    )
 
 
 def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
