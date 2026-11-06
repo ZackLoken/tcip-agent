@@ -397,21 +397,21 @@ def per_plant_series(
     buckets: dict[str, Bucket],
     state: PositiveState | None,
     plants: list[str],
-) -> dict[str, dict]:
-    """Aggregate the buckets' predictions into a per-plant positive-fraction series.
+) -> dict[str, list[CurveRow]]:
+    """Aggregate the buckets' predictions into each plant's curve rows, one per mapping date.
 
-    Only buckets whose scope declares ``state``'s attribute classify; the series covers exactly
-    the plants in ``plants`` (:func:`population`'s list).
+    Only buckets whose scope declares ``state``'s attribute classify; the rows cover exactly the
+    plants in ``plants`` (:func:`population`'s list).
 
     ``mapping`` is ``{date: [assignment, ...]}``, a mapping build's own per-date
     :class:`~tcip_mcp.pipelines.postprocessing.plant_mapping.Assignment` rows; ``buckets`` is
     each delivered date's published bucket, by its recorded date. ``plants`` is the delivery's
     population: every plant in it gets an entry, in the order given, and a plant the mapping names
-    that is not in it is never read. Every population plant has a series point on every date the
-    mapping names, one the mapping assigns it no capture on carrying no image. Returns
-    ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing, n_images),
-    ...]}}``. An entry naming no plant (``plant_mapping.assignment_is_attributed`` false) is
-    excluded from every plant's coverage.
+    that is not in it is never read. Every population plant has a row on every date the mapping
+    names, in capture order, one the mapping assigns it no capture on carrying no image. Returns
+    ``{plant_id: [CurveRow, ...]}``, every row of a plant carrying the accession its first
+    attributed assignment in capture order names. An entry naming no plant
+    (``plant_mapping.assignment_is_attributed`` false) is excluded from every plant's coverage.
 
     Coverage is measured against the stems the plant mapping names for each (plant, date): a named
     stem with no corresponding prediction document is a missing observation, and a date the
@@ -423,42 +423,57 @@ def per_plant_series(
         stems_delivery_reads,
     )
 
-    per_plant: dict[str, dict] = {
-        plant_id: {"accession": None, "series": []} for plant_id in plants
-    }
     # The mapping's own dates are the coverage reference, so a date it names is never absent; they
     # are walked in the order the dataset lists its captures.
-    for date_str in capture_order(mapping):
+    dates = capture_order(mapping)
+    named: dict[str, dict[str, list[Assignment]]] = {
+        date_str: {plant_id: [] for plant_id in plants} for date_str in dates
+    }
+    for date_str in dates:
+        for a in mapping[date_str]:
+            if assignment_is_attributed(a) and a.plant_id in named[date_str]:
+                named[date_str][a.plant_id].append(a)
+    accessions = {
+        plant_id: next(
+            (
+                a.accession_name
+                for date_str in dates
+                for a in named[date_str][plant_id]
+                if a.accession_name is not None
+            ),
+            None,
+        )
+        for plant_id in plants
+    }
+    rows: dict[str, list[CurveRow]] = {plant_id: [] for plant_id in plants}
+    for date_str in dates:
         bucket = buckets.get(date_str)
         read_stems = (
             stems_delivery_reads(mapping[date_str], bucket)
             if bucket
             else set()
         )
-        by_plant: dict[str, list[int]] = {
-            plant_id: [0, 0, 0, 0, 0] for plant_id in plants
-        }
-        for a in mapping[date_str]:
-            if not assignment_is_attributed(a) or a.plant_id not in per_plant:
-                continue
-            acc = by_plant[a.plant_id]
-            acc[4] += 1
-            if per_plant[a.plant_id]["accession"] is None:
-                per_plant[a.plant_id]["accession"] = a.accession_name
-            if bucket is None or a.stem not in read_stems:
-                acc[3] += 1
-                continue
-            total, positive, unclassified = count_by_class(
-                bucket.stem_keys[a.stem],
-                state,
-                scope=bucket.scope,
+        for plant_id, assigned in named[date_str].items():
+            counts = [
+                count_by_class(
+                    bucket.stem_keys[a.stem], state, scope=bucket.scope
+                )
+                for a in assigned
+                if bucket and a.stem in read_stems
+            ]
+            rows[plant_id].append(
+                CurveRow(
+                    plant_id=plant_id,
+                    accession=accessions[plant_id],
+                    capture=date_str,
+                    n_images=len(assigned),
+                    n_total=sum(c[0] for c in counts),
+                    n_positive=sum(c[1] for c in counts),
+                    n_unclassified=sum(c[2] for c in counts),
+                    n_missing=len(assigned) - len(counts),
+                )
             )
-            acc[0] += total
-            acc[1] += positive
-            acc[2] += unclassified
-        for plant_id, counts in by_plant.items():
-            per_plant[plant_id]["series"].append((date_str, *counts))
-    return per_plant
+    return rows
 
 
 @dataclass(frozen=True)
@@ -494,34 +509,14 @@ def per_plant_phenology(
     per_plant = per_plant_series(mapping, buckets, spec.positive_state, plants)
     milestones: list[MilestoneRow] = []
     curves: list[CurveRow] = []
-    for plant_id, info in per_plant.items():
-        rows = [
-            CurveRow(
-                plant_id=plant_id,
-                accession=info["accession"],
-                capture=capture,
-                n_images=n_images,
-                n_total=total,
-                n_positive=positive,
-                n_unclassified=unclassified,
-                n_missing=missing,
-            )
-            for (
-                capture,
-                total,
-                positive,
-                unclassified,
-                missing,
-                n_images,
-            ) in info["series"]
-        ]
+    for plant_id, rows in per_plant.items():
         frac_series = [
             (r.capture, r.ratio) for r in rows if r.ratio is not None
         ]
         # An excluded plant goes through the producer with no rows, so every row has one key set.
         row = MilestoneRow(
             plant_id=plant_id,
-            accession=info["accession"],
+            accession=rows[0].accession if rows else None,
             n_dates=len(rows),
             n_observed_dates=len(frac_series),
             n_dates_unclassified=sum(1 for r in rows if r.n_unclassified > 0),
