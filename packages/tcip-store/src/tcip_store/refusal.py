@@ -18,7 +18,12 @@ from typing import Annotated, Any, Literal, overload
 
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
-from tcip_store.errors import StoreError
+from tcip_store.errors import (
+    DatabaseRefusedError,
+    DecodeError,
+    NotFoundError,
+    StoreError,
+)
 from tcip_store.model import REQUIRED, Key, ReadDefault
 
 
@@ -175,6 +180,15 @@ def unreadable(where: str, *errors: type[Exception]) -> Iterator[None]:
         raise ReadRefusedError(Unreadable(message=str(exc)), where) from exc
 
 
+STORE_READ_REFUSALS: tuple[type[StoreError], ...] = (
+    NotFoundError,
+    DecodeError,
+    DatabaseRefusedError,
+)
+"""The errors a store read refuses under: an absent entry, bytes that do not decode, a database
+that will not open or answer. Every other ``StoreError`` is not about the data read."""
+
+
 def read_raw[T](
     read: Callable[..., T],
     key: Key,
@@ -185,11 +199,11 @@ def read_raw[T](
     """Return what ``read(key, default=default)`` answers, read under :func:`unreadable`.
 
     ``read`` is a store read or a transaction's (``tcip_store.read``, ``Txn.read``,
-    ``tcip_store.read_versioned``). Any ``StoreError`` (an absent record with no ``default``, bytes
-    that do not decode, each sentence naming the key) and any ``OSError`` (a database that does
-    not read from disk) raises :class:`ReadRefusedError` carrying its sentence behind ``where``.
+    ``tcip_store.read_versioned``). Any of :data:`STORE_READ_REFUSALS` raises
+    :class:`ReadRefusedError` carrying its sentence behind ``where``; every other error
+    escapes as itself.
     """
-    with unreadable(where, StoreError, OSError):
+    with unreadable(where, *STORE_READ_REFUSALS):
         return read(key, default=default)
 
 
