@@ -200,9 +200,10 @@ example. Each tool's full signature is in its description; this is the order, no
    and `evaluate_model` follow it.
 7. `propose_trait`, confirmed by the breeder in Setup; then `assess_checkpoint` on the selection.
 8. `run_inference`: publishes predictions as a bucket under the assessment.
-9. A delivery door: `deliver_per_image_counts`, `deliver_per_plant_csv`,
-   `deliver_phenology_milestones` (after `register_plant_registry` and `build_plant_mapping`) or
-   `deliver_orthomosaic_plant_counts`. The `delivery` skill says which door answers which question.
+9. A delivery door: `deliver_per_image_counts`, `deliver_per_plant_csv` or
+   `deliver_phenology_milestones` (the last two after `register_plant_registry` and
+   `build_plant_mapping`) or `deliver_orthomosaic_plant_counts`. The `delivery` skill says which
+   door answers which question.
 
 ## Roadmap
 

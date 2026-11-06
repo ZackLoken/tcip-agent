@@ -12,7 +12,7 @@ confirmed revision until it is confirmed itself; the delivery event names the re
 from __future__ import annotations
 
 import dataclasses
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 import tcip_store as ts
 from tcip_mcp import traits
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.operationalization import OperationalizationRefusedError
 from tests import REFUSED_NAMES, _trait_fixtures as fx
@@ -196,6 +197,12 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
     from tests._chain_fixtures import deliver_acknowledged
+    from tests._image_fixtures import write_geo_image
+    from tests._mapping_fixtures import (
+        PHOTO_POSITION_ERROR_M,
+        map_plants,
+        plant_positions,
+    )
 
     both = fx.with_operationalization(
         _count_entry(),
@@ -206,6 +213,13 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     revision = fx.propose_and_confirm(tmp_path, both)
 
     count_event = _deliver_counts(tmp_path, "per_image")
+    write_geo_image(
+        image_dir(tmp_path / "ds", "2026-02-11") / "a.png",
+        *plant_positions(["p1"])["p1"],
+        datetime(2026, 2, 11, 9),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
+    )
+    map_plants(tmp_path, tmp_path / "ds", ["p1"])
     deliver_acknowledged(
         tmp_path,
         [PlantObservation(plant_id="p1", value=5)] * 2,

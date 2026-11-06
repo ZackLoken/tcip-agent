@@ -10,6 +10,7 @@ published document holds.
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -420,9 +421,22 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
         predicted,
         published,
     )
+    from tests._image_fixtures import write_geo_image
+    from tests._mapping_fixtures import (
+        PHOTO_POSITION_ERROR_M,
+        map_plants,
+        plant_positions,
+    )
 
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
     records = [PlantObservation(plant_id="p1", value=1.0)]
+    write_geo_image(
+        _image(tmp_path, "a"),
+        *plant_positions(["p1"])["p1"],
+        datetime(2026, 1, 1, 9),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
+    )
+    map_plants(tmp_path, tmp_path / "ds", ["p1"])
 
     def deliver(subject: str, name: str) -> PerPlantDelivered:
         pytest.importorskip("torch")

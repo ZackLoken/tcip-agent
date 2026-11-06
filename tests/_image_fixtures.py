@@ -34,26 +34,22 @@ def capture_exif(when: datetime) -> Image.Exif:
     return exif
 
 
-def write_geo_image(
-    path: Path,
+def geo_exif(
+    when: datetime,
     lat: float,
     lon: float,
-    when: datetime,
-    image: Image.Image | None = None,
     *,
     h_pos_err: float | None = None,
     omit: tuple[int, ...] = (),
-) -> None:
-    """Save an image at ``path`` with EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``.
+) -> Image.Exif:
+    """Return a PIL EXIF block stating DateTimeOriginal ``when`` and GPS ``lat``/``lon``.
 
-    The EXIF also carries ``h_pos_err``, when given, as GPSHPositioningError (meters), less the
+    The block also carries ``h_pos_err``, when given, as GPSHPositioningError (meters), less the
     GPS tags ``omit`` names (``0x0001`` the latitude's hemisphere, ``0x0003``/``0x0004`` the
-    longitude's). The image saved is the PIL ``image`` given, else an 8 by 8 black RGB frame, at
-    quality 100 with no chroma subsampling.
+    longitude's).
     """
-    from PIL import Image, TiffImagePlugin
+    from PIL import TiffImagePlugin
 
-    path.parent.mkdir(parents=True, exist_ok=True)
     exif = capture_exif(when)
     gps = {
         0x0001: "N" if lat >= 0 else "S",
@@ -66,8 +62,34 @@ def write_geo_image(
     exif[0x8825] = {
         tag: value for tag, value in gps.items() if tag not in omit
     }
+    return exif
+
+
+def write_geo_image(
+    path: Path,
+    lat: float,
+    lon: float,
+    when: datetime,
+    image: Image.Image | None = None,
+    *,
+    h_pos_err: float | None = None,
+    omit: tuple[int, ...] = (),
+) -> None:
+    """Save an image at ``path`` with EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``.
+
+    The EXIF is :func:`geo_exif`'s. The image saved is the PIL ``image`` given, else an 8 by 8
+    black RGB frame, at quality 100 with no chroma subsampling.
+    """
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     frame = image if image is not None else Image.new("RGB", (8, 8))
-    frame.save(path, exif=exif, quality=100, subsampling=0)
+    frame.save(
+        path,
+        exif=geo_exif(when, lat, lon, h_pos_err=h_pos_err, omit=omit),
+        quality=100,
+        subsampling=0,
+    )
 
 
 def write_noise_image(
