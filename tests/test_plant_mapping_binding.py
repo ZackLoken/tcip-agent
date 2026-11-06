@@ -449,12 +449,15 @@ def test_the_delivery_gate_answers_409_carrying_the_readers_refusal_of_an_undeco
         plant_mapping.plant_mapping_key(tmp_path, "valley"), b"{not valid json"
     )
 
-    with pytest.raises(ts.ReadRefusedError) as refused:
-        plant_mapping.load_mapping(tmp_path, "valley")
     with pytest.raises(plant_mapping.MappingDeliveryError) as gated:
         plant_mapping.resolve_delivery_mapping(tmp_path, "valley", {})
 
     assert gated.value.status == 409
+    assert str(gated.value).startswith(
+        f"could not read mapping 'valley': plant mapping 'valley' under {tmp_path}: "
+    )
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        plant_mapping.load_mapping(tmp_path, "valley")
     assert (
         str(gated.value) == f"could not read mapping 'valley': {refused.value}"
     )
