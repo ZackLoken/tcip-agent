@@ -36,6 +36,13 @@ a refusal a typed one is to replace."""
 
 NULLABLE_SETS = {
     "AnnotateFocus": {"bucket", "proposal"},
+    "AssessmentEvidence": {
+        "count",
+        "reserved_region",
+        "classifier",
+        "scalar",
+        "scale",
+    },
     "BuildMappingPayload": {"dates", "match_radius"},
     "CanvasBox": {"dash", "casing", "halo", "label"},
     "CanvasPoint": {"dash", "casing", "halo", "label"},
@@ -53,6 +60,7 @@ NULLABLE_SETS = {
     "CurveRow": {"accession", "ratio"},
     "DatasetSelection": {"subject", "bucket"},
     "DeliveryEventRecord": {"scale_assessment_id", "plant_mapping"},
+    "DisjointnessEvidence": {"training", "selection"},
     "DrawSpread": {"mean", "std", "min", "max"},
     "Execution": {
         "conf",
@@ -72,6 +80,7 @@ NULLABLE_SETS = {
     "ImageBand": {"wavelength_nm", "interpretation"},
     "LaunchedProgram": {"version", "confinement"},
     "NonFiniteBest": {"best_value_spread", "split_sensitivity"},
+    "OverfitReport": {"initial", "final", "issue"},
     "RasterIdentity": {"band_interpretations", "geotransform"},
     "RecordedIdentity": {
         "agent_client_name",
@@ -80,6 +89,12 @@ NULLABLE_SETS = {
         "terminal_session",
     },
     "Sample": {"row_key", "ground_truth_digest"},
+    "ScaleEvidence": {
+        "calibration_mean",
+        "holdout_mean",
+        "holdout_relative_dispersion",
+        "relative_deviation",
+    },
     "ServedAnnotation": {
         "bbox",
         "rings",
@@ -158,7 +173,9 @@ NULLABLE_SETS = {
 }
 """Each served model holding two or more nullable fields, and those fields, each an absence its
 reader shows or omits rather than a state it branches on: a model added to the browser's reach
-with a nullable pair, or a field made nullable beside another, is a change to this list."""
+with a nullable pair, or a field made nullable beside another, is a change to this list.
+``AssessmentEvidence`` is the one served record whose nullable members are its evidence kinds,
+the combinations its own validator admits, under design 181 item 5 revision 2."""
 
 
 def _schemas() -> dict[str, dict]:
