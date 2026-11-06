@@ -173,12 +173,10 @@ def load_plant_mapping(
     Nothing stored under the name answers 404; a name the key refuses, or a record that will not
     load, 409.
     """
-    from tcip_store import StoreError
-
     root = store.held().root
     try:
         build = plant_mapping.load_mapping(root, payload.name)
-    except (StoreError, ValueError) as exc:
+    except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     if build is None:
         raise HTTPException(

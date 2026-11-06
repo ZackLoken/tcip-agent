@@ -172,6 +172,36 @@ def test_an_undecodable_memory_record_and_flags_record_answer_one_refusal_at_the
     assert loaded.json()["detail"].endswith(f": {_decode_sentence(flags)}")
 
 
+def test_a_label_document_in_a_database_that_will_not_open_answers_the_editors_400(
+    opened_project: Path, client: TestClient, tmp_path: Path
+) -> None:
+    """The editor's label load answers 400 when the dataset's database is not a database.
+
+    The label document and its flags record live in that one database; the load answers the
+    store's sentence rather than escaping.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_store.file_backend import database_file
+    from tests._producer_fixtures import label_image, write_image
+
+    dataset = tmp_path / "ds"
+    image = write_image(image_dir(dataset, "2026-02-11") / "a.jpg")
+    label_image(
+        image,
+        project=opened_project,
+        labels=[{"subject": "bud", "bbox": [40.0, 30.0, 60.0, 50.0]}],
+    )
+    tcip_store.release_root(dataset)
+    database_file(str(dataset)).write_bytes(b"not a database" * 100)
+
+    loaded = client.get(
+        "/api/annotate/labels", params={"image_path": str(image)}
+    )
+
+    assert loaded.status_code == 400, loaded.text
+    assert "not a SQLite database" in loaded.json()["detail"]
+
+
 @pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_confirmation_over_an_undecodable_trait_record_answers_the_readers_sentence(
     client: TestClient, opened_project: Path

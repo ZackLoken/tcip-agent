@@ -228,6 +228,34 @@ def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(
     assert status["reading"]["kind"] == "read"
 
 
+def test_inspect_project_surfaces_an_audit_log_in_a_database_that_will_not_open(
+    tmp_path: Path,
+) -> None:
+    import tcip_store
+    from tcip_mcp.tools.meta_tools import report_friction
+    from tcip_store.file_backend import database_file
+
+    _initialized(tmp_path)
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
+    tcip_store.release_root(tmp_path)
+    foreign = database_file(str(tmp_path))
+    foreign.write_bytes(b"not a database" * 100)
+
+    try:
+        status = inspect_project(tmp_path)
+    finally:
+        tcip_store.release_root(tmp_path)
+        foreign.unlink()
+
+    unavailable = status["recent_activity"]["status_unavailable"]
+    assert "not a SQLite database" in unavailable
+    # The record shares the project's database, so it is unread for the same reason.
+    assert status["reading"]["kind"] == "unread"
+    problem = status["reading"]["problem"]
+    assert problem["refusal"]["kind"] == "unreadable"
+    assert "not a SQLite database" in problem["refusal"]["message"]
+
+
 def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

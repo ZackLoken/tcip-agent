@@ -3,6 +3,7 @@
 from tcip_store.errors import (
     BackendUnavailableError,
     BadKeyError,
+    DatabaseRefusedError,
     DecodeError,
     NotFoundError,
     StoreBusyError,
@@ -27,6 +28,7 @@ from tcip_store.model import (
     canonical_path,
 )
 from tcip_store.refusal import (
+    STORE_READ_REFUSALS,
     Invalid,
     Issue,
     ReadRefusal,
@@ -74,8 +76,10 @@ from tcip_store.values import (
 __all__ = [
     "FINITE_JSON_OBJECT",
     "REQUIRED",
+    "STORE_READ_REFUSALS",
     "BackendUnavailableError",
     "BadKeyError",
+    "DatabaseRefusedError",
     "DecodeError",
     "FiniteJsonObject",
     "FiniteJsonValue",

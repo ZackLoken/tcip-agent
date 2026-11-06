@@ -78,8 +78,9 @@ def stored_stats(
 ) -> AnnotationStats:
     """Return the stats record ``key`` names, read by ``read`` (a store or a transaction read).
 
-    An absent record holds no session. A record the store will not read and a document that is
-    not the record's whole shape raise ``tcip_store.ReadRefusedError`` naming the project.
+    An absent record holds no session. A record that will not decode, one in a database that will
+    not open or answer, and a document that is not the record's whole shape raise
+    ``tcip_store.ReadRefusedError`` naming the project.
     """
     stats = tcip_store.read_record(
         read,

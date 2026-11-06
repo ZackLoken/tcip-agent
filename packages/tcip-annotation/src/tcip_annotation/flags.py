@@ -160,7 +160,8 @@ def read_flags(read: Callable[..., JsonValue], key: Key) -> list[Flag]:
     """Return every flag the record ``key`` names holds (:func:`flags_of`), read by ``read``.
 
     ``read`` is a store or a transaction read. The record is named by the image's key parts; one
-    the store will not read refuses (``tcip_store.ReadRefusedError``) as :func:`flags_of` does.
+    that will not decode or sits in a database that will not open or answer refuses
+    (``tcip_store.ReadRefusedError``) as :func:`flags_of` does, and any other store error escapes.
     """
     image = "/".join(key.parts)
     raw = tcip_store.read_raw(read, key, _flags_place(image), default=None)
