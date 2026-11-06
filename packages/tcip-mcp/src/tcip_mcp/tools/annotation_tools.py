@@ -148,9 +148,15 @@ def _counts(m: Matching) -> dict:
 
 
 def _totals(metrics: dict) -> dict:
-    """Return the TP/FP/FN a scoring's ``metrics`` report with their precision, recall and F1."""
+    """Return the TP/FP/FN a scoring's ``metrics`` report with their precision, recall and F1.
+
+    The precision, recall and F1 are rounded to four places, ``None`` where undefined.
+    """
+    from tcip_mcp.pipelines.training.evaluation import rounded
+
     return {
-        k: metrics[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")
+        **{k: metrics[k] for k in ("tp", "fp", "fn")},
+        **{k: rounded(metrics[k], 4) for k in ("precision", "recall", "f1")},
     }
 
 
@@ -176,14 +182,6 @@ def _detection_breakdown(
     ]
 
 
-def _rounded(totals: dict) -> dict:
-    """Return ``totals`` with precision, recall and F1 rounded to four places."""
-    return {
-        k: round(v, 4) if k in ("precision", "recall", "f1") else v
-        for k, v in totals.items()
-    }
-
-
 def _evaluate_image(
     image: Path,
     bucket: Bucket,
@@ -202,7 +200,7 @@ def _evaluate_image(
     """
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import SourceHeader
-    from tcip_mcp.pipelines.training.evaluation import score_bucket
+    from tcip_mcp.pipelines.training.evaluation import rounded, score_bucket
 
     (one,), metrics = score_bucket(
         [SourceHeader(resolve_image_path(image))],
@@ -218,8 +216,8 @@ def _evaluate_image(
         )
     out = {
         "image": str(image),
-        **_rounded(_totals(metrics)),
-        "map50": round(metrics["map50"], 4),
+        **_totals(metrics),
+        "map50": rounded(metrics["map50"], 4),
         "governing_criterion": metrics["governing_criterion"],
         "iou_threshold": iou_threshold,
         "conf_threshold": conf_threshold,
@@ -257,7 +255,7 @@ def _evaluate_folder(
         source_path_of,
     )
     from tcip_mcp.pipelines.raster_source import SourceHeader
-    from tcip_mcp.pipelines.training.evaluation import score_bucket
+    from tcip_mcp.pipelines.training.evaluation import rounded, score_bucket
 
     images = sorted(
         list_logical_images(images_dir).values(), key=source_path_of
@@ -271,7 +269,7 @@ def _evaluate_folder(
     )
     predicted = [one for one in scored if one.preds is not None]
     counts = {"tp": "total_tp", "fp": "total_fp", "fn": "total_fn"}
-    totals = {counts.get(k, k): v for k, v in _rounded(_totals(m)).items()}
+    totals = {counts.get(k, k): v for k, v in _totals(m).items()}
     return {
         "path": images_dir,
         "image_count": len(predicted),
@@ -280,8 +278,8 @@ def _evaluate_folder(
             for one in scored
             if one.preds is None
         ],
-        "map": round(m["map"], 4),
-        "map50": round(m["map50"], 4),
+        "map": rounded(m["map"], 4),
+        "map50": rounded(m["map50"], 4),
         **totals,
         "governing_criterion": m["governing_criterion"],
         "per_image": [

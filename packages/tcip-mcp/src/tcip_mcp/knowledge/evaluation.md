@@ -31,6 +31,11 @@ They are aggregate only; no per-class AP is reported. Per-class precision/recall
 regression get only the scalar metrics in the table above, no per-class breakdown. Change
 detection is not a built task type.
 
+Every task kind reports a score with nothing to divide as `null`, never 0.0: a class no example and
+no prediction carries, a precision with no prediction, a recall or average precision with no object,
+any metric over an empty set. A mean (macro F1, mIoU, mAP) is over the defined values alone, `null`
+when there are none, and an epoch whose selection metric is `null` is not selectable.
+
 R² and CCC ask related but distinct questions of a regression trait, and are not directly
 comparable numbers: R² is "how much better than trivially predicting this set's own mean" (overall
 predictive skill), unbounded below; CCC is bounded in [-1, 1] and explicitly decomposes into

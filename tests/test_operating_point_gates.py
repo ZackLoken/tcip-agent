@@ -136,6 +136,48 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
     assert "count_bias_exceeds_tolerance" in failures
 
 
+def test_a_holdout_keeping_no_detection_at_the_conf_has_no_precision_and_fails_the_floor() -> (
+    None
+):
+    """A holdout with no detection at the picked conf has an undefined precision.
+
+    Its detections all score 0.05, below the calibration's pick of 0.9, so none is kept to be
+    right or wrong: precision is ``None``, the reference's objects are all missed (recall 0.0),
+    and a score that cannot be computed does not clear the floor.
+    """
+    n, obj = 20, 80
+    hold = dense_records(
+        n_images=n,
+        objects_per_image=obj,
+        id_prefix="hA",
+        shift=5.0,
+        miss_pattern=[0] * n,
+        fp_pattern=[0] * n,
+        score=0.05,
+    )
+
+    _conf, evidence, failures = _criterion(_cal_picks_conf_point_nine(), hold)
+    hb = evidence["holdout_at_conf"]
+    assert (hb["tp"], hb["fp"]) == (0, 0)
+    assert hb["precision"] is None
+    assert hb["recall"] == 0.0
+    assert "localization_quality_floor_failed" in failures
+
+
+def test_a_calibration_reference_with_nothing_to_count_refuses_naming_the_pick() -> (
+    None
+):
+    """A calibration side holding no object and no detection has no conf the objective picks.
+
+    Every entry of its curve counts nothing, so none has a defined F1 to pick on.
+    """
+    empty = [whole_frame_record([], [], width=400, height=400, cap=None)]
+    with pytest.raises(
+        ValueError, match="holds no conf the .* objective picks"
+    ):
+        _criterion(empty, _records())
+
+
 def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail() -> (
     None
 ):
@@ -302,6 +344,20 @@ def test_an_all_negative_calibration_or_holdout_fails_as_insufficient() -> (
         )
         for i in range(3)
     ]
+    # A calibration side that is all negative still detects something here, so its curve has a
+    # defined F1 to pick on; one that detects nothing refuses
+    # (test_a_calibration_reference_with_nothing_to_count_refuses_naming_the_pick).
+    all_negative_detected = [
+        whole_frame_record(
+            [ann(100, 100, score=0.5)],
+            [],
+            width=400,
+            height=400,
+            cap=1,
+            image_id=f"n_{i}",
+        )
+        for i in range(3)
+    ]
 
     assert (
         "insufficient_holdout_gt"
@@ -309,7 +365,7 @@ def test_an_all_negative_calibration_or_holdout_fails_as_insufficient() -> (
     )
     assert (
         "insufficient_calibration_gt"
-        in _criterion(all_negative, real, floor=0.0)[2]
+        in _criterion(all_negative_detected, real, floor=0.0)[2]
     )
 
 
