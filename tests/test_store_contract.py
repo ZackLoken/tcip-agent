@@ -1412,6 +1412,11 @@ _LONG_WAIT_S = 10.0
 _BRIEF_HOLD_S = 0.3
 """How long a lock that clears inside the wait is held."""
 
+_TIMER_SLACK_S = 0.05
+"""How much earlier than its timeout a timed lock wait may end, provisional: on the Windows
+machine this was written on, a 0.5 s wait ended 2 to 15 ms after its timeout over 20 trials,
+never before, and 50 ms allows a coarser timer elsewhere."""
+
 
 @contextmanager
 def _waiting(store: Harness, lock_timeout_s: float) -> Iterator[None]:
@@ -1572,12 +1577,50 @@ def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in
                 clears.join(30)
 
 
+def test_a_write_on_a_connection_a_read_opened_waits_its_own_timeout(
+    store: Harness,
+) -> None:
+    """A transaction on a cached connection waits the timeout it names, not the backend's.
+
+    Under a backend that waits nothing, a read caches the connection; a transaction naming a
+    long wait then outlasts another thread's brief write transaction and lands.
+    """
+    key = store.key(LWW, "write-after-a-read")
+    ts.replace(key, {"who": "seed"})
+    ts.release_root(store.root)
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with ts.transaction(key, timeout_s=30) as txn:
+            txn.write(key, {"who": "holder"})
+            held.set()
+            release.wait(30)
+
+    with _waiting(store, 0.0):
+        assert ts.read(key) == {"who": "seed"}
+        holder = threading.Thread(target=hold)
+        clears = threading.Timer(_BRIEF_HOLD_S, release.set)
+        holder.start()
+        try:
+            assert held.wait(30)
+            clears.start()
+            with ts.transaction(key, timeout_s=_LONG_WAIT_S) as txn:
+                txn.write(key, {"who": "waiter"})
+        finally:
+            clears.cancel()
+            release.set()
+            holder.join(30)
+        assert ts.read(key) == {"who": "waiter"}
+
+
 def test_a_file_lock_refusal_reports_the_time_it_measured(
     store: Harness,
 ) -> None:
     """A file write that gives up on another holder's lock reports the time it measured.
 
-    The time is not the configured wait, and is no longer than the write took.
+    The holder makes the write wait the whole default on the path's thread lock, so the time is
+    the default to within timer slack, is not the default itself, and is no longer than the write
+    took.
     """
     path = blob_path(store.root, "held")
     path.parent.mkdir(parents=True)
@@ -1602,7 +1645,9 @@ def test_a_file_lock_refusal_reports_the_time_it_measured(
 
     assert busy.value.blocked_on == str(path)
     assert busy.value.waited_s != DEFAULT_LOCK_TIMEOUT_S
-    assert busy.value.waited_s <= took
+    assert (
+        DEFAULT_LOCK_TIMEOUT_S - _TIMER_SLACK_S <= busy.value.waited_s <= took
+    )
     assert not path.exists()
 
 
