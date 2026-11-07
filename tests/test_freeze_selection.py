@@ -520,8 +520,21 @@ def test_freeze_selection_reports_a_document_that_will_not_read_not_a_changed_on
 
     error = result["error"]
     assert "will not read" in error and "changed" not in error, error
-    assert f"{key.store}{list(key.parts)}" in error, error
+    assert f"{key.store}{list(key.parts)} under {key.root}" in error, error
     assert "not the object a label document is" in error, error
+    others = [
+        s.ground_truth
+        for s in run_resolution(
+            "exp-unreadable", project=tmp_path
+        ).partition.samples
+        if isinstance(s.ground_truth, ts.Key) and s.ground_truth != key
+    ]
+    assert others
+    assert not [
+        o
+        for o in others
+        if f"{o.store}{list(o.parts)} under {o.root}" in error
+    ], error
 
 
 def test_freeze_selection_names_the_member_whose_database_will_not_open(
@@ -550,9 +563,9 @@ def test_freeze_selection_names_the_member_whose_database_will_not_open(
 
     error = result["error"]
     assert "will not read" in error and "changed" not in error, error
-    assert (
-        f"{first.ground_truth.store}{list(first.ground_truth.parts)}" in error
-    ), error
+    place = f"{first.ground_truth.store}{list(first.ground_truth.parts)}"
+    assert f"{place} under {first.ground_truth.root}" in error, error
+    assert str(database) in error and "file is not a database" in error, error
 
 
 def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path) -> None:

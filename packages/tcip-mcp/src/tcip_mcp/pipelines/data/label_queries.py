@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_annotation.json_io import UnreadableLabelDocumentError
+from tcip_annotation.json_io import UnreadableLabelDocumentError, place_of
 from tcip_annotation.state import Annotation, GeometryReader, box_derivable
 from tcip_mcp.pipelines.image_utils import list_logical_images
 from tcip_store import Key
@@ -247,9 +247,11 @@ class GroundTruthChangedError(UnreadableLabelDocumentError, ValueError):
 
 def _where(ground_truth: Key | str) -> str:
     """Return where ``ground_truth`` lives: a record's place under its root, else its path."""
-    if isinstance(ground_truth, Key):
-        return f"{ground_truth.store}{list(ground_truth.parts)} under {ground_truth.root}"
-    return ground_truth
+    return (
+        place_of(ground_truth)
+        if isinstance(ground_truth, Key)
+        else ground_truth
+    )
 
 
 def _acquire(
