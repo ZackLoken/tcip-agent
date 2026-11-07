@@ -278,8 +278,11 @@ def draw_splits(
     write, when the tree holds fewer foreground groups of ``subject`` than one per requested
     side, and when a side would be left empty, naming it. The answer's
     ``calibration_foreground_groups`` reports how many of the reference's groups carry a
-    foreground annotation, and ``realized_ratios`` each side's share of the draw actually
-    delivered, which can diverge from the ratios asked for on a tree sized at the floor.
+    foreground annotation, ``foreground_images`` how many samples on each drawn reference side
+    carry one, ``reference_floor`` how many each side needs before a detector is assessed over
+    it (a side below it is drawn, and the assessment refuses it), and ``realized_ratios`` each
+    side's share of the draw actually delivered, which can diverge from the ratios asked for on a
+    tree sized at the floor.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -353,8 +356,10 @@ def draw_splits_at(
 
     import tcip_store
     from tcip_annotation.json_io import UnreadableLabelDocumentError
+    from tcip_mcp.assessment_evidence import REFERENCE_FLOOR
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, list_dates
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.pipelines.data.label_queries import ground_truth_bearing
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
         SIDES,
@@ -453,6 +458,12 @@ def draw_splits_at(
             counted,
             group_of,
         ),
+        "foreground_images": {
+            side: ground_truth_bearing(counted[key] for key in by_side[side])
+            for side in REFERENCE_SIDES
+            if side in ratios
+        },
+        "reference_floor": REFERENCE_FLOOR,
         "realized_ratios": {
             side: size / len(drawn) for side, size in sizes.items()
         },
