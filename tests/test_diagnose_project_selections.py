@@ -1,7 +1,8 @@
 """``tcip diagnose-project`` reads the split selections a project's ``splits`` directory holds.
 
-Each selection is drawn through ``draw_splits``; the one an error finding must name is then
-re-keyed by the store's own writer, so the project's records are never hand-built.
+Each selection is drawn through ``draw_splits``; the ones an error finding must name are then
+damaged by the store's own writer or by overwriting their database, so the project's records are
+never hand-built.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from tcip_mcp.tools.training_tools import (
     UnreadSelectionChoice,
     list_split_choices,
 )
+from tcip_store.file_backend import database_file
 from tests._cli_fixtures import run_tcip
 from tests._verified_checkpoint_fixtures import opened_run
 from tests._web_fixtures import new_project
@@ -31,22 +33,27 @@ from tests.test_selection_binding import (
     _two_subject_two_date_dataset,
 )
 
+FINDING_PREFIX = "selection will not read: "
+"""What the doctor's finding says before the refusal of a selection that will not read."""
 
-def _project_with_selections(tmp_path: Path) -> tuple[Path, Path, Path]:
-    """Return a project holding a dataset and two selections drawn under its ``splits``.
 
-    The project is made through the creation door and is its own dataset root. The two
-    selections are drawn by ``draw_splits`` into ``splits`` and one level under it; the second
-    is the one a test re-keys.
+def _project_with_selections(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    """Return a project holding a dataset and three selections drawn under its ``splits``.
+
+    The project is made through the creation door and is its own dataset root. The selections
+    are drawn by ``draw_splits`` into ``splits`` and, as ``frozen-x`` and ``damaged``, one level
+    under it; a test damages the last two. Returns the project and the three directories.
     """
     project = tmp_path / "proj"
     new_project(project)
     _two_subject_two_date_dataset(project)
     intact = project / "splits"
     rekeyed = intact / "frozen-x"
+    damaged = intact / "damaged"
     _draw(project, project, intact)
     _draw(project, project, rekeyed, seed=3)
-    return project, intact, rekeyed
+    _draw(project, project, damaged, seed=4)
+    return project, intact, rekeyed, damaged
 
 
 def _without_extent(selection_dir: Path) -> None:
@@ -59,6 +66,14 @@ def _without_extent(selection_dir: Path) -> None:
         assert isinstance(sample, dict)
         del sample["extent"]
     ts.replace(selection_key(selection_dir), document)
+
+
+def _unopenable(selection_dir: Path) -> None:
+    """Overwrite the database of the selection under ``selection_dir`` with non-database bytes."""
+    ts.release_root(selection_dir)
+    database_file(str(selection_dir)).write_bytes(
+        b"not a database, only bytes under its name" * 100
+    )
 
 
 def _naming(found: list[list[str]], selection_dir: Path) -> list[str]:
@@ -82,52 +97,74 @@ def test_the_doctor_command_reports_a_selection_that_will_not_read(
 ) -> None:
     """The doctor's command reports a re-keyed selection once as an error naming its place.
 
-    The selection beside it, untouched, adds no finding.
+    The selections beside it, untouched, add no finding.
     """
-    project, intact, rekeyed = _project_with_selections(tmp_path)
+    project, intact, rekeyed, damaged = _project_with_selections(tmp_path)
     _without_extent(rekeyed)
 
     found = _findings(project)
 
     assert _naming(found, rekeyed) == ["error"], found
-    assert any("extent" in msg for _, msg in found), found
-    assert not _naming(found, intact), found
+    assert not _naming(found, intact) and not _naming(found, damaged), found
+
+
+def test_the_doctor_command_reports_a_selection_whose_database_will_not_open(
+    tmp_path: Path,
+) -> None:
+    """The doctor's command answers, with an error finding, over a non-database store file.
+
+    The finding names the selection's place, and the selections beside it add none.
+    """
+    project, intact, rekeyed, damaged = _project_with_selections(tmp_path)
+    _unopenable(damaged)
+
+    found = _findings(project)
+
+    assert _naming(found, damaged) == ["error"], found
+    assert not _naming(found, intact) and not _naming(found, rekeyed), found
 
 
 def test_the_doctor_command_reports_no_selection_finding_for_readable_selections(
     tmp_path: Path,
 ) -> None:
     """The doctor's command names no selection when every selection under ``splits`` reads."""
-    project, intact, rekeyed = _project_with_selections(tmp_path)
+    project, *selections = _project_with_selections(tmp_path)
 
     found = _findings(project)
 
-    assert not _naming(found, intact) and not _naming(found, rekeyed), found
+    assert not [msg for _, msg in found if msg.startswith(FINDING_PREFIX)], (
+        found
+    )
+    assert not [d for d in selections if _naming(found, d)], found
 
 
-def test_the_split_picker_lists_the_selection_the_doctor_reports(
+def test_the_split_picker_lists_the_selections_the_doctor_reports(
     tmp_path: Path,
 ) -> None:
-    """The picker and the doctor see the same selection directories under ``splits``.
+    """The picker's unread reasons and the doctor's selection findings are the same set.
 
-    The re-keyed selection is an unreadable choice in the picker and an error finding in the
-    doctor, and the untouched one is a readable choice and no finding.
+    One selection is re-keyed and one has a database that will not open; each is an
+    ``UnreadSelectionChoice`` in the picker and an error finding in the doctor, with the same
+    refusal behind its place.
     """
-    project, intact, rekeyed = _project_with_selections(tmp_path)
+    project, intact, rekeyed, damaged = _project_with_selections(tmp_path)
     _without_extent(rekeyed)
+    _unopenable(damaged)
     opened_run(
         project,
         _bespoke_config(project, image_dir(project, DATES[0])),
         experiment_id="exp-picked",
     )
 
-    choices = {
-        c.selection_dir: c
-        for c in list_split_choices(project, "exp-picked").selections
+    choices = list_split_choices(project, "exp-picked").selections
+    unread = {
+        f"{FINDING_PREFIX}{c.reason}"
+        for c in choices
+        if isinstance(c, UnreadSelectionChoice)
     }
     found = _findings(project)
+    reported = {msg for _, msg in found if msg.startswith(FINDING_PREFIX)}
 
-    assert isinstance(choices[str(rekeyed)], UnreadSelectionChoice)
-    assert not isinstance(choices[str(intact)], UnreadSelectionChoice)
-    assert _naming(found, rekeyed) == ["error"], found
-    assert not _naming(found, intact), found
+    assert len(unread) == 2
+    assert reported == unread, found
+    assert {level for level, msg in found if msg in reported} == {"error"}
