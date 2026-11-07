@@ -92,4 +92,6 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
 ## Where your work lives
 
 A one-off script the agent writes for one project lives with that project, in the project's own
-directory, never in the platform's repository.
+directory, never in the platform's repository. The platform's own code changes only through its
+repository's process, never from a project session. A defect in the platform met while working a
+project is a `report_friction` with the defect in its free text, never an edit of the platform.
