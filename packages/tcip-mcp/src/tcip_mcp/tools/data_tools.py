@@ -279,10 +279,11 @@ def draw_splits(
     side, and when a side would be left empty, naming it. The answer's
     ``calibration_foreground_groups`` reports how many of the reference's groups carry a
     foreground annotation, ``foreground_images`` how many samples on each drawn reference side
-    carry one, ``reference_floor`` how many each side needs before a detector is assessed over
-    it (a side below it is drawn, and the assessment refuses it), and ``realized_ratios`` each
-    side's share of the draw actually delivered, which can diverge from the ratios asked for on a
-    tree sized at the floor.
+    bear ground truth (over label documents, those carrying at least one annotation of
+    ``subject``; a mask or table sample counts as one), ``reference_floor`` how many each side
+    needs before a detector is assessed over it (a side below it is drawn, and the assessment
+    refuses it), and ``realized_ratios`` each side's share of the draw actually delivered, which
+    can diverge from the ratios asked for on a tree sized at the floor.
 
     Args:
         folder_path: Path to the dataset root directory.
