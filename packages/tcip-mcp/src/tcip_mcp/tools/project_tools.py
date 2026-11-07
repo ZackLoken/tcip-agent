@@ -69,11 +69,11 @@ def read_datasets(project: str | Path) -> list[DatasetEntry]:
     return tcip_store.validated(
         _DATASET_REGISTRY,
         tcip_store.read(dataset_registry_key(project), default=[]),
-        _registry_place(project),
+        _dataset_registry_place(project),
     )
 
 
-def _registry_place(project: str | Path) -> str:
+def _dataset_registry_place(project: str | Path) -> str:
     """Return where ``project``'s dataset registry lives, as a refusal names it."""
     return f"the dataset registry of {project}"
 
@@ -138,7 +138,7 @@ def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
         stored = tcip_store.validated(
             _DATASET_REGISTRY,
             txn.read(key, default=[]),
-            _registry_place(project),
+            _dataset_registry_place(project),
         )
         regs = [r for r in stored if r.id != entry.id] + [entry]
         txn.write(

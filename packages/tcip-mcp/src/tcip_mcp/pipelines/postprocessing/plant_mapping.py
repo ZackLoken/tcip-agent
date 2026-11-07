@@ -1007,11 +1007,11 @@ def load_registry(project: Path | str, name: str) -> PlantRegistry:
             "register_plant_registry before naming it."
         )
     return tcip_store.validated(
-        _PLANT_REGISTRY, record, _registry_place(project, name)
+        _PLANT_REGISTRY, record, _plant_registry_place(project, name)
     )
 
 
-def _registry_place(project: Path | str, name: str) -> str:
+def _plant_registry_place(project: Path | str, name: str) -> str:
     """Return the place a refusal of the stored registry ``name`` under ``project`` names."""
     return f"plant registry {name!r} under {project}"
 
@@ -1052,7 +1052,7 @@ def registry_entries_or_refusal(
         return [], f"mapping {build.name!r} names it: {exc}"
     if record["digest"] != reference.digest:
         return [], (
-            f"plant registry {reference.name!r} under {project} named by mapping "
+            f"{_plant_registry_place(project, reference.name)} named by mapping "
             f"{build.name!r} has moved (built against digest {reference.digest!r}, now "
             f"{record['digest']!r}); rebuild the mapping against the current registry"
         )
@@ -1155,12 +1155,12 @@ def register_plant_registry_record(
         stored = txn.read(key, default=None)
         if stored is not None:
             existing = tcip_store.validated(
-                _PLANT_REGISTRY, stored, _registry_place(project, name)
+                _PLANT_REGISTRY, stored, _plant_registry_place(project, name)
             )
             if existing["digest"] == digest:
                 return existing
             raise PlantRegistryNameConflictError(
-                f"plant registry {name!r} under {project} already names different plants "
+                f"{_plant_registry_place(project, name)} already names different plants "
                 f"(digest {existing['digest']!r}, this registration would write "
                 f"{digest!r}); register under a new name"
             )
