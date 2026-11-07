@@ -48,6 +48,11 @@ def _repository(root: Path, name: str = "repo") -> tuple[Path, str]:
     _git(repo, "init", "-q")
     (repo / "a.py").write_text(SOURCE, newline="\n")
     (repo / "b.txt").write_text("one\ntwo\nthree\n", newline="\n")
+    (repo / "c.txt").write_text(
+        "head still line one\ntarget_name\n",
+        newline="\n",
+        encoding="utf-8",
+    )
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "files")
     return repo, _git(repo, "rev-parse", "HEAD")
@@ -165,10 +170,58 @@ def test_a_premise_with_no_backticked_identifier_passes_on_the_range(
     repo, commit = _repository(tmp_path)
 
     failures = _failures(
-        repo, commit, 'at a.py:1-6 the code is `import os` and `"quoted"`.'
+        repo, commit, "at a.py:1-6 the code holds `42` and `(1, 2)`."
     )
 
     assert failures == []
+
+
+def test_lines_are_counted_on_newlines_alone_as_git_counts_them(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _repository(tmp_path)
+
+    holds = _failures(repo, commit, "at c.txt:2 names `target_name`.")
+    past_end = _failures(repo, commit, "at c.txt:3 names `target_name`.")
+
+    assert holds == []
+    assert "c.txt:3-3 is outside the file (2 lines)" in past_end[0]
+
+
+def test_backticked_call_expressions_are_judged_on_the_names_inside_them(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _repository(tmp_path)
+    premise = (
+        "at a.py:{} the code does `alpha(beta_value, k=None)` or `len(x)`."
+    )
+
+    holds = _failures(repo, commit, premise.format(3))
+    off = _failures(repo, commit, premise.format(5))
+
+    assert holds == []
+    assert "none of alpha, beta_value, k, None, len, x appears" in off[0]
+
+
+def test_a_wrapped_bullet_joins_its_lines_and_later_premises_are_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    text = (
+        f"Premises, read at repo {commit}:\n\n"
+        "- at a.py:3 the code returns\n  `beta_value`.\n"
+        "- at a.py:2 the code returns `beta_value`.\n"
+    )
+
+    half = cites.parse_premise_half(text)
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    assert half.premises[0] == "- at a.py:3 the code returns `beta_value`."
+    assert len(half.premises) == 2
+    assert exit_code == 1
+    assert capsys.readouterr().out.endswith("FAIL\n")
 
 
 def test_a_bare_line_cite_fails_as_not_in_the_writers_form(
@@ -195,8 +248,14 @@ def test_a_labeled_repository_without_a_checkout_fails(
         half.premises[0], half, {"two": repo}, tmp_path
     )
 
+    single = cites.parse_premise_half(
+        f"Premises, read at one {commit}:\n\n- at a.py:3 returns `beta_value`.\n"
+    )
+    single_failures = cites.check_premise(single.premises[0], single, {}, repo)
+
     assert "no --checkout for repository 'two'" in failures[0]
     assert with_checkout == []
+    assert "no --checkout for repository 'one'" in single_failures[0]
 
 
 def test_main_exits_zero_on_an_all_passing_half_and_one_otherwise(

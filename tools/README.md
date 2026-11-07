@@ -27,9 +27,9 @@ section instead.
   requested gate runs in the foreground, stopping at the first failure with its exit code.
 - `check_premise_cites.py` - reads an issue's work order with `gh` and checks every `at <path>:<a>[-<b>]`
   cite in its premise half against the premise half's commit: the path exists there, the range is
-  inside the file, and a premise that backticks identifiers has one of them in the cited range; a
-  premise with no cite in that form fails. Prints PASS or each failing premise and FAIL; a repository
-  the header labels needs `--checkout <label>=<path>`.
+  inside the file, and a premise with identifier tokens in its backticked spans has one in the
+  cited range; a premise with no cite in that form fails. Prints PASS or each failing premise and
+  FAIL; a repository the header labels needs `--checkout <label>=<path>`.
 - `generate_frontend_routes.py` - generates the browser's route-path module, over FastAPI's
   effective route contexts whose names the frontend's non-test sources read as `ROUTES.<name>` (the
   reads `tests.READS_SCRIPT` finds through the TypeScript compiler, run under `node`
