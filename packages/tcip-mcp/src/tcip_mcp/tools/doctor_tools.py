@@ -176,7 +176,7 @@ def check_registry(
         RegistryPathTraversalError,
         resolved_registry_path,
     )
-    from tcip_store import ReadRefusedError, StoreError
+    from tcip_store import ReadRefusedError
 
     observed, refused = observe_runs(root)
     for directory, refusal in refused:
