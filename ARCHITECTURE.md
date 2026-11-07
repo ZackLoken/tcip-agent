@@ -654,7 +654,8 @@ reserved-regions assessment) are driven against the same resolved record by
 Key: `registry_index_key`, `packages/tcip-mcp/src/tcip_mcp/model_registry.py`, store
 `model_registry`, in the project's database.
 
-The registry is one relation from sha256 to its one owner, `registered_entries`,
+The registry is one relation from sha256 to its one owner, `entries_over` (`registered_entries` is
+its call over every run of the project),
 `packages/tcip-mcp/src/tcip_mcp/model_registry.py`: the completed run whose final status names those
 bytes (`run_entry`, `model_registry.py`, named by the run's id and carrying it as `experiment_id`;
 the earliest to complete when two do), else the index's foreign entry with `experiment_id` null. A
@@ -1171,8 +1172,8 @@ Must agree: the stored fingerprint and the recomputed one cover the same inputs.
 ## S27. Trained-model registry index
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape. Side A:
-`packages/tcip-mcp/src/tcip_mcp/model_registry.py` (`def registered_entries(`, the one read every
-consumer goes through: one owner per sha256, the completed run whose final status names the bytes,
+`packages/tcip-mcp/src/tcip_mcp/model_registry.py` (`def entries_over(`, the relation `registered_entries`
+calls over every run: one owner per sha256, the completed run whose final status names the bytes,
 else the index's foreign entry; `_write_registry_entry`, `model_registry.py`, replaces one foreign
 entry by sha256 inside one `tcip_store.transaction` on the key `registry_index_key`,
 `model_registry.py`, mints). Side B: `packages/tcip-web/src/tcip_web/routes/results.py`
