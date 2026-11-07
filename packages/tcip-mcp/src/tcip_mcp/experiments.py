@@ -916,7 +916,7 @@ RUN_REFUSALS = (
     RegistryPathTraversalError,
     PermissionError,
 )
-"""Every exception :func:`observe_run` raises for a run directory it will not read."""
+"""The exceptions :func:`observe_runs` answers as a run's refusal; any other propagates."""
 
 
 def observe_runs(

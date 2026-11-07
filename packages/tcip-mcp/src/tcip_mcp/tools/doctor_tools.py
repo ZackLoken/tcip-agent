@@ -134,10 +134,10 @@ def check_registry(
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
     when the root itself sits under one; only a checkpoint the root does not contain is scanned.
 
-    Every way the registry can refuse to be read comes out as a finding, not as a traceback: each
-    run record that will not read (:func:`~tcip_mcp.experiments.observe_runs`) is an error
-    finding naming the run, and the checks go on over the runs that read; an index that will not
-    decode, open or validate is one finding and ends the checks.
+    Each run whose read raises one of :data:`~tcip_mcp.experiments.RUN_REFUSALS` is an error
+    finding naming the run, and the checks go on over the runs that read; an index read raising
+    ``StoreError`` or ``ReadRefusedError`` is one finding and ends the checks. Any other
+    exception propagates.
     """
     from tcip_mcp.experiments import observe_runs
     from tcip_mcp.model_registry import entries_over
@@ -347,12 +347,12 @@ def diagnose_project(project: Path) -> dict[str, list[tuple[str, str]]]:
 
     The checks: label documents with no image, that will not read, or empty with no completion
     mark for any subject; images with no label record; registry entries whose checkpoint is
-    missing or under a test or temp tree; prediction buckets whose record will not read or names
-    a checkpoint no registry entry names; annotations accepted without an origin; flags records
-    and verdict shards that will not read, and shards whose bucket has no readable record or
-    names no document for their image; trait records that will not read or whose latest
-    revision is unconfirmed; split selections under ``splits`` that will not read; and a project
-    record that will not read. ``findings`` holds each
+    missing or under a test or temp tree; run records that will not read; prediction buckets
+    whose record will not read or names a checkpoint no registry entry names; annotations
+    accepted without an origin; flags records and verdict shards that will not read, and shards
+    whose bucket has no readable record or names no document for their image; trait records that
+    will not read or whose latest revision is unconfirmed; split selections under ``splits``
+    that will not read; and a project record that will not read. ``findings`` holds each
     finding as its level (``error``, ``warn`` or ``info``) and its message. Reads only, through
     the store this process already bound.
     """
