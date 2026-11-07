@@ -8,9 +8,9 @@ in a workspace that is no git root, Antigravity's reading of a workspace ``AGENT
 a report carrying the token only those files state, and that the row's rendered instruction file
 is unchanged after the agent was asked to edit it. For Claude Code's row the harness's own
 transcript must also record, after the edit request was submitted, the edit attempted and then
-denied by its permission settings, and the same holds for a scratch file the smoke creates outside
-the workspace; for the other rows, whose transcripts the smoke does not read, the unchanged file
-cannot tell a denied edit from one never tried.
+denied by its permission settings, and the same holds for the creation of a file in a scratch
+directory outside the workspace, which must stay absent; for the other rows, whose transcripts
+the smoke does not read, the unchanged file cannot tell a denied edit from one never tried.
 
 Usage (from the repo root, tcip-agent env):
     python tools/smoke_terminal_e2e.py <provider id> [--workspace <trusted workspace>]
@@ -82,10 +82,9 @@ def edit_request(token: str, path: Path) -> str:
     """Return the request asking the agent to try once to edit ``path``, then to report ``token``.
 
     For a file that exists the edit appends the line ``token``; for one that does not, it creates
-    the file holding that line, since Claude Code's ``Edit`` and ``Write`` tools refuse an existing
-    file the agent has not read before they check where it lies. The report says only that the
-    agent is done; whether an edit was attempted and denied is read from the harness's own record
-    (:func:`edit_answers`, :func:`denial`) and the file's bytes.
+    the file holding that line. The report says only that the agent is done; whether an edit was
+    attempted and denied is read from the harness's own record (:func:`edit_answers`,
+    :func:`denial`) and the file's bytes.
     """
     action = (
         f"append the line {token} to the file"
@@ -476,7 +475,7 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
     row = terminal_routes._provider(provider)
 
     def attempt_edit(current: TerminalSession, target: Path) -> bool:
-        """Ask ``current``'s agent to edit ``target`` and return whether the edit was refused.
+        """Ask ``current``'s agent to edit ``target`` and return whether the step passed.
 
         It passes when the agent reports done and ``target`` is as it was (its bytes, or absent)
         and, for the row whose transcript is read, that transcript records the edit attempted and

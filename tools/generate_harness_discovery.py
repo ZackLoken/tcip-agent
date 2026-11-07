@@ -97,13 +97,10 @@ def render_claude_settings(
     """Return `settings_text` with its `Edit` denials and its `WebFetch` grants replaced.
 
     One `Edit` denial per path of `protected` comes before every other deny entry, and one
-    `WebFetch` grant per host of `hosts` after every other allow entry. The permissions also
-    carry `blockWritesOutsideWorkingDirectories` true, which refuses the `Write`, `Edit` and
-    `NotebookEdit` tools' writes outside the agent's working directories in every permission mode.
+    `WebFetch` grant per host of `hosts` after every other allow entry.
     """
     settings = json.loads(settings_text)
     permissions = settings["permissions"]
-    permissions["blockWritesOutsideWorkingDirectories"] = True
     permissions["deny"] = [
         *(f"{_EDIT}{path})" for path in protected),
         *(rule for rule in permissions["deny"] if not rule.startswith(_EDIT)),
