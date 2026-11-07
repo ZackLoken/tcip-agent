@@ -26,8 +26,10 @@ from tcip_mcp.assessment_evidence import INSUFFICIENCY_FAILURES  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     IMG,
+    STEMS,
     SUBJECT,
     assess,
+    object_at,
     trained_detector,
 )
 from tests._producer_fixtures import label_image, mark_complete  # noqa: E402
@@ -244,19 +246,36 @@ def test_the_draw_states_each_reference_sides_bearing_images_the_door_counts(
 ) -> None:
     """``draw_splits`` states the ground-truth-bearing images per reference side the door counts.
 
-    Over a capture holding five ground-truth-bearing images among negatives, the draw answers
-    each reference side's bearing images and the floor without refusing; the assessment of that
-    selection refuses exactly the sides the draw states below the floor, each by the count the
-    draw states.
+    Over a capture of eight images bearing two annotations each among negatives, the draw
+    leaves the calibration side one bearing image (two annotations) and the holdout side two
+    bearing images beside negatives, and answers so without refusing. The assessment of that
+    selection refuses the calibration side by the one image the draw states and does not name
+    the holdout side, which holds the floor and a negative.
     """
-    from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
-    root, _images, selection_dir, checkpoint = trained_detector(
+    root, images_dir, _selection, checkpoint = trained_detector(
         tmp_path, experiment_id="exp-floor-draw"
     )
-    for sample in read_selection(selection_dir, project=tmp_path).samples[5:]:
-        _negative(Path(sample.source), tmp_path)
+    for index, stem in enumerate(STEMS):
+        image = images_dir / f"{stem}.png"
+        if index >= 8:
+            _negative(image, tmp_path)
+            continue
+        x0, y0, size = object_at(index)
+        label_image(
+            image,
+            [
+                Annotation(
+                    subject=SUBJECT,
+                    geometry=BBox(x0, y0, x0 + size, y0 + size),
+                ),
+                Annotation(subject=SUBJECT, geometry=BBox(0, 0, 3, 3)),
+            ],
+            IMG,
+            IMG,
+            project=tmp_path,
+        )
     redrawn = tmp_path / "redrawn"
     drawn = draw_splits(
         tmp_path,
@@ -266,25 +285,25 @@ def test_the_draw_states_each_reference_sides_bearing_images_the_door_counts(
         **drawn_split(
             seed=2,
             val_ratio=0.2,
-            calibration_ratio=0.2,
-            holdout_ratio=0.2,
+            calibration_ratio=0.1,
+            holdout_ratio=0.3,
             grouping="tile_prefix",
         ),
         actor=None,
     )
     assert "error" not in drawn, drawn
     assert drawn["reference_floor"] == FLOOR
-    bearing = drawn["foreground_images"]
-    assert set(bearing) == set(SIDES), bearing
-    short = [side for side in SIDES if bearing[side] < FLOOR]
-    assert short, bearing
+    assert drawn["foreground_images"] == {"calibration": 1, "holdout": 2}, (
+        drawn
+    )
+    assert drawn["foreground_annotations"]["calibration"] > 1, drawn
+    assert drawn["splits"]["holdout"] > 2, drawn
 
     answered = assess(tmp_path, checkpoint, redrawn)
 
     refusal = answered.get("error", "")
-    named = [
-        side
-        for side in SIDES
-        if f"the {side} side holds {bearing[side]}" in refusal
-    ]
-    assert named == short, (bearing, answered)
+    named = [side for side in SIDES if f"the {side} side holds" in refusal]
+    assert (named, "the calibration side holds 1 " in refusal) == (
+        ["calibration"],
+        True,
+    ), answered
