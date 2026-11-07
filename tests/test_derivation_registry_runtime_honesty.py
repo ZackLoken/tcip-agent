@@ -90,7 +90,7 @@ def test_registering_a_picker_registers_the_labels_it_can_stamp(
     monkeypatch.setitem(
         operating_point.COUNT_OBJECTIVE_PICKERS,
         "objective_registered_by_this_test",
-        (lambda records: None, label),
+        (lambda records: 0.0, label),
     )
 
     live = derivations.DERIVATION_IMPLEMENTATIONS
