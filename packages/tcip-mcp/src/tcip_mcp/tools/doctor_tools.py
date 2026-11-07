@@ -6,8 +6,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tcip_mcp.server import tool
+from tcip_store import StoreError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tcip_mcp.buckets import Bucket
     from tcip_store import Key
 
@@ -17,12 +20,28 @@ def _named(key: Key) -> str:
     return "/".join(key.parts)
 
 
+def _listed[T](
+    check: str, findings: list, listing: Callable[[], T]
+) -> T | None:
+    """Return what ``listing`` answers, or ``None`` when the store refuses it.
+
+    A ``StoreError`` from ``listing`` is one error finding naming ``check`` as not completed,
+    with the refusal's text; any other exception propagates.
+    """
+    try:
+        return listing()
+    except StoreError as exc:
+        findings.append(("error", f"{check} could not be completed: {exc}"))
+        return None
+
+
 def _census(root: Path, findings: list) -> dict | None:
     """Take the dataset census with every label document read.
 
     Returns the census (``data_tools._scan_dataset``) with ``label_reads``, each label key's
     document or the ``UnreadableLabelDocumentError`` it raised; ``None`` with an error finding for
-    an ``images/`` stem collision.
+    an ``images/`` stem collision, and ``None`` with an error finding when the store refuses the
+    census's listing of the label documents (:func:`_listed`).
     """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
@@ -32,9 +51,13 @@ def _census(root: Path, findings: list) -> dict | None:
     from tcip_mcp.tools.data_tools import _scan_dataset
 
     try:
-        scan = _scan_dataset(str(root))
+        scan = _listed(
+            "the label census", findings, lambda: _scan_dataset(str(root))
+        )
     except AmbiguousImageStemError as exc:
         findings.append(("error", str(exc)))
+        return None
+    if scan is None:
         return None
     label_reads: dict = {}
     for key in scan["labels"]:
@@ -45,17 +68,23 @@ def _census(root: Path, findings: list) -> dict | None:
     return {**scan, "label_reads": label_reads}
 
 
-def _buckets(root: Path, findings: list) -> dict[str, Bucket]:
+def _buckets(root: Path, findings: list) -> dict[str, Bucket] | None:
     """Read every bucket published under ``root`` once (:func:`~tcip_mcp.buckets.bucket_names`).
 
     Returns each name whose record reads mapped to its :class:`~tcip_mcp.buckets.Bucket`; each
     whose record's read raises ``ValueError`` (:func:`~tcip_mcp.buckets.read_bucket`) is left out,
-    with an error finding naming it.
+    with an error finding naming it. ``None`` with an error finding when the store refuses the
+    listing of the names (:func:`_listed`), so no check treats a bucket as absent.
     """
     from tcip_mcp.buckets import bucket_names, read_bucket
 
+    names = _listed(
+        "the prediction buckets check", findings, lambda: bucket_names(root)
+    )
+    if names is None:
+        return None
     reads: dict[str, Bucket] = {}
-    for name in bucket_names(root):
+    for name in names:
         try:
             reads[name] = read_bucket(root, name)
         except ValueError as exc:
@@ -124,12 +153,13 @@ TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
 
 
 def check_registry(
-    root: Path, findings: list, *, buckets: dict[str, Bucket]
+    root: Path, findings: list, *, buckets: dict[str, Bucket] | None
 ) -> None:
     """Flag registered models whose checkpoint is missing or points into a test or temp tree.
 
     Also flags, over the readable published buckets ``buckets`` (:func:`_buckets`), every one
-    whose record names a checkpoint digest no registry entry carries.
+    whose record names a checkpoint digest no registry entry carries; ``None``, buckets the store
+    would not list, flags none.
 
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
     when the root itself sits under one; only a checkpoint the root does not contain is scanned.
@@ -201,7 +231,7 @@ def check_registry(
             )
 
     registered_shas = {m.sha256 for m in entries}
-    for name, bucket in buckets.items():
+    for name, bucket in (buckets or {}).items():
         if (
             bucket.producer.kind == "checkpoint"
             and bucket.producer.checkpoint_sha256 not in registered_shas
@@ -244,7 +274,7 @@ def check_provenance(root: Path, findings: list, *, census: dict) -> None:
 
 
 def check_state(
-    root: Path, findings: list, *, buckets: dict[str, Bucket]
+    root: Path, findings: list, *, buckets: dict[str, Bucket] | None
 ) -> None:
     """Warn of every unreadable flags record or verdict shard and every shard naming no document.
 
@@ -252,24 +282,38 @@ def check_state(
     :func:`~tcip_annotation.verdicts.read_verdicts`, every one whose bucket the published buckets
     ``buckets`` (:func:`_buckets`) hold no readable record of, every one naming an image its
     bucket's record names no document for, and every flags record that will not read
-    (:func:`~tcip_annotation.flags.read_flags`).
+    (:func:`~tcip_annotation.flags.read_flags`). A listing of flags or of verdict shards the store
+    refuses is one error finding and that part is not checked (:func:`_listed`); ``None``,
+    buckets the store would not list, compares no shard to a bucket.
     """
     import tcip_store
     from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
     from tcip_store import ReadRefusedError
 
-    for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(root)):
+    flagged = _listed(
+        "the review flags check",
+        findings,
+        lambda: tcip_store.keys(REVIEW_FLAGS_STORE, str(root)),
+    )
+    for key in flagged or []:
         try:
             read_flags(tcip_store.read, key)
         except ReadRefusedError as exc:
             findings.append(("warn", str(exc)))
-    for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(root)):
+    judged = _listed(
+        "the review verdicts check",
+        findings,
+        lambda: tcip_store.keys(REVIEW_VERDICTS_STORE, str(root)),
+    )
+    for key in judged or []:
         name, stem = key.parts
         try:
             read_verdicts(key)
         except ReadRefusedError as exc:
             findings.append(("warn", str(exc)))
+            continue
+        if buckets is None:
             continue
         bucket = buckets.get(name)
         if bucket is None:
@@ -294,12 +338,14 @@ def check_traits(root: Path, findings: list) -> None:
     """Append an error for every unreadable trait record and a warning for every unconfirmed one.
 
     An unreadable record is one the store or its schema refuses to read; an unconfirmed one is a
-    trait whose latest revision the breeder has not confirmed.
+    trait whose latest revision the breeder has not confirmed. A listing of the traits the store
+    refuses is one error finding and no trait is checked (:func:`_listed`).
     """
     from tcip_mcp.traits import read_trait, trait_names
     from tcip_store import ReadRefusedError
 
-    for name in trait_names(root):
+    names = _listed("the traits check", findings, lambda: trait_names(root))
+    for name in names or []:
         try:
             record = read_trait(name, root)
         except ReadRefusedError as exc:
@@ -352,9 +398,10 @@ def diagnose_project(project: Path) -> dict[str, list[tuple[str, str]]]:
     accepted without an origin; flags records and verdict shards that will not read, and shards
     whose bucket has no readable record or names no document for their image; trait records that
     will not read or whose latest revision is unconfirmed; split selections under ``splits``
-    that will not read; and a project record that will not read. ``findings`` holds each
-    finding as its level (``error``, ``warn`` or ``info``) and its message. Reads only, through
-    the store this process already bound.
+    that will not read; and a project record that will not read. A check whose store will not
+    list what it checks is one error finding saying it could not be completed, and the other
+    checks run. ``findings`` holds each finding as its level (``error``, ``warn`` or ``info``)
+    and its message. Reads only, through the store this process already bound.
     """
     found: list[tuple[str, str]] = []
     census = _census(project, found)
