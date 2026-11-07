@@ -191,13 +191,17 @@ def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
         )
 
 
-def open_verified(db_path: Path) -> sqlite3.Connection:
+def open_verified(db_path: Path, timeout_s: float) -> sqlite3.Connection:
     """Open a published database, verify its schema, and set the connection to full synchronous.
 
-    The database is opened in whatever journal mode it holds.
+    The database is opened in whatever journal mode it holds, its statements waiting up to
+    ``timeout_s`` on another connection's lock, the identity check's schema read first among them.
     """
     conn = sqlite3.connect(
-        str(db_path), isolation_level=None, check_same_thread=False
+        str(db_path),
+        timeout=timeout_s,
+        isolation_level=None,
+        check_same_thread=False,
     )
     try:
         verify_identity(conn, db_path)
@@ -328,17 +332,20 @@ class SqliteBackend:
         """Yield this process, thread and root's connection, held in use until the block returns.
 
         While held, :meth:`release` waits for it. With no database at ``root``, a write
-        (``create``) builds one and a read is answered with None.
+        (``create``) builds one and a read is answered with None. The connection waits up to
+        ``timeout_s`` on another connection's lock, the backend's ``lock_timeout_s`` when None.
 
         One connection per (pid, thread, root): a forked worker never reuses the parent's handles,
         and a write on one thread never joins another thread's read.
         """
+        timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         db_path = database_file(root)
         slot = (os.getpid(), threading.get_ident(), canonical_path(root))
         with self._guard:
             conn = self._connections.get(slot)
             if conn is not None:
                 self._busy[slot] += 1
+        reused = conn is not None
         if conn is None:
             try:
                 present = db_path.is_file()
@@ -350,12 +357,16 @@ class SqliteBackend:
                 if not create:
                     yield None
                     return
-                self._publish(db_path, root, keys, timeout_s)
-            conn = open_verified(db_path)
+                self._publish(db_path, root, keys, timeout)
+            conn = open_verified(db_path, timeout)
             with self._guard:
                 self._connections[slot] = conn
                 self._busy[slot] += 1
         try:
+            if reused:
+                conn.execute(
+                    f"pragma busy_timeout = {int(max(0.0, timeout) * 1000)}"
+                )
             yield conn
         finally:
             with self._idle:
@@ -369,17 +380,16 @@ class SqliteBackend:
         db_path: Path,
         root: str,
         keys: tuple[Key, ...],
-        timeout_s: float | None,
+        timeout_s: float,
     ) -> None:
         """Build a database beside its destination and install it atomically and exclusively.
 
         The transition lock is held across the existence re-check, the build and the install, so
         two creators serialize and the loser opens the winner's database.
         """
-        timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         started = time.monotonic()
         try:
-            held = transition_lock(root, timeout_s=timeout)
+            held = transition_lock(root, timeout_s=timeout_s)
             held.__enter__()
         except self._timeout_error:
             raise StoreBusyError(keys[0], time.monotonic() - started) from None
@@ -456,16 +466,14 @@ class SqliteBackend:
 
         The write lock is taken up front rather than upgraded from a read.
         """
-        timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         with ExitStack() as held:
             with self._mapped(keys):
                 conn = held.enter_context(
-                    self._connection(keys[0].root, keys, timeout, create=True)
+                    self._connection(
+                        keys[0].root, keys, timeout_s, create=True
+                    )
                 )
                 assert conn is not None
-                conn.execute(
-                    f"pragma busy_timeout = {int(max(0.0, timeout) * 1000)}"
-                )
             with self._mapped(keys):
                 conn.execute("begin immediate")
             try:

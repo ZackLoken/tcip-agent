@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -307,7 +308,7 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
     bystander = sqlite3.connect(str(db_path), isolation_level=None)
     try:
         bystander.execute("select count(*) from records").fetchone()
-        conn = open_verified(db_path)
+        conn = open_verified(db_path, store.backend.lock_timeout_s)
         try:
             assert (
                 str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
@@ -1393,6 +1394,88 @@ def test_a_write_the_driver_refuses_for_a_read_only_database_raises_database_ref
         f"the store database under {key.root} refused the operation: "
     )
     assert type(refused.value) is ts.DatabaseRefusedError
+
+
+# ── another connection's lock ───────────────────────────────────────────────────
+
+_LONG_WAIT_S = 10.0
+"""A lock wait a brief hold (:data:`_BRIEF_HOLD_S`) clears well inside."""
+
+_BRIEF_HOLD_S = 0.3
+"""How long a lock that clears inside the wait is held."""
+
+
+@contextmanager
+def _waiting(store: Harness, lock_timeout_s: float) -> Iterator[None]:
+    """Bind a backend that waits ``lock_timeout_s`` on a lock, binding ``store``'s again after."""
+    backend = make_backend(lock_timeout_s=lock_timeout_s)
+    ts.bind(backend)
+    try:
+        yield
+    finally:
+        ts.bind(store.backend)
+        backend.close()
+
+
+@contextmanager
+def _held_by_another_connection(
+    store: Harness,
+) -> Iterator[sqlite3.Connection]:
+    """Hold the root's database from a plain connection in exclusive locking mode.
+
+    The connection takes its lock with ``begin exclusive`` and gives it up when it closes, on
+    leaving the block unless it was closed before.
+    """
+    holder = sqlite3.connect(
+        str(database_file(str(store.root))),
+        isolation_level=None,
+        check_same_thread=False,
+    )
+    try:
+        holder.execute("pragma locking_mode = exclusive")
+        holder.execute("begin exclusive")
+        yield holder
+    finally:
+        holder.close()
+
+
+def _released_into_rollback_journal(store: Harness) -> None:
+    """Release the root and put its database in rollback-journal (``delete``) mode.
+
+    A WAL database refuses another connection's exclusive lock while the store holds a
+    connection on it; a rollback-journal database takes it.
+    """
+    ts.release_root(store.root)
+    conn = store.connect()
+    try:
+        mode = conn.execute("pragma journal_mode = delete").fetchone()[0]
+    finally:
+        conn.close()
+    assert mode == "delete"
+
+
+def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in_time(
+    store: Harness,
+) -> None:
+    """A read on the connection a write used waits the backend's wait, not the write's.
+
+    After a transaction that would wait nothing, a read meeting a lock that clears inside the
+    backend's wait returns the record, and the lock is never reported.
+    """
+    key = store.key(LWW, "after-a-write")
+    ts.replace(key, {"n": 1})
+    _released_into_rollback_journal(store)
+
+    with _waiting(store, _LONG_WAIT_S):
+        with ts.transaction(key, timeout_s=0.0) as txn:
+            txn.write(key, {"n": 2})
+        with _held_by_another_connection(store) as holder:
+            clears = threading.Timer(_BRIEF_HOLD_S, holder.close)
+            clears.start()
+            try:
+                assert ts.read(key) == {"n": 2}
+            finally:
+                clears.join(30)
 
 
 def test_enumerating_review_verdicts_answers_identities_that_read_back(
