@@ -206,21 +206,17 @@ def run_entry(
     )
 
 
-def registered_entries(project_path: str | Path) -> list[RegistryEntry]:
-    """Return every checkpoint the project can load, one entry per sha256, from its one owner.
+def entries_over(
+    project_path: str | Path, observations: list[RunObservation[RunRecord]]
+) -> list[RegistryEntry]:
+    """Return every checkpoint the runs ``observations`` and the project's index make loadable.
 
-    The owner is the completed training run whose final status names those bytes
-    (:func:`run_entry`), else the foreign entry of the index registering them. Runs' entries come
-    first, in completion order.
+    One entry per sha256, from its one owner: the completed training run whose final status names
+    those bytes (:func:`run_entry`), else the foreign entry of the index registering them. Runs'
+    entries come first, in completion order. A refusal of the index raises.
     """
-    from tcip_mcp.experiments import run_observations
-
     runs = sorted(
-        (
-            entry
-            for entry in map(run_entry, run_observations(project_path))
-            if entry is not None
-        ),
+        (entry for entry in map(run_entry, observations) if entry is not None),
         key=lambda entry: entry.registered_at,
     )
     owned = {entry.sha256 for entry in runs}
@@ -232,6 +228,13 @@ def registered_entries(project_path: str | Path) -> list[RegistryEntry]:
             if e.sha256 not in owned
         ),
     ]
+
+
+def registered_entries(project_path: str | Path) -> list[RegistryEntry]:
+    """Return every checkpoint the project can load (:func:`entries_over` every run of it)."""
+    from tcip_mcp.experiments import run_observations
+
+    return entries_over(project_path, run_observations(project_path))
 
 
 type MetricsSource = Literal["trainer", "training_source", "caller"]
