@@ -134,11 +134,13 @@ def check_registry(
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
     when the root itself sits under one; only a checkpoint the root does not contain is scanned.
 
-    Every way the registry can refuse to be read (a store that will not decode, a database file
-    that will not open, an index that does not validate) comes out as a finding, not as a
-    traceback.
+    Every way the registry can refuse to be read comes out as a finding, not as a traceback: each
+    run record that will not read (:func:`~tcip_mcp.experiments.observe_runs`) is an error
+    finding naming the run, and the checks go on over the runs that read; an index that will not
+    decode, open or validate is one finding and ends the checks.
     """
-    from tcip_mcp.model_registry import registered_entries
+    from tcip_mcp.experiments import observe_runs
+    from tcip_mcp.model_registry import entries_over
     from tcip_mcp.registry_paths import (
         RegistryPathEmptyError,
         RegistryPathTraversalError,
@@ -146,8 +148,16 @@ def check_registry(
     )
     from tcip_store import ReadRefusedError, StoreError
 
+    observed, refused = observe_runs(root)
+    for directory, refusal in refused:
+        findings.append(
+            (
+                "error",
+                f"run {directory.name!r}: run record will not read: {refusal}",
+            )
+        )
     try:
-        entries = registered_entries(root)
+        entries = entries_over(root, observed)
     except (StoreError, ReadRefusedError) as exc:
         findings.append(
             (
