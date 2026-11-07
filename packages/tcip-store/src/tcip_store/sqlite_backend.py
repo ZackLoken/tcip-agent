@@ -4,7 +4,7 @@ Creation builds the database under a unique temp name in rollback-journal mode, 
 in WAL, closes, fsyncs and installs it with a no-clobber primitive, all under the root's transition
 lock, so the file's existence marks a complete WAL database. Every open verifies the schema and
 full synchronous before a single row is read, and changes nothing on disk. One writer at a time
-per root; readers are never blocked.
+per root; in WAL the store's own writer never blocks a reader.
 """
 
 from __future__ import annotations
