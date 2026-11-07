@@ -1059,11 +1059,9 @@ class SplitChoices(BaseModel):
 
 
 def selection_directories(dataset_root: Path) -> list[Path]:
-    """Return the directories under ``dataset_root`` a selection may be recorded in.
+    """Return ``<dataset_root>/splits`` and, in name order, each directory one level under it.
 
-    These are ``<dataset_root>/splits`` and, in name order, each directory one level under it,
-    where ``freeze_selection`` writes a frozen run's own partition. A directory is returned
-    whether or not a selection is recorded there.
+    A directory is returned whether or not a selection is recorded there.
     """
     splits_dir = dataset_root / "splits"
     below = (

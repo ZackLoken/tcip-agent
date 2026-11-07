@@ -310,9 +310,8 @@ def check_selections(root: Path, findings: list) -> None:
     """Append an error for every split selection under ``root`` that will not read.
 
     The selections are those recorded in ``<root>/splits`` and one level under it
-    (:func:`~tcip_mcp.tools.training_tools.selection_directories`), read as the training preflight
-    reads them; a directory recording none adds nothing. A selection drawn to any other place is
-    not reached.
+    (:func:`~tcip_mcp.tools.training_tools.selection_directories`); a directory recording none
+    adds nothing. A selection drawn to any other place is not reached.
     """
     from tcip_mcp.pipelines.data.selection import read_selection_checked
     from tcip_mcp.tools.training_tools import selection_directories
