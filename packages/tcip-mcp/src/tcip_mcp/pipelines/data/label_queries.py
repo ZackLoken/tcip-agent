@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from tcip_annotation.json_io import UnreadableLabelDocumentError
 from tcip_annotation.state import Annotation, GeometryReader, box_derivable
 from tcip_mcp.pipelines.image_utils import list_logical_images
 from tcip_store import Key
@@ -240,6 +241,17 @@ def _candidates(
     ]
 
 
+class GroundTruthChangedError(UnreadableLabelDocumentError, ValueError):
+    """Ground truth read and found absent or at a version other than the one a run recorded."""
+
+
+def _where(ground_truth: Key | str) -> str:
+    """Return where ``ground_truth`` lives: a record's place under its root, else its path."""
+    if isinstance(ground_truth, Key):
+        return f"{ground_truth.store}{list(ground_truth.parts)} under {ground_truth.root}"
+    return ground_truth
+
+
 def _acquire(
     ground_truth: Key | str,
     row_key: str | None,
@@ -253,21 +265,22 @@ def _acquire(
     the label document, the row's value, or nothing for a mask; ``(None, None)`` for ground
     truth that is not there. Each table is read once per ``tables``. With ``version``, the token
     a record carries, ground truth that is not there or is at any other version refuses naming
-    both, a document as :class:`~tcip_annotation.json_io.UnreadableLabelDocumentError` and
-    anything else as ``ValueError``.
+    both, as :class:`GroundTruthChangedError`. A document the store refuses to read raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocumentError` naming its place.
     """
     import tcip_store
-    from tcip_annotation.json_io import (
-        UnreadableLabelDocumentError,
-        document_at,
-        read_stored,
-    )
+    from tcip_annotation.json_io import document_at, read_stored
     from tcip_mcp.pipelines.data.selection import MASK, shape_of
 
     stored: Any = None
     decoded: Any = None
     if isinstance(ground_truth, Key):
-        stored = read_stored(ground_truth, default=None)
+        try:
+            stored = read_stored(ground_truth, default=None)
+        except UnreadableLabelDocumentError as exc:
+            raise UnreadableLabelDocumentError(
+                f"{_where(ground_truth)}: {exc}"
+            ) from exc
         if stored.version == tcip_store.Version.ABSENT:
             stored = None
         else:
@@ -287,13 +300,8 @@ def _acquire(
             if stored is None
             else f"is at version {stored.version.token}"
         )
-        refusal = (
-            UnreadableLabelDocumentError
-            if isinstance(ground_truth, Key)
-            else ValueError
-        )
-        raise refusal(
-            f"{ground_truth}{f' row {row_key!r}' if row_key else ''} {at}, not "
+        raise GroundTruthChangedError(
+            f"{_where(ground_truth)}{f' row {row_key!r}' if row_key else ''} {at}, not "
             f"{version}, the version recorded"
         )
     return stored, decoded
