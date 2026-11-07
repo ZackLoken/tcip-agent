@@ -131,7 +131,10 @@ shipped file's academic WebFetch grants are generated from the `cv-research` doc
 state directory `tcip_store` names. Its deny list's relative patterns resolve against the
 workspace the agent runs in (Claude Code's permissions page; a `/path` pattern anchors at the
 temporary settings file's directory instead): every project's `.tcip` store, written through the
-tools alone, and the instruction files and skills the launches write. Every row's agent runs in
+tools alone, and the instruction files and skills the launches write. Its
+`permissions.blockWritesOutsideWorkingDirectories` is true, which refuses the `Write`, `Edit` and
+`NotebookEdit` tools' writes outside the workspace in every permission mode and covers no shell
+command. Every row's agent runs in
 the backend's workspace and reads the operating contract and the skills its row's preparation
 wrote there, never the repository's. Claude's row loads project settings only (`--setting-sources project`),
 so neither the user's own settings, hooks and `CLAUDE.md` nor the developer's auto-memory reach

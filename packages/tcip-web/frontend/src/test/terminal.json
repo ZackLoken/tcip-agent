@@ -81,7 +81,7 @@
         "--strict-mcp-config"
       ],
       "version": "FAKE_TERMINAL_READY",
-      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, resolved against the workspace it runs in and merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
+      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, resolved against the workspace it runs in and merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first. In every permission mode it refuses the Write, Edit and NotebookEdit tools' writes outside the workspace, and shell commands are not covered by that.",
       "prepared": [
         "wrote the operating contract into /scratch/workspace/CLAUDE.md",
         "wrote 19 knowledge skills under /scratch/workspace/.claude/skills"
@@ -111,7 +111,7 @@
         "conv-1"
       ],
       "version": "FAKE_TERMINAL_READY",
-      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, resolved against the workspace it runs in and merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
+      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, resolved against the workspace it runs in and merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first. In every permission mode it refuses the Write, Edit and NotebookEdit tools' writes outside the workspace, and shell commands are not covered by that.",
       "prepared": [
         "wrote the operating contract into /scratch/workspace/CLAUDE.md",
         "wrote 19 knowledge skills under /scratch/workspace/.claude/skills"
