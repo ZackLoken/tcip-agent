@@ -54,7 +54,10 @@ def freeze_selection(
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-    from tcip_mcp.pipelines.data.label_queries import acquired
+    from tcip_mcp.pipelines.data.label_queries import (
+        GroundTruthChangedError,
+        acquired,
+    )
     from tcip_mcp.pipelines.data.selection import (
         Selection,
         read_selection,
@@ -86,12 +89,18 @@ def freeze_selection(
         }
     try:
         samples = acquired(samples)
-    except (UnreadableLabelDocumentError, ValueError) as exc:
+    except GroundTruthChangedError as exc:
         return {
             "error": f"a member's ground truth changed since {experiment_id!r} trained "
             f"({exc}): a selection composed from it would bind a later run to "
             "ground truth this run never saw. Freeze a run whose members have not "
             "moved, or draw a fresh split over the current data."
+        }
+    except (UnreadableLabelDocumentError, ValueError) as exc:
+        return {
+            "error": f"a member's ground truth of {experiment_id!r} will not read "
+            f"({exc}): nothing was compared with what the run saw, so no selection "
+            "is composed from it."
         }
 
     a_source = samples[0].source
