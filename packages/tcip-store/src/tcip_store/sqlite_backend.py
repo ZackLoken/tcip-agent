@@ -4,7 +4,7 @@ Creation builds the database under a unique temp name in rollback-journal mode, 
 in WAL, closes, fsyncs and installs it with a no-clobber primitive, all under the root's transition
 lock, so the file's existence marks a complete WAL database. Every open verifies the schema and
 full synchronous before a single row is read, and changes nothing on disk. One writer at a time
-per root; readers are never blocked.
+per root; in WAL the store's own writer never blocks a reader.
 """
 
 from __future__ import annotations
@@ -142,17 +142,30 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
         os.unlink(temp)
 
 
+def contended(exc: sqlite3.Error) -> bool:
+    """Return whether a driver error is another connection's lock, ``SQLITE_BUSY``.
+
+    The driver attaches the extended code, whose low eight bits are the primary one; an error the
+    driver attached no code to is not contention.
+    """
+    code = getattr(exc, "sqlite_errorcode", None)
+    return code is not None and code & 0xFF == sqlite3.SQLITE_BUSY
+
+
 def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
     """Refuse (``DatabaseRefusedError``) a database that is not this module's, before a row is read.
 
-    Refused are a file that is not a SQLite database, or one whose schema is not this module's DDL.
+    Refused are a file whose schema read the driver refuses, carrying the driver's error, and one
+    whose schema is not this module's DDL. Another connection's lock (:func:`contended`) met by
+    the schema read is raised as the driver raised it.
     """
     try:
         found = _schema_of(conn)
     except sqlite3.DatabaseError as exc:
+        if contended(exc):
+            raise
         raise DatabaseRefusedError(
-            f"{db_path} is not a SQLite database: {exc}. Something else holds the name this "
-            "store's database has."
+            f"the database at {db_path} could not complete this store's identity check: {exc}"
         ) from exc
     expected = reference_schema()
     if found == expected:
@@ -191,13 +204,17 @@ def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
         )
 
 
-def open_verified(db_path: Path) -> sqlite3.Connection:
+def open_verified(db_path: Path, timeout_s: float) -> sqlite3.Connection:
     """Open a published database, verify its schema, and set the connection to full synchronous.
 
-    The database is opened in whatever journal mode it holds.
+    The database is opened in whatever journal mode it holds, its statements waiting up to
+    ``timeout_s`` on another connection's lock, the identity check's schema read first among them.
     """
     conn = sqlite3.connect(
-        str(db_path), isolation_level=None, check_same_thread=False
+        str(db_path),
+        timeout=timeout_s,
+        isolation_level=None,
+        check_same_thread=False,
     )
     try:
         verify_identity(conn, db_path)
@@ -328,17 +345,20 @@ class SqliteBackend:
         """Yield this process, thread and root's connection, held in use until the block returns.
 
         While held, :meth:`release` waits for it. With no database at ``root``, a write
-        (``create``) builds one and a read is answered with None.
+        (``create``) builds one and a read is answered with None. The connection waits up to
+        ``timeout_s`` on another connection's lock, the backend's ``lock_timeout_s`` when None.
 
         One connection per (pid, thread, root): a forked worker never reuses the parent's handles,
         and a write on one thread never joins another thread's read.
         """
+        timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         db_path = database_file(root)
         slot = (os.getpid(), threading.get_ident(), canonical_path(root))
         with self._guard:
             conn = self._connections.get(slot)
             if conn is not None:
                 self._busy[slot] += 1
+        reused = conn is not None
         if conn is None:
             try:
                 present = db_path.is_file()
@@ -350,12 +370,16 @@ class SqliteBackend:
                 if not create:
                     yield None
                     return
-                self._publish(db_path, root, keys, timeout_s)
-            conn = open_verified(db_path)
+                self._publish(db_path, root, keys, timeout)
+            conn = open_verified(db_path, timeout)
             with self._guard:
                 self._connections[slot] = conn
                 self._busy[slot] += 1
         try:
+            if reused:
+                conn.execute(
+                    f"pragma busy_timeout = {int(max(0.0, timeout) * 1000)}"
+                )
             yield conn
         finally:
             with self._idle:
@@ -369,17 +393,16 @@ class SqliteBackend:
         db_path: Path,
         root: str,
         keys: tuple[Key, ...],
-        timeout_s: float | None,
+        timeout_s: float,
     ) -> None:
         """Build a database beside its destination and install it atomically and exclusively.
 
         The transition lock is held across the existence re-check, the build and the install, so
         two creators serialize and the loser opens the winner's database.
         """
-        timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         started = time.monotonic()
         try:
-            held = transition_lock(root, timeout_s=timeout)
+            held = transition_lock(root, timeout_s=timeout_s)
             held.__enter__()
         except self._timeout_error:
             raise StoreBusyError(keys[0], time.monotonic() - started) from None
@@ -423,25 +446,24 @@ class SqliteBackend:
     # ── error mapping ───────────────────────────────────────────────────────────
 
     @contextmanager
-    def _mapped(self, keys: tuple[Key, ...]) -> Generator[None]:
+    def _mapped(self, blocked_on: Key | str) -> Generator[None]:
         """Turn a driver error raised inside into this layer's own refusal.
 
-        Contention raises ``StoreBusyError`` naming the first key the call named; any other
-        driver error, and contention in a call that named no key, raises ``DatabaseRefusedError``.
+        ``blocked_on`` is the first key the call named, or the root a call naming no key lists.
+        Contention (:func:`contended`) raises ``StoreBusyError`` naming it; any other driver error
+        raises ``DatabaseRefusedError`` naming its root.
         """
         started = time.monotonic()
         try:
             yield
         except sqlite3.Error as exc:
-            text = str(exc).lower()
-            contended = isinstance(exc, sqlite3.OperationalError) and (
-                "locked" in text or "busy" in text
-            )
-            if contended and keys:
+            if contended(exc):
                 raise StoreBusyError(
-                    keys[0], time.monotonic() - started
+                    blocked_on, time.monotonic() - started
                 ) from exc
-            root = keys[0].root if keys else "?"
+            root = (
+                blocked_on if isinstance(blocked_on, str) else blocked_on.root
+            )
             raise DatabaseRefusedError(
                 f"the store database under {root} refused the operation: {exc}"
             ) from exc
@@ -456,20 +478,18 @@ class SqliteBackend:
 
         The write lock is taken up front rather than upgraded from a read.
         """
-        timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         with ExitStack() as held:
-            with self._mapped(keys):
+            with self._mapped(keys[0]):
                 conn = held.enter_context(
-                    self._connection(keys[0].root, keys, timeout, create=True)
+                    self._connection(
+                        keys[0].root, keys, timeout_s, create=True
+                    )
                 )
                 assert conn is not None
-                conn.execute(
-                    f"pragma busy_timeout = {int(max(0.0, timeout) * 1000)}"
-                )
-            with self._mapped(keys):
+            with self._mapped(keys[0]):
                 conn.execute("begin immediate")
             try:
-                with self._mapped(keys):
+                with self._mapped(keys[0]):
                     yield conn
                     conn.execute("commit")
             except BaseException:
@@ -517,7 +537,7 @@ class SqliteBackend:
         """
         data = None
         with (
-            self._mapped((key,)),
+            self._mapped(key),
             self._connection(key.root, create=False) as conn,
         ):
             if conn is not None:
@@ -527,7 +547,7 @@ class SqliteBackend:
     def exists(self, key: Key) -> bool:
         """Return whether the record exists, without decoding it."""
         with (
-            self._mapped((key,)),
+            self._mapped(key),
             self._connection(key.root, create=False) as conn,
         ):
             return conn is not None and self._stored(conn, key) is not None
@@ -577,7 +597,7 @@ class SqliteBackend:
         The keys are record and log keys, sorted by their parts; a root with no database answers
         an empty list.
         """
-        with self._mapped(()), self._connection(root, create=False) as conn:
+        with self._mapped(root), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
@@ -594,7 +614,7 @@ class SqliteBackend:
 
     def stores(self, root: str) -> list[str]:
         """Return every store name ``root``'s database holds a record or log entry under, sorted."""
-        with self._mapped(()), self._connection(root, create=False) as conn:
+        with self._mapped(root), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
@@ -618,7 +638,7 @@ class SqliteBackend:
         """
         start = int(after) if after else 0
         with (
-            self._mapped((key,)),
+            self._mapped(key),
             self._connection(key.root, create=False) as conn,
         ):
             if conn is None:
