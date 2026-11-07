@@ -287,7 +287,8 @@ def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
     """Return assessment ``assessment_id`` of ``project``, its paths resolved against the project.
 
     An id naming no finished assessment refuses (``ValueError``) naming it, and a record that
-    does not validate as an :class:`Assessment` (``pydantic.ValidationError``) naming each field.
+    does not validate as an :class:`Assessment` raises ``tcip_store.ReadRefusedError`` naming
+    its file and each field.
     """
     from tcip_mcp.experiments import read_record
 
@@ -297,8 +298,10 @@ def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
             f"no assessment {assessment_id!r} is recorded under {project}: nothing "
             "states what it measured."
         )
-    return ASSESSMENT_RECORD.validate_python(
-        runtime_paths(read_record(path), _PATHS, project)
+    return validated(
+        ASSESSMENT_RECORD,
+        runtime_paths(read_record(path), _PATHS, project),
+        str(path),
     )
 
 

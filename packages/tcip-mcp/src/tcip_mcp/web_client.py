@@ -179,19 +179,31 @@ class CanvasGeometry(BaseModel):
 def read_canvas_meta(project: str) -> CanvasMeta | None:
     """Return ``project``'s canvas meta record, or ``None`` when no push has landed.
 
-    A record that does not decode as its shape raises ``ValidationError``.
+    A record that does not validate as its shape raises ``tcip_store.ReadRefusedError`` naming it.
     """
     raw = tcip_store.read(canvas_meta_key(project), default=None)
-    return None if raw is None else CanvasMeta.model_validate(raw)
+    return (
+        None
+        if raw is None
+        else tcip_store.validated(
+            CanvasMeta, raw, f"the canvas meta record of {project}"
+        )
+    )
 
 
 def read_canvas_geometry(project: str) -> CanvasGeometry | None:
     """Return ``project``'s canvas geometry record, or ``None`` when no full push has landed.
 
-    A record that does not decode as its shape raises ``ValidationError``.
+    A record that does not validate as its shape raises ``tcip_store.ReadRefusedError`` naming it.
     """
     raw = tcip_store.read(canvas_geometry_key(project), default=None)
-    return None if raw is None else CanvasGeometry.model_validate(raw)
+    return (
+        None
+        if raw is None
+        else tcip_store.validated(
+            CanvasGeometry, raw, f"the canvas geometry record of {project}"
+        )
+    )
 
 
 class CaptureChoice(BaseModel):
@@ -498,7 +510,8 @@ def resolve_web_port(workspace: Path) -> int:
     """Return the port the backend serving ``workspace`` recorded under it.
 
     Refuses (:class:`NoBackendPortError`) when none is recorded, and
-    (``pydantic.ValidationError``) a recorded port that does not validate as an integer.
+    (``tcip_store.ReadRefusedError`` naming it) a recorded port that does not validate as an
+    integer.
     """
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
     if recorded is None:
@@ -506,7 +519,11 @@ def resolve_web_port(workspace: Path) -> int:
             f"no backend has recorded a port under {workspace}; "
             "`python -m tcip_web` serving it records one"
         )
-    return TypeAdapter(int).validate_python(recorded)
+    return tcip_store.validated(
+        TypeAdapter(int),
+        recorded,
+        f"the backend port recorded under {workspace}",
+    )
 
 
 def backend_url(workspace: Path, path: str) -> str:

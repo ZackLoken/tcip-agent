@@ -8,10 +8,10 @@ naming it. The dotted scorer and proposal factories are checked once for the cla
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 import pytest
-from pydantic import ValidationError
 
 import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -43,18 +43,36 @@ def test_a_registered_plant_registry_reads_back_as_its_producer_wrote_it(
     )
 
 
-def test_a_stored_plant_registry_missing_its_digest_is_refused_naming_it(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "read",
+    [
+        plant_mapping.load_registry,
+        lambda project, name: plant_mapping.register_plant_registry_record(
+            project,
+            name,
+            [project / "plants.csv"],
+            crop="currant",
+            site="orchard",
+        ),
+    ],
+    ids=["load_registry", "a second registration"],
+)
+def test_a_stored_plant_registry_missing_its_digest_is_refused_naming_it_and_its_place(
+    tmp_path: Path, read: Callable[[Path, str], object]
 ) -> None:
-    """A stored registry record without ``digest`` is refused by its reader, naming the field."""
+    """A stored registry record without ``digest`` is refused where it is read, naming both."""
     name = _registered(tmp_path)
     key = plant_mapping.plant_registry_key(tmp_path, name)
     stored = ts.read(key)
     assert isinstance(stored, dict)
     ts.replace(key, {k: v for k, v in stored.items() if k != "digest"})
 
-    with pytest.raises(ValidationError, match="digest"):
-        plant_mapping.load_registry(tmp_path, name)
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        read(tmp_path, name)
+
+    assert str(refused.value) == (
+        f"plant registry {name!r} under {tmp_path}: digest: Field required"
+    )
 
 
 def test_a_staged_source_snapshot_lays_out_each_copy_its_record_names(

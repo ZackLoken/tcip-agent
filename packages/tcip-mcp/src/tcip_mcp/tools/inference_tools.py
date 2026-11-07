@@ -30,6 +30,7 @@ from tcip_store import (
     VersionConflictError,
     canonical_path,
     store,
+    validated,
 )
 
 if TYPE_CHECKING:
@@ -148,7 +149,11 @@ def infer(
         recorded = (
             None
             if stored is None
-            else RasterPassIdentity.model_validate(stored)
+            else validated(
+                RasterPassIdentity,
+                stored,
+                _progress_place(root, bucket, "identity"),
+            )
         )
         assessed = (
             None
@@ -417,6 +422,11 @@ def _progress_key(project: Path, root: Path, bucket: str, segment: str) -> Key:
     )
 
 
+def _progress_place(root: Path, bucket: str, segment: str) -> str:
+    """Return where the progress record ``segment`` of a pass toward ``bucket`` lives."""
+    return f"the raster-pass {segment} record toward bucket {bucket!r} under {root}"
+
+
 def _progress_keys(project: Path, root: Path, bucket: str) -> list[Key]:
     """Return the key of every progress record a pass toward ``bucket`` left in ``project``.
 
@@ -451,7 +461,11 @@ def _raster_pass(
     prior: SliceBatch | None = None
     if resumed:
         batches = [
-            SliceBatch.model_validate(store.read(key))
+            validated(
+                SliceBatch,
+                store.read(key),
+                _progress_place(root, bucket, key.parts[-1]),
+            )
             for _index, key in sorted(
                 (int(key.parts[-1][len("batch-") :]), key)
                 for key in _progress_keys(project, root, bucket)

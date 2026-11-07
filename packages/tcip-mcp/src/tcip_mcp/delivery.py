@@ -645,7 +645,8 @@ def read_acknowledgment(
 ) -> Acknowledgment:
     """Return the acknowledgment ``acknowledgment_id`` names.
 
-    An id under which none is recorded refuses (:class:`DeliveryRefusedError`).
+    An id under which none is recorded refuses (:class:`DeliveryRefusedError`), and a record that
+    does not validate raises ``tcip_store.ReadRefusedError`` naming the acknowledgment.
     """
     raw = tcip_store.read(
         _acknowledgment_key(project, acknowledgment_id), default=None
@@ -655,7 +656,9 @@ def read_acknowledgment(
             f"no acknowledgment {acknowledgment_id!r} is recorded: a breeder "
             "acknowledges shipping an unvalidated result in the Results tab."
         )
-    return Acknowledgment.model_validate(raw)
+    return tcip_store.validated(
+        Acknowledgment, raw, f"acknowledgment {acknowledgment_id}"
+    )
 
 
 # ── the delivery event ──────────────────────────────────────────────────────

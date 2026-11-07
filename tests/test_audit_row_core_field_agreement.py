@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 import tcip_mcp.audit as audit_module
 import tcip_store
@@ -75,8 +74,10 @@ def test_a_stored_line_whose_timestamp_is_no_instant_is_refused_by_the_reader(
         {**line, "timestamp": "yesterday"},
     )
 
-    with pytest.raises(ValidationError) as refused:
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
         audit_module.audit_entries(tmp_path)
 
-    (error,) = refused.value.errors()
-    assert error["loc"] == ("timestamp",)
+    assert refused.value.served.where == f"the audit log at {tmp_path}"
+    refusal = refused.value.served.refusal
+    assert isinstance(refusal, tcip_store.Invalid)
+    assert [issue.loc for issue in refusal.issues] == [["timestamp"]]

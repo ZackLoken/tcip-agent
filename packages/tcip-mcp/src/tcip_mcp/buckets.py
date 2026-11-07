@@ -146,8 +146,8 @@ def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
 
     ``dataset_root`` is taken as given, not located, and carried as the bucket's root. No record
     object, or one that does not decode, refuses (:class:`NotABucketError`) naming it; a record
-    that does not validate as the bucket's refuses (``pydantic.ValidationError``) naming each
-    field.
+    that does not validate as the bucket's raises ``tcip_store.ReadRefusedError`` naming it and
+    each field.
     """
     from tcip_mcp.dataset_layout import bucket_key
 
@@ -162,8 +162,10 @@ def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
             "produced its documents or how. Publish predictions through run_inference, or stage "
             "proposals through stage_proposals."
         )
-    return _BUCKET.validate_python(
-        {**record, "root": dataset_root, "name": name}
+    return tcip_store.validated(
+        _BUCKET,
+        {**record, "root": dataset_root, "name": name},
+        f"bucket {name!r} under {dataset_root}",
     )
 
 
