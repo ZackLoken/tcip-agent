@@ -132,8 +132,8 @@ def test_the_settings_a_launch_hands_refuse_file_tool_writes_outside_the_workspa
 ):
     """Claude's row hands its harness the key refusing the file tools' writes outside the workspace.
 
-    The deny list cannot name a path outside a workspace that holds every project, so the one
-    key Claude Code honors in every permission mode carries it.
+    The key is read from the settings file a launch writes, where Claude Code honors it in every
+    permission mode.
     """
     settings = pty_host.write_claude_settings()
     permissions = json.loads(settings.read_text(encoding="utf-8"))[
