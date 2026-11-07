@@ -7,4 +7,6 @@ with the one check that reaches it.
 Line delta by area: the three lines `python tools/line_delta.py <repo> main..` printed.
 
 Design issue: its number, when this changes a persisted format, a refusal, an operating-point
-stamp or a delivery gate.
+stamp or a delivery gate. When `tests/stored_record_schemas.json` changes: the conform script
+posted on this pull request, or why no written record carries the field, or that the records are
+discarded.
