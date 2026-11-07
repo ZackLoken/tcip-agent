@@ -35,8 +35,8 @@ def freeze_selection(
     when: ``experiment_id`` names no training run; the split is spatial (region identities, not
     stems); the run's val side is empty; a member's ground truth has moved since the run (it now
     digests differently from the digest the record holds, the moved members named); a
-    selection already exists
-    at the output directory; or the selection its resolved ``scope`` composes is one
+    selection already exists at the output directory; the output directory's store will not
+    read; or the selection its resolved ``scope`` composes is one
     :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses.
 
     The frozen selection's ``calibration`` and ``holdout`` sides are always empty, so an assessment
@@ -108,14 +108,12 @@ def freeze_selection(
         else dataset_root / "splits" / f"frozen-{experiment_id}"
     )
     existing, existing_error = read_selection_checked(out_dir, project=project)
-    if existing is not None or existing_error is not None:
-        why = (
-            existing_error.refusal
-            if existing_error is not None
-            else "freeze_selection never overwrites one."
-        )
+    if existing_error is not None:
+        return {"error": f"the destination will not read: {existing_error}"}
+    if existing is not None:
         return {
-            "error": f"a selection already exists at {str(out_dir)!r}: {why}"
+            "error": f"a selection already exists at {str(out_dir)!r}: "
+            "freeze_selection never overwrites one."
         }
 
     # The draw the run's partition came from: its own drawn split, or the selection it bound.
