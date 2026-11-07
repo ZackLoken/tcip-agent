@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 from tcip_mcp.assessment_evidence import (
+    REFERENCE_FLOOR,
     ClassifierEvidence,
     CountEvidence,
     FailureName,
@@ -212,13 +213,15 @@ def count_criterion(
         failures.append("insufficient_calibration_gt")
     if not sum(len(gt_objects(r)) for r in hold_records):
         failures.append("insufficient_holdout_gt")
-    if hb["n_present"] < 2:
+    if hb["n_present"] < REFERENCE_FLOOR:
         failures.append("insufficient_holdout_images")
     if not evidence.scope_equivalence()[0]:
         failures.append("count_bias_exceeds_tolerance")
     if any(not evidence.scope_equivalence(cid)[0] for cid in hb["per_class"]):
         failures.append("count_bias_exceeds_tolerance_per_class")
-    if any(c["n_present"] == 1 for c in hb["per_class"].values()):
+    if any(
+        0 < c["n_present"] < REFERENCE_FLOOR for c in hb["per_class"].values()
+    ):
         failures.append("insufficient_holdout_images_per_class")
     if evidence.holdout_missing_classes:
         failures.append("holdout_missing_class")
@@ -272,8 +275,8 @@ def classifier_criterion(
     Cohen's kappa over its items is above zero and above ``classifier_agreement_floor``, and when
     its present-scoped per-image positive-count bias is equivalent to zero at
     ``count_bias_tolerance_frac`` of the typical positive count, at ``equivalence_z`` one-sided
-    standard errors. Both sides must carry positive evidence and the holdout at least two items
-    over at least two images.
+    standard errors. Both sides must carry positive evidence and the holdout at least
+    :data:`~tcip_mcp.assessment_evidence.REFERENCE_FLOOR` items over at least that many images.
     """
     by_image: dict[str, list[dict]] = {}
     for it in hold_items:
@@ -305,9 +308,9 @@ def classifier_criterion(
         failures.append("insufficient_calibration_positive_evidence")
     if not any(it["is_true_positive"] for it in hold_items):
         failures.append("insufficient_holdout_positive_evidence")
-    if len(hold_items) < 2:
+    if len(hold_items) < REFERENCE_FLOOR:
         failures.append("insufficient_holdout_items")
-    if len(biases) < 2:
+    if len(biases) < REFERENCE_FLOOR:
         failures.append("insufficient_holdout_images")
     if not bias_ok:
         failures.append("positive_count_bias_exceeds_tolerance")
@@ -347,7 +350,7 @@ def scalar_criterion(
     value = score(predicted, true) if hold_items else None
     finite = finite_or_none(value)
     failures: list[FailureName] = []
-    if len(hold_items) < 2:
+    if len(hold_items) < REFERENCE_FLOOR:
         failures.append("insufficient_holdout_items")
     if value is None:
         failures.append("criterion_undefined")

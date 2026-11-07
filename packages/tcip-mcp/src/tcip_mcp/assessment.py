@@ -11,7 +11,7 @@ that execution record, is validated.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from functools import partial
 from operator import methodcaller
@@ -30,6 +30,7 @@ from pydantic import (
 
 from tcip_mcp.assessment_evidence import (
     INSUFFICIENCY_FAILURES,
+    REFERENCE_FLOOR,
     AssessmentEvidence,
     CountEvidence,
     DisjointnessEvidence,
@@ -499,6 +500,31 @@ def _reference_sides(
     return selection, cal, hold
 
 
+def _refuse_short_reference(counts: dict[str, Iterable[int]]) -> None:
+    """Refuse a count reference whose side holds fewer bearing samples than the floor.
+
+    ``counts`` is each reference side's per-sample foreground counts, a sample bearing ground
+    truth by :func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_bearing`. One
+    :class:`AssessmentRefusedError` names every side below :data:`REFERENCE_FLOOR`, the bearing
+    samples it holds and the floor.
+    """
+    from tcip_mcp.pipelines.data.label_queries import ground_truth_bearing
+
+    held = {side: ground_truth_bearing(c) for side, c in counts.items()}
+    short = [
+        f"the {s} side holds {n}"
+        for s, n in held.items()
+        if n < REFERENCE_FLOOR
+    ]
+    if short:
+        raise AssessmentRefusedError(
+            f"{' and '.join(short)} ground-truth-bearing sample(s), fewer than the "
+            f"{REFERENCE_FLOOR} each reference side needs for a count bias's dispersion to be "
+            "defined: give that side more samples whose ground truth holds an object (a larger "
+            "draw or reserved region, or more of it annotated) before assessing."
+        )
+
+
 def _prepared(
     project: Path,
     *,
@@ -660,7 +686,9 @@ def assess(
     the checkpoint's head does not produce what the kind measures, and when a state-crossing
     checkpoint classifies no positive state (:class:`AssessmentRefusedError`); and before any
     inference over it, a reference the admission would not admit or only the model stands behind
-    (:func:`_admit_reference`).
+    (:func:`_admit_reference`), and, for a detector's kind, a reference side holding fewer
+    ground-truth-bearing images than :data:`REFERENCE_FLOOR` (:func:`_refuse_short_reference`),
+    before any run directory opens.
     """
     from tcip_mcp.pipelines.data.selection import source_digests
 
@@ -688,6 +716,17 @@ def assess(
         )
     admitted = _admit_reference(cal + hold, prep.scope)
     cal, hold = admitted[: len(cal)], admitted[len(cal) :]
+    if delivery_kind in DETECTOR_KINDS:
+        from tcip_mcp.pipelines.data.label_queries import foreground_counts
+
+        _refuse_short_reference(
+            {
+                side: foreground_counts(
+                    {s.location: s for s in samples}, prep.scope
+                ).values()
+                for side, samples in (("calibration", cal), ("holdout", hold))
+            }
+        )
     reads = _reference_reads(cal + hold)
     digest_of = source_digests(cal + hold)
     entry = prep.checkpoint.entry
@@ -1148,8 +1187,6 @@ def assess_reserved_regions(
         {"calibration_region": cal_rect, "holdout_region": test_rect},
     )
     source = mosaic.image
-    run_dir = _open_run(project)
-    retained, _measured = _retained(run_dir, [mosaic], reads)
     target = json_det_targets(document.annotations, scope)
     gt = {k: np.asarray(target[k]) for k in PER_BOX_KEYS if k in target}
     gt["boxes"] = gt["boxes"].astype(np.float32).reshape(-1, 4)
@@ -1209,8 +1246,11 @@ def assess_reserved_regions(
         side: {name: len(region.boxes) for name, region in regions.items()}
         for side, regions in band_regions.items()
     }
-    for side, counts in band_counts.items():
-        blocks.check_feasibility(counts, side=side)
+    _refuse_short_reference(
+        {side: counts.values() for side, counts in band_counts.items()}
+    )
+    run_dir = _open_run(project)
+    retained, _measured = _retained(run_dir, [mosaic], reads)
     samples = [
         Sample(
             member=name,
@@ -1527,7 +1567,11 @@ def assess_physical_scale(
         ("calibration", "insufficient_calibration_references"),
         ("holdout", "insufficient_holdout_references"),
     )
-    failures += [failure for side, failure in sides if len(implied[side]) < 2]
+    failures += [
+        failure
+        for side, failure in sides
+        if len(implied[side]) < REFERENCE_FLOOR
+    ]
     evidence = ScaleEvidence(implied_scales=implied, tolerance_frac=tolerance)
     value = None
     if INSUFFICIENCY_FAILURES.isdisjoint(failures):

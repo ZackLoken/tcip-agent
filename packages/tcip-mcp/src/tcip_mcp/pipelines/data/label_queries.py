@@ -9,7 +9,7 @@ an :class:`Admission`.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -445,6 +445,14 @@ def foreground_counts(
         )
         for key, member in members.items()
     }
+
+
+def ground_truth_bearing(counts: Iterable[int]) -> int:
+    """Return how many of the foreground ``counts`` bear ground truth: those above zero.
+
+    A count is one sample's (:func:`foreground_counts`) or one band's objects.
+    """
+    return sum(n > 0 for n in counts)
 
 
 def is_mask(path: Path) -> bool:

@@ -328,7 +328,7 @@ def test_completeness_is_checked_before_feasibility(tmp_path: Path) -> None:
     with pytest.raises(AssessmentRefusedError) as exc_info:
         _assess(exp, k_cal=40, k_test=40)
     assert "not marked complete" in str(exc_info.value)
-    assert "leaves only" not in str(exc_info.value)
+    assert "ground-truth-bearing" not in str(exc_info.value)
 
 
 def test_a_stated_tile_edge_other_than_the_splits_refuses_naming_both(
@@ -1156,15 +1156,6 @@ def test_density_outlier_bands_are_flagged_against_their_own_siblings() -> (
     assert (
         density_uniformity_flags({"cal_0": 10, "cal_1": 11, "cal_2": 9}) == []
     )
-
-
-def test_feasibility_counts_only_bands_that_carry_ground_truth() -> None:
-    from tcip_mcp.assessment import AssessmentRefusedError
-    from tcip_mcp.pipelines.block_calibration import check_feasibility
-
-    with pytest.raises(AssessmentRefusedError, match="leaves only 1 band"):
-        check_feasibility({"test_0": 0, "test_1": 7, "test_2": 0}, side="test")
-    check_feasibility({"cal_0": 4, "cal_1": 0, "cal_2": 9}, side="cal")
 
 
 # ── the class space and the breeder's own attestation ─────────────────────

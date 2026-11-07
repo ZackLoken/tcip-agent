@@ -252,13 +252,14 @@ def test_a_regression_assessment_records_its_scalar_evidence_alone_and_pairs_by_
     assert proposal_pairs(tmp_path, bucket, [annotation], [proposal]) == {0: 0}
 
 
-def test_a_state_crossing_assessment_records_both_criteria_and_names_a_shared_failure_once(
+def test_a_state_crossing_assessment_refuses_below_the_floor_and_records_both_criteria_at_it(
     tmp_path: Path,
 ) -> None:
-    """A state-crossing assessment over a one-image holdout records both members, a failure once.
+    """A state-crossing assessment refuses a holdout below the floor and records both at it.
 
-    The count and the classifier criterion each find the holdout's single image too few, and
-    the record names ``insufficient_holdout_images`` once.
+    Over a holdout of one ground-truth-bearing image the assessment refuses naming the holdout
+    side; over a holdout at least at the floor it records the count and the classifier
+    criterion.
     """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
@@ -271,40 +272,43 @@ def test_a_state_crossing_assessment_records_both_criteria_and_names_a_shared_fa
         assessed=False,
         experiment_id="exp-crossing-thin",
     )
-    thin = tmp_path / "thin-selection"
-    drawn = draw_splits(
-        tmp_path,
-        str(series.root),
-        output_path=str(thin),
-        subject=SUBJECT,
-        **drawn_split(
-            seed=2,
-            val_ratio=0.2,
-            calibration_ratio=0.3,
-            holdout_ratio=0.025,
-        ),
-        actor=None,
-    )
-    assert "error" not in drawn, drawn
-    answered = assess_checkpoint(
-        tmp_path,
-        checkpoint_path=series.checkpoint_path,
-        trait=series.trait,
-        delivery_kind="state_crossing_dates",
-        selection_dir=str(thin),
-        equivalence_z=EQUIVALENCE_Z,
-        dispersion_quantile=DISPERSION_QUANTILE,
-        rationale=RATIONALE,
-        stated=collection_pass(),
-        actor=None,
-    )
-    assert "error" not in answered, answered
 
+    def assessed(holdout_ratio: float) -> tuple[dict, dict]:
+        selection = tmp_path / f"selection-{holdout_ratio}"
+        drawn = draw_splits(
+            tmp_path,
+            str(series.root),
+            output_path=str(selection),
+            subject=SUBJECT,
+            **drawn_split(
+                seed=2,
+                val_ratio=0.2,
+                calibration_ratio=0.3,
+                holdout_ratio=holdout_ratio,
+            ),
+            actor=None,
+        )
+        assert "error" not in drawn, drawn
+        return drawn, assess_checkpoint(
+            tmp_path,
+            checkpoint_path=series.checkpoint_path,
+            trait=series.trait,
+            delivery_kind="state_crossing_dates",
+            selection_dir=str(selection),
+            equivalence_z=EQUIVALENCE_Z,
+            dispersion_quantile=DISPERSION_QUANTILE,
+            rationale=RATIONALE,
+            stated=collection_pass(),
+            actor=None,
+        )
+
+    thin, refused = assessed(0.025)
+    assert thin["foreground_images"]["holdout"] == 1, thin
+    assert "the holdout side holds 1" in refused.get("error", ""), refused
+
+    wide, answered = assessed(0.1)
+    assert wide["foreground_images"]["holdout"] >= wide["reference_floor"]
+    assert "error" not in answered, answered
     record = read_assessment(tmp_path, answered["assessment_id"])
-    assert record.failures.count("insufficient_holdout_images") == 1, (
-        record.failures
-    )
     assert record.criterion.count is not None
     assert record.criterion.classifier is not None
-    assert record.criterion.count.holdout_at_conf["n_present"] < 2
-    assert record.criterion.classifier.positive_count_bias_images < 2
