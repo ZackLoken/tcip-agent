@@ -2158,7 +2158,7 @@
             "conf_censored",
             "count_bias_exceeds_tolerance",
             "count_bias_exceeds_tolerance_per_class",
-            "localization_quality_floor_failed"
+            "holdout_nothing_to_score"
           ],
           "delivery_kind": "per_image_count",
           "producer": {
@@ -2765,7 +2765,7 @@
             "conf_censored",
             "count_bias_exceeds_tolerance",
             "count_bias_exceeds_tolerance_per_class",
-            "localization_quality_floor_failed"
+            "holdout_nothing_to_score"
           ],
           "delivery_kind": "per_image_count",
           "producer": {
