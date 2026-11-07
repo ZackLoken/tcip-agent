@@ -142,17 +142,28 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
         os.unlink(temp)
 
 
+def contended(exc: sqlite3.Error) -> bool:
+    """Return whether a driver error is another connection's lock: its text says locked or busy."""
+    text = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and (
+        "locked" in text or "busy" in text
+    )
+
+
 def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
     """Refuse (``DatabaseRefusedError``) a database that is not this module's, before a row is read.
 
-    Refused are a file that is not a SQLite database, or one whose schema is not this module's DDL.
+    Refused are a file whose schema read the driver refuses, carrying the driver's error, and one
+    whose schema is not this module's DDL. Another connection's lock (:func:`contended`) met by
+    the schema read is raised as the driver raised it.
     """
     try:
         found = _schema_of(conn)
     except sqlite3.DatabaseError as exc:
+        if contended(exc):
+            raise
         raise DatabaseRefusedError(
-            f"{db_path} is not a SQLite database: {exc}. Something else holds the name this "
-            "store's database has."
+            f"the database at {db_path} could not complete this store's identity check: {exc}"
         ) from exc
     expected = reference_schema()
     if found == expected:
@@ -433,25 +444,24 @@ class SqliteBackend:
     # ── error mapping ───────────────────────────────────────────────────────────
 
     @contextmanager
-    def _mapped(self, keys: tuple[Key, ...]) -> Generator[None]:
+    def _mapped(self, blocked_on: Key | str) -> Generator[None]:
         """Turn a driver error raised inside into this layer's own refusal.
 
-        Contention raises ``StoreBusyError`` naming the first key the call named; any other
-        driver error, and contention in a call that named no key, raises ``DatabaseRefusedError``.
+        ``blocked_on`` is the first key the call named, or the root a call naming no key lists.
+        Contention (:func:`contended`) raises ``StoreBusyError`` naming it; any other driver error
+        raises ``DatabaseRefusedError`` naming its root.
         """
         started = time.monotonic()
         try:
             yield
         except sqlite3.Error as exc:
-            text = str(exc).lower()
-            contended = isinstance(exc, sqlite3.OperationalError) and (
-                "locked" in text or "busy" in text
-            )
-            if contended and keys:
+            if contended(exc):
                 raise StoreBusyError(
-                    keys[0], time.monotonic() - started
+                    blocked_on, time.monotonic() - started
                 ) from exc
-            root = keys[0].root if keys else "?"
+            root = (
+                blocked_on if isinstance(blocked_on, str) else blocked_on.root
+            )
             raise DatabaseRefusedError(
                 f"the store database under {root} refused the operation: {exc}"
             ) from exc
@@ -467,17 +477,17 @@ class SqliteBackend:
         The write lock is taken up front rather than upgraded from a read.
         """
         with ExitStack() as held:
-            with self._mapped(keys):
+            with self._mapped(keys[0]):
                 conn = held.enter_context(
                     self._connection(
                         keys[0].root, keys, timeout_s, create=True
                     )
                 )
                 assert conn is not None
-            with self._mapped(keys):
+            with self._mapped(keys[0]):
                 conn.execute("begin immediate")
             try:
-                with self._mapped(keys):
+                with self._mapped(keys[0]):
                     yield conn
                     conn.execute("commit")
             except BaseException:
@@ -525,7 +535,7 @@ class SqliteBackend:
         """
         data = None
         with (
-            self._mapped((key,)),
+            self._mapped(key),
             self._connection(key.root, create=False) as conn,
         ):
             if conn is not None:
@@ -535,7 +545,7 @@ class SqliteBackend:
     def exists(self, key: Key) -> bool:
         """Return whether the record exists, without decoding it."""
         with (
-            self._mapped((key,)),
+            self._mapped(key),
             self._connection(key.root, create=False) as conn,
         ):
             return conn is not None and self._stored(conn, key) is not None
@@ -585,7 +595,7 @@ class SqliteBackend:
         The keys are record and log keys, sorted by their parts; a root with no database answers
         an empty list.
         """
-        with self._mapped(()), self._connection(root, create=False) as conn:
+        with self._mapped(root), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
@@ -602,7 +612,7 @@ class SqliteBackend:
 
     def stores(self, root: str) -> list[str]:
         """Return every store name ``root``'s database holds a record or log entry under, sorted."""
-        with self._mapped(()), self._connection(root, create=False) as conn:
+        with self._mapped(root), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
@@ -626,7 +636,7 @@ class SqliteBackend:
         """
         start = int(after) if after else 0
         with (
-            self._mapped((key,)),
+            self._mapped(key),
             self._connection(key.root, create=False) as conn,
         ):
             if conn is None:

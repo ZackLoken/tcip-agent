@@ -31,8 +31,8 @@ class DecodeError(StoreError):
 class DatabaseRefusedError(StoreError):
     """A root's database will not open or answer.
 
-    It is a file that is not a SQLite database, one whose schema is not this store's, or an
-    operation the driver or the file system refused.
+    It is a file that could not complete this store's identity check, one whose schema is not
+    this store's, or an operation the driver or the file system refused.
     """
 
 

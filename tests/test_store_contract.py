@@ -326,7 +326,7 @@ def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout
     """The elapsed value a contention refusal carries is one this layer measured."""
     key = store.key(LWW, "measured")
     with pytest.raises(ts.StoreBusyError) as caught:
-        with store.backend._mapped((key,)):  # noqa: SLF001 - the measurement is the subject
+        with store.backend._mapped(key):  # noqa: SLF001 - the measurement is the subject
             time.sleep(0.25)
             raise sqlite3.OperationalError("database is locked")
     assert 0.15 <= caught.value.waited_s < 5.0
@@ -1298,15 +1298,20 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
 def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
     store: Harness,
 ) -> None:
-    """A non-database file holding the database's name refuses a read, naming the file."""
+    """A non-database file holding the database's name refuses a read, naming the file.
+
+    The refusal is the identity check's, carrying the driver's own error.
+    """
     path = database_file(str(store.root))
     path.parent.mkdir(parents=True)
     path.write_bytes(b"not a database, only bytes under its name" * 100)
 
     with pytest.raises(ts.DatabaseRefusedError) as raised:
         ts.read(store.key(LWW, "anything"), default=None)
-    assert "not a SQLite database" in str(raised.value)
-    assert str(path) in str(raised.value)
+    message = str(raised.value)
+    assert "could not complete this store's identity check" in message
+    assert str(path) in message
+    assert str(raised.value.__cause__) in message
 
 
 def test_a_file_that_is_not_a_database_refuses_a_transaction_as_the_same_error(
@@ -1345,7 +1350,10 @@ def test_a_file_that_is_not_a_database_reads_raw_as_an_unreadable_refusal(
     served = refused.value.served
     assert served.where == "the record this test reads"
     assert served.refusal.kind == "unreadable"
-    assert "not a SQLite database" in served.refusal.message
+    assert (
+        "could not complete this store's identity check"
+        in served.refusal.message
+    )
 
 
 def test_a_transaction_misuse_raised_inside_the_reader_escapes_as_itself(
@@ -1397,6 +1405,9 @@ def test_a_write_the_driver_refuses_for_a_read_only_database_raises_database_ref
 
 
 # ── another connection's lock ───────────────────────────────────────────────────
+
+_SHORT_WAIT_S = 0.3
+"""A lock wait well under the driver's own connect default of 5 s, so the two are told apart."""
 
 _LONG_WAIT_S = 10.0
 """A lock wait a brief hold (:data:`_BRIEF_HOLD_S`) clears well inside."""
@@ -1454,6 +1465,27 @@ def _released_into_rollback_journal(store: Harness) -> None:
     assert mode == "delete"
 
 
+def test_a_lock_met_at_open_refuses_a_listing_as_busy_naming_the_root(
+    store: Harness,
+) -> None:
+    """A database another connection holds refuses ``keys`` and ``stores`` as busy, by root."""
+    ts.replace(store.key(LWW, "listed"), {"n": 1})
+    ts.release_root(store.root)
+    root = str(store.root)
+
+    with (
+        _waiting(store, _SHORT_WAIT_S),
+        _held_by_another_connection(store),
+    ):
+        with pytest.raises(ts.StoreBusyError) as listing:
+            ts.keys(LWW, root)
+        with pytest.raises(ts.StoreBusyError) as naming:
+            ts.stores(root)
+
+    assert listing.value.blocked_on == root
+    assert naming.value.blocked_on == root
+
+
 def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in_time(
     store: Harness,
 ) -> None:
@@ -1476,6 +1508,35 @@ def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in
                 assert ts.read(key) == {"n": 2}
             finally:
                 clears.join(30)
+
+
+@pytest.mark.parametrize("journal_mode", ["wal", "delete"])
+def test_a_fresh_process_reads_while_another_process_holds_the_write_transaction(
+    store: Harness, journal_mode: str
+) -> None:
+    """A new process's read returns the record while another process holds a write transaction.
+
+    It does so in WAL, as the store builds the database, and in rollback-journal mode.
+    """
+    ts.replace(store.key(LWW, "seed"), {"who": "writer"})
+    if journal_mode == "delete":
+        _released_into_rollback_journal(store)
+    else:
+        ts.release_root(store.root)
+    ready = store.root / "holder.ready"
+    holder = store.spawn(
+        "hold-transaction", store.root, LWW, "held", "holder", 120, ready
+    )
+    wait_for(ready, timeout_s=60)
+    result = store.root / "seen.json"
+
+    reader = store.spawn("read-record", store.root, LWW, "seed", result)
+
+    assert reader.wait(timeout=60) == 0
+    assert holder.poll() is None
+    assert json.loads(result.read_text(encoding="utf-8")) == {
+        "value": {"who": "writer"}
+    }
 
 
 def test_enumerating_review_verdicts_answers_identities_that_read_back(
