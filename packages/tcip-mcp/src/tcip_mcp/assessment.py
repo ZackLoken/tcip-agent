@@ -30,6 +30,7 @@ from pydantic import (
 
 from tcip_mcp.assessment_evidence import (
     INSUFFICIENCY_FAILURES,
+    REFERENCE_FLOOR,
     AssessmentEvidence,
     CountEvidence,
     DisjointnessEvidence,
@@ -1527,7 +1528,11 @@ def assess_physical_scale(
         ("calibration", "insufficient_calibration_references"),
         ("holdout", "insufficient_holdout_references"),
     )
-    failures += [failure for side, failure in sides if len(implied[side]) < 2]
+    failures += [
+        failure
+        for side, failure in sides
+        if len(implied[side]) < REFERENCE_FLOOR
+    ]
     evidence = ScaleEvidence(implied_scales=implied, tolerance_frac=tolerance)
     value = None
     if INSUFFICIENCY_FAILURES.isdisjoint(failures):
