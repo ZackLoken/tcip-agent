@@ -40,6 +40,8 @@ GOLDEN_DRAW_SPLITS = {
         "calibration": 3,
         "holdout": 3,
     },
+    "foreground_images": {"calibration": 3, "holdout": 3},
+    "reference_floor": 2,
     "total_stems": 12,
     "total_annotations": 12,
     "groups": 4,
