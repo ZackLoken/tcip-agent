@@ -1414,6 +1414,10 @@ def test_a_write_the_driver_refuses_for_a_read_only_database_raises_database_ref
 _SHORT_WAIT_S = 0.3
 """A lock wait well under the driver's own connect default of 5 s, so the two are told apart."""
 
+_GAVE_UP_WITHIN_S = 3.0
+"""Above what a short wait was measured to take here (0.8 s for 0.3 s on a rollback-journal
+database) and below the driver's 5 s default."""
+
 _LONG_WAIT_S = 10.0
 """A lock wait a brief hold (:data:`_BRIEF_HOLD_S`) clears well inside."""
 
@@ -1470,6 +1474,42 @@ def _released_into_rollback_journal(store: Harness) -> None:
     assert mode == "delete"
 
 
+def _served_as_busy(refused: ts.ReadRefusedError) -> ts.StoreBusyError:
+    """Return the busy refusal a reader served as ``Unreadable``, its sentence carried whole."""
+    busy = refused.__cause__
+    assert isinstance(busy, ts.StoreBusyError)
+    assert refused.served.refusal.kind == "unreadable"
+    assert refused.served.refusal.message == str(busy)
+    return busy
+
+
+def test_a_lock_met_at_open_refuses_a_read_as_busy_after_the_backend_s_wait(
+    store: Harness,
+) -> None:
+    """A database another connection holds refuses a fresh read as busy, naming the key.
+
+    The read gives up after the backend's own wait rather than the driver's default, and the
+    reader serves the same busy sentence as ``Unreadable``.
+    """
+    key = store.key(LWW, "held-at-open")
+    ts.replace(key, {"n": 1})
+    ts.release_root(store.root)
+
+    with (
+        _waiting(store, _SHORT_WAIT_S),
+        _held_by_another_connection(store),
+    ):
+        with pytest.raises(ts.StoreBusyError) as busy:
+            ts.read(key)
+        with pytest.raises(ts.ReadRefusedError) as refused:
+            ts.read_raw(ts.read, key, "the record this test reads")
+
+    assert busy.value.blocked_on == key
+    assert _SHORT_WAIT_S <= busy.value.waited_s < _GAVE_UP_WITHIN_S
+    assert refused.value.served.where == "the record this test reads"
+    assert _served_as_busy(refused.value).blocked_on == key
+
+
 def test_a_lock_met_at_open_refuses_a_listing_as_busy_naming_the_root(
     store: Harness,
 ) -> None:
@@ -1489,6 +1529,35 @@ def test_a_lock_met_at_open_refuses_a_listing_as_busy_naming_the_root(
 
     assert listing.value.blocked_on == root
     assert naming.value.blocked_on == root
+
+
+def test_a_lock_met_on_a_cached_connection_is_served_by_the_reader(
+    store: Harness,
+) -> None:
+    """A lock met by a read on a connection already open waits the backend's wait, then refuses.
+
+    The read raises ``StoreBusyError`` naming the key, the reader serves it as ``Unreadable``,
+    and a listing raises it naming the root.
+    """
+    key = store.key(LWW, "held-mid-read")
+    ts.replace(key, {"n": 1})
+    _released_into_rollback_journal(store)
+    root = str(store.root)
+
+    with _waiting(store, _SHORT_WAIT_S):
+        assert ts.read(key) == {"n": 1}
+        with _held_by_another_connection(store):
+            with pytest.raises(ts.StoreBusyError) as busy:
+                ts.read(key)
+            with pytest.raises(ts.ReadRefusedError) as refused:
+                ts.read_raw(ts.read, key, "the record this test reads")
+            with pytest.raises(ts.StoreBusyError) as listing:
+                ts.keys(LWW, root)
+
+    assert busy.value.blocked_on == key
+    assert _SHORT_WAIT_S <= busy.value.waited_s < _GAVE_UP_WITHIN_S
+    assert _served_as_busy(refused.value).blocked_on == key
+    assert listing.value.blocked_on == root
 
 
 def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in_time(
