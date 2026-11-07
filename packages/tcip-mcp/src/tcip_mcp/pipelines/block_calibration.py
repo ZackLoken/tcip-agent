@@ -1,6 +1,6 @@
 """The reserved-region reference of a within-image split.
 
-It holds the band geometry, completeness and feasibility for a mosaic's own reserved calibration
+It holds the band geometry and completeness for a mosaic's own reserved calibration
 and holdout regions, for a raster training source too large or too singular to hold whole images
 out from.
 """
@@ -128,25 +128,6 @@ def check_completeness(
             f"the reserved region(s) {uncovered} are not marked complete for subject {subject!r} "
             f"in {where}: mark each region complete in the Annotate tab before its ground truth "
             "can be assessed against."
-        )
-
-
-def check_feasibility(
-    gt_counts: dict[str, int], *, side: str, min_present: int = 2
-) -> None:
-    """Refuse when fewer than ``min_present`` bands on this side carry any GT at all.
-
-    The refusal is an :class:`~tcip_mcp.assessment.AssessmentRefusedError` naming the side.
-    """
-    from tcip_mcp.assessment import AssessmentRefusedError
-
-    n_present = sum(1 for c in gt_counts.values() if c > 0)
-    if n_present < min_present:
-        raise AssessmentRefusedError(
-            f"the resolved {side} band layout "
-            f"({len(gt_counts)} band(s)) leaves only {n_present} band(s) with any GT, fewer than "
-            f"the {min_present} an equivalence check needs; reduce k_{side}, widen the reserved "
-            f"fraction, or check region completeness/annotation density for this mosaic."
         )
 
 

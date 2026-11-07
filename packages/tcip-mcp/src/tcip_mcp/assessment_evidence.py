@@ -61,6 +61,11 @@ INSUFFICIENCY_FAILURES: frozenset[FailureName] = frozenset(
 )
 """The failures saying a reference holds too little evidence to judge, not that it judged badly."""
 
+REFERENCE_FLOOR = 2
+"""The fewest units (ground-truth-bearing images or bands, holdout items, implied scales) a
+reference side's statistic is estimated over: a sample standard deviation needs two, and the
+count criterion's ``count_bias_std_present`` is 0.0 below two present images."""
+
 _RECORD = ConfigDict(frozen=True, extra="forbid")
 
 

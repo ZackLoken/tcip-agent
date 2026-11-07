@@ -77,7 +77,9 @@ def assess_checkpoint(
     the classifier's agreement over matched instances for ``state_crossing_dates``; the scalar
     skill for an ordinal or regression aggregate, a regression scored by the revision's own
     ``regression_criterion``. The reference must share no group or image with the producing run's
-    training or selection side.
+    training or selection side. A detector's kind refuses, before any inference, a reference side
+    holding fewer ground-truth-bearing images than the floor ``draw_splits`` answers as
+    ``reference_floor``.
 
     Args:
         checkpoint_path: A checkpoint registered in this project.
@@ -149,8 +151,9 @@ def assess_reserved_regions(
         checkpoint_path: A checkpoint registered in this project, produced by a run of it.
         trait: The trait whose latest confirmed revision states the criterion's floors.
         delivery_kind: ``per_image_count`` or ``per_plant_count_aggregate``.
-        k_cal / k_test: Bands per reserved region, recorded with the assessment; the count
-            criterion needs at least two bands carrying ground truth per side.
+        k_cal / k_test: Bands per reserved region, recorded with the assessment; a side holding
+            fewer bands carrying ground truth than the reference floor refuses before any
+            inference.
         equivalence_z / dispersion_quantile: As :func:`assess_checkpoint` takes them.
         rationale: Why the assessment states these settings, recorded with it.
         stated: Execution values to state rather than derive (``execution.Stated``), its
