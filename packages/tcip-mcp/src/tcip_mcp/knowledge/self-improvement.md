@@ -5,12 +5,9 @@ description: "How the agent turns friction and findings into a durable record th
 
 # Self-improvement: learning that stays with the project
 
-Learning lands with the project it came from, in that project's `.tcip/` store. Nothing a
-session learns writes into the platform: the knowledge documents, the operating contract among
-them, and platform code change only when the owner changes them.
-
-Where something is genuinely general, the owner is the transport: they read these records and
-decide what becomes a platform change.
+Learning lands with the project it came from, in that project's `.tcip/` store. Where something
+is genuinely general, the owner is the transport: they read these records and decide what becomes
+a platform change.
 
 This document is itself one of the platform's domain knowledge documents. Every harness reaches it
 as a skill of its name, which reads it through the `serve_domain_knowledge` tool.
@@ -85,7 +82,7 @@ the one audited write in this loop, kept out of the script. It acts on the proje
 started for (a worksheet covering other projects is recorded by a server started for each) and
 only records the pass in that project's audit log, from which `inspect_project` counts the
 backlog since it; turning a recurring theme into a skill line, an operating-contract rule, or a tool
-change stays your own separate edit, per the scoping above.
+change is a platform change the owner decides, per the scoping above.
 
 ## Reading the record back
 
