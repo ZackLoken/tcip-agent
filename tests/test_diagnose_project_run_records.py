@@ -181,9 +181,13 @@ def test_every_run_that_will_not_read_is_named_and_the_runs_that_read_are_checke
     found = _findings(project)
 
     for run_id in spoiled:
-        assert [level for level, msg in found if run_id in msg] == ["error"], (
-            found
-        )
+        others = [other for other in spoiled if other != run_id]
+        naming = [
+            (level, msg)
+            for level, msg in found
+            if run_id in msg and not any(other in msg for other in others)
+        ]
+        assert [level for level, _ in naming] == ["error"], found
     assert [
         level
         for level, msg in found
