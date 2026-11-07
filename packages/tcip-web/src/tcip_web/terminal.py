@@ -502,8 +502,9 @@ PROVIDERS: tuple[Provider, ...] = (
             "and merged with the workspace's own project settings only, the user's own "
             "settings and instruction files not loaded; a tool call neither list "
             "decides asks first. In every permission mode it refuses the Write, Edit "
-            "and NotebookEdit tools' writes outside the workspace, and shell commands "
-            "are not covered by that."
+            "and NotebookEdit tools' writes outside its working directories, the "
+            "workspace and any directory the person adds, and shell commands are not "
+            "covered by that."
         ),
         files=CLAUDE_CODE,
         prepare=prepare_harness_files,

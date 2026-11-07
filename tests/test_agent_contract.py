@@ -130,7 +130,7 @@ def test_the_deny_list_protects_what_a_launch_writes_and_every_projects_store(
 def test_the_settings_a_launch_hands_refuse_file_tool_writes_outside_the_workspace() -> (
     None
 ):
-    """Claude's row hands its harness the key refusing the file tools' writes outside the workspace.
+    """Claude's row settings refuse the file tools' writes outside its working directories.
 
     The key is read from the settings file a launch writes, where Claude Code honors it in every
     permission mode.

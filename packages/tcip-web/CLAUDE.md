@@ -116,9 +116,8 @@ token once done, and passes only when the file is unchanged; for Claude's row th
 hook named on the session's report line must also record, past the length it had when the request
 was submitted, an `Edit` or `Write` of that file and after it that use's answer, Claude Code's
 permission denial. For Claude's row it then asks the agent to create a file in a scratch directory
-outside the workspace, which must stay absent (the tools refuse an existing file the agent has not
-read before any permission is checked). Codex and Antigravity rows are checked by the unchanged
-file alone, which cannot tell a denied edit from one never tried.
+outside the workspace, which must stay absent. Codex and Antigravity rows are checked by the
+unchanged file alone, which cannot tell a denied edit from one never tried.
 
 Claude's row passes a settings file each launch writes from `CLAUDE_SETTINGS`,
 `agent_terminal.settings.json`, with the session hook added; its `confinement` sentence states what
@@ -135,8 +134,8 @@ workspace the agent runs in (Claude Code's permissions page; a `/path` pattern a
 temporary settings file's directory instead): every project's `.tcip` store, written through the
 tools alone, and the instruction files and skills the launches write. Its
 `permissions.blockWritesOutsideWorkingDirectories` is true, which refuses the `Write`, `Edit` and
-`NotebookEdit` tools' writes outside the workspace in every permission mode and covers no shell
-command. Every row's agent runs in
+`NotebookEdit` tools' writes outside its working directories, the workspace and any directory the
+person adds, in every permission mode, and covers no shell command. Every row's agent runs in
 the backend's workspace and reads the operating contract and the skills its row's preparation
 wrote there, never the repository's. Claude's row loads project settings only (`--setting-sources project`),
 so neither the user's own settings, hooks and `CLAUDE.md` nor the developer's auto-memory reach
