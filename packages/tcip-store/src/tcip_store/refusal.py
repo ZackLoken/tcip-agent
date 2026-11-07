@@ -22,6 +22,7 @@ from tcip_store.errors import (
     DatabaseRefusedError,
     DecodeError,
     NotFoundError,
+    StoreBusyError,
     StoreError,
 )
 from tcip_store.model import REQUIRED, Key, ReadDefault
@@ -184,9 +185,11 @@ STORE_READ_REFUSALS: tuple[type[StoreError], ...] = (
     NotFoundError,
     DecodeError,
     DatabaseRefusedError,
+    StoreBusyError,
 )
 """The errors a store read refuses under: an absent entry, bytes that do not decode, a database
-that will not open or answer. Every other ``StoreError`` is not about the data read."""
+that will not open or answer, a lock another holder kept past the wait. Every other
+``StoreError`` is not about the read."""
 
 
 def read_raw[T](

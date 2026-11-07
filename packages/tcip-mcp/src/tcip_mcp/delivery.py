@@ -793,8 +793,9 @@ def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
 
     Its paths are resolved against the project; the events stand in the order produced. An event
     its shape refuses, or one that will not decode or sits in a database that will not open or
-    answer, raises ``tcip_store.ReadRefusedError`` naming the event's id: the shape's issues, or
-    the store's sentence.
+    answer or that another holder keeps locked past the wait, raises
+    ``tcip_store.ReadRefusedError`` naming the event's id: the shape's issues, or the store's
+    sentence.
     """
     scope = str(project_state_dir(project))
     with tcip_store.unreadable(

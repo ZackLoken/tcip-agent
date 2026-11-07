@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -25,7 +26,12 @@ import pytest
 import tcip_store as ts
 from tcip_annotation import verdicts
 from tcip_mcp import delivery, traits
-from tcip_store.file_backend import DATABASE_FILENAME, database_file
+from tcip_store.file_backend import (
+    DATABASE_FILENAME,
+    DEFAULT_LOCK_TIMEOUT_S,
+    database_file,
+    path_lock,
+)
 from tcip_store.sqlite_backend import (
     SqliteBackend,
     encode_parts,
@@ -307,7 +313,7 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
     bystander = sqlite3.connect(str(db_path), isolation_level=None)
     try:
         bystander.execute("select count(*) from records").fetchone()
-        conn = open_verified(db_path)
+        conn = open_verified(db_path, store.backend.lock_timeout_s)
         try:
             assert (
                 str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
@@ -317,18 +323,6 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
             conn.close()
     finally:
         bystander.close()
-
-
-def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout(
-    store: Harness,
-) -> None:
-    """The elapsed value a contention refusal carries is one this layer measured."""
-    key = store.key(LWW, "measured")
-    with pytest.raises(ts.StoreBusyError) as caught:
-        with store.backend._mapped((key,)):  # noqa: SLF001 - the measurement is the subject
-            time.sleep(0.25)
-            raise sqlite3.OperationalError("database is locked")
-    assert 0.15 <= caught.value.waited_s < 5.0
 
 
 def test_every_connection_commits_at_full_synchronous(store: Harness) -> None:
@@ -1297,15 +1291,20 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
 def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
     store: Harness,
 ) -> None:
-    """A non-database file holding the database's name refuses a read, naming the file."""
+    """A non-database file holding the database's name refuses a read, naming the file.
+
+    The refusal is the identity check's, carrying the driver's own error.
+    """
     path = database_file(str(store.root))
     path.parent.mkdir(parents=True)
     path.write_bytes(b"not a database, only bytes under its name" * 100)
 
     with pytest.raises(ts.DatabaseRefusedError) as raised:
         ts.read(store.key(LWW, "anything"), default=None)
-    assert "not a SQLite database" in str(raised.value)
-    assert str(path) in str(raised.value)
+    message = str(raised.value)
+    assert "could not complete this store's identity check" in message
+    assert str(path) in message
+    assert str(raised.value.__cause__) in message
 
 
 def test_a_file_that_is_not_a_database_refuses_a_transaction_as_the_same_error(
@@ -1344,7 +1343,10 @@ def test_a_file_that_is_not_a_database_reads_raw_as_an_unreadable_refusal(
     served = refused.value.served
     assert served.where == "the record this test reads"
     assert served.refusal.kind == "unreadable"
-    assert "not a SQLite database" in served.refusal.message
+    assert (
+        "could not complete this store's identity check"
+        in served.refusal.message
+    )
 
 
 def test_a_transaction_misuse_raised_inside_the_reader_escapes_as_itself(
@@ -1393,6 +1395,290 @@ def test_a_write_the_driver_refuses_for_a_read_only_database_raises_database_ref
         f"the store database under {key.root} refused the operation: "
     )
     assert type(refused.value) is ts.DatabaseRefusedError
+
+
+# ── another connection's lock ───────────────────────────────────────────────────
+
+_SHORT_WAIT_S = 0.3
+"""A lock wait well under the driver's own connect default of 5 s, so the two are told apart."""
+
+_GAVE_UP_WITHIN_S = 3.0
+"""Above what a short wait was measured to take here (0.8 s for 0.3 s on a rollback-journal
+database) and below the driver's 5 s default."""
+
+_LONG_WAIT_S = 10.0
+"""A lock wait a brief hold (:data:`_BRIEF_HOLD_S`) clears well inside."""
+
+_BRIEF_HOLD_S = 0.3
+"""How long a lock that clears inside the wait is held."""
+
+_TIMER_SLACK_S = 0.05
+"""How much earlier than its timeout a timed lock wait may end, provisional: on the Windows
+machine this was written on, a 0.5 s wait ended 2 to 15 ms after its timeout over 20 trials,
+never before, and 50 ms allows a coarser timer elsewhere."""
+
+
+@contextmanager
+def _waiting(store: Harness, lock_timeout_s: float) -> Iterator[None]:
+    """Bind a backend that waits ``lock_timeout_s`` on a lock, binding ``store``'s again after."""
+    backend = make_backend(lock_timeout_s=lock_timeout_s)
+    ts.bind(backend)
+    try:
+        yield
+    finally:
+        ts.bind(store.backend)
+        backend.close()
+
+
+@contextmanager
+def _held_by_another_connection(
+    store: Harness,
+) -> Iterator[sqlite3.Connection]:
+    """Hold the root's database from a plain connection in exclusive locking mode.
+
+    The connection takes its lock with ``begin exclusive`` and gives it up when it closes, on
+    leaving the block unless it was closed before.
+    """
+    holder = sqlite3.connect(
+        str(database_file(str(store.root))),
+        isolation_level=None,
+        check_same_thread=False,
+    )
+    try:
+        holder.execute("pragma locking_mode = exclusive")
+        holder.execute("begin exclusive")
+        yield holder
+    finally:
+        holder.close()
+
+
+def _released_into_rollback_journal(store: Harness) -> None:
+    """Release the root and put its database in rollback-journal (``delete``) mode.
+
+    A WAL database refuses another connection's exclusive lock while the store holds a
+    connection on it; a rollback-journal database takes it.
+    """
+    ts.release_root(store.root)
+    conn = store.connect()
+    try:
+        mode = conn.execute("pragma journal_mode = delete").fetchone()[0]
+    finally:
+        conn.close()
+    assert mode == "delete"
+
+
+def _served_as_busy(refused: ts.ReadRefusedError) -> ts.StoreBusyError:
+    """Return the busy refusal a reader served as ``Unreadable``, its sentence carried whole."""
+    busy = refused.__cause__
+    assert isinstance(busy, ts.StoreBusyError)
+    assert refused.served.refusal.kind == "unreadable"
+    assert refused.served.refusal.message == str(busy)
+    return busy
+
+
+def test_a_lock_met_at_open_refuses_a_read_as_busy_after_the_backend_s_wait(
+    store: Harness,
+) -> None:
+    """A database another connection holds refuses a fresh read as busy, naming the key.
+
+    The read gives up after the backend's own wait rather than the driver's default, and the
+    reader serves the same busy sentence as ``Unreadable``.
+    """
+    key = store.key(LWW, "held-at-open")
+    ts.replace(key, {"n": 1})
+    ts.release_root(store.root)
+
+    with (
+        _waiting(store, _SHORT_WAIT_S),
+        _held_by_another_connection(store),
+    ):
+        with pytest.raises(ts.StoreBusyError) as busy:
+            ts.read(key)
+        with pytest.raises(ts.ReadRefusedError) as refused:
+            ts.read_raw(ts.read, key, "the record this test reads")
+
+    assert busy.value.blocked_on == key
+    assert _SHORT_WAIT_S <= busy.value.waited_s < _GAVE_UP_WITHIN_S
+    assert busy.value.waited_s != _SHORT_WAIT_S
+    assert refused.value.served.where == "the record this test reads"
+    assert _served_as_busy(refused.value).blocked_on == key
+
+
+def test_a_lock_met_at_open_refuses_a_listing_as_busy_naming_the_root(
+    store: Harness,
+) -> None:
+    """A database another connection holds refuses ``keys`` and ``stores`` as busy, by root."""
+    ts.replace(store.key(LWW, "listed"), {"n": 1})
+    ts.release_root(store.root)
+    root = str(store.root)
+
+    with (
+        _waiting(store, _SHORT_WAIT_S),
+        _held_by_another_connection(store),
+    ):
+        with pytest.raises(ts.StoreBusyError) as listing:
+            ts.keys(LWW, root)
+        with pytest.raises(ts.StoreBusyError) as naming:
+            ts.stores(root)
+
+    assert listing.value.blocked_on == root
+    assert naming.value.blocked_on == root
+
+
+def test_a_lock_met_on_a_cached_connection_is_served_by_the_reader(
+    store: Harness,
+) -> None:
+    """A lock met by a read on a connection already open waits the backend's wait, then refuses.
+
+    The read raises ``StoreBusyError`` naming the key, the reader serves it as ``Unreadable``,
+    and a listing raises it naming the root.
+    """
+    key = store.key(LWW, "held-mid-read")
+    ts.replace(key, {"n": 1})
+    _released_into_rollback_journal(store)
+    root = str(store.root)
+
+    with _waiting(store, _SHORT_WAIT_S):
+        assert ts.read(key) == {"n": 1}
+        with _held_by_another_connection(store):
+            with pytest.raises(ts.StoreBusyError) as busy:
+                ts.read(key)
+            with pytest.raises(ts.ReadRefusedError) as refused:
+                ts.read_raw(ts.read, key, "the record this test reads")
+            with pytest.raises(ts.StoreBusyError) as listing:
+                ts.keys(LWW, root)
+
+    assert busy.value.blocked_on == key
+    assert _SHORT_WAIT_S <= busy.value.waited_s < _GAVE_UP_WITHIN_S
+    assert _served_as_busy(refused.value).blocked_on == key
+    assert listing.value.blocked_on == root
+
+
+def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in_time(
+    store: Harness,
+) -> None:
+    """A read on the connection a write used waits the backend's wait, not the write's.
+
+    After a transaction that would wait nothing, a read meeting a lock that clears inside the
+    backend's wait returns the record, and the lock is never reported.
+    """
+    key = store.key(LWW, "after-a-write")
+    ts.replace(key, {"n": 1})
+    _released_into_rollback_journal(store)
+
+    with _waiting(store, _LONG_WAIT_S):
+        with ts.transaction(key, timeout_s=0.0) as txn:
+            txn.write(key, {"n": 2})
+        with _held_by_another_connection(store) as holder:
+            clears = threading.Timer(_BRIEF_HOLD_S, holder.close)
+            clears.start()
+            try:
+                assert ts.read(key) == {"n": 2}
+            finally:
+                clears.join(30)
+
+
+def test_a_write_on_a_connection_a_read_opened_waits_its_own_timeout(
+    store: Harness,
+) -> None:
+    """A transaction on a cached connection waits the timeout it names, not the backend's.
+
+    Under a backend that waits nothing, a read caches the connection; a transaction naming a
+    long wait then outlasts another thread's brief write transaction and lands.
+    """
+    key = store.key(LWW, "write-after-a-read")
+    ts.replace(key, {"who": "seed"})
+    ts.release_root(store.root)
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with ts.transaction(key, timeout_s=30) as txn:
+            txn.write(key, {"who": "holder"})
+            held.set()
+            release.wait(30)
+
+    with _waiting(store, 0.0):
+        assert ts.read(key) == {"who": "seed"}
+        holder = threading.Thread(target=hold)
+        clears = threading.Timer(_BRIEF_HOLD_S, release.set)
+        holder.start()
+        try:
+            assert held.wait(30)
+            clears.start()
+            with ts.transaction(key, timeout_s=_LONG_WAIT_S) as txn:
+                txn.write(key, {"who": "waiter"})
+        finally:
+            clears.cancel()
+            release.set()
+            holder.join(30)
+        assert ts.read(key) == {"who": "waiter"}
+
+
+def test_a_file_lock_refusal_reports_the_time_it_measured(
+    store: Harness,
+) -> None:
+    """A file write that gives up on another holder's lock reports the time it measured.
+
+    The holder makes the write wait the whole default on the path's thread lock, so the time is
+    the default to within timer slack, is not the default itself, and is no longer than the write
+    took.
+    """
+    path = blob_path(store.root, "held")
+    path.parent.mkdir(parents=True)
+    taken, finish = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with path_lock(path):
+            taken.set()
+            finish.wait(4 * DEFAULT_LOCK_TIMEOUT_S)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        assert taken.wait(30)
+        started = time.monotonic()
+        with pytest.raises(ts.StoreBusyError) as busy:
+            ts.put_blob(path, b"refused")
+        took = time.monotonic() - started
+    finally:
+        finish.set()
+        holder.join(30)
+
+    assert busy.value.blocked_on == str(path)
+    assert busy.value.waited_s != DEFAULT_LOCK_TIMEOUT_S
+    assert (
+        DEFAULT_LOCK_TIMEOUT_S - _TIMER_SLACK_S <= busy.value.waited_s <= took
+    )
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("journal_mode", ["wal", "delete"])
+def test_a_fresh_process_reads_while_another_process_holds_the_write_transaction(
+    store: Harness, journal_mode: str
+) -> None:
+    """A new process's read returns the record while another process holds a write transaction.
+
+    It does so in WAL, as the store builds the database, and in rollback-journal mode.
+    """
+    ts.replace(store.key(LWW, "seed"), {"who": "writer"})
+    if journal_mode == "delete":
+        _released_into_rollback_journal(store)
+    else:
+        ts.release_root(store.root)
+    ready = store.root / "holder.ready"
+    holder = store.spawn(
+        "hold-transaction", store.root, LWW, "held", "holder", 120, ready
+    )
+    wait_for(ready, timeout_s=60)
+    result = store.root / "seen.json"
+
+    reader = store.spawn("read-record", store.root, LWW, "seed", result)
+
+    assert reader.wait(timeout=60) == 0
+    assert holder.poll() is None
+    assert json.loads(result.read_text(encoding="utf-8")) == {
+        "value": {"who": "writer"}
+    }
 
 
 def test_enumerating_review_verdicts_answers_identities_that_read_back(
