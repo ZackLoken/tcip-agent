@@ -4,16 +4,17 @@
 
 The issue's body and comments are read with ``gh issue view``. The premise half opens at the line
 ``Premises, read at <commit>:``, whose header names one or more commits, each optionally preceded
-by a repository label, and continues as the contiguous bullet list that follows it. A premise's
-repository is its ``[<label>]`` prefix, or the only one the header names. The unlabeled
-repository is the checkout the script runs from; a labeled one is the path its ``--checkout``
-names, and a label with none is a failing premise.
+by a repository label, and continues as the contiguous bullet list that follows it, an indented
+line continuing the bullet before it. A premise's repository is its ``[<label>]`` prefix, or the
+only one the header names. The unlabeled repository is the checkout the script runs from; a
+labeled one is the path its ``--checkout`` names, and a label with none is a failing premise.
 
 Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>``, is read with
 ``git show <commit>:<path>``. It fails when the path is absent at the commit or the range is past
-the file. A premise that backticks identifiers fails when none of them appears in the union of
-its cited ranges. A premise with no cite in the writer's form fails. Prints PASS, or each failing
-premise and FAIL, and exits 1 on FAIL or when no premise half can be read.
+the file. Lines are counted on newline bytes alone, as git counts them. A premise whose backticked
+spans hold identifier tokens fails when none of them appears in the union of its cited ranges. A
+premise with no cite in the writer's form fails. Prints PASS, or each failing premise and FAIL,
+and exits 1 on FAIL or when no premise half can be read.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ CITE = re.compile(
     r"\bat\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
 )
 BACKTICKED = re.compile(r"`([^`]+)`")
-IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
+IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 
 class PremiseHalfError(ValueError):
@@ -104,11 +105,16 @@ def parse_premise_half(text: str) -> PremiseHalf:
         commits[match["label"]] = match["commit"]
     if not commits:
         raise PremiseHalfError("the header names no commit")
-    premises = []
-    for line in text[header.end() :].splitlines()[1:]:
+    premises: list[str] = []
+    for raw in text[header.end() :].split("\n")[1:]:
+        line = raw.rstrip("\r")
+        if not line.strip():
+            continue
         if line.startswith(("- ", "* ")):
             premises.append(line)
-        elif line.strip():
+        elif premises and line[0] in " \t":
+            premises[-1] += " " + line.strip()
+        else:
             break
     if not premises:
         raise PremiseHalfError("no premise line follows the header")
@@ -127,8 +133,16 @@ def parse_cites(line: str) -> list[Cite]:
 
 
 def backticked_identifiers(line: str) -> list[str]:
-    """Return the backticked tokens of ``line`` that are one identifier, dots allowed."""
-    return [t for t in BACKTICKED.findall(line) if IDENTIFIER.fullmatch(t)]
+    """Return every identifier token inside the backticked spans of ``line``, dots allowed.
+
+    A span such as ``f(x, default=None)`` contributes ``f``, ``x``, ``default`` and ``None``.
+    """
+    tokens = (
+        token
+        for span in BACKTICKED.findall(line)
+        for token in IDENTIFIER.findall(span)
+    )
+    return list(dict.fromkeys(tokens))
 
 
 def cited_text(checkout: Path, commit: str, cite: Cite) -> str:
@@ -140,20 +154,20 @@ def cited_text(checkout: Path, commit: str, cite: Cite) -> str:
     proc = subprocess.run(
         ["git", "-C", str(checkout), "show", f"{commit}:{cite.path}"],
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
     )
     if proc.returncode:
-        raise CiteError(
-            f"{cite.path} unreadable at {commit[:12]}: {proc.stderr.strip()}"
-        )
-    lines = proc.stdout.splitlines()
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise CiteError(f"{cite.path} unreadable at {commit[:12]}: {stderr}")
+    lines = proc.stdout.split(b"\n")
+    if lines[-1] == b"":
+        lines.pop()
     if not 1 <= cite.first <= cite.last <= len(lines):
         raise CiteError(
             f"{cite.path}:{cite.first}-{cite.last} is outside the file ({len(lines)} lines)"
         )
-    return "\n".join(lines[cite.first - 1 : cite.last])
+    return b"\n".join(lines[cite.first - 1 : cite.last]).decode(
+        "utf-8", errors="replace"
+    )
 
 
 def repository_of(
@@ -172,7 +186,7 @@ def repository_of(
         raise CiteError(f"repository {label!r} is not one the header names")
     if label is not None and label in checkouts:
         return half.commits[label], checkouts[label]
-    if label is None or len(half.commits) == 1:
+    if label is None:
         return half.commits[label], home
     raise CiteError(f"no --checkout for repository {label!r}")
 
