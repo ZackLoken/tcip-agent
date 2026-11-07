@@ -599,6 +599,11 @@ NO_DOCUMENT = LabelDocument(
 # ── reader ─────────────────────────────────────────────────────────────────
 
 
+def place_of(key: Key) -> str:
+    """Return where the record ``key`` names lives: its store and parts under its root."""
+    return f"{key.store}{list(key.parts)} under {key.root}"
+
+
 def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
     """Return ``stored``, what the store answered for ``key``, as a :class:`LabelDocument`.
 
@@ -610,9 +615,7 @@ def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
     try:
         return label_document(stored.value)
     except UnreadableLabelDocumentError as exc:
-        raise UnreadableLabelDocumentError(
-            f"{key.store}{list(key.parts)} under {key.root}: {exc}"
-        ) from exc
+        raise UnreadableLabelDocumentError(f"{place_of(key)}: {exc}") from exc
 
 
 def read_stored(
@@ -649,7 +652,7 @@ def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
     stored = read_stored(key)
     if version is not None and stored.version.token != version:
         raise UnreadableLabelDocumentError(
-            f"{key.store}{list(key.parts)} under {key.root} is at "
+            f"{place_of(key)} is at "
             f"version {stored.version.token}, not {version}, the one "
             "measured"
         )
