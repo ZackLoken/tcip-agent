@@ -45,7 +45,8 @@
       "WebFetch(domain:proceedings.mlr.press)",
       "WebFetch(domain:aclanthology.org)",
       "WebFetch(domain:biorxiv.org)"
-    ]
+    ],
+    "blockWritesOutsideWorkingDirectories": true
   },
   "promptCacheTtl": "1h",
   "env": {
