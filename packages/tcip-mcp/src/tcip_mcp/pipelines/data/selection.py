@@ -602,18 +602,14 @@ def read_selection_checked(
 def _read_selection_document(
     selection_dir: str | Path, project: str | Path
 ) -> JsonValue:
-    from tcip_store import DecodeError
-
-    with tcip_store.unreadable(
-        selection_place(selection_dir), DecodeError, ValueError
-    ):
-        document = tcip_store.read(selection_key(selection_dir), default=None)
-        resolved = (
-            None
-            if document is None
-            else runtime_paths(document, SELECTION_PATHS, project)
-        )
-    return resolved
+    place = selection_place(selection_dir)
+    document = tcip_store.read_raw(
+        tcip_store.read, selection_key(selection_dir), place, default=None
+    )
+    if document is None:
+        return None
+    with tcip_store.unreadable(place, ValueError):
+        return runtime_paths(document, SELECTION_PATHS, project)
 
 
 def ground_truth_digest(ground_truth: Key | str) -> str:
