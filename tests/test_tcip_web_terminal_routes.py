@@ -439,8 +439,8 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         assert handed["permissions"] == shipped["permissions"]
         assert not any(
             word in entry
-            for entries in handed["permissions"].values()
-            for entry in entries
+            for key in ("deny", "allow")
+            for entry in handed["permissions"][key]
             if not entry.startswith("mcp__tcip__")
             for word in ("tcip ", "tcip_")
         )

@@ -125,3 +125,19 @@ def test_the_deny_list_protects_what_a_launch_writes_and_every_projects_store(
     protected = [*written, database_file(str(opened.root))]
     assert sorted(p for p in protected if not denied(p)) == []
     assert not denied(opened.root / "code" / "measure.py")
+
+
+def test_the_settings_a_launch_hands_refuse_file_tool_writes_outside_the_workspace() -> (
+    None
+):
+    """Claude's row settings refuse the file tools' writes outside its working directories.
+
+    The key is read from the settings file a launch writes, where Claude Code honors it in every
+    permission mode.
+    """
+    settings = pty_host.write_claude_settings()
+    permissions = json.loads(settings.read_text(encoding="utf-8"))[
+        "permissions"
+    ]
+
+    assert permissions["blockWritesOutsideWorkingDirectories"] is True
