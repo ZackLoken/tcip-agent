@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
-from pydantic import ValidationError
 
 from tcip_mcp.audit import now
 from tcip_mcp.web_client import CanvasMeta, Panel, read_canvas_meta
@@ -252,5 +251,9 @@ def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(
     del meta["received_at"]
     tcip_store.replace(canvas_meta_key(str(tmp_path)), meta)
 
-    with pytest.raises(ValidationError, match="received_at"):
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
         capture_live_canvas(bound, refresh=False)
+
+    assert str(refused.value) == (
+        f"the canvas meta record of {tmp_path}: received_at: Field required"
+    )

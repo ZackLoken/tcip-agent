@@ -750,7 +750,10 @@ def test_archive_project_admits_a_symlink_spelled_project(
 
 
 class _ParkingRegistry:
-    """The dataset registry's adapter, its writes each first waiting once at ``barrier``."""
+    """The dataset registry's adapter, its writes each first waiting once at ``barrier``.
+
+    ``tcip_store.validated`` reads it through :meth:`model_validate`, the real adapter's read.
+    """
 
     def __init__(
         self,
@@ -760,8 +763,10 @@ class _ParkingRegistry:
         self.real = real
         self.barrier = barrier
 
-    def validate_python(self, value: JsonValue) -> list[DatasetEntry]:
-        return self.real.validate_python(value)
+    def model_validate(
+        self, value: JsonValue, *, context: dict[str, object] | None = None
+    ) -> list[DatasetEntry]:
+        return self.real.validate_python(value, context=context)
 
     def dump_python(
         self, value: list[DatasetEntry], *, mode: Literal["json", "python"]
