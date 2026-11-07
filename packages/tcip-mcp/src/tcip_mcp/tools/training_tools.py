@@ -1058,6 +1058,22 @@ class SplitChoices(BaseModel):
     ]
 
 
+def selection_directories(dataset_root: Path) -> list[Path]:
+    """Return the directories under ``dataset_root`` a selection may be recorded in.
+
+    These are ``<dataset_root>/splits`` and, in name order, each directory one level under it,
+    where ``freeze_selection`` writes a frozen run's own partition. A directory is returned
+    whether or not a selection is recorded there.
+    """
+    splits_dir = dataset_root / "splits"
+    below = (
+        sorted(p for p in splits_dir.iterdir() if p.is_dir())
+        if splits_dir.is_dir()
+        else []
+    )
+    return [splits_dir, *below]
+
+
 def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     """List every data choice a relaunch of ``experiment_id`` can take.
 
@@ -1175,20 +1191,12 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
         candidate_dirs.append(candidate)
     dataset_root = dataset_root_of(root_anchor)
     if dataset_root is not None:
-        default_dir = str(dataset_root / "splits")
-        default_norm = canonical_path(default_dir)
-        if default_norm != own_norm and default_norm not in seen:
-            seen.add(default_norm)
-            candidate_dirs.append(default_dir)
-        # One level down: where freeze_selection writes a frozen run's own partition.
-        splits_dir = Path(default_dir)
-        if splits_dir.is_dir():
-            for sub in sorted(p for p in splits_dir.iterdir() if p.is_dir()):
-                sub_norm = canonical_path(str(sub))
-                if sub_norm == own_norm or sub_norm in seen:
-                    continue
-                seen.add(sub_norm)
-                candidate_dirs.append(str(sub))
+        for found in selection_directories(dataset_root):
+            found_norm = canonical_path(str(found))
+            if found_norm == own_norm or found_norm in seen:
+                continue
+            seen.add(found_norm)
+            candidate_dirs.append(str(found))
 
     selections: list[SelectionChoice | UnreadSelectionChoice] = []
     for candidate_dir in candidate_dirs:
