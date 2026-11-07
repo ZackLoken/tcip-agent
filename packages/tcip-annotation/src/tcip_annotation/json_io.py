@@ -621,8 +621,8 @@ def read_stored(
     """Return the store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed).
 
     Any of :data:`tcip_store.STORE_READ_REFUSALS` (a record that does not decode, an absent one
-    read with no default, a database that will not open or answer) raises
-    :class:`UnreadableLabelDocumentError` with the store's own message.
+    read with no default, a database that will not open or answer or stays locked past the wait)
+    raises :class:`UnreadableLabelDocumentError` with the store's own message.
     """
     try:
         return tcip_store.read_versioned(key, default=default)

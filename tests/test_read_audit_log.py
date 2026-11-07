@@ -209,7 +209,7 @@ def test_read_audit_log_refuses_a_log_in_a_database_that_will_not_open(
     assert result["error"].startswith(
         f"the audit log at {audit_module.audit_log_key(project).root}: "
     )
-    assert "not a SQLite database" in result["error"]
+    assert "could not complete this store's identity check" in result["error"]
 
 
 def test_read_audit_log_refuses_a_scope_naming_no_dataset_or_project(

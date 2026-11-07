@@ -199,7 +199,10 @@ def test_a_label_document_in_a_database_that_will_not_open_answers_the_editors_4
     )
 
     assert loaded.status_code == 400, loaded.text
-    assert "not a SQLite database" in loaded.json()["detail"]
+    assert (
+        "could not complete this store's identity check"
+        in loaded.json()["detail"]
+    )
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")

@@ -1,7 +1,7 @@
 """The selection reader refuses a selection directory whose store will not open under its place.
 
-Each selection is drawn through ``draw_splits``; its database is then overwritten with bytes that
-are not a SQLite database.
+Each selection is drawn through ``draw_splits``; its database is then overwritten with bytes the
+store's identity check cannot complete on.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def test_both_readers_refuse_a_selection_whose_database_will_not_open(
 
     assert selection is None and refused is not None
     assert refused.where == selection_place(out)
-    assert "not a SQLite database" in str(refused)
+    assert "could not complete this store's identity check" in str(refused)
     assert strict.value.served == refused
 
 
@@ -105,7 +105,9 @@ def test_freeze_selection_answers_an_unreadable_destination_not_an_existing_sele
     )
 
     assert selection_place(destination) in refused["error"], refused
-    assert "not a SQLite database" in refused["error"], refused
+    assert (
+        "could not complete this store's identity check" in refused["error"]
+    ), refused
     assert "already exists" not in refused["error"], refused
     again = freeze_selection(
         tmp_path, "exp-src", output_path=str(tmp_path / "fresh"), actor=None

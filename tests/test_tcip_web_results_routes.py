@@ -1208,7 +1208,10 @@ def test_loading_a_mapping_whose_receipt_log_is_in_a_database_that_will_not_open
         assert resp.json()["detail"].startswith(
             f"the audit log at {audit_log_key(opened_project).root}: "
         )
-        assert "not a SQLite database" in resp.json()["detail"]
+        assert (
+            "could not complete this store's identity check"
+            in resp.json()["detail"]
+        )
         with pytest.raises(tcip_store.ReadRefusedError) as refused:
             plant_mapping.load_mapping(opened_project, "valley")
     finally:

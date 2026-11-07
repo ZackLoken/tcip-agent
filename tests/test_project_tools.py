@@ -248,12 +248,15 @@ def test_inspect_project_surfaces_an_audit_log_in_a_database_that_will_not_open(
         foreign.unlink()
 
     unavailable = status["recent_activity"]["status_unavailable"]
-    assert "not a SQLite database" in unavailable
+    assert "could not complete this store's identity check" in unavailable
     # The record shares the project's database, so it is unread for the same reason.
     assert status["reading"]["kind"] == "unread"
     problem = status["reading"]["problem"]
     assert problem["refusal"]["kind"] == "unreadable"
-    assert "not a SQLite database" in problem["refusal"]["message"]
+    assert (
+        "could not complete this store's identity check"
+        in problem["refusal"]["message"]
+    )
 
 
 def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
