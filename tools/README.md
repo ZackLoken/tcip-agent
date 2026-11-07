@@ -36,6 +36,11 @@ section instead.
   the pydantic models its `declared_models` lists, so the browser's types are a projection of the
   backend's rather than hand-transcribed. Run after changing a declared model;
   `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.
+- `generate_record_schemas.py` - renders the validation-mode JSON schema of every stored record
+  model its `STORED_RECORDS` lists (what a reader validates a record the platform wrote against)
+  into `tests/stored_record_schemas.json`. Run after changing a stored record model;
+  `tests/test_stored_record_schemas.py` fails when the checked-in snapshot is stale, and the pull
+  request template then asks how the records already written are conformed.
 - `generate_*_fixture.py` - each writes to its `GENERATED_PATH` what the platform's own routes
   serve for scenes it makes in a scratch session (`fixture_session.py`), the fixtures the frontend
   tests read; its module docstring names the scenes. Run after changing what those routes serve;
