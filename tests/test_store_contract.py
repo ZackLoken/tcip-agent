@@ -26,7 +26,12 @@ import pytest
 import tcip_store as ts
 from tcip_annotation import verdicts
 from tcip_mcp import delivery, traits
-from tcip_store.file_backend import DATABASE_FILENAME, database_file
+from tcip_store.file_backend import (
+    DATABASE_FILENAME,
+    DEFAULT_LOCK_TIMEOUT_S,
+    database_file,
+    path_lock,
+)
 from tcip_store.sqlite_backend import (
     SqliteBackend,
     encode_parts,
@@ -1508,6 +1513,40 @@ def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in
                 assert ts.read(key) == {"n": 2}
             finally:
                 clears.join(30)
+
+
+def test_a_file_lock_refusal_reports_the_time_it_measured(
+    store: Harness,
+) -> None:
+    """A file write that gives up on another holder's lock reports the time it measured.
+
+    The time is not the configured wait, and is no longer than the write took.
+    """
+    path = blob_path(store.root, "held")
+    path.parent.mkdir(parents=True)
+    taken, finish = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with path_lock(path):
+            taken.set()
+            finish.wait(4 * DEFAULT_LOCK_TIMEOUT_S)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        assert taken.wait(30)
+        started = time.monotonic()
+        with pytest.raises(ts.StoreBusyError) as busy:
+            ts.put_blob(path, b"refused")
+        took = time.monotonic() - started
+    finally:
+        finish.set()
+        holder.join(30)
+
+    assert busy.value.blocked_on == str(path)
+    assert busy.value.waited_s != DEFAULT_LOCK_TIMEOUT_S
+    assert busy.value.waited_s <= took
+    assert not path.exists()
 
 
 @pytest.mark.parametrize("journal_mode", ["wal", "delete"])

@@ -70,20 +70,22 @@ class VersionConflictError(StoreError):
 
 
 class StoreBusyError(StoreError):
-    """A lock was not acquired within the timeout, so nothing was written.
+    """Another holder kept a lock the operation needed, and the operation gave up.
 
-    ``blocked_on`` names the first key or file the refused call named.
+    ``blocked_on`` names the first key, the root or the file the refused call named;
+    ``waited_s`` is how long the operation ran before it gave up, its lock wait included.
     """
 
     def __init__(self, blocked_on: Key | str, waited_s: float) -> None:
-        """Take the key or file waited on and the seconds waited."""
+        """Take the key, root or file the call named and the seconds it ran before giving up."""
         named = (
             blocked_on
             if isinstance(blocked_on, str)
             else f"{blocked_on.store}{list(blocked_on.parts)}"
         )
         super().__init__(
-            f"waited {waited_s:.1f}s for {named} and gave up; nothing was written."
+            f"{named} was busy: another holder kept its lock, and the operation gave up "
+            f"after {waited_s:.1f}s."
         )
         self.blocked_on = blocked_on
         self.waited_s = waited_s

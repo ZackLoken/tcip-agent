@@ -262,15 +262,16 @@ def _read_bytes(path: Path) -> bytes | None:
 def _locked(path: Path) -> Generator[None]:
     """Hold ``path``'s lock (:func:`path_lock`).
 
-    Raises ``StoreBusyError`` naming the path when the wait runs out.
+    Raises ``StoreBusyError`` naming the path and the time it measured once the wait runs out.
     """
     _, timeout_error = _filelock_classes()
     ensure_parent(path)
+    started = time.monotonic()
     try:
         with path_lock(path):
             yield
     except timeout_error:
-        raise StoreBusyError(str(path), DEFAULT_LOCK_TIMEOUT_S) from None
+        raise StoreBusyError(str(path), time.monotonic() - started) from None
 
 
 def require_version(
