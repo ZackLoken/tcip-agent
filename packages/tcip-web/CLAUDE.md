@@ -115,8 +115,10 @@ launch names. Last it asks the agent to edit the row's rendered instruction file
 token once done, and passes only when the file is unchanged; for Claude's row the transcript its
 hook named on the session's report line must also record, past the length it had when the request
 was submitted, an `Edit` or `Write` of that file and after it that use's answer, Claude Code's
-permission denial. Codex and Antigravity rows are checked by the unchanged file alone, which cannot
-tell a denied edit from one never tried.
+permission denial. For Claude's row it then asks the agent to create a file in a scratch directory
+outside the workspace, which must stay absent (the tools refuse an existing file the agent has not
+read before any permission is checked). Codex and Antigravity rows are checked by the unchanged
+file alone, which cannot tell a denied edit from one never tried.
 
 Claude's row passes a settings file each launch writes from `CLAUDE_SETTINGS`,
 `agent_terminal.settings.json`, with the session hook added; its `confinement` sentence states what
