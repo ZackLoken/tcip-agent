@@ -69,16 +69,55 @@ DAMAGES = {
 """Each way a run the platform opened is spoiled on disk, by the id it is damaged under."""
 
 
+def _final_rewritten(run_dir: Path, change: Callable[[dict], None]) -> None:
+    """Rewrite the run's published ``final_status.json`` on disk with ``change`` applied."""
+    path = run_dir / experiments.FINAL_STATUS_FILE
+    record = experiments.read_record(path)
+    assert isinstance(record, dict)
+    change(record)
+    path.write_bytes(encode_record(record))
+
+
+def _final_without_key(run_dir: Path) -> None:
+    _final_rewritten(run_dir, lambda record: record.pop("ended"))
+
+
+def _final_traversing(run_dir: Path) -> None:
+    def change(record: dict) -> None:
+        record["checkpoint"]["path"] = "../last.pt"
+
+    _final_rewritten(run_dir, change)
+
+
+FINAL_DAMAGES = {
+    "missing key": _final_without_key,
+    "traversing path": _final_traversing,
+}
+"""Each way a completed run's final status is spoiled on disk, by the id it is damaged under."""
+
+
 def _damaged_run(
-    tmp_path: Path, project: Path, damage: Callable[[Path], None]
+    tmp_path: Path,
+    project: Path,
+    damage: Callable[[Path], None],
+    experiment_id: str = "exp-damaged",
 ) -> str:
     """Open a run under ``project``, spoil it with ``damage``, and return its id."""
     run_dir = opened_run(
         project,
         detection_config(tmp_path / "ds", project=project),
-        experiment_id="exp-damaged",
+        experiment_id=experiment_id,
     )
     damage(run_dir)
+    return run_dir.name
+
+
+def _completed_without_checkpoint(project: Path, experiment_id: str) -> str:
+    """Run a training run to completion under ``project``, delete its checkpoint, return its id."""
+    run_dir = finished_run(project, experiment_id=experiment_id)
+    checkpoint = experiments.observe_run(run_dir).checkpoint
+    assert checkpoint is not None
+    Path(checkpoint.path).unlink()
     return run_dir.name
 
 
@@ -102,24 +141,53 @@ def test_the_doctor_command_reports_a_run_that_will_not_read_as_its_own_finding(
     )
 
 
-def test_the_registry_checks_go_on_over_the_runs_that_read(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "damage", FINAL_DAMAGES.values(), ids=FINAL_DAMAGES.keys()
+)
+def test_the_doctor_command_reports_a_final_status_that_will_not_read_as_its_own_finding(
+    tmp_path: Path, damage: Callable[[Path], None]
 ) -> None:
-    """A completed run whose checkpoint is gone is still checked beside a run that will not read."""
+    """A completed run whose final status is spoiled is one error finding naming the run."""
     project = tmp_path / "proj"
     new_project(project)
-    _damaged_run(tmp_path, project, _undecodable)
-    completed = finished_run(project, experiment_id="exp-completed")
-    checkpoint = experiments.observe_run(completed).checkpoint
-    assert checkpoint is not None
-    Path(checkpoint.path).unlink()
+    run_dir = finished_run(project, experiment_id="exp-final")
+    damage(run_dir)
 
     found = _findings(project)
 
+    assert [level for level, msg in found if "exp-final" in msg] == [
+        "error"
+    ], found
+    assert not [msg for _, msg in found if REGISTRY_INDEX_FINDING in msg], (
+        found
+    )
+
+
+def test_every_run_that_will_not_read_is_named_and_the_runs_that_read_are_checked(
+    tmp_path: Path,
+) -> None:
+    """Two runs spoiled two ways are two findings, and a completed run beside them is checked.
+
+    The completed run's checkpoint is gone, so the per-entry check names it.
+    """
+    project = tmp_path / "proj"
+    new_project(project)
+    spoiled = [
+        _damaged_run(tmp_path, project, _undecodable, "exp-undecodable"),
+        _damaged_run(tmp_path, project, _without_metrics, "exp-unlogged"),
+    ]
+    completed = _completed_without_checkpoint(project, "exp-completed")
+
+    found = _findings(project)
+
+    for run_id in spoiled:
+        assert [level for level, msg in found if run_id in msg] == ["error"], (
+            found
+        )
     assert [
         level
         for level, msg in found
-        if "registry entry 'exp-completed'" in msg
+        if f"registry entry {completed!r}" in msg
         and "checkpoint missing" in msg
     ] == ["error"], found
 
