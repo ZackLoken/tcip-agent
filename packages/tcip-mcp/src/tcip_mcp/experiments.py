@@ -73,6 +73,8 @@ from tcip_mcp.pipelines.schemas import (
 from tcip_mcp.pipelines.training.tensorboard_manager import TensorboardState
 from tcip_mcp.registry_paths import (
     PathFields,
+    RegistryPathEmptyError,
+    RegistryPathTraversalError,
     recorded_paths,
     runtime_paths,
     within,
@@ -81,6 +83,8 @@ from tcip_mcp.workspace import path_segment
 from tcip_store import (
     DecodeError,
     FiniteJsonValue,
+    ReadRefusedError,
+    StoreError,
     decode_value,
     encode_log_line,
     encode_record,
@@ -904,12 +908,46 @@ def experiment_dirs(project: Path | str) -> list[Path]:
     return [*run_dirs(project), *sweep_dirs(project)]
 
 
+RUN_REFUSALS = (
+    StoreError,
+    ReadRefusedError,
+    IncompleteRunError,
+    RegistryPathEmptyError,
+    RegistryPathTraversalError,
+    PermissionError,
+)
+"""The exceptions :func:`observe_runs` answers as a run's refusal; any other propagates."""
+
+
+def observe_runs(
+    project: Path | str,
+) -> tuple[list[RunObservation[RunRecord]], list[tuple[Path, Exception]]]:
+    """Observe every run of ``project`` (:func:`run_dirs`) once.
+
+    Returns the observations that read, in creation order, and each directory that refused with
+    the exception it raised (one of :data:`RUN_REFUSALS`), in :func:`run_dirs` order. Any other
+    exception propagates.
+    """
+    observed: list[RunObservation[RunRecord]] = []
+    refused: list[tuple[Path, Exception]] = []
+    for directory in run_dirs(project):
+        try:
+            observed.append(observe_run(directory))
+        except RUN_REFUSALS as exc:
+            refused.append((directory, exc))
+    observed.sort(key=lambda observation: observation.record.created)
+    return observed, refused
+
+
 def run_observations(project: Path | str) -> list[RunObservation[RunRecord]]:
-    """Return every run of ``project`` (:func:`run_dirs`), each observed once, in creation order."""
-    return sorted(
-        (observe_run(d) for d in run_dirs(project)),
-        key=lambda observation: observation.record.created,
-    )
+    """Return every run of ``project`` (:func:`run_dirs`), each observed once, in creation order.
+
+    The first run that will not read raises its refusal (:func:`observe_runs`).
+    """
+    observed, refused = observe_runs(project)
+    if refused:
+        raise refused[0][1]
+    return observed
 
 
 def live_run_conflict(project: Path) -> str | None:
