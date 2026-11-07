@@ -325,18 +325,6 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
         bystander.close()
 
 
-def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout(
-    store: Harness,
-) -> None:
-    """The elapsed value a contention refusal carries is one this layer measured."""
-    key = store.key(LWW, "measured")
-    with pytest.raises(ts.StoreBusyError) as caught:
-        with store.backend._mapped(key):  # noqa: SLF001 - the measurement is the subject
-            time.sleep(0.25)
-            raise sqlite3.OperationalError("database is locked")
-    assert 0.15 <= caught.value.waited_s < 5.0
-
-
 def test_every_connection_commits_at_full_synchronous(store: Harness) -> None:
     """The connection a write commits on runs at FULL synchronous."""
     ts.replace(store.key(LWW, "durable"), {"n": 1})

@@ -143,11 +143,13 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
 
 
 def contended(exc: sqlite3.Error) -> bool:
-    """Return whether a driver error is another connection's lock: its text says locked or busy."""
-    text = str(exc).lower()
-    return isinstance(exc, sqlite3.OperationalError) and (
-        "locked" in text or "busy" in text
-    )
+    """Return whether a driver error is another connection's lock, ``SQLITE_BUSY``.
+
+    The driver attaches the extended code, whose low eight bits are the primary one; an error the
+    driver attached no code to is not contention.
+    """
+    code = getattr(exc, "sqlite_errorcode", None)
+    return code is not None and code & 0xFF == sqlite3.SQLITE_BUSY
 
 
 def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
