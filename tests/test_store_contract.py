@@ -1499,6 +1499,7 @@ def test_a_lock_met_at_open_refuses_a_read_as_busy_after_the_backend_s_wait(
 
     assert busy.value.blocked_on == key
     assert _SHORT_WAIT_S <= busy.value.waited_s < _GAVE_UP_WITHIN_S
+    assert busy.value.waited_s != _SHORT_WAIT_S
     assert refused.value.served.where == "the record this test reads"
     assert _served_as_busy(refused.value).blocked_on == key
 
