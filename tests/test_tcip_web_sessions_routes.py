@@ -484,7 +484,8 @@ def test_an_open_while_the_departing_stats_record_is_held_answers_409_and_opens_
         backend.close()
 
     assert resp.status_code == 409, resp.text
-    assert resp.json()["detail"].endswith("gave up; nothing was written.")
+    assert "was busy: another holder kept its lock" in resp.json()["detail"]
+    assert "nothing was written" not in resp.json()["detail"]
     opened = store.opened
     assert opened is not None and opened.id == valley.id
     (session,) = _sessions(valley.root)
