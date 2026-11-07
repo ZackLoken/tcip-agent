@@ -306,6 +306,23 @@ def check_traits(root: Path, findings: list) -> None:
             )
 
 
+def check_selections(root: Path, findings: list) -> None:
+    """Append an error for every split selection under ``root`` that will not read.
+
+    The selections are those recorded in ``<root>/splits`` and one level under it
+    (:func:`~tcip_mcp.tools.training_tools.selection_directories`), read as the training preflight
+    reads them; a directory recording none adds nothing. A selection drawn to any other place is
+    not reached.
+    """
+    from tcip_mcp.pipelines.data.selection import read_selection_checked
+    from tcip_mcp.tools.training_tools import selection_directories
+
+    for directory in selection_directories(root):
+        _, refusal = read_selection_checked(directory, project=root)
+        if refusal is not None:
+            findings.append(("error", f"selection will not read: {refusal}"))
+
+
 def check_project_record(root: Path, findings: list) -> None:
     """Append an error when the project record is absent, damaged, or on an unreadable root."""
     from tcip_mcp.project_record import record_or_problem
@@ -325,7 +342,8 @@ def diagnose_project(project: Path) -> dict[str, list[tuple[str, str]]]:
     a checkpoint no registry entry names; annotations accepted without an origin; flags records
     and verdict shards that will not read, and shards whose bucket has no readable record or
     names no document for their image; trait records that will not read or whose latest
-    revision is unconfirmed; and a project record that will not read. ``findings`` holds each
+    revision is unconfirmed; split selections under ``splits`` that will not read; and a project
+    record that will not read. ``findings`` holds each
     finding as its level (``error``, ``warn`` or ``info``) and its message. Reads only, through
     the store this process already bound.
     """
@@ -338,6 +356,7 @@ def diagnose_project(project: Path) -> dict[str, list[tuple[str, str]]]:
     check_registry(project, found, buckets=buckets)
     check_state(project, found, buckets=buckets)
     check_traits(project, found)
+    check_selections(project, found)
     check_project_record(project, found)
     rank = {"error": 0, "warn": 1, "info": 2}
     return {"findings": sorted(found, key=lambda f: rank[f[0]])}
