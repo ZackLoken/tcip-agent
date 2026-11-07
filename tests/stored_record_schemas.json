@@ -4226,6 +4226,20 @@
     "title": "SweepRecord",
     "type": "object"
   },
+  "tcip_mcp.experiments._Launched": {
+    "description": "The run a ``launch_training`` audit line's arguments name.",
+    "properties": {
+      "experiment_id": {
+        "title": "Experiment Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "experiment_id"
+    ],
+    "title": "_Launched",
+    "type": "object"
+  },
   "tcip_mcp.model_registry.CheckpointStamp": {
     "$defs": {
       "DetectorGeometry": {
@@ -6132,6 +6146,25 @@
     "title": "MappingBuild",
     "type": "object"
   },
+  "tcip_mcp.pipelines.postprocessing.plant_mapping._MappingBuilt": {
+    "description": "The mapping a ``plant_mapping_built`` audit line's arguments name.",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "record_sha256": {
+        "title": "Record Sha256",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "record_sha256"
+    ],
+    "title": "_MappingBuilt",
+    "type": "object"
+  },
   "tcip_mcp.pipelines.postprocessing.plant_mapping._PLANT_REGISTRY": {
     "$defs": {
       "RegistryCsv": {
@@ -6206,6 +6239,1680 @@
       "registered_at"
     ],
     "title": "PlantRegistry",
+    "type": "object"
+  },
+  "tcip_mcp.pipelines.schemas.EvaluationSpec": {
+    "$defs": {
+      "MaskCut": {
+        "additionalProperties": false,
+        "description": "How an instance segmentation head's soft masks become rings.\n\n``mask_binarize`` is the probability a mask pixel is foreground at, refusing a value outside\n``[0, 1]``, and ``vertex_spacing`` the pixels of each ring's perimeter per vertex its rings are\nsimplified to (``mask_contours.mask_to_polygon_rings``, zero keeping every contour vertex),\nrefusing a negative or non-finite value. Both are required.",
+        "properties": {
+          "mask_binarize": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Mask Binarize",
+            "type": "number"
+          },
+          "vertex_spacing": {
+            "minimum": 0,
+            "title": "Vertex Spacing",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mask_binarize",
+          "vertex_spacing"
+        ],
+        "title": "MaskCut",
+        "type": "object"
+      },
+      "ScoreWeights": {
+        "additionalProperties": false,
+        "description": "The composite objective's weight on each of its terms.\n\nThe objective is ``evaluation.compute_composite_objective``'s; each weight is non-negative so\na better term never raises the lower-is-better objective.",
+        "properties": {
+          "f1": {
+            "minimum": 0,
+            "title": "F1",
+            "type": "number"
+          },
+          "loss": {
+            "minimum": 0,
+            "title": "Loss",
+            "type": "number"
+          },
+          "map50": {
+            "minimum": 0,
+            "title": "Map50",
+            "type": "number"
+          }
+        },
+        "required": [
+          "loss",
+          "f1",
+          "map50"
+        ],
+        "title": "ScoreWeights",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "What a run's validation pass scores against.\n\nIt holds the confirmed trait it selects for, the selection metric, one with a declared ranking\ndirection (:data:`SelectionMetric`), and the thresholds and score weights the validation pass\napplies.",
+    "properties": {
+      "conf_threshold": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Conf Threshold"
+      },
+      "iou_threshold": {
+        "default": 0.5,
+        "title": "Iou Threshold",
+        "type": "number"
+      },
+      "mask_cut": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MaskCut"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "rationale": {
+        "minLength": 1,
+        "title": "Rationale",
+        "type": "string"
+      },
+      "score_weights": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ScoreWeights"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "selection_metric": {
+        "enum": [
+          "loss",
+          "objective",
+          "mae",
+          "rmse",
+          "precision",
+          "recall",
+          "f1",
+          "map",
+          "map50",
+          "iou_precision",
+          "iou_recall",
+          "iou_f1",
+          "accuracy",
+          "rank_acc",
+          "quadratic_weighted_kappa",
+          "r_squared",
+          "mIoU",
+          "dice",
+          "pixel_acc"
+        ],
+        "title": "Selection Metric",
+        "type": "string"
+      },
+      "trait": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Trait"
+      }
+    },
+    "required": [
+      "rationale",
+      "selection_metric"
+    ],
+    "title": "EvaluationSpec",
+    "type": "object"
+  },
+  "tcip_mcp.pipelines.schemas.TrainConfigSchema": {
+    "$defs": {
+      "Attribute": {
+        "additionalProperties": false,
+        "description": "One classification axis of a subject's instances.\n\n``values`` are ordered, and a value's id is its position there; for an ``ordinal`` attribute\nthat order is the rank (severity 0 < 1 < 2). Construction validates every field\n(``pydantic.ValidationError``): a known ``type`` and a non-empty list of distinct non-empty\nnames.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "categorical",
+              "ordinal"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "values"
+        ],
+        "title": "Attribute",
+        "type": "object"
+      },
+      "AugmentationSpec": {
+        "additionalProperties": true,
+        "description": "``augmentation``: each transform's name to the values its constructor takes.\n\nNames are those ``augmentations.build_augmentation`` builds, kept as stated in order beside\nthe block's ``rationale``.",
+        "properties": {
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale"
+        ],
+        "title": "AugmentationSpec",
+        "type": "object"
+      },
+      "BoundSplit": {
+        "additionalProperties": false,
+        "description": "``data.split`` bound to the selection recorded at ``selection_dir``.\n\nIts train and val sides are as recorded, or, with a ``seed`` stated, redrawn inside them at\nit. The draw's reason is the selection's own record.",
+        "properties": {
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seed"
+          },
+          "selection_dir": {
+            "title": "Selection Dir",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selection_dir"
+        ],
+        "title": "BoundSplit",
+        "type": "object"
+      },
+      "ClassScope": {
+        "additionalProperties": false,
+        "description": "The class space a run's ground truth was admitted under.\n\n``subject`` is the object class a document admission read completion and targets for, and\n``attributes`` every attribute the registry declares for it, each an\n:class:`~tcip_mcp.subject_registry.Attribute` whose value ids are positions in its declared\norder: ``None`` until the registry is read, empty for a subject that declares none. A mask\nraster and a table row carry their own classes: the scope over them has every field\n``None``. An empty subject is ``None``.",
+        "properties": {
+          "attributes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/Attribute"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attributes"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subject"
+          }
+        },
+        "title": "ClassScope",
+        "type": "object"
+      },
+      "CosineSchedule": {
+        "additionalProperties": false,
+        "description": "Cosine annealing over the block's horizon down to ``eta_min``.",
+        "properties": {
+          "eta_min": {
+            "title": "Eta Min",
+            "type": "number"
+          },
+          "horizon_epochs": {
+            "minimum": 1,
+            "title": "Horizon Epochs",
+            "type": "integer"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "type": {
+            "const": "cosine",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "horizon_epochs",
+          "type",
+          "eta_min"
+        ],
+        "title": "CosineSchedule",
+        "type": "object"
+      },
+      "DataSpec": {
+        "additionalProperties": false,
+        "description": "``data``: where a run's samples are and how they split.\n\nIt also holds what the run's resolution records beside them (``scope`` and the sizes). A key\noutside these fields refuses by name, and so does a ``tiling`` beside a ``dataset_source``.",
+        "properties": {
+          "dataset_source": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DatasetSourceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "images_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Images Dir"
+          },
+          "labels_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Labels Dir"
+          },
+          "num_channels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Num Channels"
+          },
+          "num_classes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Num Classes"
+          },
+          "num_ranks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Num Ranks"
+          },
+          "plant_csv_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plant Csv Paths"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ClassScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "split": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/BoundSplit"
+              },
+              {
+                "$ref": "#/$defs/DrawnSplit"
+              }
+            ],
+            "title": "Split"
+          },
+          "tiling": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TilingSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "split"
+        ],
+        "title": "DataSpec",
+        "type": "object"
+      },
+      "DatasetSourceSchema": {
+        "additionalProperties": false,
+        "description": "A bespoke dataset builder.\n\nA key outside these fields refuses by name, and so does a ``builder_kwargs`` naming a value\nthe platform hands (:class:`DatasetContext`).",
+        "properties": {
+          "builder": {
+            "minLength": 1,
+            "title": "Builder",
+            "type": "string"
+          },
+          "builder_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Builder Kwargs"
+          },
+          "source_files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Files"
+          }
+        },
+        "required": [
+          "builder"
+        ],
+        "title": "DatasetSourceSchema",
+        "type": "object"
+      },
+      "DrawnSplit": {
+        "additionalProperties": false,
+        "description": "``data.split`` a run draws itself at ``seed``.\n\nEach side but ``train`` is drawn at its stated ``<side>_ratio`` (zero draws no such side,\n``train`` the remainder), balanced by foreground count when ``stratify_foreground``, grouped\nby ``grouping``: a named policy, or an explicit ``{<capture>/<stem>: group_key}`` map covering\nevery member.",
+        "properties": {
+          "calibration_ratio": {
+            "title": "Calibration Ratio",
+            "type": "number"
+          },
+          "grouping": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            ],
+            "title": "Grouping"
+          },
+          "holdout_ratio": {
+            "title": "Holdout Ratio",
+            "type": "number"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "stratify_foreground": {
+            "title": "Stratify Foreground",
+            "type": "boolean"
+          },
+          "val_ratio": {
+            "title": "Val Ratio",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rationale",
+          "seed",
+          "val_ratio",
+          "calibration_ratio",
+          "holdout_ratio",
+          "stratify_foreground",
+          "grouping"
+        ],
+        "title": "DrawnSplit",
+        "type": "object"
+      },
+      "EarlyStoppingSpec": {
+        "additionalProperties": false,
+        "description": "The stop rule that ends a stage and the run.\n\nA stage ends once its selection value has not improved by ``min_delta`` for ``patience``\nepochs, the run ends with the stage whose best does not improve by ``min_delta`` on the best of\nthe stage before it, and the run stops as diverged after ``nonfinite_passes`` consecutive full\ntraining passes with no finite batch loss.",
+        "properties": {
+          "min_delta": {
+            "minimum": 0,
+            "title": "Min Delta",
+            "type": "number"
+          },
+          "nonfinite_passes": {
+            "minimum": 1,
+            "title": "Nonfinite Passes",
+            "type": "integer"
+          },
+          "patience": {
+            "minimum": 1,
+            "title": "Patience",
+            "type": "integer"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "patience",
+          "min_delta",
+          "nonfinite_passes"
+        ],
+        "title": "EarlyStoppingSpec",
+        "type": "object"
+      },
+      "EvaluationSpec": {
+        "additionalProperties": false,
+        "description": "What a run's validation pass scores against.\n\nIt holds the confirmed trait it selects for, the selection metric, one with a declared ranking\ndirection (:data:`SelectionMetric`), and the thresholds and score weights the validation pass\napplies.",
+        "properties": {
+          "conf_threshold": {
+            "anyOf": [
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Conf Threshold"
+          },
+          "iou_threshold": {
+            "default": 0.5,
+            "title": "Iou Threshold",
+            "type": "number"
+          },
+          "mask_cut": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MaskCut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "score_weights": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ScoreWeights"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "selection_metric": {
+            "enum": [
+              "loss",
+              "objective",
+              "mae",
+              "rmse",
+              "precision",
+              "recall",
+              "f1",
+              "map",
+              "map50",
+              "iou_precision",
+              "iou_recall",
+              "iou_f1",
+              "accuracy",
+              "rank_acc",
+              "quadratic_weighted_kappa",
+              "r_squared",
+              "mIoU",
+              "dice",
+              "pixel_acc"
+            ],
+            "title": "Selection Metric",
+            "type": "string"
+          },
+          "trait": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Trait"
+          }
+        },
+        "required": [
+          "rationale",
+          "selection_metric"
+        ],
+        "title": "EvaluationSpec",
+        "type": "object"
+      },
+      "ImageStatsSampling": {
+        "additionalProperties": false,
+        "description": "What band statistics read.\n\nIt is the sampling of whichever of ``derivations.band_normalization_stats`` (the exact\nderivation) or ``band_normalization_stats_sampled`` (the windowed one) produced them.\n``windows`` pairs each source's label with the rectangle read from it, or ``None`` for the\nexact derivation's own whole-image read (``pixel_fraction`` is then ``1.0`` and\n``window_size``/``max_windows_per_image`` are ``None``); ``max_images`` is the cap on rasters\ndrawn and ``seed`` the seed that drew them.",
+        "properties": {
+          "max_images": {
+            "title": "Max Images",
+            "type": "integer"
+          },
+          "max_windows_per_image": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Windows Per Image"
+          },
+          "pixel_fraction": {
+            "title": "Pixel Fraction",
+            "type": "number"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "window_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Window Size"
+          },
+          "windows": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ImageStatsWindow"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "minItems": 1,
+            "title": "Windows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "windows",
+          "seed",
+          "max_images",
+          "pixel_fraction"
+        ],
+        "title": "ImageStatsSampling",
+        "type": "object"
+      },
+      "ImageStatsWindow": {
+        "additionalProperties": false,
+        "description": "One pixel rectangle a sampled band-normalization statistic read, in a raster's own grid.",
+        "properties": {
+          "x0": {
+            "title": "X0",
+            "type": "integer"
+          },
+          "x1": {
+            "title": "X1",
+            "type": "integer"
+          },
+          "y0": {
+            "title": "Y0",
+            "type": "integer"
+          },
+          "y1": {
+            "title": "Y1",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x0",
+          "y0",
+          "x1",
+          "y1"
+        ],
+        "title": "ImageStatsWindow",
+        "type": "object"
+      },
+      "LrScalingSpec": {
+        "additionalProperties": false,
+        "description": "Effective-batch LR scaling.\n\nEach stage's learning rates are multiplied by ``(its effective batch / the first stage's) **\nscale_power``, capped at ``max_lr`` when one is stated.",
+        "properties": {
+          "max_lr": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Lr"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "scale_power": {
+            "title": "Scale Power",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rationale",
+          "scale_power"
+        ],
+        "title": "LrScalingSpec",
+        "type": "object"
+      },
+      "MaskCut": {
+        "additionalProperties": false,
+        "description": "How an instance segmentation head's soft masks become rings.\n\n``mask_binarize`` is the probability a mask pixel is foreground at, refusing a value outside\n``[0, 1]``, and ``vertex_spacing`` the pixels of each ring's perimeter per vertex its rings are\nsimplified to (``mask_contours.mask_to_polygon_rings``, zero keeping every contour vertex),\nrefusing a negative or non-finite value. Both are required.",
+        "properties": {
+          "mask_binarize": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Mask Binarize",
+            "type": "number"
+          },
+          "vertex_spacing": {
+            "minimum": 0,
+            "title": "Vertex Spacing",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mask_binarize",
+          "vertex_spacing"
+        ],
+        "title": "MaskCut",
+        "type": "object"
+      },
+      "ModelSourceSchema": {
+        "additionalProperties": false,
+        "description": "The importable-builder reference and what its model is built with.\n\nIt holds the task its model is for, the statistics it normalizes by (whose source names any\npretrained weights its builder loads), and a detector's geometry stated for a run that\nresolves no frame to derive it from. A key outside these fields refuses by name, and so does\na ``builder_kwargs`` naming a value the platform hands (:data:`HANDED_TO_BUILDER`).",
+        "properties": {
+          "builder": {
+            "minLength": 1,
+            "title": "Builder",
+            "type": "string"
+          },
+          "builder_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Builder Kwargs"
+          },
+          "detector_geometry": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StatedDetectorGeometry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "normalization": {
+            "$ref": "#/$defs/Normalization"
+          },
+          "source_files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Files"
+          },
+          "task": {
+            "minLength": 1,
+            "title": "Task",
+            "type": "string"
+          }
+        },
+        "required": [
+          "builder",
+          "task",
+          "normalization"
+        ],
+        "title": "ModelSourceSchema",
+        "type": "object"
+      },
+      "Normalization": {
+        "additionalProperties": false,
+        "description": "The per-band ``image_mean`` and ``image_std`` a model normalizes its input by.\n\nBoth are in [0, 1] tensor units. Their ``source`` is the data's band statistics' own sampling\nrecord when no weights load (``derivations.band_normalization_stats``), the pretrained weights\nwhose own statistics they are (``derivations.pretrained_normalization``), or the statement of\nevery band for a model reading more bands than its weights carry statistics for.",
+        "properties": {
+          "image_mean": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Image Mean",
+            "type": "array"
+          },
+          "image_std": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "title": "Image Std",
+            "type": "array"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ImageStatsSampling"
+              },
+              {
+                "$ref": "#/$defs/PretrainedWeights"
+              },
+              {
+                "$ref": "#/$defs/StatedBeyondWeights"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "image_mean",
+          "image_std",
+          "source"
+        ],
+        "title": "Normalization",
+        "type": "object"
+      },
+      "OneCycleSchedule": {
+        "additionalProperties": false,
+        "description": "One cycle over the block's horizon peaking at ``max_lr``.\n\nEach of ``torch.optim.lr_scheduler.OneCycleLR``'s own settings is stated.",
+        "properties": {
+          "anneal_strategy": {
+            "enum": [
+              "cos",
+              "linear"
+            ],
+            "title": "Anneal Strategy",
+            "type": "string"
+          },
+          "base_momentum": {
+            "title": "Base Momentum",
+            "type": "number"
+          },
+          "cycle_momentum": {
+            "title": "Cycle Momentum",
+            "type": "boolean"
+          },
+          "div_factor": {
+            "title": "Div Factor",
+            "type": "number"
+          },
+          "final_div_factor": {
+            "title": "Final Div Factor",
+            "type": "number"
+          },
+          "horizon_epochs": {
+            "minimum": 1,
+            "title": "Horizon Epochs",
+            "type": "integer"
+          },
+          "max_lr": {
+            "title": "Max Lr",
+            "type": "number"
+          },
+          "max_momentum": {
+            "title": "Max Momentum",
+            "type": "number"
+          },
+          "pct_start": {
+            "title": "Pct Start",
+            "type": "number"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "three_phase": {
+            "title": "Three Phase",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "onecycle",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "horizon_epochs",
+          "type",
+          "max_lr",
+          "pct_start",
+          "anneal_strategy",
+          "cycle_momentum",
+          "base_momentum",
+          "max_momentum",
+          "div_factor",
+          "final_div_factor",
+          "three_phase"
+        ],
+        "title": "OneCycleSchedule",
+        "type": "object"
+      },
+      "OptimizerSpec": {
+        "additionalProperties": false,
+        "description": "Optimizer settings.\n\nIts family and its tuned settings are required (both rates, the weight decay, and ``momentum``\nfor ``sgd`` and for no other optimizer).",
+        "properties": {
+          "backbone_lr": {
+            "exclusiveMinimum": 0,
+            "title": "Backbone Lr",
+            "type": "number"
+          },
+          "head_lr": {
+            "exclusiveMinimum": 0,
+            "title": "Head Lr",
+            "type": "number"
+          },
+          "lr_range_run": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lr Range Run"
+          },
+          "momentum": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Momentum"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "weight_decay": {
+            "minimum": 0,
+            "title": "Weight Decay",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rationale",
+          "name",
+          "backbone_lr",
+          "head_lr",
+          "weight_decay"
+        ],
+        "title": "OptimizerSpec",
+        "type": "object"
+      },
+      "PlateauSchedule": {
+        "additionalProperties": false,
+        "description": "The rate times ``factor`` once the run's selection value stops improving.\n\nIt stops improving when it has not improved in its metric's direction (:func:`selection_of`),\nby ``threshold`` in ``threshold_mode``, for ``patience`` epochs; ``cooldown`` epochs then pass\nbefore the count resumes. The rate never falls below ``min_lr``, and a change smaller than\n``eps`` is not applied (``torch.optim.lr_scheduler.ReduceLROnPlateau``).",
+        "properties": {
+          "cooldown": {
+            "title": "Cooldown",
+            "type": "integer"
+          },
+          "eps": {
+            "title": "Eps",
+            "type": "number"
+          },
+          "factor": {
+            "title": "Factor",
+            "type": "number"
+          },
+          "min_lr": {
+            "title": "Min Lr",
+            "type": "number"
+          },
+          "patience": {
+            "title": "Patience",
+            "type": "integer"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "threshold_mode": {
+            "enum": [
+              "rel",
+              "abs"
+            ],
+            "title": "Threshold Mode",
+            "type": "string"
+          },
+          "type": {
+            "const": "plateau",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "type",
+          "factor",
+          "patience",
+          "threshold",
+          "threshold_mode",
+          "cooldown",
+          "min_lr",
+          "eps"
+        ],
+        "title": "PlateauSchedule",
+        "type": "object"
+      },
+      "PretrainedWeights": {
+        "additionalProperties": false,
+        "description": "Pretrained weights a model's builder loads.\n\nThey are named by the ``library`` publishing them and their ``name`` there, a timm pretrained\ntag (``resnet18.a1_in1k``), a torchvision weights enum member\n(``ResNet18_Weights.IMAGENET1K_V1``) or a ``transformers`` checkpoint, a Hugging Face hub id\n(``facebook/mask2former-swin-small-coco-instance``) or a directory holding one.",
+        "properties": {
+          "library": {
+            "enum": [
+              "timm",
+              "torchvision",
+              "transformers"
+            ],
+            "title": "Library",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library",
+          "name"
+        ],
+        "title": "PretrainedWeights",
+        "type": "object"
+      },
+      "SamplerSpec": {
+        "additionalProperties": true,
+        "description": "``sampler``: the train loader's sampler ``name`` names (``samplers.build_sampler``).\n\nThe sampler's own values are kept as stated beside the block's ``rationale``.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "name"
+        ],
+        "title": "SamplerSpec",
+        "type": "object"
+      },
+      "ScoreWeights": {
+        "additionalProperties": false,
+        "description": "The composite objective's weight on each of its terms.\n\nThe objective is ``evaluation.compute_composite_objective``'s; each weight is non-negative so\na better term never raises the lower-is-better objective.",
+        "properties": {
+          "f1": {
+            "minimum": 0,
+            "title": "F1",
+            "type": "number"
+          },
+          "loss": {
+            "minimum": 0,
+            "title": "Loss",
+            "type": "number"
+          },
+          "map50": {
+            "minimum": 0,
+            "title": "Map50",
+            "type": "number"
+          }
+        },
+        "required": [
+          "loss",
+          "f1",
+          "map50"
+        ],
+        "title": "ScoreWeights",
+        "type": "object"
+      },
+      "StageSpec": {
+        "additionalProperties": false,
+        "description": "One progressive-unfreeze step.\n\nIt holds ``freeze_to`` and ``gradient_accumulation_steps``. Any other key, a per-stage ``lr``\nor ``epochs`` included, is refused by name.",
+        "properties": {
+          "freeze_to": {
+            "title": "Freeze To",
+            "type": "integer"
+          },
+          "gradient_accumulation_steps": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Gradient Accumulation Steps"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "freeze_to"
+        ],
+        "title": "StageSpec",
+        "type": "object"
+      },
+      "StatedBeyondWeights": {
+        "additionalProperties": false,
+        "description": "Per-band statistics stated with ``rationale`` beyond the bands the weights cover.\n\nThe model reads more bands than the ``pretrained_weights`` it loads carry statistics for.",
+        "properties": {
+          "pretrained_weights": {
+            "$ref": "#/$defs/PretrainedWeights"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "pretrained_weights"
+        ],
+        "title": "StatedBeyondWeights",
+        "type": "object"
+      },
+      "StatedDetectorGeometry": {
+        "additionalProperties": false,
+        "description": "A detector geometry a model source states, with its reason.",
+        "properties": {
+          "anchor_base_size": {
+            "exclusiveMinimum": 0,
+            "title": "Anchor Base Size",
+            "type": "integer"
+          },
+          "aspect_ratios": {
+            "items": {
+              "type": "number"
+            },
+            "minItems": 1,
+            "title": "Aspect Ratios",
+            "type": "array"
+          },
+          "max_size": {
+            "exclusiveMinimum": 0,
+            "title": "Max Size",
+            "type": "integer"
+          },
+          "min_size": {
+            "exclusiveMinimum": 0,
+            "title": "Min Size",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/$defs/_Stated"
+          }
+        },
+        "required": [
+          "min_size",
+          "max_size",
+          "anchor_base_size",
+          "aspect_ratios",
+          "source"
+        ],
+        "title": "StatedDetectorGeometry",
+        "type": "object"
+      },
+      "StepSchedule": {
+        "additionalProperties": false,
+        "description": "The rate times ``gamma`` every ``step_size`` epochs.",
+        "properties": {
+          "gamma": {
+            "title": "Gamma",
+            "type": "number"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "step_size": {
+            "title": "Step Size",
+            "type": "integer"
+          },
+          "type": {
+            "const": "step",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale",
+          "type",
+          "step_size",
+          "gamma"
+        ],
+        "title": "StepSchedule",
+        "type": "object"
+      },
+      "TilingSpec": {
+        "additionalProperties": false,
+        "description": "``data.tiling``, stated for a run that tiles its loader (:func:`run_tiling`).\n\nIt holds the ``datasets.TiledDetectionDataset`` options it states (an unstated edge and\noverlap derived, an unstated sliver fraction derived by the tiler), whether a tile holding no\nobject trains (``skip_empty``), and a within-image spatial split's ``buffer``.",
+        "properties": {
+          "buffer": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Buffer"
+          },
+          "keep_regions": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Keep Regions"
+          },
+          "overlap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Overlap"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "skip_empty": {
+            "title": "Skip Empty",
+            "type": "boolean"
+          },
+          "sliver_frac": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sliver Frac"
+          },
+          "tile_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tile Size"
+          }
+        },
+        "required": [
+          "rationale",
+          "skip_empty"
+        ],
+        "title": "TilingSpec",
+        "type": "object"
+      },
+      "_Stated": {
+        "additionalProperties": false,
+        "description": "A block a config states.\n\nA key outside its fields refuses by name, and ``rationale`` carries why the block states what\nit does.",
+        "properties": {
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rationale"
+        ],
+        "title": "_Stated",
+        "type": "object"
+      }
+    },
+    "additionalProperties": true,
+    "description": "The training config shape: trainer keys at the top level, no nested section.\n\nA key outside these fields is a bespoke loop's own and is kept as stated. It requires\n``model_source``, ``data``, ``evaluation``, the seeding and precision every trainer reads, and\n``rationale``, the reason for the top-level values it states; what training reads besides is\n:meth:`trainer_reads`.",
+    "properties": {
+      "augmentation": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AugmentationSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "batch_size": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Batch Size"
+      },
+      "checkpoint_every_n_epochs": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Checkpoint Every N Epochs"
+      },
+      "data": {
+        "$ref": "#/$defs/DataSpec"
+      },
+      "deterministic": {
+        "title": "Deterministic",
+        "type": "boolean"
+      },
+      "device": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Device"
+      },
+      "early_stopping": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EarlyStoppingSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "evaluation": {
+        "$ref": "#/$defs/EvaluationSpec"
+      },
+      "gradient_accumulation_steps": {
+        "default": 1,
+        "minimum": 1,
+        "title": "Gradient Accumulation Steps",
+        "type": "integer"
+      },
+      "log_every_n_batches": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Log Every N Batches"
+      },
+      "lr_scaling": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LrScalingSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "mixed_precision": {
+        "title": "Mixed Precision",
+        "type": "boolean"
+      },
+      "model_source": {
+        "$ref": "#/$defs/ModelSourceSchema"
+      },
+      "num_workers": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Num Workers",
+        "type": "integer"
+      },
+      "optimizer": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/OptimizerSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "rationale": {
+        "minLength": 1,
+        "title": "Rationale",
+        "type": "string"
+      },
+      "sampler": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SamplerSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "scheduler": {
+        "anyOf": [
+          {
+            "discriminator": {
+              "mapping": {
+                "cosine": "#/$defs/CosineSchedule",
+                "onecycle": "#/$defs/OneCycleSchedule",
+                "plateau": "#/$defs/PlateauSchedule",
+                "step": "#/$defs/StepSchedule"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CosineSchedule"
+              },
+              {
+                "$ref": "#/$defs/PlateauSchedule"
+              },
+              {
+                "$ref": "#/$defs/OneCycleSchedule"
+              },
+              {
+                "$ref": "#/$defs/StepSchedule"
+              }
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scheduler"
+      },
+      "seed": {
+        "title": "Seed",
+        "type": "integer"
+      },
+      "stage_warmup_epochs": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Stage Warmup Epochs",
+        "type": "integer"
+      },
+      "stages": {
+        "anyOf": [
+          {
+            "items": {
+              "$ref": "#/$defs/StageSpec"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Stages"
+      },
+      "training_source": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Training Source"
+      }
+    },
+    "required": [
+      "model_source",
+      "data",
+      "rationale",
+      "seed",
+      "deterministic",
+      "mixed_precision",
+      "evaluation"
+    ],
+    "title": "TrainConfigSchema",
     "type": "object"
   },
   "tcip_mcp.pipelines.training.lr_range.LrRangeResult": {
@@ -7098,6 +8805,26 @@
       "would_do_differently"
     ],
     "title": "Retrospective",
+    "type": "object"
+  },
+  "tcip_mcp.tools.project_tools.LastRetrospective": {
+    "description": "The last retrospective a project's log records: its ``project_id`` and when it landed.",
+    "properties": {
+      "modified_at": {
+        "format": "date-time",
+        "title": "Modified At",
+        "type": "string"
+      },
+      "project_id": {
+        "title": "Project Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "project_id",
+      "modified_at"
+    ],
+    "title": "LastRetrospective",
     "type": "object"
   },
   "tcip_mcp.tools.project_tools._DATASET_REGISTRY": {
@@ -9029,6 +10756,225 @@
       "sessions"
     ],
     "title": "AnnotationStats",
+    "type": "object"
+  },
+  "tcip_web.routes.terminal.SessionStartReported": {
+    "description": "What an ``agent_terminal_reported`` line records: a session start report and its session.",
+    "properties": {
+      "conversation": {
+        "minLength": 1,
+        "title": "Conversation",
+        "type": "string"
+      },
+      "session_id": {
+        "title": "Session Id",
+        "type": "string"
+      },
+      "source": {
+        "enum": [
+          "startup",
+          "resume",
+          "clear",
+          "compact",
+          "fork"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "transcript_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Transcript Path"
+      }
+    },
+    "required": [
+      "conversation",
+      "source",
+      "transcript_path",
+      "session_id"
+    ],
+    "title": "SessionStartReported",
+    "type": "object"
+  },
+  "tcip_web.routes.terminal.TerminalEnded": {
+    "description": "What an ``agent_terminal_ended`` line records about the session it ends.\n\nBeside the :class:`TerminalEnd` an end answers, it holds the session, why it ended in words\nfor the person and its :data:`HandOff`.",
+    "properties": {
+      "cause": {
+        "title": "Cause",
+        "type": "string"
+      },
+      "hand_off": {
+        "enum": [
+          "not_asked",
+          "not_landed",
+          "landed"
+        ],
+        "title": "Hand Off",
+        "type": "string"
+      },
+      "session_id": {
+        "title": "Session Id",
+        "type": "string"
+      },
+      "undelivered": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Undelivered",
+        "type": "array"
+      }
+    },
+    "required": [
+      "undelivered",
+      "session_id",
+      "cause",
+      "hand_off"
+    ],
+    "title": "TerminalEnded",
+    "type": "object"
+  },
+  "tcip_web.routes.terminal.TerminalLaunch": {
+    "$defs": {
+      "LaunchedProgram": {
+        "description": "What a launch ran: its provider row, argv, version, confinement, preparation and resume.\n\nIt carries the provider row's id, the rendered argv, the version its executable (the first\nelement) declares, what the row states its harness's own enforcement restricts and leaves\nopen (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), the\nsteps the row's preparation took before the launch, empty when it has none, and the\nconversation it resumed and the session that was in it, or why it resumed none.",
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Argv",
+            "type": "array"
+          },
+          "confinement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confinement"
+          },
+          "prepared": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prepared",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "resumed": {
+            "discriminator": {
+              "mapping": {
+                "not_resumed": "#/$defs/NotResumed",
+                "resumed": "#/$defs/Resumed"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Resumed"
+              },
+              {
+                "$ref": "#/$defs/NotResumed"
+              }
+            ],
+            "title": "Resumed"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "provider",
+          "argv",
+          "version",
+          "confinement",
+          "prepared",
+          "resumed"
+        ],
+        "title": "LaunchedProgram",
+        "type": "object"
+      },
+      "NotResumed": {
+        "description": "A launch that starts a new conversation, and why it resumed none, in words for a person.",
+        "properties": {
+          "kind": {
+            "const": "not_resumed",
+            "default": "not_resumed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "why"
+        ],
+        "title": "NotResumed",
+        "type": "object"
+      },
+      "Resumed": {
+        "description": "A launch that continues a conversation: the conversation, and the session it was in.",
+        "properties": {
+          "conversation": {
+            "title": "Conversation",
+            "type": "string"
+          },
+          "kind": {
+            "const": "resumed",
+            "default": "resumed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "session": {
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation",
+          "session"
+        ],
+        "title": "Resumed",
+        "type": "object"
+      }
+    },
+    "description": "A started session: its id and what it launched.",
+    "properties": {
+      "launched": {
+        "$ref": "#/$defs/LaunchedProgram"
+      },
+      "session_id": {
+        "title": "Session Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "session_id",
+      "launched"
+    ],
+    "title": "TerminalLaunch",
     "type": "object"
   }
 }
