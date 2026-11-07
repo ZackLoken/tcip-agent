@@ -137,14 +137,14 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
     assert "count_bias_exceeds_tolerance" in failures
 
 
-def test_a_holdout_keeping_no_detection_at_the_conf_has_no_precision_and_fails_the_floor() -> (
+def test_a_holdout_keeping_no_detection_at_the_conf_has_nothing_to_score() -> (
     None
 ):
     """A holdout with no detection at the picked conf has an undefined precision.
 
     Its detections all score 0.05, below the calibration's pick of 0.9, so none is kept to be
     right or wrong: precision is ``None``, the reference's objects are all missed (recall 0.0),
-    and a score that cannot be computed does not clear the floor.
+    and the holdout is stamped as having nothing to score, not as a defined score under the floor.
     """
     n, obj = 20, 80
     hold = dense_records(
@@ -162,7 +162,8 @@ def test_a_holdout_keeping_no_detection_at_the_conf_has_no_precision_and_fails_t
     assert (hb["tp"], hb["fp"]) == (0, 0)
     assert hb["precision"] is None
     assert hb["recall"] == 0.0
-    assert "localization_quality_floor_failed" in failures
+    assert "holdout_nothing_to_score" in failures
+    assert "localization_quality_floor_failed" not in failures
 
 
 def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail() -> (
@@ -332,10 +333,10 @@ def test_an_all_negative_calibration_or_holdout_fails_as_insufficient() -> (
         for i in range(3)
     ]
 
-    assert (
-        "insufficient_holdout_gt"
-        in _criterion(real, all_negative, floor=0.0)[2]
-    )
+    holdout_failures = _criterion(real, all_negative, floor=0.0)[2]
+    assert "insufficient_holdout_gt" in holdout_failures
+    assert "localization_quality_floor_failed" not in holdout_failures
+    assert "holdout_nothing_to_score" not in holdout_failures
     assert (
         "insufficient_calibration_gt"
         in _criterion(all_negative, real, floor=0.0)[2]
