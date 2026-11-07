@@ -40,7 +40,7 @@ from tcip_mcp.pipelines.training.evaluation import (
 from tcip_mcp.traits import CountObjective, RegressionCriterion, TraitEntry
 
 COUNT_OBJECTIVE_PICKERS: dict[
-    CountObjective, tuple[Callable[[dict], float | None], str]
+    CountObjective, tuple[Callable[[dict], float], str]
 ] = {
     "count_unbiased": (pick_count_unbiased, "count-unbiased count curve"),
     "detection_f1": (pick_f1_max, "F1-max count curve"),
@@ -154,8 +154,7 @@ def count_criterion(
     typical count, and each curve its quantile and the
     criterion it matched under. Every matching is kept in ``held`` where one is given
     (:func:`~tcip_mcp.pipelines.training.evaluation.matched`).
-    A conf at or below the floor fails as ``conf_censored``. A calibration curve the objective
-    picks no conf on refuses (``ValueError``).
+    A conf at or below the floor fails as ``conf_censored``.
     """
     picker, conf_label = COUNT_OBJECTIVE_PICKERS[entry.count_objective]
     criterion = resolve_match_criterion(entry, cal_records)
@@ -167,14 +166,7 @@ def count_criterion(
         dispersion_quantile=dispersion_quantile,
         held=held,
     )
-    picked = picker(cal_curve)
-    if picked is None:
-        raise ValueError(
-            f"the calibration side's count curve holds no conf the {entry.count_objective} "
-            "objective picks: its predictions carry no detection to sweep. Assess a checkpoint "
-            "that detects the subject, over a reference that holds it."
-        )
-    conf = float(picked)
+    conf = picker(cal_curve)
     hb, cb = (
         derive_operating_point_curve(
             records,
