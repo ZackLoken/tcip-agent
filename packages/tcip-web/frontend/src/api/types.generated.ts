@@ -1210,6 +1210,7 @@ export type FailureName =
   | "insufficient_holdout_images_per_class"
   | "holdout_missing_class"
   | "localization_quality_floor_failed"
+  | "holdout_nothing_to_score"
   | "count_error_dispersion_too_high"
   | "insufficient_calibration_positive_evidence"
   | "insufficient_holdout_positive_evidence"
