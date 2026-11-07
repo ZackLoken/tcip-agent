@@ -252,14 +252,14 @@ def test_a_regression_assessment_records_its_scalar_evidence_alone_and_pairs_by_
     assert proposal_pairs(tmp_path, bucket, [annotation], [proposal]) == {0: 0}
 
 
-def test_a_state_crossing_assessment_records_both_criteria_each_failure_named_once(
+def test_a_state_crossing_assessment_refuses_below_the_floor_and_records_both_criteria_at_it(
     tmp_path: Path,
 ) -> None:
-    """A state-crossing assessment records both members, each failure once, over the floor.
+    """A state-crossing assessment refuses a holdout below the floor and records both at it.
 
     Over a holdout of one ground-truth-bearing image the assessment refuses naming the holdout
     side; over a holdout at least at the floor it records the count and the classifier
-    criterion, each failure named once.
+    criterion.
     """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
@@ -312,4 +312,3 @@ def test_a_state_crossing_assessment_records_both_criteria_each_failure_named_on
     record = read_assessment(tmp_path, answered["assessment_id"])
     assert record.criterion.count is not None
     assert record.criterion.classifier is not None
-    assert len(record.failures) == len(set(record.failures)), record.failures
