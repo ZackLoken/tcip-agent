@@ -160,6 +160,7 @@ NULLABLE_SETS = {
     },
     "TraitEntry": {
         "positive_state",
+        "majority_fraction",
         "iou_jitter_px",
         "iou_margin",
         "count_bias_tolerance_frac",
