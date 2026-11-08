@@ -86,7 +86,7 @@ describe("ProjectPicker", () => {
           "not a project yet: create it with initialize_project",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(STRAY.tree.dataset_root)).toBeInTheDocument();
+    expect(screen.getByText(STRAY.root)).toBeInTheDocument();
   });
 
   it("opens a project by its id, then selects a dataset inside its own directory", async () => {
@@ -104,7 +104,7 @@ describe("ProjectPicker", () => {
       user: "grower",
     });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
-      dataset_root: VALLEY.tree.dataset_root,
+      dataset_root: VALLEY.root,
       date: VALLEY.tree.captures.at(-1)!.name,
     });
     expect(useStore.getState().openProject).toEqual(openedAs(VALLEY).project);
