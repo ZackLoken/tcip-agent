@@ -4,16 +4,8 @@
     "open_id": null,
     "projects": [
       {
+        "root": "/scratch/workspace/valley",
         "modified": 946684801.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/valley",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0,
         "kind": "read",
         "record": {
           "id": "<valley id>",
@@ -27,19 +19,19 @@
             "intensity": true,
             "scale": true
           }
-        }
-      },
-      {
-        "modified": 946684800.0,
+        },
         "tree": {
-          "dataset_root": "/scratch/workspace/other",
           "captures": [],
           "subjects": [],
           "subjects_by_date": {},
           "buckets_by_date": {},
           "label_problem": null
         },
-        "image_count": 0,
+        "image_count": 0
+      },
+      {
+        "root": "/scratch/workspace/other",
+        "modified": 946684800.0,
         "kind": "read",
         "record": {
           "id": "<other id>",
@@ -53,7 +45,15 @@
             "intensity": true,
             "scale": true
           }
-        }
+        },
+        "tree": {
+          "captures": [],
+          "subjects": [],
+          "subjects_by_date": {},
+          "buckets_by_date": {},
+          "label_problem": null
+        },
+        "image_count": 0
       }
     ]
   },
@@ -116,16 +116,8 @@
     "open_id": null,
     "projects": [
       {
+        "root": "/scratch/workspace/stray",
         "modified": 946684803.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/stray",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0,
         "kind": "unread",
         "problem": {
           "where": "the project record of /scratch/workspace/stray",
@@ -136,16 +128,8 @@
         }
       },
       {
+        "root": "/scratch/workspace/empty",
         "modified": 946684802.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/empty",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0,
         "kind": "read",
         "record": {
           "id": "<empty block id>",
@@ -159,22 +143,19 @@
             "intensity": true,
             "scale": true
           }
-        }
-      },
-      {
-        "modified": 946684801.0,
+        },
         "tree": {
-          "dataset_root": "/scratch/workspace/ridge",
-          "captures": [
-            { "name": "2026-02-11", "date": "2026-02-11" },
-            { "name": "2026-03-01", "date": "2026-03-01" }
-          ],
+          "captures": [],
           "subjects": [],
-          "subjects_by_date": { "2026-02-11": [], "2026-03-01": [] },
-          "buckets_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "subjects_by_date": {},
+          "buckets_by_date": {},
           "label_problem": null
         },
-        "image_count": 2,
+        "image_count": 0
+      },
+      {
+        "root": "/scratch/workspace/ridge",
+        "modified": 946684801.0,
         "kind": "read",
         "record": {
           "id": "<ridge farm id>",
@@ -188,12 +169,37 @@
             "intensity": true,
             "scale": true
           }
-        }
+        },
+        "tree": {
+          "captures": [
+            { "name": "2026-02-11", "date": "2026-02-11" },
+            { "name": "2026-03-01", "date": "2026-03-01" }
+          ],
+          "subjects": [],
+          "subjects_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "buckets_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "label_problem": null
+        },
+        "image_count": 2
       },
       {
+        "root": "/scratch/workspace/valley",
         "modified": 946684800.0,
+        "kind": "read",
+        "record": {
+          "id": "<valley farm id>",
+          "display_name": "Valley farm",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        },
         "tree": {
-          "dataset_root": "/scratch/workspace/valley",
           "captures": [
             { "name": "2026-02-11", "date": "2026-02-11" },
             { "name": "2026-03-01", "date": "2026-03-01" },
@@ -212,21 +218,7 @@
           },
           "label_problem": null
         },
-        "image_count": 4,
-        "kind": "read",
-        "record": {
-          "id": "<valley farm id>",
-          "display_name": "Valley farm",
-          "site": "north orchard",
-          "invariances": {
-            "horizontal_flip": true,
-            "vertical_flip": true,
-            "rotation": 180.0,
-            "color": true,
-            "intensity": true,
-            "scale": true
-          }
-        }
+        "image_count": 4
       }
     ]
   },
@@ -240,16 +232,8 @@
     "open_id": "<valley farm id>",
     "projects": [
       {
+        "root": "/scratch/workspace/stray",
         "modified": 946684803.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/stray",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0,
         "kind": "unread",
         "problem": {
           "where": "the project record of /scratch/workspace/stray",
@@ -260,16 +244,8 @@
         }
       },
       {
+        "root": "/scratch/workspace/empty",
         "modified": 946684802.0,
-        "tree": {
-          "dataset_root": "/scratch/workspace/empty",
-          "captures": [],
-          "subjects": [],
-          "subjects_by_date": {},
-          "buckets_by_date": {},
-          "label_problem": null
-        },
-        "image_count": 0,
         "kind": "read",
         "record": {
           "id": "<empty block id>",
@@ -283,22 +259,19 @@
             "intensity": true,
             "scale": true
           }
-        }
-      },
-      {
-        "modified": 946684801.0,
+        },
         "tree": {
-          "dataset_root": "/scratch/workspace/ridge",
-          "captures": [
-            { "name": "2026-02-11", "date": "2026-02-11" },
-            { "name": "2026-03-01", "date": "2026-03-01" }
-          ],
+          "captures": [],
           "subjects": [],
-          "subjects_by_date": { "2026-02-11": [], "2026-03-01": [] },
-          "buckets_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "subjects_by_date": {},
+          "buckets_by_date": {},
           "label_problem": null
         },
-        "image_count": 2,
+        "image_count": 0
+      },
+      {
+        "root": "/scratch/workspace/ridge",
+        "modified": 946684801.0,
         "kind": "read",
         "record": {
           "id": "<ridge farm id>",
@@ -312,12 +285,37 @@
             "intensity": true,
             "scale": true
           }
-        }
+        },
+        "tree": {
+          "captures": [
+            { "name": "2026-02-11", "date": "2026-02-11" },
+            { "name": "2026-03-01", "date": "2026-03-01" }
+          ],
+          "subjects": [],
+          "subjects_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "buckets_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "label_problem": null
+        },
+        "image_count": 2
       },
       {
+        "root": "/scratch/workspace/valley",
         "modified": 946684800.0,
+        "kind": "read",
+        "record": {
+          "id": "<valley farm id>",
+          "display_name": "Valley farm",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        },
         "tree": {
-          "dataset_root": "/scratch/workspace/valley",
           "captures": [
             { "name": "2026-02-11", "date": "2026-02-11" },
             { "name": "2026-03-01", "date": "2026-03-01" },
@@ -336,21 +334,7 @@
           },
           "label_problem": null
         },
-        "image_count": 4,
-        "kind": "read",
-        "record": {
-          "id": "<valley farm id>",
-          "display_name": "Valley farm",
-          "site": "north orchard",
-          "invariances": {
-            "horizontal_flip": true,
-            "vertical_flip": true,
-            "rotation": 180.0,
-            "color": true,
-            "intensity": true,
-            "scale": true
-          }
-        }
+        "image_count": 4
       }
     ]
   },
