@@ -9378,7 +9378,7 @@
       },
       "TraitEntry": {
         "additionalProperties": false,
-        "description": "One trait's complete entry: its spec fields and its operationalization per delivery kind.\n\nEvery field is required; a field not yet decided is stated as empty or null.",
+        "description": "One trait's complete entry: its spec fields and its operationalization per delivery kind.\n\nEvery field is required; a field not yet decided is stated as empty or null. The milestone\nvalues an entry states must agree with each other (:meth:`_milestones_agree`); whether a\nfield is stated at all is the breeder's question (:func:`authored`).",
         "properties": {
           "classifier_agreement_floor": {
             "anyOf": [
@@ -9505,19 +9505,30 @@
             "title": "Localization Tolerance Frac",
             "type": "number"
           },
+          "majority_fraction": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fraction, one of ``milestone_fractions`` once they are stated, whose crossing is the\nmajority date, or null for an entry naming no majority.",
+            "title": "Majority Fraction"
+          },
           "majority_label": {
-            "description": "The label the majority-alias column carries.",
+            "description": "The label the majority date's column carries, a token free of whitespace not shaped like a\nmilestone key; stated exactly when ``majority_fraction`` is.",
             "title": "Majority Label",
             "type": "string"
           },
-          "majority_milestone": {
-            "description": "The crossing key (e.g. ``95per``) the crops.yml majority-date milestone maps to, or empty.",
-            "title": "Majority Milestone",
-            "type": "string"
-          },
           "milestone_fractions": {
-            "description": "Crossing fractions for a milestone-delivering trait.",
+            "description": "Crossing fractions for a milestone-delivering trait, each a whole percent, no two naming\none milestone key.",
             "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 1,
               "type": "number"
             },
             "title": "Milestone Fractions",
@@ -9569,7 +9580,7 @@
             "title": "Ordinal Agreement Floor"
           },
           "phenology_prefix": {
-            "description": "The phenology CSV milestone-column prefix.",
+            "description": "The phenology CSV milestone-column prefix, a token free of whitespace, or empty.",
             "title": "Phenology Prefix",
             "type": "string"
           },
@@ -9638,7 +9649,7 @@
           "milestone_fractions",
           "milestone_on",
           "crossing_rule",
-          "majority_milestone",
+          "majority_fraction",
           "phenology_prefix",
           "majority_label",
           "count_objective",

@@ -653,43 +653,20 @@ _SPEC_SHAPES = [
         crossing_rule=RULE,
         phenology_prefix="b",
     ),
-    # A majority label with no majority milestone: a column must not be built from the label
-    # alone without a milestone to source it.
-    entry(
-        "b",
-        BUD_OPENING.delivers,
-        milestone_fractions=(0.1, 0.9),
-        crossing_rule=RULE,
-        phenology_prefix="b",
-        majority_label="peak",
-    ),
-    # A majority milestone naming a crossing the trait does not compute: the column is real (the
-    # spec names it) and its value is honestly None, which is not the same as a phantom.
-    entry(
-        "b",
-        BUD_OPENING.delivers,
-        milestone_fractions=(0.1, 0.9),
-        crossing_rule=RULE,
-        phenology_prefix="b",
-        majority_milestone="95per",
-        majority_label="peak",
-    ),
     BUD_OPENING,
 ]
 
 
 @pytest.mark.parametrize(
-    "spec",
-    _SPEC_SHAPES,
-    ids=lambda s: f"{s.name}-{s.majority_milestone or 'nomajority'}",
+    "spec", _SPEC_SHAPES, ids=["no_majority", "bud_opening"]
 )
 def test_phenology_csv_columns_name_no_column_without_a_producer(
     spec: TraitEntry,
 ) -> None:
     """Every trait-prefixed column the CSV schema names is filled by a producer.
 
-    The parametrized spec shapes include one whose ``majority_milestone`` is unset, and no
-    computed column is missing from the schema.
+    The parametrized spec shapes include one that names no majority, and no computed column is
+    missing from the schema.
     """
     series = [("2026-02-01", 0.0), ("2026-02-10", 0.5), ("2026-02-20", 1.0)]
     produced = {
@@ -704,6 +681,40 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(
         produced - schema == set()
     )  # and nothing computed is silently dropped
     assert not any(c.startswith(f"{spec.phenology_prefix}__") for c in schema)
+
+
+@pytest.mark.parametrize(
+    "fields, refusal",
+    [
+        (
+            {"majority_label": "peak"},
+            "majority_label 'peak' is set while majority_fraction is None",
+        ),
+        (
+            {"majority_fraction": 0.95, "majority_label": "peak"},
+            "majority_fraction 0.95 is not one of milestone_fractions [0.1, 0.9]",
+        ),
+    ],
+    ids=["label_without_majority", "majority_outside_the_fractions"],
+)
+def test_an_entry_whose_majority_names_no_computed_column_is_refused(
+    fields: dict[str, object], refusal: str
+) -> None:
+    """A majority column with no milestone to source it, or none computed, is refused by the type.
+
+    Neither shape reaches a delivery to blank its majority column.
+    """
+    with pytest.raises(ValidationError) as refused:
+        entry(
+            "b",
+            BUD_OPENING.delivers,
+            milestone_fractions=(0.1, 0.9),
+            crossing_rule=RULE,
+            phenology_prefix="b",
+            **fields,
+        )
+
+    assert refusal in str(refused.value)
 
 
 def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(

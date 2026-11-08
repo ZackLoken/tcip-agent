@@ -24,7 +24,7 @@ TRAIT_GOLDEN: dict[str, Any] = {
                 "milestone_fractions": [0.5],
                 "milestone_on": "positive_fraction",
                 "crossing_rule": "linear_whole_day",
-                "majority_milestone": "",
+                "majority_fraction": None,
                 "phenology_prefix": "",
                 "majority_label": "",
                 "count_objective": "",
