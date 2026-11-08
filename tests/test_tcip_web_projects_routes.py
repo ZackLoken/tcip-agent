@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,7 +23,7 @@ from tests._busy_store_fixtures import (
 from tests._web_fixtures import INVARIANCES
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from tcip_store import RefusedRead
     from tcip_web.state import OpenProject
@@ -456,6 +457,78 @@ def test_opening_an_id_no_project_holds_is_404(
     assert resp.status_code == 404
     assert "000000000000" in resp.json()["detail"]
     assert client.get("/api/projects").json()["open_id"] is None
+
+
+@contextmanager
+def _locked_by_another_holder(root: Path) -> Iterator[None]:
+    """Hold ``root``'s database from another connection while the bound backend waits briefly.
+
+    The bound backend's connections on ``root`` are released first. On leaving, the holder and
+    the short-wait backend are closed and a new default backend is bound.
+    """
+    import tcip_store
+
+    tcip_store.release_root(root)
+    try:
+        with waiting(SHORT_WAIT_S), held_by_another_connection(root):
+            yield
+    finally:
+        tcip_store.bind()
+
+
+def test_opening_a_project_whose_store_is_held_answers_409_not_404(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    held = _make_project(workspace_dir, "locked_orchard")
+
+    with _locked_by_another_holder(held.root):
+        resp = client.post(
+            "/api/projects/open", json={"id": held.id, "user": "grower"}
+        )
+
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert "was busy" in detail, detail
+    assert "gave up after" in detail, detail
+    assert "no project in the workspace has id" not in detail, detail
+    assert client.get("/api/projects").json()["open_id"] is None
+
+
+def test_a_held_project_does_not_stop_another_from_opening(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    held = _make_project(workspace_dir, "locked_orchard")
+    free = _make_project(workspace_dir, "free_orchard")
+
+    with _locked_by_another_holder(held.root):
+        opened = client.post(
+            "/api/projects/open", json={"id": free.id, "user": "grower"}
+        )
+        unknown = client.post(
+            "/api/projects/open", json={"id": "0" * 12, "user": "grower"}
+        )
+
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["project"]["id"] == free.id
+    assert unknown.status_code == 409, unknown.text
+    detail = unknown.json()["detail"]
+    assert str(held.root) in detail, detail
+    assert str(free.root) not in detail, detail
+
+
+def test_a_held_project_opens_once_the_hold_is_released(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    held = _make_project(workspace_dir, "locked_orchard")
+    with _locked_by_another_holder(held.root):
+        pass
+
+    resp = client.post(
+        "/api/projects/open", json={"id": held.id, "user": "grower"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["project"]["id"] == held.id
 
 
 def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(

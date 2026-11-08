@@ -205,9 +205,10 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
     person's and unended, else in a new one. A contribution whose ``contribution_id`` the record
     already holds is a repeat: it lands nowhere, leaves no line, and answers :class:`Repeated`
     with the session it first landed in, ended or not. A contribution with no time, no
-    annotations and no confirmed negative answers :class:`NothingRecorded`. Answers 404 for
-    a ``project_id`` no workspace project holds, 409 for a named session that is not the
-    person's unended session, for a ``project_id`` that is not the open project's when no
+    annotations and no confirmed negative answers :class:`NothingRecorded`. Answers, when a
+    session is named, the 404 or 409 of :func:`~tcip_web.routes.projects.workspace_project` for
+    a ``project_id`` no single workspace project holds; 409 for a named session that is not
+    the person's unended session, for a ``project_id`` that is not the open project's when no
     session is named, and when the line cannot follow the write.
     """
     from tcip_web.routes.projects import workspace_project
