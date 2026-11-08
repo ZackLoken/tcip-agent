@@ -1278,9 +1278,7 @@ def cancel_training(
     except ValueError as exc:
         return {"error": str(exc)}
     try:
-        with unreadable(
-            str(directory), *experiments.RUN_REFUSALS, FileNotFoundError
-        ):
+        with unreadable(str(directory), *experiments.RUN_REFUSALS):
             return training_detail(project, directory)
     except ReadRefusedError as exc:
         return CancelRecorded(
