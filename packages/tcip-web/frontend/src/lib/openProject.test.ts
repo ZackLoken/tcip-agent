@@ -61,9 +61,7 @@ describe("openWithDefaults", () => {
     await openWithDefaults(RIDGE);
 
     expect(api.projects.open).toHaveBeenCalledWith({ id: RIDGE.record.id, user: "grower" });
-    expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe(
-      RIDGE.tree.dataset_root,
-    );
+    expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe(RIDGE.root);
     expect(useStore.getState().openProject).toEqual(openedAs(RIDGE).project);
   });
 

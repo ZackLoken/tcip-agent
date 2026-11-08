@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
+import { readRefusalText } from "@/api/http";
 import {
   type OpenAnswer,
   type ProjectsListing,
@@ -34,7 +35,12 @@ vi.mock("@/api/client", () => {
 });
 
 const { valley: VALLEY, ridge: RIDGE, empty: EMPTY, stray: STRAY } = PICKER;
-const { picker: LISTING, picker_open: VALLEY_OPEN, empty_listing: NO_PROJECTS } = PROJECT_FIXTURES;
+const {
+  picker: LISTING,
+  picker_open: VALLEY_OPEN,
+  picker_damaged: DAMAGED,
+  empty_listing: NO_PROJECTS,
+} = PROJECT_FIXTURES;
 
 /** The newest of Valley farm's dates holding labels. */
 const [LANDED] = Object.entries(VALLEY.tree.subjects_by_date)
@@ -86,7 +92,7 @@ describe("ProjectPicker", () => {
           "not a project yet: create it with initialize_project",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(STRAY.tree.dataset_root)).toBeInTheDocument();
+    expect(screen.getByText(STRAY.root)).toBeInTheDocument();
   });
 
   it("opens a project by its id, then selects a dataset inside its own directory", async () => {
@@ -104,7 +110,7 @@ describe("ProjectPicker", () => {
       user: "grower",
     });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
-      dataset_root: VALLEY.tree.dataset_root,
+      dataset_root: VALLEY.root,
       date: VALLEY.tree.captures.at(-1)!.name,
     });
     expect(useStore.getState().openProject).toEqual(openedAs(VALLEY).project);
@@ -491,6 +497,24 @@ describe("ProjectPicker", () => {
     await waitFor(() => expect(useStore.getState().openChoice.projectId).toBe(VALLEY.record.id));
     expect(api.projects.open).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
+  });
+
+  it("lists the open project whose record will not read as an unread card and selects none", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue(DAMAGED);
+    render(<ProjectPicker />);
+
+    const unread = DAMAGED.projects.find((p) => p.kind === UNREAD && p.root.endsWith("/valley"));
+    if (unread?.kind !== UNREAD) throw new Error("the produced listing's valley record read");
+    expect(await screen.findByText(unread.root)).toBeInTheDocument();
+    expect(screen.getByText(readRefusalText(unread.problem))).toBeInTheDocument();
+    await screen.findByText(RIDGE.record.display_name);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(DAMAGED.open_id).not.toBeNull();
+    expect(useStore.getState().openChoice.projectId).toBeFalsy();
+    expect(document.querySelectorAll('[aria-pressed="true"]')).toHaveLength(0);
   });
 
   it("keeps the project the person chose over the preselection", async () => {
