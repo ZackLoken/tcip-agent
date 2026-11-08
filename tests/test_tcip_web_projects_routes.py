@@ -16,7 +16,7 @@ from tests._busy_store_fixtures import (
     SHORT_WAIT_S,
     held_by_another_connection,
     seconds_given_up_after,
-    short_wait_backend,
+    waiting,
 )
 from tests._web_fixtures import INVARIANCES
 
@@ -214,7 +214,7 @@ def test_list_over_a_held_store_answers_409_saying_it_was_busy_and_how_long_it_w
     held = _make_project(workspace_dir, "held_project").root
     tcip_store.release_root(held)
 
-    with short_wait_backend(), held_by_another_connection(held):
+    with waiting(SHORT_WAIT_S), held_by_another_connection(held):
         resp = client.get("/api/projects")
 
     assert resp.status_code == 409, resp.text
