@@ -157,30 +157,21 @@ def test_read_audit_log_refuses_on_a_page_carrying_an_undecodable_entry(
     project: Path,
     dataset_root: Path,
 ) -> None:
-    import sqlite3
-
+    """The tool answers the log reader's refusal of the damaged entry as its error."""
+    import tcip_store
     from tcip_mcp.tools.annotation_tools import write_subject_registry
-    from tcip_store.file_backend import database_file
+    from tests._record_damage_fixtures import damage_last_log_entry
 
     assert "error" not in write_subject_registry(
         project, str(dataset_root), subjects=_subjects(), actor=None
     )
-    conn = sqlite3.connect(
-        str(database_file(str(dataset_root.resolve()))), isolation_level=None
-    )
-    try:
-        conn.execute(
-            "update log_entries set entry = ? where id = (select max(id) from "
-            "log_entries)",
-            (b'{"tool": "write_subject_registry", bro',),
-        )
-    finally:
-        conn.close()
+    damage_last_log_entry(audit_module.audit_log_key(dataset_root.resolve()))
 
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
+        audit_module.audit_entries(dataset_root.resolve())
     result = read_audit_log(project, scope=str(dataset_root))
 
-    assert "error" in result
-    assert "undecodable" in result["error"]
+    assert result["error"] == str(refused.value)
     assert "entries" not in result
 
 
