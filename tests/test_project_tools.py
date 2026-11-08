@@ -164,6 +164,39 @@ def test_inspect_project(tmp_path: Path) -> None:
     assert status["plant_mappings"] == MappingsListed(names=[]).model_dump()
 
 
+def test_inspect_project_counts_neither_models_nor_renders(
+    tmp_path: Path,
+) -> None:
+    """A project with a registered model and a requested render carries no model or render count.
+
+    The model's checkpoint sits in a run directory, where the trainer's writer puts it, and the
+    render path is the viz directory's first.
+    """
+    pytest.importorskip("torch")
+    from tcip_mcp.experiments import experiment_dir
+    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path
+    from tcip_mcp.project_paths import viz_output_path
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
+
+    _initialized(tmp_path)
+    checkpoint = produced_checkpoint(
+        checkpoint_path(
+            experiment_dir("run-a", project=tmp_path), "model_best"
+        ),
+        "registered-weights",
+    )
+    ModelRegistry(str(tmp_path)).register_model(
+        "currant_bud_detector_v1", str(checkpoint), actor=None
+    )
+    viz_output_path(tmp_path, "overlay")
+
+    status = inspect_project(tmp_path)
+
+    assert "model_count" not in status
+    assert "artifact_count" not in status
+
+
 def test_inspect_project_folds_in_recent_activity(tmp_path: Path) -> None:
     from tcip_mcp.tools.meta_tools import report_friction
 
