@@ -314,6 +314,39 @@ def test_a_sweep_cancel_is_recorded_at_its_own_sweep_record_that_will_not_read(
     assert cancel_unread(project, sweep)["where"] == str(sweep / SWEEP_FILE)
 
 
+def test_a_sweep_cancel_is_recorded_at_the_audit_log_holding_an_entry_that_will_not_decode(
+    project: Path, real_hpo_base_config: dict
+) -> None:
+    """A sweep's cancel over a project whose audit log holds an undecodable entry is recorded.
+
+    The sweep's detail reads the log's launch lines, so the damaged entry refuses the read after
+    the cancel was written; the answer's place is the log, and the cancel's own line lands as
+    ``ok`` past the damaged entry, which a read from the log's start still refuses over.
+    """
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_entries, audit_log_key
+    from tcip_mcp.experiments import CANCEL_FILE
+    from tests._audit_fixtures import audit_rows
+    from tests._record_damage_fixtures import damage_last_log_entry
+
+    sweep = opened_sweep(project, real_hpo_base_config)
+    past = damage_last_log_entry(audit_log_key(project))
+
+    unread = cancel_unread(project, sweep)
+
+    assert (unread["where"], unread["refusal"]["kind"]) == (
+        f"the audit log at {project}",
+        "unreadable",
+    )
+    assert (sweep / CANCEL_FILE).is_file()
+    assert [
+        row["status"]
+        for row in audit_rows(project, "cancel_training", after=past)
+    ] == ["ok"]
+    with pytest.raises(ts.ReadRefusedError):
+        audit_entries(project)
+
+
 @pytest.mark.skipif(
     os.name == "nt",
     reason="Windows' chmod sets the read-only flag alone, so no read is denied",

@@ -93,13 +93,7 @@ def read_verdicts(key: Key) -> list[Verdict]:
     shard = f"the verdict shard {'/'.join(key.parts)}"
     with tcip_store.unreadable(shard, *tcip_store.STORE_READ_REFUSALS):
         page = tcip_store.read_log(key)
-    if page.corrupt:
-        raise tcip_store.ReadRefusedError(
-            tcip_store.Unreadable(
-                message=f"entries at {page.corrupt} will not decode"
-            ),
-            shard,
-        )
+    tcip_store.refuse_corrupt_entries(page, shard)
     return [
         decode_verdict(entry, f"entry {i} of {shard}")
         for i, entry in enumerate(page.records)
