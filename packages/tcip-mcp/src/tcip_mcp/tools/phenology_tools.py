@@ -136,9 +136,9 @@ def register_plant_registry(
     ``registered_at``, and a content digest over every parsed row.
 
     A second registration under a taken ``name`` is read before it writes (this store's own
-    ``concurrency="cas"``): it returns the existing record unchanged when the digest matches (the
-    same plants again, from a different path or row order), and refuses naming both digests when it
-    does not.
+    ``concurrency="cas"``): it refuses naming both crops when its crop differs, returns the
+    existing record unchanged when the digest matches (the same plants again, from a different
+    path or row order), and refuses naming both digests when it does not.
 
     Args:
         name: The registry's name within this project (``plant_mapping.NAME_SEGMENT``:
@@ -152,8 +152,8 @@ def register_plant_registry(
     Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
     (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with :func:`shp_to_plant_csv`), naming
     any file that parsed no georeferenced, named plant or is not UTF-8 text, naming a crop that is
-    empty or that ``crops.yml`` names for no trait, and naming a name conflict's two digests or a
-    name outside ``NAME_SEGMENT``. This does not require a project record.
+    empty or that ``crops.yml`` names for no trait, and naming a name conflict's two crops or two
+    digests or a name outside ``NAME_SEGMENT``. This does not require a project record.
 
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping

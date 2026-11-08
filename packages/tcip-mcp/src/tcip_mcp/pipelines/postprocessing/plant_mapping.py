@@ -920,7 +920,7 @@ class NoGeoreferencedPlantsError(Exception):
 
 
 class PlantRegistryNameConflictError(Exception):
-    """A registration's name is already taken by a different set of plants."""
+    """A registration's name is already taken by a different set of plants or another crop."""
 
 
 PLANT_REGISTRY_STORE = "plant_registries"
@@ -1148,8 +1148,8 @@ def register_plant_registry_record(
     (``pydantic.ValidationError``); a crop crops.yml names for no trait raises ``ValueError``. The
     read-then-write is one transaction (:func:`tcip_store.transaction`, this store's own
     ``concurrency="cas"``): a second registration under a taken name returns the existing record
-    unchanged when the digest matches, and raises :class:`PlantRegistryNameConflictError`
-    otherwise, naming the two digests.
+    unchanged when the crop and the digest match, and otherwise raises
+    :class:`PlantRegistryNameConflictError` naming the two crops, or else the two digests.
     """
     from tcip_mcp.traits import require_registered_crop
 
@@ -1173,6 +1173,12 @@ def register_plant_registry_record(
             existing = tcip_store.validated(
                 _PLANT_REGISTRY, stored, _plant_registry_place(project, name)
             )
+            if existing["crop"] != record["crop"]:
+                raise PlantRegistryNameConflictError(
+                    f"{_plant_registry_place(project, name)} is of crop "
+                    f"{existing['crop']!r}, this registration names crop "
+                    f"{record['crop']!r}; register under a new name"
+                )
             if existing["digest"] == digest:
                 return existing
             raise PlantRegistryNameConflictError(

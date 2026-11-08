@@ -112,6 +112,21 @@ def test_each_door_stores_a_named_crop_stripped(tmp_path: Path) -> None:
     assert identity.crop == crop
 
 
+def test_a_same_name_registration_with_another_crop_refuses_naming_both(
+    tmp_path: Path,
+) -> None:
+    """The same plants under a taken name with a different crop refuse, the stored one kept."""
+    first, other = _crop(0), _crop(1)
+    stored = _registered_plants(tmp_path, first)
+    assert "error" not in stored, stored
+
+    refused = _registered_plants(tmp_path, other)
+
+    error = refused.get("error", "")
+    assert repr(first) in error and repr(other) in error, refused
+    assert plant_mapping.load_registry(tmp_path, "valley") == stored
+
+
 def test_a_stored_registry_whose_crop_is_empty_refuses_on_load(
     tmp_path: Path,
 ) -> None:
