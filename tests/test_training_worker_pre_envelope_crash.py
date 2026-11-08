@@ -79,3 +79,5 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
     assert final.state == "failed"
     assert "dataset build exploded" in final.status_error
     assert "audit entry could not be written" in final.status_error
+    assert "did not start" in final.status_error
+    assert "committed" not in final.status_error
