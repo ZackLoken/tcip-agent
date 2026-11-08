@@ -84,6 +84,7 @@ from tcip_store import (
     DecodeError,
     FiniteJsonValue,
     ReadRefusedError,
+    RefusedRead,
     StoreError,
     decode_value,
     encode_log_line,
@@ -712,21 +713,19 @@ def require_open(directory: Path) -> None:
         )
 
 
-def request_cancel(directory: Path) -> datetime:
-    """Record a cancellation request of the run or sweep at ``directory``; return its first time.
+def request_cancel(directory: Path) -> CancelRequest:
+    """Record a cancellation request of the run or sweep at ``directory``; return the first one.
 
-    A later request leaves the first record as written. Refuses a directory that has ended
-    (:func:`require_open`).
+    A later request leaves the first record as written and returns it, read back. Refuses a
+    directory that has ended (:func:`require_open`).
     """
     require_open(directory)
+    request = CancelRequest(requested=now())
     try:
-        write_once(
-            directory / CANCEL_FILE,
-            CancelRequest(requested=now()).model_dump(mode="json"),
-        )
+        write_once(directory / CANCEL_FILE, request.model_dump(mode="json"))
     except FileExistsError:
-        pass
-    return cancel_requested_at(directory)
+        return read_cancel_request(directory)
+    return request
 
 
 class CancelRequest(BaseModel):
@@ -737,14 +736,22 @@ class CancelRequest(BaseModel):
     requested: AwareDatetime
 
 
+def read_cancel_request(directory: Path) -> CancelRequest:
+    """Return the cancellation request of the run or sweep at ``directory``.
+
+    None written raises ``FileNotFoundError``, and a record that does not validate
+    ``tcip_store.ReadRefusedError`` naming its file.
+    """
+    path = directory / CANCEL_FILE
+    return validated(CancelRequest, read_record(path), str(path))
+
+
 def cancel_requested_at(directory: Path) -> datetime:
     """Return when the cancellation of the run or sweep at ``directory`` was first requested.
 
-    The record is a :class:`CancelRequest`; none written raises ``FileNotFoundError``, and one
-    that does not validate ``tcip_store.ReadRefusedError`` naming its file.
+    Refuses as :func:`read_cancel_request` does.
     """
-    path = directory / CANCEL_FILE
-    return validated(CancelRequest, read_record(path), str(path)).requested
+    return read_cancel_request(directory).requested
 
 
 def cancel_requested(directory: Path) -> bool:
@@ -1462,10 +1469,29 @@ class SweepDetail(BaseModel):
     tensorboard: TensorboardState
 
 
-type TrainingDetail = Annotated[
-    RunDetail | SweepDetail, Field(discriminator="kind")
-]
+class CancelRecorded(BaseModel):
+    """A cancellation request that was written, answered without the run's detail.
+
+    ``unread`` is the refused read of the record the detail read after the request could not
+    take; the request itself stands as written at ``requested_at``.
+    """
+
+    kind: Literal["cancel_recorded"] = "cancel_recorded"
+    experiment_id: str
+    requested_at: AwareDatetime
+    unread: RefusedRead
+
+
+_Details = RunDetail | SweepDetail
+
+type TrainingDetail = Annotated[_Details, Field(discriminator="kind")]
 """One run, trial or sweep with the TensorBoard serving its board, told apart by its ``kind``."""
+
+type CancelAnswer = Annotated[
+    _Details | CancelRecorded, Field(discriminator="kind")
+]
+"""What a cancel request answers: the :data:`TrainingDetail` it reads, or the cancel recorded with
+its detail unread, told apart by their ``kind``."""
 
 
 class TrainingListing(BaseModel):

@@ -446,6 +446,35 @@ def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
     assert (line["tool"], line["actor"]) == ("cancel_training", "user:tester")
 
 
+def test_a_cancel_whose_run_will_not_read_afterward_answers_200_as_recorded(
+    tmp_path: Path, opened_client: TestClient
+) -> None:
+    """The cancel route answers the recorded cancel, not a raise, and logs it as one ok line."""
+    from tcip_mcp.experiments import RUN_FILE
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
+
+    run_dir = opened_run(
+        tmp_path,
+        detection_config(tmp_path / "gui-data", project=tmp_path),
+        experiment_id="exp-gui-cancel-unread",
+    )
+    (run_dir / RUN_FILE).write_bytes(b"\xff\xfe not json")
+    before = len(audit_rows(tmp_path, "cancel_training"))
+
+    resp = opened_client.post(
+        "/api/training/runs/exp-gui-cancel-unread/cancel",
+        json={"user": "tester"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["kind"] == "cancel_recorded"
+    (line,) = audit_rows(tmp_path, "cancel_training")[before:]
+    assert line["status"] == "ok"
+
+
 def test_tensorboard_route_404s_for_unknown_run(
     opened_client: TestClient,
 ) -> None:

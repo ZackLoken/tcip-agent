@@ -18,6 +18,8 @@ from tcip_mcp import experiments
 from tcip_mcp.audit import append_or_raise, audit_line, audited, now
 from tcip_mcp.experiments import (
     SWEEP_FILE,
+    CancelAnswer,
+    CancelRecorded,
     RunDetail,
     SweepDetail,
     SweepGroup,
@@ -57,6 +59,7 @@ from tcip_store import (
     RefusedRead,
     StoreError,
     canonical_path,
+    unreadable,
 )
 
 tool()(available_search_algs)
@@ -1240,7 +1243,7 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
 @audited
 def cancel_training(
     project: Path, experiment_id: str, *, actor: str | None
-) -> TrainingDetail | dict:
+) -> CancelAnswer | dict:
     """Request graceful cancellation of a running training run, a sweep's trial or a whole sweep.
 
     The request is ``actor``'s, the run or sweep named by its id (``experiments.named_directory``).
@@ -1254,7 +1257,9 @@ def cancel_training(
     ``model_final.pt``.
     A sweep stops each running trial at its next batch boundary and launches no more. The answer
     is the run, trial or sweep as :func:`training_detail` reads it now, so its state may still
-    read 'running'.
+    read 'running'. When that read refuses, a record of the run or, for a sweep, of any run of
+    the project that will not read, the request stands and the answer is ``cancel_recorded``,
+    carrying the refused read.
 
     Refuses an id naming no run or sweep, and one that has already ended
     (``experiments.request_cancel``); a repeated request keeps the first one's time.
@@ -1269,10 +1274,18 @@ def cancel_training(
     if directory is None:
         return {"error": f"Run not found: {experiment_id}"}
     try:
-        experiments.request_cancel(directory)
+        request = experiments.request_cancel(directory)
     except ValueError as exc:
         return {"error": str(exc)}
-    return training_detail(project, directory)
+    try:
+        with unreadable(str(directory), *experiments.RUN_REFUSALS):
+            return training_detail(project, directory)
+    except ReadRefusedError as exc:
+        return CancelRecorded(
+            experiment_id=directory.name,
+            requested_at=request.requested,
+            unread=exc.served,
+        )
 
 
 @tool()

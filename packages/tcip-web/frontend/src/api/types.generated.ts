@@ -19,6 +19,8 @@ export const BLOCKED = "blocked";
 
 export const BUCKET_EXISTS = "bucket_exists";
 
+export const CANCEL_RECORDED = "cancel_recorded";
+
 export const CANOPY_SEGMENTS = "canopy_segments";
 
 export const BOX = "box";
@@ -447,6 +449,8 @@ export type TrainingDetail = RunDetail | SweepDetail;
 export type TensorboardLaunch = TensorboardServing | TensorboardFailure;
 
 export type EmptyBodyPayload = Record<string, never>;
+
+export type CancelAnswer = RunDetail | SweepDetail | CancelRecorded;
 
 export interface PersonPayload {
   user: string;
@@ -883,6 +887,13 @@ export type ByName_Subject__MinLen_min_length_1_ = Record<
   string,
   { description: string; attributes?: ByName_Attribute_ }
 >;
+
+export interface CancelRecorded {
+  kind: "cancel_recorded";
+  experiment_id: string;
+  requested_at: string;
+  unread: RefusedRead;
+}
 
 export interface Canceled {
   status: "canceled";
