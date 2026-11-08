@@ -120,9 +120,8 @@ when none lies within it the capture is `unmapped`. A capture is matched within 
 `match_radius` stated with its reason governs every date of the build, and without one each
 date's radius is the largest horizontal positioning error its photographs report in their EXIF,
 the build refusing until one is stated when any one positioned photograph of a date reports
-none; the mapping records which per date. Each assignment records its `source` (`sequence` /
-`nearest_neighbor` / `unmapped`) and `distance_m`: interpretable signals. It records no 0–1
-"confidence" value.
+none; the mapping records which per date. Each assignment records its `source` and `distance_m`:
+interpretable signals. It records no 0–1 "confidence" value.
 
 ## Delivery checklist
 
