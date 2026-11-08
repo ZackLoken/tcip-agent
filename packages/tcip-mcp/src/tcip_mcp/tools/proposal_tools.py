@@ -523,7 +523,8 @@ def _stage_assignments_regime(
 
     The candidates come from the record of the run ``assignments`` names, staged at ``address``;
     refuses when that record is absent or the image's content no longer matches the content
-    identity it recorded.
+    identity it recorded, and raises ``tcip_store.ReadRefusedError`` naming the run when the
+    record does not validate.
     """
     try:
         source = resolve_image_path(img)
@@ -536,7 +537,11 @@ def _stage_assignments_regime(
             "error": f"No proposal run {assignments.staging_id!r} is staged for {img.stem}. "
             "Run propose_annotations and pass the staging_id it answers."
         }
-    staging = ProposalStaging.model_validate(stored)
+    staging = validated(
+        ProposalStaging,
+        stored,
+        f"proposal run {assignments.staging_id!r} staged for {img.stem}",
+    )
 
     from tcip_mcp.pipelines.raster_source import (
         displays_plain,

@@ -998,7 +998,7 @@ def load_registry(project: Path | str, name: str) -> PlantRegistry:
 
     A name nothing is stored under (never registered, or deleted since a mapping recorded it)
     refuses (:class:`PlantRegistryNotFoundError`) naming it; a record that does not validate as
-    :class:`PlantRegistry` refuses with ``pydantic.ValidationError`` naming each field.
+    :class:`PlantRegistry` raises ``tcip_store.ReadRefusedError`` naming it and each field.
     """
     record = tcip_store.read(plant_registry_key(project, name), default=None)
     if record is None:
@@ -1006,7 +1006,14 @@ def load_registry(project: Path | str, name: str) -> PlantRegistry:
             f"plant registry not found: {name!r} under {project}; register it with "
             "register_plant_registry before naming it."
         )
-    return _PLANT_REGISTRY.validate_python(record)
+    return tcip_store.validated(
+        _PLANT_REGISTRY, record, _plant_registry_place(project, name)
+    )
+
+
+def _plant_registry_place(project: Path | str, name: str) -> str:
+    """Return the place a refusal of the stored registry ``name`` under ``project`` names."""
+    return f"plant registry {name!r} under {project}"
 
 
 def registry_csv_entries(
@@ -1045,7 +1052,7 @@ def registry_entries_or_refusal(
         return [], f"mapping {build.name!r} names it: {exc}"
     if record["digest"] != reference.digest:
         return [], (
-            f"plant registry {reference.name!r} under {project} named by mapping "
+            f"{_plant_registry_place(project, reference.name)} named by mapping "
             f"{build.name!r} has moved (built against digest {reference.digest!r}, now "
             f"{record['digest']!r}); rebuild the mapping against the current registry"
         )
@@ -1147,11 +1154,13 @@ def register_plant_registry_record(
     with tcip_store.transaction(key) as txn:
         stored = txn.read(key, default=None)
         if stored is not None:
-            existing = _PLANT_REGISTRY.validate_python(stored)
+            existing = tcip_store.validated(
+                _PLANT_REGISTRY, stored, _plant_registry_place(project, name)
+            )
             if existing["digest"] == digest:
                 return existing
             raise PlantRegistryNameConflictError(
-                f"plant registry {name!r} under {project} already names different plants "
+                f"{_plant_registry_place(project, name)} already names different plants "
                 f"(digest {existing['digest']!r}, this registration would write "
                 f"{digest!r}); register under a new name"
             )

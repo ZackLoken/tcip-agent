@@ -63,12 +63,19 @@ _DATASET_REGISTRY = TypeAdapter(list[DatasetEntry])
 def read_datasets(project: str | Path) -> list[DatasetEntry]:
     """Read the project's dataset registry, or [] when absent.
 
-    A registry present but undecodable raises, as does one that is not a list of
-    :class:`DatasetEntry` (``ValidationError``).
+    A registry present but undecodable raises, and one that is not a list of
+    :class:`DatasetEntry` raises ``tcip_store.ReadRefusedError`` naming the registry.
     """
-    return _DATASET_REGISTRY.validate_python(
-        tcip_store.read(dataset_registry_key(project), default=[])
+    return tcip_store.validated(
+        _DATASET_REGISTRY,
+        tcip_store.read(dataset_registry_key(project), default=[]),
+        _dataset_registry_place(project),
     )
+
+
+def _dataset_registry_place(project: str | Path) -> str:
+    """Return where ``project``'s dataset registry lives, as a refusal names it."""
+    return f"the dataset registry of {project}"
 
 
 def dataset_entry_path(project: str | Path, entry: DatasetEntry) -> Path:
@@ -128,7 +135,11 @@ def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
     """
     key = dataset_registry_key(project)
     with tcip_store.transaction(key) as txn:
-        stored = _DATASET_REGISTRY.validate_python(txn.read(key, default=[]))
+        stored = tcip_store.validated(
+            _DATASET_REGISTRY,
+            txn.read(key, default=[]),
+            _dataset_registry_place(project),
+        )
         regs = [r for r in stored if r.id != entry.id] + [entry]
         txn.write(
             key,

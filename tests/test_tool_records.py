@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import ValidationError
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir, image_root
@@ -160,13 +159,16 @@ def test_a_registered_dataset_reads_back_as_the_entry_its_door_registered(
     ]
 
 
-def test_a_dataset_entry_missing_its_path_is_refused_naming_it(
-    tmp_path: Path,
+@pytest.mark.parametrize("reader", ["read_datasets", "upsert_dataset"])
+def test_a_dataset_entry_missing_its_path_is_refused_naming_it_and_the_registry(
+    tmp_path: Path, reader: str
 ) -> None:
     from tcip_mcp.tools.project_tools import (
+        DatasetEntry,
         dataset_registry_key,
         read_datasets,
         register_dataset,
+        upsert_dataset,
     )
     from tests.test_project_tools import _make_dataset
 
@@ -178,8 +180,19 @@ def test_a_dataset_entry_missing_its_path_is_refused_naming_it(
         [{"id": entry.id} for entry in read_datasets(tmp_path)],
     )
 
-    with pytest.raises(ValidationError, match="path"):
-        read_datasets(tmp_path)
+    reads = {
+        "read_datasets": lambda: read_datasets(tmp_path),
+        "upsert_dataset": lambda: upsert_dataset(
+            tmp_path, DatasetEntry(id="other", path="other")
+        ),
+    }
+
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        reads[reader]()
+
+    assert str(refused.value) == (
+        f"the dataset registry of {tmp_path}: 0.path: Field required"
+    )
 
 
 def _proposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
@@ -233,13 +246,18 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
     del stored["engine"]
     ts.replace(key, stored)
 
-    with pytest.raises(ValidationError, match="engine"):
+    with pytest.raises(ts.ReadRefusedError) as refused:
         stage_proposals(
             tmp_path,
             image_path=str(image),
             assignments=kept(proposed, (0, "bud")),
             actor=None,
         )
+
+    assert str(refused.value) == (
+        f"proposal run {proposed.staging_id!r} staged for {image.stem}: "
+        "engine: Field required"
+    )
 
 
 def test_an_interrupted_raster_pass_reads_back_as_its_identity_and_first_batch(
@@ -301,7 +319,35 @@ def test_a_raster_pass_identity_missing_its_tile_batch_size_refuses_the_resume_n
 
     result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
-    assert "tile_batch_size" in result["error"]
+    assert result["error"].startswith(
+        f"the raster-pass identity record toward bucket {bucket!r} under "
+    )
+    assert result["error"].endswith(": tile_batch_size: Field required")
+
+
+def test_a_raster_pass_batch_missing_its_slices_refuses_the_resume_naming_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.inference_tools import _progress_key
+    from tests.test_raster_pass_resume import _interrupted, _run, _setup
+
+    ckpt, raster_path = _setup(tmp_path)
+    bucket = "preds/2026-01-01"
+    _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
+    key = _progress_key(tmp_path, tmp_path / "ds", bucket, "batch-000000")
+    stored = dict(ts.read(key))
+    del stored["slices"]
+    with ts.transaction(key) as txn:
+        txn.write(key, stored)
+
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        _run(tmp_path, ckpt, raster_path, bucket, resume=True)
+
+    assert refused.value.served.where.startswith(
+        f"the raster-pass batch-000000 record toward bucket {bucket!r} under "
+    )
+    assert str(refused.value.served.refusal) == "slices: Field required"
 
 
 _SHAPE = {
@@ -348,5 +394,9 @@ def test_a_canvas_meta_record_missing_its_user_refuses_the_capture_naming_it(
     del stored["user"]
     ts.replace(key, stored)
 
-    with pytest.raises(ValidationError, match="user"):
+    with pytest.raises(ts.ReadRefusedError) as refused:
         capture_live_canvas(bound_to(opened), refresh=False)
+
+    assert str(refused.value) == (
+        f"the canvas meta record of {opened_project}: user: Field required"
+    )

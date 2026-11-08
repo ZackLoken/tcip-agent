@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 import tcip_store
 from tcip_mcp.dataset_layout import image_root
@@ -154,11 +153,12 @@ def test_a_stored_meta_record_missing_its_arrival_instant_is_refused_naming_it(
     del raw["received_at"]
     tcip_store.replace(canvas_meta_key(root), raw)
 
-    with pytest.raises(ValidationError) as refused:
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
         read_canvas_meta(root)
 
-    (error,) = refused.value.errors()
-    assert (error["loc"], error["type"]) == (("received_at",), "missing")
+    assert str(refused.value) == (
+        f"the canvas meta record of {root}: received_at: Field required"
+    )
 
 
 def test_a_stored_meta_record_missing_its_dirty_flag_is_refused_naming_it(
@@ -173,11 +173,12 @@ def test_a_stored_meta_record_missing_its_dirty_flag_is_refused_naming_it(
     del raw["dirty"]
     tcip_store.replace(canvas_meta_key(root), raw)
 
-    with pytest.raises(ValidationError) as refused:
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
         read_canvas_meta(root)
 
-    (error,) = refused.value.errors()
-    assert (error["loc"], error["type"]) == (("dirty",), "missing")
+    assert str(refused.value) == (
+        f"the canvas meta record of {root}: dirty: Field required"
+    )
 
 
 def test_a_stored_geometry_record_missing_its_shapes_is_refused_naming_them(
@@ -192,11 +193,12 @@ def test_a_stored_geometry_record_missing_its_shapes_is_refused_naming_them(
     del raw["shapes"]
     tcip_store.replace(canvas_geometry_key(root), raw)
 
-    with pytest.raises(ValidationError) as refused:
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
         read_canvas_geometry(root)
 
-    (error,) = refused.value.errors()
-    assert (error["loc"], error["type"]) == (("shapes",), "missing")
+    assert str(refused.value) == (
+        f"the canvas geometry record of {root}: shapes: Field required"
+    )
 
 
 def test_a_stored_geometry_record_whose_shape_states_no_kind_is_refused_naming_it(
@@ -213,9 +215,10 @@ def test_a_stored_geometry_record_whose_shape_states_no_kind_is_refused_naming_i
     del first["kind"]
     tcip_store.replace(canvas_geometry_key(root), raw)
 
-    with pytest.raises(ValidationError) as refused:
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
         read_canvas_geometry(root)
 
-    (error,) = refused.value.errors()
-    assert error["loc"] == ("shapes", 0)
-    assert error["type"] == "union_tag_not_found"
+    assert str(refused.value) == (
+        f"the canvas geometry record of {root}: shapes.0: "
+        "Unable to extract tag using discriminator 'kind'"
+    )
