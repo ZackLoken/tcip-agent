@@ -84,6 +84,7 @@ from tcip_store import (
     DecodeError,
     FiniteJsonValue,
     ReadRefusedError,
+    RefusedRead,
     StoreError,
     decode_value,
     encode_log_line,
@@ -1468,10 +1469,29 @@ class SweepDetail(BaseModel):
     tensorboard: TensorboardState
 
 
+class CancelRecorded(BaseModel):
+    """A cancellation request that was written, answered without the run's detail.
+
+    ``unread`` is the refused read of the record the detail read after the request could not
+    take; the request itself stands as written at ``requested_at``.
+    """
+
+    kind: Literal["cancel_recorded"] = "cancel_recorded"
+    experiment_id: str
+    requested_at: AwareDatetime
+    unread: RefusedRead
+
+
 type TrainingDetail = Annotated[
     RunDetail | SweepDetail, Field(discriminator="kind")
 ]
 """One run, trial or sweep with the TensorBoard serving its board, told apart by its ``kind``."""
+
+type CancelAnswer = Annotated[
+    RunDetail | SweepDetail | CancelRecorded, Field(discriminator="kind")
+]
+"""What a cancel request answers: the :data:`TrainingDetail` it reads, or the cancel recorded with
+its detail unread, told apart by their ``kind``."""
 
 
 class TrainingListing(BaseModel):

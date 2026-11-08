@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from starlette.types import Receive, Scope, Send
 
 from tcip_mcp.experiments import (
+    CancelAnswer,
     Comparison,
     MetricsRow,
     RunRow,
@@ -310,11 +311,12 @@ def _end_to_end(
 @router.post("/runs/{experiment_id}/cancel")
 def cancel_run_route(
     experiment_id: str, payload: PersonPayload
-) -> TrainingDetail:
+) -> CancelAnswer:
     """Request graceful cancellation of the run, trial or sweep ``experiment_id`` names.
 
     The request goes through ``cancel_training``, by the person ``user`` names, answering the
-    run, trial or sweep as it reads after the request; its refusal answers 404.
+    run, trial or sweep as it reads after the request, or the cancel recorded with the read that
+    refused; its refusal answers 404.
     """
     from tcip_mcp.tools.training_tools import cancel_training
 
