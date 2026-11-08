@@ -9441,7 +9441,7 @@
       },
       "TraitEntry": {
         "additionalProperties": false,
-        "description": "One trait's complete entry: its spec fields and its operationalization per delivery kind.\n\nEvery field is required; a field not yet decided is stated as empty or null. The milestone\nvalues an entry states must agree with each other (:meth:`_milestones_agree`); whether a\nfield is stated at all is the breeder's question (:func:`authored`).",
+        "description": "One trait's complete entry: its spec fields and its operationalization per delivery kind.\n\nEvery field is required; a field not yet decided is stated as empty or null. The milestone\nvalues an entry states must agree with each other. Whether a field is stated at all is the\nbreeder's question (:func:`authored`), with one exception: a stated majority fraction requires\nits majority label, the name of its column.",
         "properties": {
           "classifier_agreement_floor": {
             "anyOf": [

@@ -24,7 +24,11 @@ from pydantic import (
 import tcip_store as ts
 from tcip_annotation.text import Text
 from tcip_mcp.audit import append_or_raise, audit_line
-from tcip_mcp.pipelines.postprocessing.phenology import milestone_key
+from tcip_mcp.pipelines.postprocessing.phenology import (
+    is_milestone_key,
+    is_whole_percent,
+    milestone_key,
+)
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_store import Key
 
@@ -248,7 +252,6 @@ class PositiveState(BaseModel):
 MilestoneFraction = Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
 """A share of a plant's objects a milestone is crossed at, finite and in (0, 1]."""
 
-_MILESTONE_KEY_SHAPE = re.compile(r"\d{2,}per")
 _TOKEN = re.compile(r"\S+")
 
 
@@ -256,8 +259,9 @@ class TraitEntry(BaseModel):
     """One trait's complete entry: its spec fields and its operationalization per delivery kind.
 
     Every field is required; a field not yet decided is stated as empty or null. The milestone
-    values an entry states must agree with each other (:meth:`_milestones_agree`); whether a
-    field is stated at all is the breeder's question (:func:`authored`).
+    values an entry states must agree with each other. Whether a field is stated at all is the
+    breeder's question (:func:`authored`), with one exception: a stated majority fraction requires
+    its majority label, the name of its column.
     """
 
     model_config = ConfigDict(
@@ -339,17 +343,20 @@ class TraitEntry(BaseModel):
         :func:`~tcip_mcp.pipelines.postprocessing.phenology.milestone_key`; a majority that is
         not one of the stated fractions; a majority label empty while a majority is stated, or
         stated while none is; a label or prefix that is not a token free of whitespace; a label
-        shaped like a milestone key. A field left unstated is never refused here.
+        shaped like a milestone key. The empty label beside a stated majority is the one
+        unstated field refused here.
         """
         fractions = self.milestone_fractions
         majority = self.majority_fraction
-        inexact = [f for f in fractions if round(f, 2) != f]
-        if inexact:
+        stated = (*fractions, *(() if majority is None else (majority,)))
+        inexact = {f for f in stated if not is_whole_percent(f)}
+        if any(f in inexact for f in fractions):
             raise ValueError(
-                f"milestone_fractions {inexact} are not whole percents; each names its column "
-                "by its whole percent, so state each as a whole percent"
+                f"milestone_fractions {[f for f in fractions if f in inexact]} are not whole "
+                "percents; each names its column by its whole percent, so state each as a whole "
+                "percent"
             )
-        if majority is not None and round(majority, 2) != majority:
+        if majority in inexact:
             raise ValueError(
                 f"majority_fraction {majority} is not a whole percent; it names its crossing's "
                 "column by its whole percent"
@@ -388,7 +395,7 @@ class TraitEntry(BaseModel):
                     f"{field} {value!r} is not a token free of whitespace; it is spelled into "
                     "a column name"
                 )
-        if _MILESTONE_KEY_SHAPE.fullmatch(label):
+        if is_milestone_key(label):
             raise ValueError(
                 f"majority_label {label!r} is shaped like a milestone key, which names the "
                 "column of a crossing at that percent; choose a label that is not"

@@ -17,6 +17,7 @@ helper, not the delivered trait.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -44,12 +45,31 @@ if TYPE_CHECKING:
     )
 
 
+_KEY_SUFFIX = "per"
+_KEY_SHAPE = re.compile(rf"\d{{2,}}{_KEY_SUFFIX}")
+
+
+def _percent(fraction: float) -> int:
+    """Return the whole percent nearest ``fraction``."""
+    return int(round(fraction * 100))
+
+
 def milestone_key(fraction: float) -> str:
     """Return the key a milestone crossing at ``fraction`` is named by, ``NNper``.
 
     ``NN`` is the fraction's whole percent; the key is the milestone's CSV column suffix.
     """
-    return f"{int(round(fraction * 100)):02d}per"
+    return f"{_percent(fraction):02d}{_KEY_SUFFIX}"
+
+
+def is_milestone_key(text: str) -> bool:
+    """Return whether ``text`` is shaped like a :func:`milestone_key`: digits, then ``per``."""
+    return _KEY_SHAPE.fullmatch(text) is not None
+
+
+def is_whole_percent(fraction: float) -> bool:
+    """Return whether ``fraction`` is exactly the fraction its :func:`milestone_key` names."""
+    return _percent(fraction) / 100 == fraction
 
 
 def _milestone_targets(spec: TraitEntry) -> dict[str, float]:
