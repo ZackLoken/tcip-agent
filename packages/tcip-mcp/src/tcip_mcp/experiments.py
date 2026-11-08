@@ -1482,13 +1482,13 @@ class CancelRecorded(BaseModel):
     unread: RefusedRead
 
 
-type TrainingDetail = Annotated[
-    RunDetail | SweepDetail, Field(discriminator="kind")
-]
+_Details = RunDetail | SweepDetail
+
+type TrainingDetail = Annotated[_Details, Field(discriminator="kind")]
 """One run, trial or sweep with the TensorBoard serving its board, told apart by its ``kind``."""
 
 type CancelAnswer = Annotated[
-    RunDetail | SweepDetail | CancelRecorded, Field(discriminator="kind")
+    _Details | CancelRecorded, Field(discriminator="kind")
 ]
 """What a cancel request answers: the :data:`TrainingDetail` it reads, or the cancel recorded with
 its detail unread, told apart by their ``kind``."""

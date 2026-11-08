@@ -220,6 +220,7 @@ def test_a_sweep_cancel_is_recorded_when_a_trial_of_the_project_will_not_read(
     """
     from tcip_mcp.experiments import CANCEL_FILE, RUN_FILE
     from tcip_mcp.tools.training_tools import cancel_training, open_trial
+    from tests._audit_fixtures import audit_rows
 
     sweep = opened_sweep(project, real_hpo_base_config)
     trial = open_trial(sweep, "t0", {"optimizer.head_lr": 0.001})
@@ -235,6 +236,9 @@ def test_a_sweep_cancel_is_recorded_when_a_trial_of_the_project_will_not_read(
     )
     assert str(trial / RUN_FILE) in served["unread"]["refusal"]["message"]
     assert (sweep / CANCEL_FILE).is_file()
+    assert [
+        row["status"] for row in audit_rows(project, "cancel_training")
+    ] == ["ok"]
 
 
 def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_canceled(
