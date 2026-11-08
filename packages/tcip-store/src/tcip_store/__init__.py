@@ -37,6 +37,7 @@ from tcip_store.refusal import (
     Unreadable,
     read_raw,
     read_record,
+    refuse_corrupt_entries,
     unreadable,
     validated,
 )
@@ -124,6 +125,7 @@ __all__ = [
     "read_raw",
     "read_record",
     "read_versioned",
+    "refuse_corrupt_entries",
     "release_root",
     "replace",
     "scalar_number",
