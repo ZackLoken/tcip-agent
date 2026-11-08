@@ -210,6 +210,33 @@ def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
     assert "error" in cancel_training(elsewhere, sweep_id, actor=None)
 
 
+def test_a_sweep_cancel_is_recorded_when_a_trial_of_the_project_will_not_read(
+    project: Path, real_hpo_base_config: dict
+) -> None:
+    """A sweep's cancel is answered as recorded when a run of the project refuses to read.
+
+    The sweep's detail reads every run of the project, so a trial's undecodable record refuses
+    the read after the cancel was written, and the answer names that record.
+    """
+    from tcip_mcp.experiments import CANCEL_FILE, RUN_FILE
+    from tcip_mcp.tools.training_tools import cancel_training, open_trial
+
+    sweep = opened_sweep(project, real_hpo_base_config)
+    trial = open_trial(sweep, "t0", {"optimizer.head_lr": 0.001})
+    (trial / RUN_FILE).write_bytes(b"\xff\xfe not json")
+
+    answer = cancel_training(project, sweep.name, actor=None)
+
+    assert not isinstance(answer, dict)
+    served = answer.model_dump(mode="json")
+    assert (served["kind"], served["experiment_id"]) == (
+        "cancel_recorded",
+        sweep.name,
+    )
+    assert str(trial / RUN_FILE) in served["unread"]["refusal"]["message"]
+    assert (sweep / CANCEL_FILE).is_file()
+
+
 def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_canceled(
     project: Path,
     real_hpo_base_config: dict,

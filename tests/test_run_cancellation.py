@@ -48,6 +48,44 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path: Path) -> None:
     assert "error" in cancel_training(tmp_path, "missing-run", actor=None)
 
 
+def test_a_cancel_written_is_answered_and_logged_when_the_run_will_not_read(
+    tmp_path: Path,
+) -> None:
+    """A cancel whose run's record will not read afterward is still recorded, answered and logged.
+
+    The answer names the record that did not read, and the log holds the cancel's one line,
+    stamped ok.
+    """
+    from tcip_mcp.experiments import CANCEL_FILE, RUN_FILE
+    from tcip_mcp.tools.training_tools import cancel_training
+    from tests._audit_fixtures import audit_rows
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
+
+    run_dir = opened_run(
+        tmp_path,
+        detection_config(tmp_path / "data", project=tmp_path),
+        experiment_id="cancel-run-unread",
+    )
+    (run_dir / RUN_FILE).write_bytes(b"\xff\xfe not json")
+
+    answer = cancel_training(tmp_path, run_dir.name, actor=None)
+
+    assert not isinstance(answer, dict)
+    served = answer.model_dump(mode="json")
+    assert (served["kind"], served["experiment_id"]) == (
+        "cancel_recorded",
+        run_dir.name,
+    )
+    assert str(run_dir / RUN_FILE) in served["unread"]["refusal"]["message"]
+    assert (run_dir / CANCEL_FILE).is_file()
+    assert [
+        row["status"] for row in audit_rows(tmp_path, "cancel_training")
+    ] == ["ok"]
+
+
 def test_cancel_before_training_yields_canceled(tmp_path: Path) -> None:
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import request_cancel
