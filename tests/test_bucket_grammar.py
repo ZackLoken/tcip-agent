@@ -58,10 +58,12 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     Beside a dated directory under ``images/``, a hidden one adds no date to either.
     """
     from tcip_mcp.workspace import listed_project
-    from tcip_web.routes.projects import _summarize
+    from tcip_web.routes.projects import ReadProject, _summarize
     from tests._producer_fixtures import registry_of, registry_over
+    from tests._web_fixtures import named_project
 
     root = tmp_path / "Valley_Farm"
+    named_project(root, "Valley Farm")
     image_dir(root, "2026-03-02").mkdir(parents=True)
     image_dir(root, ".hidden").mkdir(parents=True)
     registry_over(root, registry_of("leaf"))
@@ -72,7 +74,11 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     picker = _summarize(listed_project(root))
 
     assert [c["name"] for c in tree["captures"]] == ["2026-03-02"]
-    assert picker.tree.model_dump(mode="json") == tree
+    assert isinstance(picker, ReadProject)
+    assert (
+        picker.tree.model_dump(mode="json") | {"dataset_root": picker.root}
+        == tree
+    )
 
 
 def test_the_tree_states_each_captures_date_and_none_where_no_date_names_it(
@@ -136,11 +142,13 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     """
     pytest.importorskip("torch")
     from tcip_mcp.workspace import listed_project
-    from tcip_web.routes.projects import _summarize
+    from tcip_web.routes.projects import ReadProject, _summarize
     from tests._chain_fixtures import DATE, unassessed_bucket
+    from tests._web_fixtures import named_project
 
-    bucket = unassessed_bucket(tmp_path, experiment_id="exp-grammar")
     root = tmp_path / "ds"
+    named_project(root, "ds")
+    bucket = unassessed_bucket(tmp_path, experiment_id="exp-grammar")
 
     tree = client.get(
         "/api/dataset/tree", params={"dataset_root": str(root)}
@@ -148,4 +156,8 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     picker = _summarize(listed_project(root))
 
     assert tree["buckets_by_date"][DATE] == [bucket.name]
-    assert picker.tree.model_dump(mode="json") == tree
+    assert isinstance(picker, ReadProject)
+    assert (
+        picker.tree.model_dump(mode="json") | {"dataset_root": picker.root}
+        == tree
+    )
