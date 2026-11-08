@@ -208,10 +208,9 @@ class ServedMapping(BaseModel):
 
 
 class MappingVerification(NamedTuple):
-    """What :func:`verify_mapping_inputs` could not re-check: captures and plant CSVs, by name."""
+    """What :func:`verify_mapping_inputs` could not re-check: captures, by name."""
 
     captures_unverified: list[str]
-    plant_csvs_unverified: list[str]
 
 
 class PlantMappingDisclosure(BaseModel):
@@ -232,7 +231,6 @@ class PlantMappingDisclosure(BaseModel):
     match_radius: dict[str, MatchRadius]
     capture_digests: dict[str, dict[str, str]]
     captures_unverified: list[str]
-    plant_csvs_unverified: list[str]
     dates_delivered: list[str]
     images_unattributed: int
     plant_attribution: str
@@ -442,7 +440,6 @@ class MappingBuild:
             match_radius=self.match_radius,
             capture_digests=self.capture_digests,
             captures_unverified=verified.captures_unverified,
-            plant_csvs_unverified=verified.plant_csvs_unverified,
             dates_delivered=dates_delivered,
             images_unattributed=self.unattributed(dates_delivered),
             plant_attribution=self.plant_attribution,
@@ -1948,7 +1945,7 @@ def verify_mapping_inputs(
                     "rebuild to cover the images actually on disk"
                 )
 
-    return MappingVerification(captures_unverified, [])
+    return MappingVerification(captures_unverified)
 
 
 def ungeoreferenced_capture_message(

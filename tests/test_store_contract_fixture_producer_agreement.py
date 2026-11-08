@@ -100,7 +100,6 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
             "match_radius",
             "capture_digests",
             "captures_unverified",
-            "plant_csvs_unverified",
             "dates_delivered",
             "images_unattributed",
             "plant_attribution",
