@@ -338,6 +338,91 @@
       }
     ]
   },
+  "picker_damaged": {
+    "workspace": "/scratch/workspace",
+    "open_id": "<valley farm id>",
+    "projects": [
+      {
+        "root": "/scratch/workspace/stray",
+        "modified": 946684803.0,
+        "kind": "unread",
+        "problem": {
+          "where": "the project record of /scratch/workspace/stray",
+          "refusal": {
+            "kind": "unreadable",
+            "message": "not a project yet: create it with initialize_project"
+          }
+        }
+      },
+      {
+        "root": "/scratch/workspace/empty",
+        "modified": 946684802.0,
+        "kind": "read",
+        "record": {
+          "id": "<empty block id>",
+          "display_name": "Empty block",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        },
+        "tree": {
+          "captures": [],
+          "subjects": [],
+          "subjects_by_date": {},
+          "buckets_by_date": {},
+          "label_problem": null
+        },
+        "image_count": 0
+      },
+      {
+        "root": "/scratch/workspace/ridge",
+        "modified": 946684801.0,
+        "kind": "read",
+        "record": {
+          "id": "<ridge farm id>",
+          "display_name": "Ridge farm",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        },
+        "tree": {
+          "captures": [
+            { "name": "2026-02-11", "date": "2026-02-11" },
+            { "name": "2026-03-01", "date": "2026-03-01" }
+          ],
+          "subjects": [],
+          "subjects_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "buckets_by_date": { "2026-02-11": [], "2026-03-01": [] },
+          "label_problem": null
+        },
+        "image_count": 2
+      },
+      {
+        "root": "/scratch/workspace/valley",
+        "modified": 946684800.0,
+        "kind": "unread",
+        "problem": {
+          "where": "the project record of /scratch/workspace/valley",
+          "refusal": {
+            "kind": "unreadable",
+            "message": "project_record['project'] under /scratch/workspace/valley exists but does not decode: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+          }
+        }
+      }
+    ]
+  },
   "removed": {
     "archive_path": "/scratch/workspace/.removed/<retired block archive>",
     "archive_name": "<retired block archive>"
