@@ -155,12 +155,12 @@ def test_the_log_reader_refuses_the_non_finite_row_its_writer_refuses(
     """A row carrying a non-finite number is refused by the log's writer and by its reader alike.
 
     The writer (``metrics_row``) refuses it naming the position; a line spelling it, which
-    ``json`` decodes, is refused by ``read_rows`` naming the position too.
+    ``json`` decodes, is refused by ``read_rows`` as invalid at its line, naming the position too.
     """
     import pytest
 
     from tcip_mcp.experiments import metrics_row, read_rows
-    from tcip_store import DecodeError
+    from tcip_store import ReadRefusedError
 
     with pytest.raises(ValueError, match=r"val_per_class_iou\.dict\.0"):
         metrics_row({"val_per_class_iou": {"0": float("nan")}}, 1, None)
@@ -170,8 +170,48 @@ def test_the_log_reader_refuses_the_non_finite_row_its_writer_refuses(
         b'{"epoch": 1, "timestamp": "2026-01-01T00:00:00+00:00", '
         b'"val_per_class_iou": {"0": NaN}}\n'
     )
-    with pytest.raises(DecodeError, match=r"val_per_class_iou\.dict\.0"):
+    with pytest.raises(
+        ReadRefusedError, match=r"val_per_class_iou\.dict\.0"
+    ) as refused:
         read_rows(log)
+    assert (refused.value.served.where, refused.value.served.refusal.kind) == (
+        f"{log}:1",
+        "invalid",
+    )
+
+
+def test_a_row_read_past_an_offset_is_refused_at_its_line_counted_from_the_logs_start(
+    tmp_path: Path,
+) -> None:
+    """A row read past an offset that will not decode is refused at its line in the whole log.
+
+    Two epochs logged through the envelope's sink are read, a line that does not decode is
+    appended, and the read from the offset the first read returned names that line's number in
+    the file, not its index past the offset.
+    """
+    import pytest
+
+    from tcip_mcp.experiments import METRICS_FILE, read_rows
+    from tcip_store import ReadRefusedError
+
+    run_dir = opened_run(
+        tmp_path,
+        detection_config(tmp_path / "data", project=tmp_path),
+        experiment_id="exp-offset-read",
+    )
+    log_epoch(run_dir, 1, {"loss": 0.9})
+    log_epoch(run_dir, 2, {"loss": 0.5})
+    log = run_dir / METRICS_FILE
+    rows, offset = read_rows(log)
+    assert [row.epoch for row in rows] == [1, 2]
+    line = log.read_bytes().count(b"\n") + 1
+    with log.open("ab") as handle:
+        handle.write(b"{not a row\n")
+
+    with pytest.raises(ReadRefusedError) as refused:
+        read_rows(log, after=offset)
+    assert line > 1
+    assert refused.value.served.where == f"{log}:{line}"
 
 
 def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(
