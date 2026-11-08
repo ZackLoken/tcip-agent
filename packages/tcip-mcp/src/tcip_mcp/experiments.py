@@ -712,21 +712,19 @@ def require_open(directory: Path) -> None:
         )
 
 
-def request_cancel(directory: Path) -> datetime:
-    """Record a cancellation request of the run or sweep at ``directory``; return its first time.
+def request_cancel(directory: Path) -> CancelRequest:
+    """Record a cancellation request of the run or sweep at ``directory``; return the first one.
 
-    A later request leaves the first record as written. Refuses a directory that has ended
-    (:func:`require_open`).
+    A later request leaves the first record as written and returns it, read back. Refuses a
+    directory that has ended (:func:`require_open`).
     """
     require_open(directory)
+    request = CancelRequest(requested=now())
     try:
-        write_once(
-            directory / CANCEL_FILE,
-            CancelRequest(requested=now()).model_dump(mode="json"),
-        )
+        write_once(directory / CANCEL_FILE, request.model_dump(mode="json"))
     except FileExistsError:
-        pass
-    return cancel_requested_at(directory)
+        return read_cancel_request(directory)
+    return request
 
 
 class CancelRequest(BaseModel):
@@ -737,14 +735,22 @@ class CancelRequest(BaseModel):
     requested: AwareDatetime
 
 
+def read_cancel_request(directory: Path) -> CancelRequest:
+    """Return the cancellation request of the run or sweep at ``directory``.
+
+    None written raises ``FileNotFoundError``, and a record that does not validate
+    ``tcip_store.ReadRefusedError`` naming its file.
+    """
+    path = directory / CANCEL_FILE
+    return validated(CancelRequest, read_record(path), str(path))
+
+
 def cancel_requested_at(directory: Path) -> datetime:
     """Return when the cancellation of the run or sweep at ``directory`` was first requested.
 
-    The record is a :class:`CancelRequest`; none written raises ``FileNotFoundError``, and one
-    that does not validate ``tcip_store.ReadRefusedError`` naming its file.
+    Refuses as :func:`read_cancel_request` does.
     """
-    path = directory / CANCEL_FILE
-    return validated(CancelRequest, read_record(path), str(path)).requested
+    return read_cancel_request(directory).requested
 
 
 def cancel_requested(directory: Path) -> bool:

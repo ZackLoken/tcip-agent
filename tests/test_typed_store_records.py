@@ -435,7 +435,8 @@ def test_a_cancellation_reads_back_as_its_first_request(
     run_dir = _sweep_dir(tmp_path, "run_a")
     first = request_cancel(run_dir)
 
-    assert request_cancel(run_dir) == first == cancel_requested_at(run_dir)
+    assert request_cancel(run_dir) == first
+    assert first.requested == cancel_requested_at(run_dir)
     (run_dir / CANCEL_FILE).write_text(json.dumps({}), encoding="utf-8")
     with pytest.raises(ts.ReadRefusedError) as refused:
         cancel_requested_at(run_dir)
