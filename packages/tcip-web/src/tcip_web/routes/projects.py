@@ -135,7 +135,9 @@ def workspace_project(project_id: str) -> tuple[Path, ProjectRecord]:
     """Return the directory and record of the workspace project with ``project_id``.
 
     The project is the one whose record holds that id
-    (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none, or two, do.
+    (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none does and every record
+    read, or when two do, and 409 naming each unreadable record when none that read does and
+    some record would not read.
     """
     try:
         with _WORKSPACE_TURN:
@@ -143,6 +145,8 @@ def workspace_project(project_id: str) -> tuple[Path, ProjectRecord]:
         return workspace.project_by_id(records, project_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except workspace.UnreadProjectsError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 class OpenRequest(BaseModel):
@@ -162,9 +166,9 @@ class OpenAnswer(BaseModel):
 async def open_project(req: OpenRequest) -> OpenAnswer:
     """Open the project ``req.id`` names and return it (:class:`OpenAnswer`).
 
-    400 for a request naming no one, 404 when the workspace holds no single project with it (a
-    project whose record will not read is not found by its id), 409 when its persisted GUI
-    state, or the stats record of the project it replaces, will not read, its detail the
+    400 for a request naming no one, 404 or 409 as :func:`workspace_project` answers when the
+    workspace holds no single project with it, 409 when its persisted GUI state, or the stats
+    record of the project it replaces, will not read, its detail the
     :class:`~tcip_store.RefusedRead` naming the record and why, and 409 carrying the answer when
     the open committed and a departed session's audit line could not be written
     (:class:`~tcip_web.routes.audit_gap.AuditGapRefusal`).
@@ -214,10 +218,11 @@ class RemovalRequest(BaseModel):
 async def remove_project(req: RemovalRequest) -> workspace.ProjectRemoval:
     """Archive the project ``req.id`` names into the workspace's ``.removed/`` and move it there.
 
-    The project, when it is the open one, is closed only once the removal is admitted. 404 for
-    no such project, 400 for a confirm name that is not its display name, 409 while a job or run
-    of it is live, the archive refuses or another process holds the folder past the move's retry
-    budget, 400 for a request naming no one.
+    The project, when it is the open one, is closed only once the removal is admitted. 404 or 409
+    for no single such project as :func:`workspace_project` answers, 400 for a confirm name that
+    is not its display name, 409 while a job or run of it is live, the archive refuses or
+    another process holds the folder past the move's retry budget, 400 for a request naming no
+    one.
     """
     person = actor(req.user)
     project, record = await anyio.to_thread.run_sync(workspace_project, req.id)
@@ -264,8 +269,8 @@ class RenameRequest(BaseModel):
 def rename_project_route(req: RenameRequest) -> RecordCorrection:
     """Change the display name of the project ``req.id`` names; its directory is left as it is.
 
-    404 for no such project, 400 for a display name the record refuses or a request naming no
-    one.
+    404 or 409 for no single such project as :func:`workspace_project` answers, 400 for a
+    display name the record refuses or a request naming no one.
     """
     person = actor(req.user)
     project, _ = workspace_project(req.id)
@@ -289,8 +294,8 @@ def replace_invariances_route(
 ) -> RecordCorrection:
     """Correct the capture invariances the project ``req.id`` names records.
 
-    404 for no such project, 400 for a request naming no one, and 422 for a block the record's
-    type refuses.
+    404 or 409 for no single such project as :func:`workspace_project` answers, 400 for a
+    request naming no one, and 422 for a block the record's type refuses.
     """
     person = actor(req.user)
     project, _ = workspace_project(req.id)
