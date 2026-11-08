@@ -34,10 +34,11 @@ def freeze_selection(
     Reads the run's resolution (``experiments.run_resolution``) and refuses, naming the primitive,
     when: ``experiment_id`` names no training run; the split is spatial (region identities, not
     stems); the run's val side is empty; a member's ground truth has moved since the run (it now
-    digests differently from the digest the record holds, the moved members named); a
-    selection already exists at the output directory; the output directory's store will not
-    read; or the selection its resolved ``scope`` composes is one
-    :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses.
+    digests differently from the digest the record holds, or is absent); a member's ground truth
+    will not read (the store's refusal); a selection already exists at the output directory; the
+    output directory's store will not read; or the selection its resolved ``scope`` composes is
+    one :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses. The two ground-truth
+    refusals name the one member the read stopped at, never every member affected.
 
     The frozen selection's ``calibration`` and ``holdout`` sides are always empty, so an assessment
     against it refuses by name; this tool's answer carries a ``note`` saying so.
@@ -54,7 +55,10 @@ def freeze_selection(
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-    from tcip_mcp.pipelines.data.label_queries import acquired
+    from tcip_mcp.pipelines.data.label_queries import (
+        GroundTruthChangedError,
+        acquired,
+    )
     from tcip_mcp.pipelines.data.selection import (
         Selection,
         read_selection,
@@ -86,12 +90,18 @@ def freeze_selection(
         }
     try:
         samples = acquired(samples)
-    except (UnreadableLabelDocumentError, ValueError) as exc:
+    except GroundTruthChangedError as exc:
         return {
             "error": f"a member's ground truth changed since {experiment_id!r} trained "
             f"({exc}): a selection composed from it would bind a later run to "
             "ground truth this run never saw. Freeze a run whose members have not "
             "moved, or draw a fresh split over the current data."
+        }
+    except (UnreadableLabelDocumentError, ValueError) as exc:
+        return {
+            "error": f"a member's ground truth of {experiment_id!r} will not read "
+            f"({exc}): this member's ground truth was not compared with what the run saw, "
+            "so no selection is composed from it."
         }
 
     a_source = samples[0].source
