@@ -601,8 +601,10 @@ def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
         mapping_over,
         write_plots_csv,
     )
+    from tests._web_fixtures import named_project
 
     root = tmp_path / "ds"
+    named_project(root, "ds")
     dates = ["2026-02-11", "2026-02-18"]
     geolocated_captures(root, dates)
     plants = write_plots_csv(tmp_path / "plants.csv")

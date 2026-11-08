@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -202,25 +203,159 @@ def test_list_ignores_dirs_without_tcip(
     assert set(_listed(client)) == {"real_project_site"}
 
 
-def test_list_over_a_held_store_answers_409_saying_it_was_busy_and_how_long_it_waited(
+def _ingest_one_image(project: Path, scratch: Path, date: str) -> None:
+    """Ingest one image stating the capture ``date`` into ``project`` through ``ingest_images``.
+
+    The source image is written under ``scratch``.
+    """
+    from datetime import datetime
+
+    from PIL import Image
+
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
+    from tests._image_fixtures import capture_exif
+
+    source = scratch / "raw"
+    source.mkdir()
+    Image.new("RGB", (8, 8)).save(
+        source / "img.png",
+        exif=capture_exif(datetime.fromisoformat(date).replace(hour=9)),
+    )
+    ingested = ingest_images(project, str(source), actor=None)
+    assert isinstance(ingested, IngestManifest), ingested
+    assert ingested.copied == 1, ingested
+
+
+def _assert_listed_unread_for_its_wait(
+    listing: dict, held: Path, took_s: float
+) -> None:
+    """Assert ``listing`` lists the project ``held`` as unread with the store's busy sentence.
+
+    The entry names the directory as ``root`` and carries no tree and no image count; the
+    sentence's wait lies inside the band the store contract test holds a short wait to, and the
+    request ``took_s`` seconds, less than a second store read on the held root would have added:
+    each waits at least ``SHORT_WAIT_S`` again.
+    """
+    (entry,) = (
+        p for p in listing["projects"] if p["root"] == str(held.resolve())
+    )
+    assert entry["kind"] == "unread", entry
+    assert "tree" not in entry and "image_count" not in entry, entry
+    sentence = entry["problem"]["refusal"]["message"]
+    assert "was busy" in sentence, sentence
+    waited_s = seconds_given_up_after(sentence)
+    assert SHORT_WAIT_S <= waited_s < GAVE_UP_WITHIN_S, sentence
+    assert took_s < waited_s + SHORT_WAIT_S, (took_s, sentence)
+
+
+def test_list_over_a_held_store_lists_it_unread_and_the_other_project_read(
     client: TestClient, workspace_dir: Path
 ) -> None:
-    """Pinning test: a project whose store is held past a short wait fails the listing as busy.
+    """A project whose store is held past a short wait lists as unread beside a readable one.
 
-    The answer is the store's own sentence at 409, its wait inside the band the store contract
-    test holds a short wait to.
+    The answer is 200, the free project listed read with its record and tree, and the held one
+    unread with its directory and the store's busy sentence, after one lock wait.
     """
+    import tcip_store
+
     held = _make_project(workspace_dir, "held_project").root
+    free = _make_project(workspace_dir, "free_project", dates=["2026-02-11"])
+    tcip_store.release_root(held)
 
-    with _locked_by_another_holder(held):
+    with waiting(SHORT_WAIT_S), held_by_another_connection(held):
+        started = time.monotonic()
         resp = client.get("/api/projects")
+        took_s = time.monotonic() - started
 
-    assert resp.status_code == 409, resp.text
-    sentence = resp.json()["detail"]
-    assert "was busy" in sentence, sentence
-    assert (
-        SHORT_WAIT_S <= seconds_given_up_after(sentence) < GAVE_UP_WITHIN_S
-    ), sentence
+    assert resp.status_code == 200, resp.text
+    listing = resp.json()
+    _assert_listed_unread_for_its_wait(listing, held, took_s)
+    (read,) = (p for p in listing["projects"] if p["kind"] == "read")
+    assert read["record"]["id"] == free.id
+    assert read["root"] == str(free.root.resolve())
+    assert read["tree"]["captures"] == [
+        {"name": "2026-02-11", "date": "2026-02-11"}
+    ]
+
+
+def test_list_over_a_held_store_holding_an_image_lists_it_unread_then_read_once_released(
+    client: TestClient, workspace_dir: Path, tmp_path: Path
+) -> None:
+    """A held project holding a capture lists unread as one holding none does, and reads after.
+
+    Its capture is ingested before the hold, so the label documents' key listing is the first
+    store read a tree would make; once the hold is released the listing reads it with its
+    capture and its image.
+    """
+    import tcip_store
+
+    held = _make_project(workspace_dir, "held_project").root
+    _ingest_one_image(held, tmp_path, "2026-02-11")
+    _make_project(workspace_dir, "free_project")
+    tcip_store.release_root(held)
+
+    with waiting(SHORT_WAIT_S):
+        with held_by_another_connection(held):
+            started = time.monotonic()
+            resp = client.get("/api/projects")
+            took_s = time.monotonic() - started
+        after = client.get("/api/projects")
+
+    assert resp.status_code == 200, resp.text
+    _assert_listed_unread_for_its_wait(resp.json(), held, took_s)
+    assert after.status_code == 200, after.text
+    (read,) = (
+        p for p in after.json()["projects"] if p["root"] == str(held.resolve())
+    )
+    assert read["kind"] == "read"
+    assert read["tree"]["captures"] == [
+        {"name": "2026-02-11", "date": "2026-02-11"}
+    ]
+    assert read["image_count"] == 1
+
+
+def test_list_over_a_held_store_of_the_open_project_names_it_open_and_lists_it_unread(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    """The open project, held past a short wait, lists unread; the listing's open_id names it."""
+    import tcip_store
+
+    made = _make_project(workspace_dir, "held_project")
+    _make_project(workspace_dir, "free_project")
+    opened = client.post(
+        "/api/projects/open", json={"id": made.id, "user": "grower"}
+    )
+    assert opened.status_code == 200, opened.text
+    tcip_store.release_root(made.root)
+
+    with waiting(SHORT_WAIT_S), held_by_another_connection(made.root):
+        started = time.monotonic()
+        resp = client.get("/api/projects")
+        took_s = time.monotonic() - started
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["open_id"] == made.id
+    _assert_listed_unread_for_its_wait(resp.json(), made.root, took_s)
+
+
+def test_a_listed_projects_tree_is_the_dataset_trees_without_its_directory(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    """The listing's tree and GET /api/dataset/tree agree; the latter adds the root."""
+    _make_project(
+        workspace_dir,
+        "currant_bud_valley-farm",
+        dates=["2026-02-11"],
+        subjects=["bud"],
+    )
+
+    (listed,) = client.get("/api/projects").json()["projects"]
+    served = client.get(
+        "/api/dataset/tree", params={"dataset_root": listed["root"]}
+    )
+
+    assert served.status_code == 200, served.text
+    assert served.json() == {**listed["tree"], "dataset_root": listed["root"]}
 
 
 def test_list_sorted_by_modified_desc(
@@ -442,8 +577,7 @@ def test_list_reports_the_record_across_four_project_states(
     tcip_store.replace(key, {"not_site": "x"}, expect=current)
 
     by_path = {
-        p["tree"]["dataset_root"]: p
-        for p in client.get("/api/projects").json()["projects"]
+        p["root"]: p for p in client.get("/api/projects").json()["projects"]
     }
     assert set(by_path) == {
         str(p.resolve()) for p in (recorded, recordless, undecodable, invalid)

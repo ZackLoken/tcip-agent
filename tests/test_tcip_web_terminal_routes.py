@@ -3719,27 +3719,37 @@ def test_an_end_whose_hand_off_evidence_will_not_read_leaves_the_agent_running_a
         "session_id"
     ]
     assert _hand_off(client, sid).status_code == 200
+    past, _ = _hand_off_that_will_not_decode(opened_project, sid, monkeypatch)
 
-    with monkeypatch.context() as unreadable:
-        unreadable.setattr(terminal_routes, "acts_of", _unreadable_log)
-        resp = _lenient_client().post(
-            f"/api/terminal/sessions/{sid}/end", json={"user": "tester"}
-        )
+    resp = _lenient_client().post(
+        f"/api/terminal/sessions/{sid}/end", json={"user": "tester"}
+    )
 
     assert resp.status_code == 500
     assert pty.terminate_calls == 0
     assert terminal_routes._SESSIONS[sid].alive()
-    assert audit_rows(opened_project, "agent_terminal_ended") == []
+    assert audit_rows(opened_project, "agent_terminal_ended", after=past) == []
 
 
-_UNREADABLE = "the audit log carries 1 undecodable entries"
+def _hand_off_that_will_not_decode(
+    project: Path, terminal_session: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str]:
+    """Land ``terminal_session``'s asked-for hand-off in ``project``'s log, then damage it.
 
-_UNREADABLE_END = terminal_routes.NO_END_LINE + _UNREADABLE
+    The hand-off is :func:`_retrospective_declared_by`'s line, which then will not decode. Returns
+    the log's cursor past it, and what an end reading the hand-off puts on the session's stream:
+    :data:`~tcip_web.routes.terminal.NO_END_LINE` before the log reader's refusal of the page past
+    the cursor the hand-off was asked at.
+    """
+    from tcip_mcp.audit import audit_entries, audit_log_key
+    from tests._record_damage_fixtures import damage_last_log_entry
 
-
-def _unreadable_log(*args: object, **kwargs: object) -> None:
-    """Stand in for an audit log read that refuses its undecodable entries."""
-    raise ValueError(_UNREADABLE)
+    _, asked = audit_entries(project)
+    _retrospective_declared_by(project, terminal_session, monkeypatch)
+    past = damage_last_log_entry(audit_log_key(project))
+    with pytest.raises(ValueError) as refused:
+        audit_entries(project, after=asked)
+    return past, terminal_routes.NO_END_LINE + str(refused.value)
 
 
 def test_shutdown_ends_every_session_when_one_hand_off_will_not_read(
@@ -3763,15 +3773,17 @@ def test_shutdown_ends_every_session_when_one_hand_off_will_not_read(
         terminal_routes._SESSIONS[sid] = session
     first = terminal_routes._SESSIONS[ids[0]]
     assert first.hand_off("user:tester")
+    past, unrecorded = _hand_off_that_will_not_decode(
+        opened_project, ids[0], monkeypatch
+    )
 
-    with monkeypatch.context() as unreadable, caplog.at_level("ERROR"):
-        unreadable.setattr(terminal_routes, "acts_of", _unreadable_log)
+    with caplog.at_level("ERROR"):
         terminal_routes.shutdown_all()
 
     assert terminal_routes._SESSIONS == {}
-    (line,) = audit_rows(opened_project, "agent_terminal_ended")
+    (line,) = audit_rows(opened_project, "agent_terminal_ended", after=past)
     assert line["arguments"]["session_id"] == ids[1]
-    assert _UNREADABLE_END in first.scrollback_snapshot()
+    assert unrecorded in first.scrollback_snapshot()
     assert any("ended unrecorded" in r.message for r in caplog.records)
 
 
@@ -3792,15 +3804,17 @@ def test_a_process_exit_with_an_unreadable_hand_off_forgets_the_session_and_says
     ]
     session = terminal_routes._SESSIONS[sid]
     assert _hand_off(client, sid).status_code == 200
+    past, unrecorded = _hand_off_that_will_not_decode(
+        opened_project, sid, monkeypatch
+    )
 
-    with monkeypatch.context() as unreadable, caplog.at_level("ERROR"):
-        unreadable.setattr(terminal_routes, "acts_of", _unreadable_log)
+    with caplog.at_level("ERROR"):
         assert session.end_unattended("the agent's process exited") is True
 
     assert sid not in terminal_routes._SESSIONS
-    assert _UNREADABLE_END in session.scrollback_snapshot()
+    assert unrecorded in session.scrollback_snapshot()
     assert any("ended unrecorded" in r.message for r in caplog.records)
-    assert audit_rows(opened_project, "agent_terminal_ended") == []
+    assert audit_rows(opened_project, "agent_terminal_ended", after=past) == []
 
 
 def test_a_switch_from_a_session_for_no_project_ends_it_at_once(

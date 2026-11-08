@@ -56,8 +56,8 @@ def dump_store(project: Path, out_dir: Path) -> list[Path]:
     and ``out_dir`` is resolved by :func:`~tcip_mcp.registry_paths.located` against it. A record is
     written through :func:`tcip_store.encode_record` and a log one
     :func:`tcip_store.encode_log_line` per line; returns the files written. Refuses
-    (``ValueError``) an ``out_dir`` inside the project and a log holding entries that will not
-    decode.
+    (``ValueError``) an ``out_dir`` inside the project, and (``tcip_store.ReadRefusedError``) a log
+    holding entries that will not decode, naming its key.
     """
     from tcip_mcp.registry_paths import located
     from tcip_store.file_backend import database_roots
@@ -85,11 +85,7 @@ def dump_store(project: Path, out_dir: Path) -> list[Path]:
                         )
                     )
                 page = tcip_store.read_log(key)
-                if page.corrupt:
-                    raise ValueError(
-                        f"the log {key} holds entries at {page.corrupt} that will "
-                        "not decode"
-                    )
+                tcip_store.refuse_corrupt_entries(page, f"the log {key}")
                 if page.records:
                     files.append(
                         (

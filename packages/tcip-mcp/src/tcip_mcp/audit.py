@@ -81,22 +81,24 @@ def audit_entries(
 ) -> tuple[list[AuditLine], str]:
     """Return every entry of ``scope``'s log past the cursor ``after``, and the log's cursor.
 
-    Entries are read as :class:`AuditLine`, in the order they landed. A log carrying undecodable
-    entries raises ``ValueError`` naming how many. An entry that is no audit line, or a log in a
-    database that will not open or answer or that another holder keeps locked past the wait,
-    raises ``tcip_store.ReadRefusedError`` naming the log.
+    Entries are read as :class:`AuditLine`, in the order they landed. A page holding entries that
+    will not decode (:func:`tcip_store.refuse_corrupt_entries`), an entry that is no audit line,
+    or a log in a database that will not open or answer or that another holder keeps locked past
+    the wait, raises ``tcip_store.ReadRefusedError`` naming the log.
     """
-    from tcip_store import STORE_READ_REFUSALS, read_log, unreadable, validated
+    from tcip_store import (
+        STORE_READ_REFUSALS,
+        read_log,
+        refuse_corrupt_entries,
+        unreadable,
+        validated,
+    )
 
     key = audit_log_key(scope)
     log = f"the audit log at {key.root}"
     with unreadable(log, *STORE_READ_REFUSALS):
         page = read_log(key, after=after)
-    if page.corrupt:
-        raise ValueError(
-            f"{log} carries {len(page.corrupt)} undecodable "
-            "entries; repair the log before trusting a read of it"
-        )
+    refuse_corrupt_entries(page, log)
     return [validated(AuditLine, r, log) for r in page.records], page.cursor
 
 

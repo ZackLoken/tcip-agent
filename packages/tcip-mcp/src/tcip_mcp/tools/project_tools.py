@@ -524,9 +524,9 @@ def _recent_activity(project: Path) -> dict:
     ``record_distillation_pass`` lines in the order they landed: the reports since the last
     retrospective and since the last distillation pass, the retrospectives since that pass, the
     last retrospective's ``project_id`` and time, the last pass's time, and the time of the last
-    report or retrospective. A log carrying undecodable entries answers ``status_unavailable``
-    naming how many, and a log in a database that will not open or answer naming the store's
-    sentence.
+    report or retrospective. A log that will not read answers ``status_unavailable`` carrying
+    :func:`~tcip_mcp.audit.audit_entries`' refusal: the positions of entries that will not decode,
+    or the store's sentence for a database that will not open or answer.
     """
     from tcip_mcp.audit import acts_of
 
