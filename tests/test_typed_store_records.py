@@ -364,8 +364,12 @@ def test_a_bucket_record_missing_a_field_refuses_naming_it(
     del stored["execution"]
     ts.replace(key, stored)
 
-    with pytest.raises(ValidationError, match=r"execution\s+Field required"):
+    with pytest.raises(ts.ReadRefusedError) as refused:
         read_bucket(bucket.root, bucket.name)
+
+    assert str(refused.value) == (
+        f"bucket {bucket.name!r} under {bucket.root}: execution: Field required"
+    )
 
 
 def test_a_final_status_reads_back_as_it_was_written(tmp_path: Path) -> None:
@@ -433,8 +437,43 @@ def test_a_cancellation_reads_back_as_its_first_request(
 
     assert request_cancel(run_dir) == first == cancel_requested_at(run_dir)
     (run_dir / CANCEL_FILE).write_text(json.dumps({}), encoding="utf-8")
-    with pytest.raises(ValidationError, match=r"requested\s+Field required"):
+    with pytest.raises(ts.ReadRefusedError) as refused:
         cancel_requested_at(run_dir)
+    assert str(refused.value) == (
+        f"{run_dir / CANCEL_FILE}: requested: Field required"
+    )
+
+
+def test_an_acknowledgment_reads_back_as_recorded_and_one_missing_a_field_refuses(
+    tmp_path: Path,
+) -> None:
+    """An acknowledgment reads back as recorded; one stored without its reason refuses."""
+    from tcip_mcp.delivery import (
+        _acknowledgment_key,
+        read_acknowledgment,
+        record_acknowledgment,
+    )
+
+    recorded = record_acknowledgment(
+        tmp_path,
+        acknowledged_by="user:breeder",
+        reason="an unassessed fixture bucket",
+        result_sha256="ab" * 32,
+    )
+    key = _acknowledgment_key(tmp_path, recorded.acknowledgment_id)
+
+    assert (
+        read_acknowledgment(tmp_path, recorded.acknowledgment_id) == recorded
+    )
+    stored = ts.read(key)
+    assert isinstance(stored, dict)
+    del stored["reason"]
+    ts.replace(key, stored)
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        read_acknowledgment(tmp_path, recorded.acknowledgment_id)
+    assert str(refused.value) == (
+        f"acknowledgment {recorded.acknowledgment_id}: reason: Field required"
+    )
 
 
 def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
@@ -588,7 +627,7 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
     for record, match in (
         (
             {**stored, "passed": True},
-            r"passed\s+Unexpected keyword argument",
+            r"passed: Unexpected keyword argument",
         ),
         (
             {
@@ -598,13 +637,14 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
                     "captures": [[identity.id, SCALE_DATE]],
                 },
             },
-            r"reference\.selection\.captures\s+Unexpected keyword argument",
+            r"reference\.selection\.captures: Unexpected keyword argument",
         ),
         (
             {k: v for k, v in stored.items() if k != "failures"},
-            r"failures\s+Field required",
+            r"failures: Field required",
         ),
     ):
         path.write_text(json.dumps(record), encoding="utf-8")
-        with pytest.raises(ValidationError, match=match):
+        with pytest.raises(ts.ReadRefusedError, match=match) as refused:
             read_assessment(tmp_path, produced["assessment_id"])
+        assert refused.value.served.where == str(path)

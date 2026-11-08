@@ -82,11 +82,11 @@ def audit_entries(
     """Return every entry of ``scope``'s log past the cursor ``after``, and the log's cursor.
 
     Entries are read as :class:`AuditLine`, in the order they landed. A log carrying undecodable
-    entries raises ``ValueError`` naming how many, and an entry that is no audit line
-    ``pydantic.ValidationError``. A log in a database that will not open or answer, or that
-    another holder keeps locked past the wait, raises ``tcip_store.ReadRefusedError``.
+    entries raises ``ValueError`` naming how many. An entry that is no audit line, or a log in a
+    database that will not open or answer or that another holder keeps locked past the wait,
+    raises ``tcip_store.ReadRefusedError`` naming the log.
     """
-    from tcip_store import STORE_READ_REFUSALS, read_log, unreadable
+    from tcip_store import STORE_READ_REFUSALS, read_log, unreadable, validated
 
     key = audit_log_key(scope)
     log = f"the audit log at {key.root}"
@@ -97,7 +97,7 @@ def audit_entries(
             f"{log} carries {len(page.corrupt)} undecodable "
             "entries; repair the log before trusting a read of it"
         )
-    return [AuditLine.model_validate(r) for r in page.records], page.cursor
+    return [validated(AuditLine, r, log) for r in page.records], page.cursor
 
 
 def acts_among(

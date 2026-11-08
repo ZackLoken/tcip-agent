@@ -541,12 +541,23 @@ class TestPortDiscovery:
     ) -> None:
         """A recorded port that does not read as a port raises naming it, not read as absent."""
         import tcip_store as ts
-        from tcip_mcp.web_client import backend_port_key, resolve_web_port
+        from tcip_mcp.web_client import (
+            backend_port_key,
+            record_backend_port,
+            resolve_web_port,
+        )
 
-        ts.replace(backend_port_key(tmp_path.parent), "not a port")
+        workspace = tmp_path.parent
+        record_backend_port(workspace, 8765)
+        assert resolve_web_port(workspace) == 8765
+        ts.replace(backend_port_key(workspace), "not a port")
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        with pytest.raises(ValueError, match="valid integer"):
-            resolve_web_port(tmp_path.parent)
+        with pytest.raises(ts.ReadRefusedError) as refused:
+            resolve_web_port(workspace)
+        assert refused.value.served.where == (
+            f"the backend port recorded under {workspace}"
+        )
+        assert "valid integer" in str(refused.value.served.refusal)
 
     def test_the_port_handoff_is_one_declaration_that_both_packages_reach(
         self,

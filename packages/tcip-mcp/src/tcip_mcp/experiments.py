@@ -740,11 +740,11 @@ class CancelRequest(BaseModel):
 def cancel_requested_at(directory: Path) -> datetime:
     """Return when the cancellation of the run or sweep at ``directory`` was first requested.
 
-    The record is a :class:`CancelRequest`; none written raises ``FileNotFoundError``.
+    The record is a :class:`CancelRequest`; none written raises ``FileNotFoundError``, and one
+    that does not validate ``tcip_store.ReadRefusedError`` naming its file.
     """
-    return CancelRequest.model_validate(
-        read_record(directory / CANCEL_FILE)
-    ).requested
+    path = directory / CANCEL_FILE
+    return validated(CancelRequest, read_record(path), str(path)).requested
 
 
 def cancel_requested(directory: Path) -> bool:
