@@ -268,29 +268,59 @@ def test_a_resumed_session_reports_its_conversation_and_is_told_nothing(
     assert _reported(remembered, started).conversation == "conv-r"
 
 
-def test_a_report_whose_line_fails_fails_the_hook_and_prints_nothing(
+def test_a_report_the_backend_refuses_is_told_the_agent_as_the_backend_answered(
     remembered: OpenProject,
     started: terminal_routes.TerminalSession,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A report the backend cannot record answers 409, and the hook raises it, printing nothing.
+    """A start the backend refuses is printed to the agent with the refusal's status and body.
 
-    The harness runs its agent without the orientation; the recorded conversation stays unset.
+    The project's store is overwritten after the launch, so the report's line cannot be written
+    and the route answers 409; the hook returns 0 and its output states the store's refusal.
     """
-    import httpx
-
-    from tests._audit_fixtures import audit_rows, refuse_audit_appends
+    import tcip_store
+    from tcip_store.file_backend import database_file
 
     monkeypatch.setenv(TERMINAL_SESSION_ENV, started.id)
-    with monkeypatch.context() as refusing:
-        refuse_audit_appends(refusing)
-        with pytest.raises(httpx.HTTPStatusError) as refused:
-            _hooked(monkeypatch, capsys, _claude_start("conv-x", "startup"))
+    tcip_store.release_root(remembered.root)
+    foreign = database_file(str(remembered.root))
+    foreign.write_bytes(b"not a database" * 100)
 
-    assert refused.value.response.status_code == 409
-    assert capsys.readouterr().out == ""
-    assert audit_rows(remembered.root, "agent_terminal_reported") == []
+    try:
+        text = _additional_context(
+            _hooked(monkeypatch, capsys, _claude_start("conv-x", "startup"))
+        )
+    finally:
+        tcip_store.release_root(remembered.root)
+        foreign.unlink()
+
+    assert "refused this session's start" in text
+    assert "409" in text
+    assert "could not complete this store's identity check" in text
+
+
+def test_a_session_the_backend_does_not_hold_is_told_the_agent_as_the_backend_answered(
+    started: terminal_routes.TerminalSession,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Every answer that is not 2xx is printed alike: an unknown session's 404 too."""
+    from tcip_web.state import store
+
+    unknown = session_start_url(store.workspace, "no-such-session")
+
+    text = _additional_context(
+        _hooked(
+            monkeypatch,
+            capsys,
+            _claude_start("conv-y", "startup"),
+            unknown,
+        )
+    )
+
+    assert "refused this session's start" in text
+    assert "404" in text
 
 
 def test_the_orientation_holds_the_newest_entries_that_fit_and_how_many_there_are(
