@@ -115,6 +115,21 @@ def build_plain_ds(**kwargs: object) -> _PlainDataset:
     return _PlainDataset(**kwargs)
 
 
+def build_loader_ds(
+    *,
+    samples: Sequence[Sample],
+    scope: ClassScope,
+    transforms: Callable[[Image.Image, dict], tuple[Tensor, dict]] | None,
+    **_ignored: object,
+) -> BaseDataset:
+    """Build the platform's detection loader over the context, as a builder is invited to."""
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset
+
+    return DetectionDataset(
+        samples=samples, scope=scope, transforms=transforms
+    )
+
+
 BESPOKE_DS = "test_dataset_source_seam:build_bespoke_ds"
 """The ``dataset_source`` builder of :func:`build_bespoke_ds`."""
 BESPOKE_DS_FILE = str(REPO_ROOT / "tests" / "test_dataset_source_seam.py")
@@ -238,20 +253,18 @@ def _scope() -> ClassScope:
     return registry_scope(Path(__file__).parent, "leaf")
 
 
-def _ctx(
+def _run_config(
     root: Path, task: str, data: dict
-) -> tuple[TrainContext, list[Sample]]:
-    """Return a training body's context over a run of ``root`` of ``task``, and its samples.
+) -> tuple[dict, list[Sample]]:
+    """Return a run config of ``root`` of ``task``, and the samples it is admitted over.
 
-    The run is opened by the launcher's own producer, its data block stating ``data`` beside the
-    place :func:`_admitted_samples` admits there and the class space it admits under, with no
-    validation side.
+    The config's data block states ``data`` beside the place :func:`_admitted_samples` admits
+    there and the class space it admits under, with no validation side.
     """
     from dataclasses import asdict
 
     from tests._chain_fixtures import training_config
     from tests._training_values import evaluation_block
-    from tests.tiny_trainer_fixtures import run_context
 
     samples = _admitted_samples(root / "ds")
     config = training_config(
@@ -270,6 +283,19 @@ def _ctx(
         },
         evaluation=evaluation_block(selection_metric="loss"),
     )
+    return config, samples
+
+
+def _ctx(
+    root: Path, task: str, data: dict
+) -> tuple[TrainContext, list[Sample]]:
+    """Return a training body's context over a run of ``root`` of ``task``, and its samples.
+
+    The run is opened by the launcher's own producer over :func:`_run_config`.
+    """
+    from tests.tiny_trainer_fixtures import run_context
+
+    config, samples = _run_config(root, task, data)
     return run_context(root, config), samples
 
 
@@ -326,8 +352,37 @@ def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_sub
         "s1",
     ]  # the builder's own configuration, from its own kwargs
     assert ds.marker == "bespoke"  # builder_kwargs applied
-    # The platform states nothing about a dataset it did not build, and reads nothing off it.
-    assert not hasattr(ds, "expected_channels")
+    assert ds.expected_channels == ctx.spec.data.num_channels == 3
+
+
+def test_a_builder_returning_a_built_in_loader_trains(tmp_path: Path) -> None:
+    """A run whose builder returns a built-in loader trains to a completed run.
+
+    The builder returns a ``DetectionDataset`` over its context's samples and scope; the run,
+    opened by the launcher's own producer, is run by the worker's own entry, which draws the
+    loader's first item at the run's band count.
+    """
+    from tcip_mcp.experiments import observe
+    from tests._chain_fixtures import stated_detector_geometry
+    from tests._verified_checkpoint_fixtures import worker_run
+
+    config, _samples = _run_config(
+        tmp_path,
+        "detection",
+        {
+            "dataset_source": {
+                "builder": "test_dataset_source_seam:build_loader_ds",
+                "source_files": [BESPOKE_DS_FILE],
+            }
+        },
+    )
+    config["model_source"]["detector_geometry"] = stated_detector_geometry(
+        (16, 16)
+    )
+    run_dir = worker_run(tmp_path, config)
+
+    final = observe(run_dir).final
+    assert final is not None and final.state == "completed", final
 
 
 def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
@@ -412,7 +467,8 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path) -> None:
     """The builder's own configuration is its ``builder_kwargs`` and nothing else.
 
     The lowest boundary requires the dataset source with the layout it imports from, the task,
-    the samples, the scope and the transforms.
+    the samples, the scope, the transforms and the run's band count, which the dataset it returns
+    reads.
     """
     import inspect
 
@@ -425,7 +481,14 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path) -> None:
         ).parameters.items()
         if p.default is inspect.Parameter.empty
     }
-    assert required == {"bespoke", "task", "samples", "scope", "transforms"}
+    assert required == {
+        "bespoke",
+        "task",
+        "samples",
+        "scope",
+        "transforms",
+        "num_channels",
+    }
 
     samples = _admitted_samples(tmp_path / "ds")
     stated = {
@@ -439,8 +502,10 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path) -> None:
         samples=samples,
         scope=_scope(),
         transforms=None,
+        num_channels=3,
     )
     assert ds.marker == "pinned" and ds.samples == list(samples)
+    assert ds.expected_channels == 3
 
     with pytest.raises(ValueError, match="builder_kwargs"):
         _source({"builder": BESPOKE_DS, "builder_kwargs": [1, 2]})

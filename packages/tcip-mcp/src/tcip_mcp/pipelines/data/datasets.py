@@ -71,9 +71,7 @@ class BaseDataset(Dataset, ABC):
     """Abstract base for all task-specific datasets."""
 
     task_type: str = ""
-    expected_channels: (
-        int  # input channels the dataset yields, stamped by build_dataset
-    )
+    expected_channels: int  # input channels the dataset yields, set by stamped
 
     @property
     @abstractmethod
@@ -1045,6 +1043,7 @@ def build_from_dataset_source(
     samples: Sequence[Sample],
     scope: ClassScope,
     transforms: Transforms | None,
+    num_channels: int,
 ) -> BaseDataset:
     """Import and call the dataset builder a ``dataset_source`` names, and return its dataset.
 
@@ -1059,7 +1058,8 @@ def build_from_dataset_source(
     The context is a ``schemas.DatasetContext``, each value under its field's name;
     ``builder_kwargs`` configure the builder (``schemas.DatasetSourceSchema`` refuses one naming
     a context field). A builder returning anything but a :class:`BaseDataset` refuses
-    (``ValueError``) naming the builder.
+    (``ValueError``) naming the builder; the dataset it returns reads ``num_channels``, the
+    run's band count (:func:`stamped`).
     """
     from tcip_mcp.pipelines.model_build import import_source_builder
 
@@ -1075,12 +1075,19 @@ def build_from_dataset_source(
     if not isinstance(built, BaseDataset):
         raise ValueError(
             f"dataset_source builder {dataset_source.builder!r} returned a "
-            f"{type(built).__name__}, and the loaders and the run's geometry read a dataset's "
-            "num_samples, expected_channels and sample_classes, which a "
+            f"{type(built).__name__}, and the platform reads a dataset's "
+            "num_samples and sample_classes, which a "
             "tcip_mcp.pipelines.data.datasets.BaseDataset states. Return a BaseDataset: one of "
-            "the built-in loaders, or a subclass of it."
+            "the built-in loaders, or a subclass of it. The platform sets its expected_channels "
+            "from the run's band count."
         )
-    return built
+    return stamped(built, num_channels)
+
+
+def stamped[D: BaseDataset](dataset: D, num_channels: int) -> D:
+    """Set ``dataset``'s ``expected_channels`` to the run's band count and return it."""
+    dataset.expected_channels = num_channels
+    return dataset
 
 
 def _band_count(samples: Sequence[Sample]) -> int:
@@ -1236,11 +1243,12 @@ def build_dataset(
             transforms=transforms,
             tiling=tiler,
         )
-    ds = _builtin_loader(
-        task, samples=samples, scope=scope, transforms=transforms
+    return stamped(
+        _builtin_loader(
+            task, samples=samples, scope=scope, transforms=transforms
+        ),
+        sizes["num_channels"],
     )
-    ds.expected_channels = sizes["num_channels"]
-    return ds
 
 
 def build_tiled_dataset(
@@ -1269,7 +1277,7 @@ def build_tiled_dataset(
         "a task that tiles reads label documents"
     )
     # Stamped before the tiler indexes every image at the base's band count.
-    base.expected_channels = sizes["num_channels"]
+    stamped(base, sizes["num_channels"])
     return TiledDetectionDataset(
         base, transforms=transforms, **tiling.tiler_options()
     )
