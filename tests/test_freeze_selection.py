@@ -499,6 +499,75 @@ def test_freeze_selection_reads_a_members_removed_document_as_moved(
     assert "'a'" in result["error"]
 
 
+def test_freeze_selection_reports_a_document_that_will_not_read_not_a_changed_one(
+    tmp_path: Path,
+) -> None:
+    """freeze_selection says a member's document will not read, never that it changed.
+
+    One member's stored document, replaced through the store's writer by a value that decodes
+    but is not a label document, refuses the freeze naming that member and the document's own
+    refusal; no other member is named.
+    """
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(tmp_path, root, "exp-unreadable")
+
+    key = label_key(root, DATES[0], "a")
+    ts.replace(key, ["not", "a", "label", "document"])
+
+    result = freeze_selection(tmp_path, "exp-unreadable", actor=None)
+
+    error = result["error"]
+    assert "will not read" in error and "changed" not in error, error
+    assert f"{key.store}{list(key.parts)} under {key.root}" in error, error
+    assert "not the object a label document is" in error, error
+    others = [
+        s.ground_truth
+        for s in run_resolution(
+            "exp-unreadable", project=tmp_path
+        ).partition.samples
+        if isinstance(s.ground_truth, ts.Key) and s.ground_truth != key
+    ]
+    assert others
+    assert not [
+        o
+        for o in others
+        if f"{o.store}{list(o.parts)} under {o.root}" in error
+    ], error
+
+
+def test_freeze_selection_names_the_member_whose_database_will_not_open(
+    tmp_path: Path,
+) -> None:
+    """freeze_selection names the member it was reading when the store refuses its database.
+
+    A dataset database overwritten with bytes that are not SQLite refuses the first member's
+    read with a text naming the file alone; the freeze's answer says the member's ground truth
+    will not read and names that member's place, the one the first partition sample keys.
+    """
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(tmp_path, root, "exp-no-database")
+
+    first = run_resolution(
+        "exp-no-database", project=tmp_path
+    ).partition.samples[0]
+    assert isinstance(first.ground_truth, ts.Key)
+    ts.release_root(root)
+    database = root / ".tcip" / "store.db"
+    database.write_bytes(b"this is not a database" * 100)
+
+    result = freeze_selection(tmp_path, "exp-no-database", actor=None)
+
+    error = result["error"]
+    assert "will not read" in error and "changed" not in error, error
+    place = f"{first.ground_truth.store}{list(first.ground_truth.parts)}"
+    assert f"{place} under {first.ground_truth.root}" in error, error
+    assert str(database) in error and "file is not a database" in error, error
+
+
 def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path) -> None:
     from tcip_mcp.tools.data_tools import freeze_selection
 
