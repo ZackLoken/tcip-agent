@@ -1039,11 +1039,10 @@ def registry_csv_entries(
     ]
 
 
-def registry_entries_or_refusal(
-    build: MappingBuild,
-    project: Path | str,
-) -> tuple[list[RegistryCsv], str | None]:
-    """Return the CSV entries ``build.plant_registry`` names, or the refusal when untrusted.
+def registry_or_refusal(
+    build: MappingBuild, project: Path | str
+) -> PlantRegistry | str:
+    """Return the registry record ``build.plant_registry`` names, or the refusal when untrusted.
 
     The refusal names the registry, the mapping and ``project``: the named registry no longer
     loads, or its own ``digest`` no longer matches ``build.plant_registry.digest``.
@@ -1052,58 +1051,14 @@ def registry_entries_or_refusal(
     try:
         record = load_registry(project, reference.name)
     except PlantRegistryNotFoundError as exc:
-        return [], f"mapping {build.name!r} names it: {exc}"
+        return f"mapping {build.name!r} names it: {exc}"
     if record["digest"] != reference.digest:
-        return [], (
+        return (
             f"{_plant_registry_place(project, reference.name)} named by mapping "
             f"{build.name!r} has moved (built against digest {reference.digest!r}, now "
             f"{record['digest']!r}); rebuild the mapping against the current registry"
         )
-    return registry_csv_entries(record, project), None
-
-
-def _read_registered_bytes(
-    registry_entries: list[RegistryCsv],
-) -> tuple[list[str], list[str], dict[str, bytes]]:
-    """Read each of ``registry_entries``' files once and compare its bytes to the registered hash.
-
-    Returns every missing path, every path whose bytes differ from the entry's ``sha256``, and
-    the bytes read for every present path, keyed by the entry's own ``path``.
-    """
-    missing: list[str] = []
-    rewritten: list[str] = []
-    bytes_by_path: dict[str, bytes] = {}
-    for entry in registry_entries:
-        p = Path(entry["path"])
-        if not p.is_file():
-            missing.append(entry["path"])
-            continue
-        data = p.read_bytes()
-        bytes_by_path[entry["path"]] = data
-        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
-            rewritten.append(entry["path"])
-    return missing, rewritten, bytes_by_path
-
-
-def verify_registry_csv_bytes(
-    registry_entries: list[RegistryCsv],
-) -> tuple[list[str], str | None, dict[str, bytes]]:
-    """Check each of ``registry_entries``'s recorded bytes against what is on disk now.
-
-    The entries are :func:`registry_csv_entries`'; each present file's bytes are read exactly
-    once. Returns every missing path, the first rewritten file (or ``None`` when every present
-    path's bytes still match what was registered), and the verified bytes this call read for every
-    present path, keyed by the entry's own ``path``.
-    """
-    missing, rewritten, bytes_by_path = _read_registered_bytes(
-        registry_entries
-    )
-    first = (
-        f"plant CSV {rewritten[0]} was rewritten since it was registered"
-        if rewritten
-        else None
-    )
-    return missing, first, bytes_by_path
+    return record
 
 
 def registered_plants(
@@ -1116,10 +1071,21 @@ def registered_plants(
     every file that is missing and every file whose bytes differ from the registered ones.
     """
     entries = registry_csv_entries(registry, project)
-    missing, rewritten, bytes_by_path = _read_registered_bytes(entries)
+    missing: list[str] = []
+    rewritten: list[str] = []
+    bytes_by_path: dict[str, bytes] = {}
+    for entry in entries:
+        p = Path(entry["path"])
+        if not p.is_file():
+            missing.append(entry["path"])
+            continue
+        data = p.read_bytes()
+        bytes_by_path[entry["path"]] = data
+        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            rewritten.append(entry["path"])
     if missing or rewritten:
         named = [
-            f"{what}: {paths}"
+            f"{what}: {', '.join(paths)}"
             for what, paths in (
                 ("plant CSV(s) not found", missing),
                 ("plant CSV(s) rewritten since registered", rewritten),
@@ -1832,8 +1798,8 @@ def verify_mapping_inputs(
     (:func:`assignment_is_attributed` true, with a ``distance_m``) refuses by name when the
     capture's fresh GPS position no longer sits ``distance_m`` from any plant of that name in the
     plant CSVs whose bytes this same call just verified, or when the fresh capture carries no GPS
-    position at all. When that plant's own CSV is itself among ``plant_csvs_unverified``, the
-    position is disclosed rather than compared.
+    position at all; one whose recorded plant no verified CSV names refuses naming the capture and
+    the plant.
 
     When every mapped capture of a date was read (``missing_stems`` empty and ``read_set`` equal to
     the recorded stems :func:`assignment_is_attributed` calls attributed), every capture the date
@@ -1844,11 +1810,11 @@ def verify_mapping_inputs(
     EXIF timestamp or band-group manifest change on a read capture goes undetected when some
     other mapped capture of the same date was not read.
 
-    Raises :class:`MappingDeliveryError` for any of the above; otherwise returns the
-    :class:`MappingVerification`, entries in ``build.dates`` order and, within a date, sorted by
-    name. A missing plant CSV is disclosed in ``plant_csvs_unverified``; a rewritten one refuses
-    (restore the file's registered bytes, or register the current file under a new registry name,
-    rebuild the mapping against it, and deliver under that name).
+    Raises :class:`MappingDeliveryError` for any of the above, and before any capture is read for
+    a registry :func:`registry_or_refusal` refuses and for the registered plant CSVs
+    :func:`registered_plants` refuses, naming every missing or rewritten file; otherwise returns
+    the :class:`MappingVerification`, entries in ``build.dates`` order and, within a date, sorted
+    by name.
     """
     from tcip_mcp.pipelines.image_utils import (
         AmbiguousImageStemError,
@@ -1860,26 +1826,16 @@ def verify_mapping_inputs(
     remedy = "rebuild with build_plant_mapping"
 
     # Plant CSVs first: the per-capture moved-position check below trusts only verified bytes.
-    registry_entries, registry_refusal = registry_entries_or_refusal(
-        build, project
-    )
-    if registry_refusal:
-        raise MappingDeliveryError(registry_refusal)
-    plant_csvs_unverified, rewritten_fact, verified_csv_bytes = (
-        verify_registry_csv_bytes(registry_entries)
-    )
-    if rewritten_fact:
+    registry = registry_or_refusal(build, project)
+    if isinstance(registry, str):
+        raise MappingDeliveryError(registry)
+    try:
+        verified_plants = registered_plants(registry, project)
+    except RegisteredBytesError as exc:
         raise MappingDeliveryError(
-            f"{rewritten_fact}: restore the file's registered bytes, or register the current "
-            "file under a new registry name, rebuild the mapping against it, and deliver under "
-            "that name"
-        )
-    verified_plants = [
-        plant
-        for entry in registry_entries
-        if entry["path"] not in plant_csvs_unverified
-        for plant in read_plant_csv_bytes(verified_csv_bytes[entry["path"]])
-    ]
+            f"mapping {build.name!r}: {exc} A mapping is delivered over a new registration "
+            "only once it is rebuilt against it."
+        ) from exc
 
     try:
         on_disk = scan_captures(
@@ -1962,10 +1918,11 @@ def verify_mapping_inputs(
                     if p.plant_id == row.plant_id
                 ]
                 if not distances:
-                    # The plant's own CSV is among plant_csvs_unverified, so this capture's
-                    # recorded position is disclosed as unrechecked.
-                    unverified_names.add(s.name)
-                    continue
+                    raise MappingDeliveryError(
+                        f"{s.name} (date {date}) was assigned plant {row.plant_id!r}, which no "
+                        f"plant CSV of registry {registry['name']!r} names: this mapping was "
+                        "not built over its registry's registered bytes; rebuild"
+                    )
                 if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
                     raise MappingDeliveryError(
                         f"{s.name} (date {date}) has moved since this mapping was built: "
@@ -1991,7 +1948,7 @@ def verify_mapping_inputs(
                     "rebuild to cover the images actually on disk"
                 )
 
-    return MappingVerification(captures_unverified, plant_csvs_unverified)
+    return MappingVerification(captures_unverified, [])
 
 
 def ungeoreferenced_capture_message(
@@ -2113,19 +2070,16 @@ def resolve_delivery_mapping(
                 "date(s)"
             )
         # Refused on the record's own evidence, before verify_mapping_inputs reads any capture.
-        registry_entries, registry_refusal = registry_entries_or_refusal(
-            mapping_build, project
-        )
-        if registry_refusal:
-            raise MappingDeliveryError(registry_refusal, status=409)
-        paths = [entry["path"] for entry in registry_entries]
-        n_plants = sum(entry["n_plants"] for entry in registry_entries)
-        if n_plants == 0:
+        registry = registry_or_refusal(mapping_build, project)
+        if isinstance(registry, str):
+            raise MappingDeliveryError(registry, status=409)
+        if registry["n_plants"] == 0:
             raise MappingDeliveryError(
-                f"the plant CSVs this mapping was built from ({paths}) parsed no plant with "
-                "usable coordinates and a name, so no capture could be assigned; check the "
-                "CSV's column headers against read_plant_csvs's and rebuild the mapping"
+                f"{_plant_registry_place(project, registry['name'])}, which mapping {name!r} "
+                "was built from, holds no plant, so no capture could be assigned; register the "
+                "block's plant CSVs under a new registry name and rebuild the mapping against it"
             )
+        paths = [e["path"] for e in registry_csv_entries(registry, project)]
         if all(a.distance_m is None for a in delivered_assignments):
             raise MappingDeliveryError(
                 ungeoreferenced_capture_message(

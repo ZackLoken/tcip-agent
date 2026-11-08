@@ -17,6 +17,8 @@ from tests import _trait_fixtures as fx
 from tests._mapping_fixtures import PLOTS, write_plots_csv
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
 
 torch = pytest.importorskip("torch")
@@ -24,6 +26,9 @@ torch = pytest.importorskip("torch")
 KIND = "per_plant_count_aggregate"
 SCOPE = {"subject": fx.COUNT_SUBJECT}
 pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
+
+PLANT_CSV = "plants.csv"
+"""The file name, under the project, of the plant CSV :func:`_scene` writes and registers."""
 
 
 def _scene(
@@ -65,7 +70,7 @@ def _scene(
         actor=None,
     )
     assert "error" not in result, result
-    plant_csv = write_plots_csv(tmp_path / "plants.csv", plants)
+    plant_csv = write_plots_csv(tmp_path / PLANT_CSV, plants)
     return dataset_root, plant_csv, date
 
 
@@ -357,6 +362,46 @@ def test_a_capture_added_since_the_mapping_was_built_refuses(
     )
 
     assert "does not cover what is on disk now" in res["error"]
+    assert not (tmp_path / "o.csv").exists()
+
+
+def _removed(plant_csv: Path) -> str:
+    """Remove ``plant_csv``; return the phrase a refusal of a missing CSV states."""
+    plant_csv.unlink()
+    return "not found"
+
+
+def _rewritten(plant_csv: Path) -> str:
+    """Rewrite ``plant_csv`` with its plant moved; return the phrase a refusal of it states."""
+    write_plots_csv(plant_csv, {"P1": (43.19675, -90.058000)})
+    return "rewritten"
+
+
+@pytest.mark.parametrize(
+    "change", [_removed, _rewritten], ids=lambda f: f.__name__.strip("_")
+)
+def test_a_registered_plant_csv_gone_or_rewritten_refuses_the_delivery_naming_it(
+    tmp_path: Path, change: Callable[[Path], str]
+) -> None:
+    """A plant CSV removed or rewritten since its registration refuses the door, naming the file.
+
+    The refusal comes before the gate, and no output is written.
+    """
+    dataset_root, date = _mapped(tmp_path)
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
+    plant_csv = tmp_path / PLANT_CSV
+    phrase = change(plant_csv)
+
+    res = _deliver(
+        tmp_path,
+        _records(("P1", 1)),
+        ["P1"],
+        dataset_root,
+        [bucket],
+        plant_mapping="valley",
+    )
+
+    assert phrase in res["error"] and str(plant_csv) in res["error"], res
     assert not (tmp_path / "o.csv").exists()
 
 
