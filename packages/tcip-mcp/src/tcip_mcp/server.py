@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
+from mcp.shared.exceptions import MCPError
 
 from tcip_mcp import agent_identity
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
@@ -168,13 +169,40 @@ def _creating(
     return entry
 
 
+def _carrying_sentences(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Return ``fn`` as the server registers it, every exception it raises answered with its text.
+
+    A ``ToolError``, a ``ResourceError`` or an ``MCPError`` passes through unchanged. Any other
+    exception is logged with its traceback at ERROR and re-raised as a ``ToolError`` whose text is
+    its class name and its sentence, the class name alone for an empty one, the original its
+    cause.
+    """
+
+    @functools.wraps(fn)
+    def entry(*args: object, **kwargs: object) -> object:
+        try:
+            return fn(*args, **kwargs)
+        except (ToolError, ResourceError, MCPError):
+            raise
+        except Exception as exc:
+            logger.exception("tool %s raised", fn.__name__)
+            sentence = str(exc)
+            name = type(exc).__name__
+            raise ToolError(
+                f"{name}: {sentence}" if sentence else name
+            ) from exc
+
+    return entry
+
+
 def build_server(session: Session) -> MCPServer:
     """Return a server registering every declared tool, each call acting in ``session``.
 
     Each call acts on the project ``session`` is bound to at that call and is made by its person
     (:class:`Session`). With no project bound, only the tools taking neither ``project`` nor
     ``bound`` can run, and from the first project the creation door creates, every tool acts on
-    that one.
+    that one. A call that raises answers the exception's class and sentence
+    (:func:`_carrying_sentences`).
     """
     server = MCPServer(
         "tcip-pipeline", lifespan=agent_identity.session_lifespan
@@ -185,7 +213,9 @@ def build_server(session: Session) -> MCPServer:
         registered = _bound(fn, session)
         if creates_project:
             registered = _creating(registered, session)
-        server.add_tool(registered, description=description)
+        server.add_tool(
+            _carrying_sentences(registered), description=description
+        )
     return server
 
 
