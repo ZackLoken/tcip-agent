@@ -9,7 +9,6 @@ interface with a generated field set or a bare union alias matching a generated 
 from __future__ import annotations
 
 import importlib
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -59,19 +58,12 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
 def test_the_audit_gap_refusal_declares_committed_as_a_required_boolean() -> (
     None
 ):
-    """The refusal's model and its generated interface both require ``committed`` as a boolean."""
+    """The refusal's model requires ``committed`` as a boolean and ``what`` beside it."""
     from tcip_web.routes.audit_gap import AuditGapRefusal
 
     schema = AuditGapRefusal.model_json_schema()
     assert schema["properties"]["committed"]["type"] == "boolean"
     assert {"committed", "what"} <= set(schema["required"])
-    interface = re.search(
-        r"export interface AuditGapRefusal \{(.*?)\n\}",
-        GENERATED.read_text(encoding="utf-8"),
-        re.DOTALL,
-    )
-    assert interface is not None
-    assert "  committed: boolean;" in interface.group(1)
 
 
 class _OneMemberLiteral(BaseModel):

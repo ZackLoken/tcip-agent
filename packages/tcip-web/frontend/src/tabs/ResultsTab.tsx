@@ -285,9 +285,9 @@ export function ResultsTab() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      const gap = committedOf<SavedExport>(e);
-      if (gap?.committed && gap.what !== null) {
-        useStore.getState().pushToast(auditGapExportMessage(gap.what.saved_path, messageOf(e)));
+      const committed = committedOf<SavedExport>(e);
+      if (committed) {
+        useStore.getState().pushToast(auditGapExportMessage(committed.saved_path, messageOf(e)));
         return;
       }
       // The download door refuses through the same structured family, so it lands in the panel.
@@ -360,9 +360,9 @@ export function ResultsTab() {
       setCountExported(exported);
       setCountGateRefusal(null);
     } catch (e) {
-      const gap = committedOf<SavedExport>(e);
-      if (gap?.committed && gap.what !== null) {
-        setCountError(auditGapExportMessage(gap.what.saved_path, messageOf(e)));
+      const committed = committedOf<SavedExport>(e);
+      if (committed) {
+        setCountError(auditGapExportMessage(committed.saved_path, messageOf(e)));
         return;
       }
       const opRefusal = refusalOf<OperationalizationRefusal>(e, OPERATIONALIZATION);

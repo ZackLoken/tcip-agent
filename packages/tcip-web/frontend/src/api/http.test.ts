@@ -103,22 +103,13 @@ describe("http helpers", () => {
     expect(gap(null)).toBeNull();
   });
 
-  it("committedOf reads whether the call committed and what, and is null for any other failure", async () => {
+  it("committedOf returns the body only when the call committed, null otherwise", async () => {
     const produced = RESULTS_ANSWERS.count_export_audit_gap;
-    expect(committedOf<SavedExport>(await thrown(produced))).toEqual({
-      committed: true,
-      what: produced.body.detail.what,
-    });
+    expect(committedOf<SavedExport>(await thrown(produced))).toEqual(produced.body.detail.what);
 
-    expect(committedOf(await thrown(RESULTS_ANSWERS.mapping_audit_gap))).toEqual({
-      committed: true,
-      what: null,
-    });
-
-    expect(committedOf(await thrown(TERMINAL_ANSWERS.start_audit_gap))).toEqual({
-      committed: false,
-      what: null,
-    });
+    // Committed with no body to offer, and nothing committed: neither offers a body.
+    expect(committedOf(await thrown(RESULTS_ANSWERS.mapping_audit_gap))).toBeNull();
+    expect(committedOf(await thrown(TERMINAL_ANSWERS.start_audit_gap))).toBeNull();
 
     expect(committedOf(await thrown(ANNOTATE_ANSWERS.engine_refusal))).toBeNull();
   });
