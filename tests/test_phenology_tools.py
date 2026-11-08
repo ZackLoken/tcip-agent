@@ -9,13 +9,16 @@ no bucket's scope declares the attribute.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    GpsSource,
     StatedRadius,
     plant_mapping_key,
 )
@@ -25,14 +28,8 @@ from tests._audit_fixtures import audit_rows
 from tests._chain_fixtures import deliver_milestones
 
 
-def test_the_served_description_states_the_claiming_method_and_names_no_row_run() -> (
-    None
-):
-    """The description served for ``build_plant_mapping`` states what the mapping does.
-
-    Each image on a date takes the nearest plant no earlier capture of the date has claimed, in
-    capture-time order; the description names no row run.
-    """
+def _served_tool_description() -> str:
+    """Return the description the tool listing serves for ``build_plant_mapping``."""
     from tcip_web.cli import tool_listing
 
     (served,) = (
@@ -41,10 +38,46 @@ def test_the_served_description_states_the_claiming_method_and_names_no_row_run(
         if t.name == "build_plant_mapping"
     )
     assert served is not None
-    description = " ".join(served.split())
-    assert "row run" not in description
-    assert "nearest unclaimed plant" in description
-    assert "capture-time order" in description
+    return served
+
+
+def _served_plant_mapping_section() -> str:
+    """Return the "Plant mapping" section of the ``phenology`` content as served."""
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
+
+    content = serve_domain_knowledge(name="phenology")["content"]
+    _, _, tail = content.partition("\n## Plant mapping")
+    assert tail, "the served phenology document has no 'Plant mapping' section"
+    section, _, _ = tail.partition("\n## ")
+    return section
+
+
+@pytest.mark.parametrize(
+    "served_text",
+    [_served_tool_description, _served_plant_mapping_section],
+    ids=["tool-description", "knowledge-section"],
+)
+def test_the_served_text_states_the_claiming_method_and_names_no_row_run(
+    served_text: Callable[[], str],
+) -> None:
+    """Each text the agent is served about the mapping states what the mapping does.
+
+    Each image on a date takes the nearest unclaimed plant, in capture-time order; neither the
+    tool description nor the knowledge document names a row run.
+    """
+    text = " ".join(served_text().split())
+    assert "row run" not in text
+    assert "nearest unclaimed plant" in text
+    assert "capture-time order" in text
+
+
+def test_the_served_plant_mapping_section_names_every_source_an_assignment_takes() -> (
+    None
+):
+    """The served "Plant mapping" section names each ``GpsSource`` value in backticks."""
+    section = _served_plant_mapping_section()
+    for source in get_args(GpsSource):
+        assert f"`{source}`" in section
 
 
 def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
