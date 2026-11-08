@@ -20,6 +20,20 @@ if TYPE_CHECKING:
 torch = pytest.importorskip("torch")
 
 
+def _opened(project: Path, experiment_id: str) -> Path:
+    """Open a detector run under ``project`` through the launcher's own producer."""
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
+
+    return opened_run(
+        project,
+        detection_config(project / "data", project=project),
+        experiment_id=experiment_id,
+    )
+
+
 def test_cancel_training_reaches_the_runs_own_poll(tmp_path: Path) -> None:
     """A cancel requested by id reaches the run's own poll; an id naming no run refuses.
 
@@ -28,17 +42,8 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path: Path) -> None:
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.tools.training_tools import cancel_training
-    from tests._verified_checkpoint_fixtures import (
-        detection_config,
-        opened_run,
-    )
 
-    run_dir = opened_run(
-        tmp_path,
-        detection_config(tmp_path / "data", project=tmp_path),
-        experiment_id="cancel-run-1",
-    )
-    run = observed_run(observe(run_dir))
+    run = observed_run(observe(_opened(tmp_path, "cancel-run-1")))
     assert not run.should_cancel()
 
     res = cancel_training(tmp_path, run.id, actor=None)
@@ -53,37 +58,61 @@ def test_a_cancel_written_is_answered_and_logged_when_the_run_will_not_read(
 ) -> None:
     """A cancel whose run's record will not read afterward is still recorded, answered and logged.
 
-    The answer names the record that did not read, and the log holds the cancel's one line,
-    stamped ok.
+    The answer's refused read is placed at the record that did not read, and the log holds the
+    cancel's one line, stamped ok.
     """
     from tcip_mcp.experiments import CANCEL_FILE, RUN_FILE
-    from tcip_mcp.tools.training_tools import cancel_training
     from tests._audit_fixtures import audit_rows
-    from tests._verified_checkpoint_fixtures import (
-        detection_config,
-        opened_run,
-    )
+    from tests.test_hpo_cancel import cancel_unread
 
-    run_dir = opened_run(
-        tmp_path,
-        detection_config(tmp_path / "data", project=tmp_path),
-        experiment_id="cancel-run-unread",
-    )
+    run_dir = _opened(tmp_path, "cancel-run-unread")
     (run_dir / RUN_FILE).write_bytes(b"\xff\xfe not json")
 
-    answer = cancel_training(tmp_path, run_dir.name, actor=None)
-
-    assert not isinstance(answer, dict)
-    served = answer.model_dump(mode="json")
-    assert (served["kind"], served["experiment_id"]) == (
-        "cancel_recorded",
-        run_dir.name,
-    )
-    assert str(run_dir / RUN_FILE) in served["unread"]["refusal"]["message"]
+    assert cancel_unread(tmp_path, run_dir)["where"] == str(run_dir / RUN_FILE)
     assert (run_dir / CANCEL_FILE).is_file()
     assert [
         row["status"] for row in audit_rows(tmp_path, "cancel_training")
     ] == ["ok"]
+
+
+@pytest.mark.parametrize("damage", ["empty path", "traversing path"])
+def test_a_cancel_is_recorded_at_the_run_record_whose_path_field_will_not_resolve(
+    tmp_path: Path, damage: str
+) -> None:
+    """A run's cancel is recorded, at its run record, when a stored path there will not resolve.
+
+    The record's ``resume_from`` is rewritten on disk empty, or carrying a ``..`` segment.
+    """
+    from tcip_mcp.experiments import RUN_FILE
+    from tests.test_diagnose_project_run_records import DAMAGES
+    from tests.test_hpo_cancel import cancel_unread
+
+    run_dir = _opened(tmp_path, "cancel-run-path")
+    DAMAGES[damage](run_dir)
+
+    assert cancel_unread(tmp_path, run_dir)["where"] == str(run_dir / RUN_FILE)
+
+
+def test_a_repeated_cancel_answers_as_the_first_until_its_record_will_not_read(
+    tmp_path: Path,
+) -> None:
+    """A repeated cancel answers as the first did; once the cancel record will not read, it refuses.
+
+    The refusal is an error naming the cancel record.
+    """
+    from tcip_mcp.experiments import CANCEL_FILE
+    from tcip_mcp.tools.training_tools import cancel_training
+
+    run_dir = _opened(tmp_path, "cancel-run-twice")
+    first = cancel_training(tmp_path, run_dir.name, actor=None)
+
+    assert cancel_training(tmp_path, run_dir.name, actor=None) == first
+
+    (run_dir / CANCEL_FILE).write_bytes(b"\xff\xfe not json")
+    refused = cancel_training(tmp_path, run_dir.name, actor=None)
+
+    assert isinstance(refused, dict), refused
+    assert str(run_dir / CANCEL_FILE) in refused["error"]
 
 
 def test_cancel_before_training_yields_canceled(tmp_path: Path) -> None:

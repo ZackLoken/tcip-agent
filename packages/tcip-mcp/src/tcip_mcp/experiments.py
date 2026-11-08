@@ -81,7 +81,6 @@ from tcip_mcp.registry_paths import (
 )
 from tcip_mcp.workspace import path_segment
 from tcip_store import (
-    DecodeError,
     FiniteJsonValue,
     ReadRefusedError,
     RefusedRead,
@@ -92,6 +91,7 @@ from tcip_store import (
     finite_number,
     non_finite_state,
     stored_numbers,
+    unreadable,
     validated,
 )
 from tcip_store.file_backend import is_sharing_violation, retry_while_denied
@@ -493,11 +493,14 @@ def read_run_record(path: Path) -> JsonValue:
     """Return the run or sweep record at ``path`` (:func:`read_record`).
 
     Each path :data:`RECORD_PATHS` names for its file is resolved against the directory's
-    project.
+    project; one stored empty or carrying a ``..`` segment raises ``tcip_store.ReadRefusedError``
+    at ``path``.
     """
-    return runtime_paths(
-        read_record(path), RECORD_PATHS[path.name], project_of_run(path)
-    )
+    record, project = read_record(path), project_of_run(path)
+    with unreadable(
+        str(path), RegistryPathEmptyError, RegistryPathTraversalError
+    ):
+        return runtime_paths(record, RECORD_PATHS[path.name], project)
 
 
 def publish_once(path: Path, write: Callable[[BinaryIO], object]) -> None:
@@ -616,39 +619,41 @@ violation (``tcip_store.file_backend.retry_while_denied``) before raising it."""
 def read_record(path: Path) -> JsonValue:
     """Return the JSON record at ``path``.
 
-    A Windows sharing violation is retried while :data:`SHARING_RETRY_BUDGET_S` is unspent and
-    raised once it is, no read starting after the deadline; every other ``PermissionError``, a
-    missing file (``FileNotFoundError``) and bytes that do not decode (``DecodeError`` naming the
-    file) raise at once.
+    A Windows sharing violation is retried while :data:`SHARING_RETRY_BUDGET_S` is unspent, no
+    read starting after the deadline. A read denied past it or for any other reason, and bytes
+    that do not decode, raise ``tcip_store.ReadRefusedError`` (``Unreadable``) at ``path``; a
+    missing file raises ``FileNotFoundError``.
     """
-    data = retry_while_denied(
-        path.read_bytes, SHARING_RETRY_BUDGET_S, denied=is_sharing_violation
-    )
-    try:
-        return decode_value(data)
-    except ValueError as exc:
-        raise DecodeError(f"{path} does not decode as JSON: {exc}") from exc
+    with unreadable(str(path), PermissionError, ValueError):
+        return decode_value(
+            retry_while_denied(
+                path.read_bytes,
+                SHARING_RETRY_BUDGET_S,
+                denied=is_sharing_violation,
+            )
+        )
 
 
 def read_rows(path: Path, *, after: int = 0) -> tuple[list[MetricsRow], int]:
     """Return every complete row of the metrics log at ``path`` past byte offset ``after``.
 
     Beside them is the offset past the last complete one. A line still being appended is left for
-    the next read. A log that does not exist raises ``FileNotFoundError``; a complete line that
-    does not decode as a :class:`MetricsRow` raises ``DecodeError`` naming the file.
+    the next read. A log that does not exist raises ``FileNotFoundError``, and one whose read is
+    denied ``tcip_store.ReadRefusedError`` at ``path``. A complete line that does not decode, or
+    whose :class:`MetricsRow` refuses it, raises ``tcip_store.ReadRefusedError`` (``Unreadable``
+    or ``Invalid``) at ``<path>:<n>``, ``n`` the line's 1-based number in newline bytes from the
+    log's first byte, whatever ``after`` is.
     """
-    with open(path, "rb") as handle:
-        handle.seek(after)
+    with unreadable(str(path), PermissionError), open(path, "rb") as handle:
+        first = handle.read(after).count(b"\n") + 1
         data = handle.read()
     end = data.rfind(b"\n") + 1
     rows: list[MetricsRow] = []
-    for line in data[:end].splitlines():
-        try:
-            rows.append(MetricsRow.model_validate(decode_value(line)))
-        except ValueError as exc:
-            raise DecodeError(
-                f"{path} holds a row that does not decode: {exc}"
-            ) from exc
+    for n, line in enumerate(data[:end].split(b"\n")[:-1], start=first):
+        place = f"{path}:{n}"
+        with unreadable(place, ValueError):
+            value = decode_value(line)
+        rows.append(validated(MetricsRow, value, place))
     return rows, after + end
 
 
@@ -919,8 +924,6 @@ RUN_REFUSALS = (
     StoreError,
     ReadRefusedError,
     IncompleteRunError,
-    RegistryPathEmptyError,
-    RegistryPathTraversalError,
     PermissionError,
 )
 """The exceptions :func:`observe_runs` answers as a run's refusal; any other propagates."""
@@ -1740,7 +1743,7 @@ def compare_experiments(
         run, final = observation.record, observation.final
         try:
             metrics = read_rows(observation.metrics_log)[0]
-        except DecodeError as exc:
+        except ReadRefusedError as exc:
             comparisons.append(
                 UncomparedRun(experiment_id=eid, error=str(exc))
             )

@@ -17,7 +17,7 @@ pytest.importorskip("torchvision")
 
 from tcip_mcp import experiments
 from tcip_mcp.experiments import METRICS_FILE, RUN_FILE
-from tcip_store import StoreError, encode_record
+from tcip_store import ReadRefusedError, encode_record
 from tests._verified_checkpoint_fixtures import (
     detection_config,
     finished_run,
@@ -199,10 +199,13 @@ def test_every_run_that_will_not_read_is_named_and_the_runs_that_read_are_checke
 def test_a_reader_of_the_runs_still_refuses_on_a_run_that_will_not_read(
     tmp_path: Path,
 ) -> None:
-    """``run_observations`` raises the refusal of a run that will not read."""
+    """``run_observations`` raises the refusal of a run that will not read, at its record."""
     project = tmp_path / "proj"
     new_project(project)
-    _damaged_run(tmp_path, project, _undecodable)
+    run_id = _damaged_run(tmp_path, project, _undecodable)
 
-    with pytest.raises(StoreError, match="exp-damaged"):
+    with pytest.raises(ReadRefusedError) as refused:
         experiments.run_observations(project)
+    assert refused.value.served.where == str(
+        experiments.experiment_dir(run_id, project=project) / RUN_FILE
+    )
