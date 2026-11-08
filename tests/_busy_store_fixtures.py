@@ -13,18 +13,20 @@ from typing import TYPE_CHECKING
 
 import tcip_store
 from tcip_store.file_backend import database_file
-from tcip_store.sqlite_backend import SqliteBackend
+from tests._store_worker import make_backend
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from tcip_store.sqlite_backend import SqliteBackend
+
 SHORT_WAIT_S = 0.3
 """A lock wait well under the driver's own connect default of 5 s, so the two are told apart."""
 
 GAVE_UP_WITHIN_S = 3.0
-"""Above what a short wait was measured to take here (0.8 s for 0.3 s on a rollback-journal
-database) and below the driver's 5 s default."""
+"""Above what a 0.3 s wait took (0.8 s) on a rollback-journal database, measured on the Windows
+machine the store contract tests were written on, and below the driver's 5 s default."""
 
 
 @contextmanager
@@ -50,12 +52,13 @@ def held_by_another_connection(
 
 
 @contextmanager
-def short_wait_backend() -> Iterator[SqliteBackend]:
-    """Bind a backend that waits :data:`SHORT_WAIT_S` on a lock, and close it on leaving.
+def waiting(lock_timeout_s: float) -> Iterator[SqliteBackend]:
+    """Bind a backend that waits ``lock_timeout_s`` on a lock, yield it, and close it on leaving.
 
-    No other backend is bound again on leaving, so a block holds one test's own operations.
+    The backend is the store contract's (:func:`tests._store_worker.make_backend`). Binding
+    another backend afterward is the caller's.
     """
-    backend = tcip_store.bind(SqliteBackend(lock_timeout_s=SHORT_WAIT_S))
+    backend = tcip_store.bind(make_backend(lock_timeout_s=lock_timeout_s))
     try:
         yield backend
     finally:

@@ -41,6 +41,7 @@ from tests._busy_store_fixtures import (
     GAVE_UP_WITHIN_S,
     SHORT_WAIT_S,
     held_by_another_connection,
+    waiting,
 )
 from tests._store_worker import (
     CAS,
@@ -1419,13 +1420,11 @@ never before, and 50 ms allows a coarser timer elsewhere."""
 @contextmanager
 def _waiting(store: Harness, lock_timeout_s: float) -> Iterator[None]:
     """Bind a backend that waits ``lock_timeout_s`` on a lock, binding ``store``'s again after."""
-    backend = make_backend(lock_timeout_s=lock_timeout_s)
-    ts.bind(backend)
     try:
-        yield
+        with waiting(lock_timeout_s):
+            yield
     finally:
         ts.bind(store.backend)
-        backend.close()
 
 
 def _released_into_rollback_journal(store: Harness) -> None:
