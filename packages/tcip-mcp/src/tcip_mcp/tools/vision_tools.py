@@ -1001,11 +1001,11 @@ def capture_live_canvas(
         if crop_to_viewport and viewport is not None
         else None
     )
-    read = _display_of(
-        SourceHeader(resolve_image_path(src_image)),
-        max_edge=max_edge,
-        region=region,
-    )
+    try:
+        source = resolve_image_path(src_image)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"error": str(exc)}
+    read = _display_of(SourceHeader(source), max_edge=max_edge, region=region)
     try:
         out = render_canvas_state(
             read.pixels,
@@ -1096,8 +1096,12 @@ def overlay_reference_grid(
     img = located(image_path, project)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
+    try:
+        source = resolve_image_path(img)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"error": str(exc)}
 
-    display = _display_of(SourceHeader(resolve_image_path(img)))
+    display = _display_of(SourceHeader(source))
     w, h = display.native_size
     if tile_size is None:
         tile_size = derive_pointing_tile_size(w, h)

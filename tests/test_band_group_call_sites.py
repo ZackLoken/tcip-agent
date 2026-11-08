@@ -24,7 +24,10 @@ from tests._producer_fixtures import (  # noqa: E402
 from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 
 if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
     from tcip_mcp.workspace import BoundProject
+    from tcip_web.state import OpenProject
 
 
 def _write_group(images_dir: Path, stem: str) -> tuple[Path, dict[str, Path]]:
@@ -328,6 +331,65 @@ def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
         result = visualize(tmp_path, render)
         assert "capture_001.bandgroup" in result["error"], (render, result)
         assert "name the manifest" in result["error"]
+
+
+def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_serves_its_manifest(
+    client: TestClient, opened: OpenProject, grouped_dataset: GroupedDataset
+) -> None:
+    """A door naming one band of a grouped capture answers the resolver's refusal as its error.
+
+    ``read_annotations``, ``save_annotations``, ``overlay_reference_grid`` and
+    ``capture_live_canvas`` are called through the server, the canvas pushed through the
+    backend's own route; each answers the sentence ``resolve_image_path`` raises for the band, as
+    it answers a path that is not a file, and each serves the group's manifest.
+    """
+    import json
+
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tests._web_fixtures import bound_to
+    from tests.test_agent_identity_records import results_through_handshake
+
+    member = str(grouped_dataset.bands["Green"])
+    with pytest.raises(FileNotFoundError) as refused:
+        resolve_image_path(member)
+
+    def answers(image: str) -> list[dict]:
+        pushed = client.post(
+            "/api/canvas/state",
+            json={
+                "project_id": opened.id,
+                "tab": "annotate",
+                "image_path": image,
+                "viewport": {"x": 0, "y": 0, "w": 16, "h": 16, "scale": 1.0},
+                "mode": "box",
+                "active_subject": None,
+                "cut_armed": False,
+                "dirty": False,
+                "user": "breeder",
+                "classes": [{"name": "bud", "color": "#FF0000"}],
+                "counts": {},
+                "shapes": None,
+            },
+        )
+        assert pushed.status_code == 200, pushed.text
+        results = results_through_handshake(
+            [
+                ("read_annotations", {"image_path": image}),
+                ("save_annotations", {"image_path": image, "annotations": []}),
+                (
+                    "overlay_reference_grid",
+                    {"image_path": image, "overlap": 0.0},
+                ),
+                ("capture_live_canvas", {"refresh": False}),
+            ],
+            bound=bound_to(opened),
+        )
+        assert not any(result.is_error for result in results), results
+        return [json.loads(result.content[0].text) for result in results]
+
+    assert answers(member) == [{"error": str(refused.value)}] * 4
+    served = answers(str(grouped_dataset.manifest))
+    assert [answer.get("error") for answer in served] == [None] * 4, served
 
 
 def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(
