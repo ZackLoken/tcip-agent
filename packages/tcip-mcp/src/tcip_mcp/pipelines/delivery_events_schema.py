@@ -151,7 +151,7 @@ class AnsweredScale(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    kind: Literal["answered"] = "answered"
+    kind: Literal["answers"] = "answers"
     assessment_id: str
 
 

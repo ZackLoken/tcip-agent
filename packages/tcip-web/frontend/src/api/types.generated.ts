@@ -11,7 +11,7 @@ export const AGENT = "agent";
 
 export const PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus";
 
-export const ANSWERED = "answered";
+export const ANSWERS = "answers";
 
 export const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
 
@@ -834,7 +834,7 @@ export interface AnnotationPayload {
 }
 
 export interface AnsweredScale {
-  kind: "answered";
+  kind: "answers";
   assessment_id: string;
 }
 

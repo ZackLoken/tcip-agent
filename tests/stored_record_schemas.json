@@ -4965,8 +4965,8 @@
             "type": "string"
           },
           "kind": {
-            "const": "answered",
-            "default": "answered",
+            "const": "answers",
+            "default": "answers",
             "title": "Kind",
             "type": "string"
           }
@@ -5492,7 +5492,7 @@
       "ScaleRead": {
         "discriminator": {
           "mapping": {
-            "answered": "#/$defs/AnsweredScale",
+            "answers": "#/$defs/AnsweredScale",
             "unanswered": "#/$defs/UnansweredScale"
           },
           "propertyName": "kind"
