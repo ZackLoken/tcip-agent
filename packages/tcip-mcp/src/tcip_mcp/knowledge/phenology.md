@@ -104,15 +104,18 @@ state's check against the subject registry are the `delivery` skill's meaning do
 Don't confuse `score_predictions` (IoU GT-vs-prediction *eval* matching) with plant-GPS mapping;
 they are unrelated.
 
-## Plant mapping: why captures claim plants in capture-time order
+## Plant mapping: one capture per plant per date
 
 Image GPS (a handheld's EXIF) can carry more error than the spacing between adjacent plots, so
-nearest-neighbor GPS alone is ambiguous. The RTK-collected, GIS-rectified plant grid is
-accurate; the *image* GPS is the fuzzy side. `plant_mapping.py` resolves this by ordering each
-date's images by EXIF capture time (the walker's sequence) and giving each the nearest plant no
-earlier image of that date has claimed (`sequence`); when no unclaimed plant lies within the
-radius it takes the nearest plant (`nearest_neighbor`), and when none lies within it the image is
-`unmapped`. A capture is matched within its date's radius: a
+a capture's nearest plant can be a neighbor of the plant it shows. The RTK-collected,
+GIS-rectified plant grid is accurate; the *image* GPS is the fuzzy side. `plant_mapping.py` uses
+only each capture's own position and a set of plants claimed per date: it takes each date's
+images in EXIF capture-time order, and each takes the nearest plant no earlier image of that date
+has claimed (`sequence`), so each plant is taken as `sequence` by at most one capture of a date.
+Capture order decides only which of two captures takes a plant first; nothing corrects a capture
+whose position lies nearer another plant than the one it shows. When no unclaimed plant lies
+within the radius a capture takes the nearest plant (`nearest_neighbor`), and when none lies
+within it the capture is `unmapped`. A capture is matched within its date's radius: a
 `match_radius` stated with its reason governs every date of the build, and without one each
 date's radius is the largest horizontal positioning error its photographs report in their EXIF,
 the build refusing until one is stated when any one positioned photograph of a date reports

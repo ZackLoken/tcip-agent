@@ -141,14 +141,15 @@ def test_the_earlier_capture_claims_the_plant_two_captures_are_nearest_to(
 ) -> None:
     """Two captures nearest to one plant: the earlier claims it, the later takes the next nearest.
 
-    The stamps are given later capture first; the assignments come back in that order.
+    The stamps are given later capture first, and the stems sort opposite to capture time; the
+    assignments come back in the order given.
     """
     plants = [
         _plant("P1", "A", 43.1960, -90.0580),
         _plant("P2", "B", 43.19603, -90.0580),
     ]
-    later = stamp("later", 43.1960, -90.0580, 10)
-    earlier = stamp("earlier", 43.1960, -90.0580, 0)
+    later = stamp("a_late", 43.1960, -90.0580, 10)
+    earlier = stamp("b_early", 43.1960, -90.0580, 0)
     assigned = _assign([later, earlier], plants)
     assert [(a.plant_id, a.source) for a in assigned] == [
         ("P2", "sequence"),
@@ -161,8 +162,8 @@ def test_the_later_capture_takes_the_claimed_plant_when_no_other_is_in_range(
 ) -> None:
     """With no unclaimed plant within the radius, the later capture takes the claimed nearest."""
     plants = [_plant("P1", "A", 43.1960, -90.0580)]
-    later = stamp("later", 43.1960, -90.0580, 10)
-    earlier = stamp("earlier", 43.1960, -90.0580, 0)
+    later = stamp("a_late", 43.1960, -90.0580, 10)
+    earlier = stamp("b_early", 43.1960, -90.0580, 0)
     assigned = _assign([later, earlier], plants)
     assert [(a.plant_id, a.source) for a in assigned] == [
         ("P1", "nearest_neighbor"),
