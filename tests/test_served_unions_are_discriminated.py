@@ -59,7 +59,7 @@ NULLABLE_SETS = {
     },
     "CurveRow": {"accession", "ratio"},
     "DatasetSelection": {"subject", "bucket"},
-    "DeliveryEventRecord": {"scale_assessment_id", "plant_mapping"},
+    "DeliveryEventRecord": {"scale", "plant_mapping"},
     "DisjointnessEvidence": {"training", "selection"},
     "DrawSpread": {"mean", "std", "min", "max"},
     "Execution": {
