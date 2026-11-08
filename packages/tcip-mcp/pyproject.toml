@@ -13,7 +13,7 @@ dependencies = [
     "timm>=1.0",
     "numpy",
     # scipy.spatial (band-group identity tolerance, nearest-neighbor spacing, diversity scorer's
-    # cosine distance) and scipy.stats.median_abs_deviation (the row-break derivation).
+    # cosine distance).
     "scipy",
     # sklearn.metrics: metric_at_thresholds (added in 1.9; the mask threshold derivation) and the
     # classification, agreement and regression metrics; preprocessing.minmax_scale (review queue).

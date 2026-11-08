@@ -25,6 +25,28 @@ from tests._audit_fixtures import audit_rows
 from tests._chain_fixtures import deliver_milestones
 
 
+def test_the_served_description_states_the_claiming_method_and_names_no_row_run() -> (
+    None
+):
+    """The description served for ``build_plant_mapping`` states what the mapping does.
+
+    Each image on a date takes the nearest plant no earlier capture of the date has claimed, in
+    capture-time order; the description names no row run.
+    """
+    from tcip_web.cli import tool_listing
+
+    (served,) = (
+        t.description
+        for t in tool_listing()
+        if t.name == "build_plant_mapping"
+    )
+    assert served is not None
+    description = " ".join(served.split())
+    assert "row run" not in description
+    assert "nearest unclaimed plant" in description
+    assert "capture-time order" in description
+
+
 def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     from datetime import datetime
 
