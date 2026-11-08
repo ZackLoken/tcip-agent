@@ -37,6 +37,11 @@ from tcip_store.sqlite_backend import (
     encode_parts,
     open_verified,
 )
+from tests._busy_store_fixtures import (
+    GAVE_UP_WITHIN_S,
+    SHORT_WAIT_S,
+    held_by_another_connection,
+)
 from tests._store_worker import (
     CAS,
     LOG,
@@ -1399,13 +1404,6 @@ def test_a_write_the_driver_refuses_for_a_read_only_database_raises_database_ref
 
 # ── another connection's lock ───────────────────────────────────────────────────
 
-_SHORT_WAIT_S = 0.3
-"""A lock wait well under the driver's own connect default of 5 s, so the two are told apart."""
-
-_GAVE_UP_WITHIN_S = 3.0
-"""Above what a short wait was measured to take here (0.8 s for 0.3 s on a rollback-journal
-database) and below the driver's 5 s default."""
-
 _LONG_WAIT_S = 10.0
 """A lock wait a brief hold (:data:`_BRIEF_HOLD_S`) clears well inside."""
 
@@ -1428,28 +1426,6 @@ def _waiting(store: Harness, lock_timeout_s: float) -> Iterator[None]:
     finally:
         ts.bind(store.backend)
         backend.close()
-
-
-@contextmanager
-def _held_by_another_connection(
-    store: Harness,
-) -> Iterator[sqlite3.Connection]:
-    """Hold the root's database from a plain connection in exclusive locking mode.
-
-    The connection takes its lock with ``begin exclusive`` and gives it up when it closes, on
-    leaving the block unless it was closed before.
-    """
-    holder = sqlite3.connect(
-        str(database_file(str(store.root))),
-        isolation_level=None,
-        check_same_thread=False,
-    )
-    try:
-        holder.execute("pragma locking_mode = exclusive")
-        holder.execute("begin exclusive")
-        yield holder
-    finally:
-        holder.close()
 
 
 def _released_into_rollback_journal(store: Harness) -> None:
@@ -1489,8 +1465,8 @@ def test_a_lock_met_at_open_refuses_a_read_as_busy_after_the_backend_s_wait(
     ts.release_root(store.root)
 
     with (
-        _waiting(store, _SHORT_WAIT_S),
-        _held_by_another_connection(store),
+        _waiting(store, SHORT_WAIT_S),
+        held_by_another_connection(store.root),
     ):
         with pytest.raises(ts.StoreBusyError) as busy:
             ts.read(key)
@@ -1498,8 +1474,8 @@ def test_a_lock_met_at_open_refuses_a_read_as_busy_after_the_backend_s_wait(
             ts.read_raw(ts.read, key, "the record this test reads")
 
     assert busy.value.blocked_on == key
-    assert _SHORT_WAIT_S <= busy.value.waited_s < _GAVE_UP_WITHIN_S
-    assert busy.value.waited_s != _SHORT_WAIT_S
+    assert SHORT_WAIT_S <= busy.value.waited_s < GAVE_UP_WITHIN_S
+    assert busy.value.waited_s != SHORT_WAIT_S
     assert refused.value.served.where == "the record this test reads"
     assert _served_as_busy(refused.value).blocked_on == key
 
@@ -1513,8 +1489,8 @@ def test_a_lock_met_at_open_refuses_a_listing_as_busy_naming_the_root(
     root = str(store.root)
 
     with (
-        _waiting(store, _SHORT_WAIT_S),
-        _held_by_another_connection(store),
+        _waiting(store, SHORT_WAIT_S),
+        held_by_another_connection(store.root),
     ):
         with pytest.raises(ts.StoreBusyError) as listing:
             ts.keys(LWW, root)
@@ -1538,9 +1514,9 @@ def test_a_lock_met_on_a_cached_connection_is_served_by_the_reader(
     _released_into_rollback_journal(store)
     root = str(store.root)
 
-    with _waiting(store, _SHORT_WAIT_S):
+    with _waiting(store, SHORT_WAIT_S):
         assert ts.read(key) == {"n": 1}
-        with _held_by_another_connection(store):
+        with held_by_another_connection(store.root):
             with pytest.raises(ts.StoreBusyError) as busy:
                 ts.read(key)
             with pytest.raises(ts.ReadRefusedError) as refused:
@@ -1549,7 +1525,7 @@ def test_a_lock_met_on_a_cached_connection_is_served_by_the_reader(
                 ts.keys(LWW, root)
 
     assert busy.value.blocked_on == key
-    assert _SHORT_WAIT_S <= busy.value.waited_s < _GAVE_UP_WITHIN_S
+    assert SHORT_WAIT_S <= busy.value.waited_s < GAVE_UP_WITHIN_S
     assert _served_as_busy(refused.value).blocked_on == key
     assert listing.value.blocked_on == root
 
@@ -1569,7 +1545,7 @@ def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in
     with _waiting(store, _LONG_WAIT_S):
         with ts.transaction(key, timeout_s=0.0) as txn:
             txn.write(key, {"n": 2})
-        with _held_by_another_connection(store) as holder:
+        with held_by_another_connection(store.root) as holder:
             clears = threading.Timer(_BRIEF_HOLD_S, holder.close)
             clears.start()
             try:
