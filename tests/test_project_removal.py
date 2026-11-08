@@ -178,6 +178,41 @@ def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_a
     assert client.post("/api/projects/remove", json=body).status_code == 200
 
 
+def test_a_run_record_that_will_not_read_refuses_the_removal_naming_it(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A project holding a run whose ``run.json`` will not read refuses its removal with 409.
+
+    The detail names the record, and the project stays where it was.
+    """
+    from tcip_mcp.experiments import RUN_FILE
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
+
+    ws = tmp_path.parent
+    made = _project(ws, "valley_block", "Valley block")
+    record = (
+        opened_run(
+            made.root,
+            detection_config(ws / "run-data", project=made.root),
+            experiment_id="exp-unread",
+        )
+        / RUN_FILE
+    )
+    record.write_bytes(b"\xff\xfe not json")
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"id": made.id, "confirm_name": "Valley block", "user": "tester"},
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert str(record) in resp.json()["detail"]
+    assert made.root.is_dir()
+
+
 def test_an_unfinished_inference_job_refuses_the_removal(
     client: TestClient, tmp_path: Path
 ) -> None:

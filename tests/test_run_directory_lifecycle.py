@@ -365,6 +365,21 @@ def _refusing_final_status(
     return refused
 
 
+def _assert_refused_at_final_status(
+    run_dir: Path, read: Callable[[], object]
+) -> None:
+    """Assert ``read`` refuses as unreadable at ``run_dir``'s final status."""
+    from tcip_mcp.experiments import FINAL_STATUS_FILE
+    from tcip_store import ReadRefusedError
+
+    with pytest.raises(ReadRefusedError) as refused:
+        read()
+    assert (refused.value.served.where, refused.value.served.refusal.kind) == (
+        str(run_dir / FINAL_STATUS_FILE),
+        "unreadable",
+    )
+
+
 def test_a_final_status_a_sharing_violation_refuses_once_is_read_on_the_retry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -386,7 +401,10 @@ def test_a_final_status_a_sharing_violation_refuses_once_is_read_on_the_retry(
 def test_a_final_status_a_sharing_violation_keeps_refusing_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A sharing violation that outlasts the retry budget is raised after more than one read."""
+    """A sharing violation that outlasts the retry budget refuses, after more than one read.
+
+    The refusal is placed at the final status.
+    """
     import math
 
     from tcip_mcp.experiments import observe
@@ -395,17 +413,17 @@ def test_a_final_status_a_sharing_violation_keeps_refusing_raises(
     run_dir = finished_run(tmp_path, experiment_id="exp-locked-status")
     refused = _refusing_final_status(monkeypatch, times=math.inf)
 
-    with pytest.raises(PermissionError):
-        observe(run_dir)
+    _assert_refused_at_final_status(run_dir, lambda: observe(run_dir))
     assert len(refused) > 1
 
 
 def test_a_final_status_denied_for_another_reason_raises_without_a_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A final-status read denied for a reason other than sharing raises without a retry.
+    """A final-status read denied for a reason other than sharing refuses without a retry.
 
-    A read denied with Windows' access-denied code (5) raises on its first refusal.
+    A read denied with Windows' access-denied code (5) refuses, at the final status, on its first
+    refusal.
     """
     import math
 
@@ -415,8 +433,7 @@ def test_a_final_status_denied_for_another_reason_raises_without_a_retry(
     run_dir = finished_run(tmp_path, experiment_id="exp-denied-status")
     refused = _refusing_final_status(monkeypatch, times=math.inf, winerror=5)
 
-    with pytest.raises(PermissionError):
-        observe(run_dir)
+    _assert_refused_at_final_status(run_dir, lambda: observe(run_dir))
     assert len(refused) == 1
 
 

@@ -224,7 +224,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
 
     Of five rows stamped in three UTC offsets and a bare "Z", the two whose instants fall
     strictly after the final status's ``ended`` are counted. A row stating no timestamp refuses
-    the run's comparison, naming the row.
+    the run's comparison at the row's line in the log, naming the field.
     """
     from datetime import UTC, timedelta, timezone
 
@@ -279,10 +279,13 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     assert compared.kind == "compared", compared
     assert compared.rows_after_end == 2
 
-    with (run_dir / METRICS_FILE).open("ab") as log:
-        log.write(b'{"epoch": 6, "loss": 0.6}\n')
+    log = run_dir / METRICS_FILE
+    line = log.read_bytes().count(b"\n") + 1
+    with log.open("ab") as handle:
+        handle.write(b'{"epoch": 6, "loss": 0.6}\n')
     (refused,) = compare_experiments(
         ["exp-instants"], project=tmp_path
     ).experiments
     assert refused.kind == "uncompared", refused
-    assert "epoch': 6" in refused.error and "timestamp" in refused.error
+    assert refused.error.startswith(f"{log}:{line}: "), refused.error
+    assert "timestamp" in refused.error

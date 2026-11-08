@@ -762,6 +762,40 @@ def test_a_bucket_document_that_will_not_read_answers_400_at_the_proposals_route
     assert "record 0" in resp.text
 
 
+def test_a_bucket_whose_assessment_will_not_read_answers_400_naming_it_at_the_proposals_route(
+    tmp_path: Path, client: TestClient
+) -> None:
+    """The proposals of a bucket published under an assessment load until that record will not read.
+
+    Then the route answers 400 naming the assessment's file.
+    """
+    from tcip_mcp.assessment import ASSESSMENT_FILE, assessment_dir
+    from tests._chain_fixtures import run_the_chain
+    from tests._web_fixtures import open_new_project
+
+    chain = run_the_chain(tmp_path, experiment_id="exp-proposals-unread")
+    open_new_project(tmp_path)
+    bucket = chain.read()
+    image = next(
+        p
+        for p in sorted(chain.images_dir.iterdir())
+        if bucket.document_key(p.stem) is not None
+    )
+    params = {"image_path": str(image), "bucket": bucket.name}
+    loaded = client.get("/api/annotate/proposals", params=params)
+    assert loaded.status_code == 200, loaded.text
+
+    record = (
+        assessment_dir(tmp_path, chain.assessment["assessment_id"])
+        / ASSESSMENT_FILE
+    )
+    record.write_bytes(b"\xff\xfe not json")
+    resp = client.get("/api/annotate/proposals", params=params)
+
+    assert resp.status_code == 400, resp.text
+    assert str(record) in resp.json()["detail"]
+
+
 def test_a_verdict_entry_its_model_refuses_answers_400_with_its_readers_sentence(
     tmp_path: Path, client: TestClient
 ) -> None:
