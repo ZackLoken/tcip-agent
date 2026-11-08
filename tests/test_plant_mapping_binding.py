@@ -36,6 +36,7 @@ from tests._mapping_fixtures import (
     write_plant_csv,
 )
 from tests._web_fixtures import named_project
+from tests.test_registered_plants import CHANGES
 from tests.test_second_trait_acceptance import (
     BLOOM_STATE,
     FLOWERS,
@@ -1545,6 +1546,77 @@ def test_a_moved_capture_whose_own_csv_is_removed_refuses_under_a_partial_read(
         output_csv_path=str(out_csv),
     )
     assert str(per_plant_csvs[1]) in res["error"], res
+    assert not out_csv.exists()
+
+
+@pytest.mark.parametrize(("rewritten", "removed"), CHANGES)
+def test_a_delivery_over_a_changed_registry_refuses_naming_each_changed_csv_as_the_build_does(
+    tmp_path: Path, rewritten: list[int], removed: list[int]
+) -> None:
+    """A delivery over a registry whose CSVs changed names every changed CSV and no intact one.
+
+    Three plants, one CSV each, mapped before the change. The delivery tool's refusal names
+    exactly the rewritten and removed CSVs and carries the sentence ``build_plant_mapping``
+    answers over the same changed registry, and no output is written.
+    """
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    plants3 = [
+        *PLANTS,
+        {
+            "plot": "P3",
+            "accession": "acc-C",
+            "lat": 43.19670,
+            "lon": -90.058074,
+        },
+    ]
+    _plant_csv, preds_by_date = _write_scene(
+        dataset_root, dates=[DATES[0]], plants=plants3
+    )
+    per_plant_csvs = [
+        write_plant_csv(tmp_path / f"plants_{p['plot']}.csv", [p])
+        for p in plants3
+    ]
+    registry = register_plant_registry_for(tmp_path, per_plant_csvs)
+    build_res = build_plant_mapping(
+        tmp_path,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=registry,
+        actor=None,
+    )
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    for i in rewritten:
+        per_plant_csvs[i].write_bytes(per_plant_csvs[i].read_bytes() + b"\n")
+    for i in removed:
+        per_plant_csvs[i].unlink()
+    changed = {per_plant_csvs[i] for i in (*rewritten, *removed)}
+
+    out_csv = tmp_path / "out.csv"
+    res = deliver_phenology_milestones(
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        dataset_root=str(dataset_root),
+        buckets=list(preds_by_date.values()),
+        output_csv_path=str(out_csv),
+        plants=[p["plot"] for p in plants3],
+        actor=None,
+    )
+    for csv_path in per_plant_csvs:
+        assert (csv_path.name in res["error"]) == (csv_path in changed), res
+    built = build_plant_mapping(
+        tmp_path,
+        name="probe",
+        dataset_root=str(dataset_root),
+        plant_registry=registry,
+        actor=None,
+    )
+    assert built["error"] in res["error"], (built, res)
     assert not out_csv.exists()
 
 
