@@ -459,22 +459,10 @@ def inspect_project(project: Path) -> dict:
     """
     from tcip_mcp.project_record import record_or_problem
 
-    tcip = project / ".tcip"
-
     status: dict = {
         "project_path": str(project),
         "reading": record_or_problem(project).model_dump(mode="json"),
     }
-
-    # Models
-    models_dir = tcip / "models"
-    if models_dir.is_dir():
-        status["model_count"] = len(list(models_dir.glob("*.pt")))
-
-    # Artifacts
-    artifacts_dir = tcip / "artifacts"
-    if artifacts_dir.is_dir():
-        status["artifact_count"] = len(list(artifacts_dir.iterdir()))
 
     # The logical images under <root>/images/<date>/ and the capture dates they sit under.
     from tcip_mcp import dataset_layout
