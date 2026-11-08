@@ -274,7 +274,7 @@ def test_a_report_the_backend_refuses_is_told_the_agent_as_the_backend_answered(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A start the backend refuses is printed to the agent with the refusal's status and body.
+    """A start the backend answers with a refusal is printed to the agent with its status and body.
 
     The project's store is overwritten after the launch, so the report's line cannot be written
     and the route answers 409; the hook returns 0 and its output states the store's refusal.
@@ -295,8 +295,7 @@ def test_a_report_the_backend_refuses_is_told_the_agent_as_the_backend_answered(
         tcip_store.release_root(remembered.root)
         foreign.unlink()
 
-    assert "refused this session's start" in text
-    assert "409" in text
+    assert "answered this session's start with HTTP 409:" in text
     assert "could not complete this store's identity check" in text
 
 
@@ -319,8 +318,7 @@ def test_a_session_the_backend_does_not_hold_is_told_the_agent_as_the_backend_an
         )
     )
 
-    assert "refused this session's start" in text
-    assert "404" in text
+    assert "answered this session's start with HTTP 404:" in text
 
 
 def test_the_orientation_holds_the_newest_entries_that_fit_and_how_many_there_are(

@@ -7,7 +7,7 @@ them ``conversationId`` and ``transcriptPath``. The report goes to the
 session start route the argument names or, with none, to that of the terminal session
 ``TCIP_TERMINAL_SESSION`` names on the backend serving the workspace ``TCIP_WORKSPACE`` names. The
 orientation the route answers is printed in the shape that harness reads from a hook's stdout,
-and nothing is printed when it answers none. A refusal the route answers is printed in that shape
+and nothing is printed when it answers none. An answer that is not 2xx is printed in that shape
 too.
 """
 
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     """Report the session start the hook's stdin states and print the orientation answered.
 
     Returns 0 once the backend answered. An answer that is not 2xx is printed in the same shape,
-    as one sentence stating that the backend refused the start, the answer's status and its body.
+    as one sentence stating that the backend answered the start with that status and its body.
     Raises what ``httpx.post`` raises for an unreachable backend, ``ValidationError`` for an
     input neither harness shape reads, and ``KeyError`` naming ``TCIP_TERMINAL_SESSION`` when no
     URL is given and it is unset.
@@ -122,11 +122,11 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     )
     answer = httpx.post(url, json=report.model_dump(), timeout=None)
     if not answer.is_success:
-        refusal = (
-            f"The TCIP backend refused this session's start "
-            f"(HTTP {answer.status_code}): {answer.text}"
+        failure = (
+            f"The TCIP backend answered this session's start with "
+            f"HTTP {answer.status_code}: {answer.text}"
         )
-        print(json.dumps(start.output(refusal)))
+        print(json.dumps(start.output(failure)))
         return 0
     told: SessionOrientation = TypeAdapter(SessionOrientation).validate_json(
         answer.text
