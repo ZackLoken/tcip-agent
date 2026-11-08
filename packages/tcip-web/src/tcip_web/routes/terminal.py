@@ -217,6 +217,18 @@ def _record(
         )
 
 
+def _line_unwritten(exc: AuditEntryNotWrittenError) -> str:
+    """Return the sentence for a failed append of the one line a route writes to the project's log.
+
+    It names the line, that it was not written and the store's refusal (``exc.__cause__``), and
+    says no record of the project was changed.
+    """
+    return (
+        f"The {exc.tool} audit line was not written: {exc.__cause__}. "
+        "No record of the project was changed."
+    )
+
+
 _TAIL_CHARS = 32
 
 
@@ -320,8 +332,10 @@ class TerminalSession:
         except AuditEntryNotWrittenError as exc:
             if self.terminate():
                 pty.close()
-                return pty_host.NotStarted(why=str(exc))
-            return pty_host.NotStarted(why=f"{exc} {_SURVIVED}")
+                return pty_host.NotStarted(why=_line_unwritten(exc))
+            return pty_host.NotStarted(
+                why=f"{_line_unwritten(exc)} {_SURVIVED}"
+            )
         self._project = project
         # Started only once the start line is written, so the process's own end follows it.
         pty_host.start_reader(
@@ -993,7 +1007,9 @@ def session_start(
         try:
             _record(_REPORTED, reported.model_dump(), session._project, None)
         except AuditEntryNotWrittenError as exc:
-            raise audit_gap_409(exc, None) from exc
+            raise audit_gap_409(
+                exc, None, message=_line_unwritten(exc)
+            ) from exc
     return pty_host.orientation(session._project, req.source)
 
 
