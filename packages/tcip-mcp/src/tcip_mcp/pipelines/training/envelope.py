@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
     from torch.utils.tensorboard import SummaryWriter
 
+    from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.experiments import (
         FinalState,
         MetricsRow,
@@ -592,14 +593,16 @@ def run_training_envelope(ctx: TrainContext) -> None:
     The envelope opens a ``training_run`` audit event, dispatches the body
     (:func:`dispatch_train_body`), settles how the run ended (:func:`_settle_run`), and closes
     the run (:func:`close_run`), whatever the body did or omitted. An opening line that cannot
-    be written fails the run naming why.
+    be written fails the run before the body is dispatched, naming the unwritten line and that
+    the training did not start.
     """
-    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
 
     run = ctx.run
     audit_args = {"experiment_id": run.id, "task": ctx.task}
 
     t0 = time.monotonic()
+    body_dispatched = False
     try:
         record_event_or_raise(
             "training_run",
@@ -608,12 +611,18 @@ def run_training_envelope(ctx: TrainContext) -> None:
             status="running",
             scope=run.project,
         )
+        body_dispatched = True
         dispatch_train_body(ctx)
     except Exception as exc:  # noqa: BLE001
         if run.status not in ("failed", "canceled"):
             run.status = "failed"
-        run.status_error = run.status_error or str(exc)
-        logger.exception("Training body failed for %s: %s", run.id, exc)
+        if body_dispatched or not isinstance(exc, AuditEntryNotWrittenError):
+            run.status_error = run.status_error or str(exc)
+            logger.exception("Training body failed for %s: %s", run.id, exc)
+        else:
+            message = _unwritten_before_start(exc)
+            run.status_error = run.status_error or message
+            logger.error("%s (run %s)", message, run.id)
 
     from pydantic import TypeAdapter
 
@@ -626,6 +635,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
         # The status the body left, which an agent's own loop sets, is a final state or refuses.
         TypeAdapter(FinalState).validate_python(run.status),
         run.status_error or None,
+        body_dispatched=body_dispatched,
         checkpoint=checkpoint,
         arguments={
             **audit_args,
@@ -635,12 +645,25 @@ def run_training_envelope(ctx: TrainContext) -> None:
     )
 
 
+def _unwritten_before_start(exc: AuditEntryNotWrittenError) -> str:
+    """Return the sentence for a ``training_run`` line refused while no training body had run.
+
+    It names the line, the store's refusal (``exc.__cause__``) and that the training did not
+    start; it claims no change committed.
+    """
+    return (
+        f"The {exc.tool} audit entry could not be written: {exc.__cause__}. "
+        "The training did not start."
+    )
+
+
 def close_run(
     run_dir: Path,
     project: Path,
     state: FinalState,
     status_error: str | None,
     *,
+    body_dispatched: bool,
     checkpoint: RunCheckpoint | None,
     arguments: dict[str, Any],
     **extra: JsonValue,
@@ -649,7 +672,9 @@ def close_run(
 
     The line goes under ``project`` and the status ends at the line's instant; the return is the
     state and ``status_error`` the final status names. A refused append ends the run ``failed``
-    with no checkpoint, its reason named after ``status_error`` when there is one.
+    with no checkpoint, its reason named after ``status_error`` when there is one: the append's
+    own message when ``body_dispatched`` (what the body changed is committed), otherwise that the
+    training did not start.
     """
     from tcip_mcp.audit import (
         AuditEntryNotWrittenError,
@@ -663,7 +688,10 @@ def close_run(
         append_or_raise(line, scope=project)
     except AuditEntryNotWrittenError as exc:
         state, checkpoint = "failed", None
-        status_error = f"{status_error}; {exc}" if status_error else str(exc)
+        message = str(exc) if body_dispatched else _unwritten_before_start(exc)
+        status_error = (
+            f"{status_error}; {message}" if status_error else message
+        )
     write_final_status(
         run_dir,
         state,

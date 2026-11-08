@@ -120,6 +120,7 @@ def run_directory(
                 project_of_run(run_dir),
                 "failed",
                 str(exc),
+                body_dispatched=False,
                 checkpoint=None,
                 arguments={"experiment_id": run_dir.name},
             )
