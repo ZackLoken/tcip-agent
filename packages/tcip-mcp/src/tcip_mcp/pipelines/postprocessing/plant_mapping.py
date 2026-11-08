@@ -122,9 +122,8 @@ class PlantRecord:
 _DECODED = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
 
 GpsSource = Literal["sequence", "nearest_neighbor", "unmapped"]
-"""Where a GPS assignment's plant came from: the nearest plant no earlier capture of the date had
-claimed (``sequence``), the nearest plant within the date's match radius when none unclaimed lies
-within it (``nearest_neighbor``), or none within it (``unmapped``)."""
+"""What a GPS assignment's plant is: one claimed in capture order (``sequence``), the nearest plant
+within the match distance (``nearest_neighbor``), or none (``unmapped``)."""
 
 UnattributedSegmentSource = Literal[
     "outside_segments",
