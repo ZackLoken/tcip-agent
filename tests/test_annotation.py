@@ -10,6 +10,7 @@ from tcip_annotation.json_io import label_document, read_label_document
 from tcip_annotation.matching import iou_matrix, pair_proposals
 
 if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
     from tests._producer_fixtures import WrittenDataset
 
 
@@ -100,3 +101,38 @@ def test_score_predictions_single_image(data_dir: WrittenDataset) -> None:
     assert "fp" in result
     assert "fn" in result
     assert result["tp"] + result["fn"] == 2  # 2 GT boxes
+
+
+def test_the_annotation_doors_answer_a_photograph_that_will_not_decode_with_the_headers_sentence(
+    project: Path, bound: BoundProject
+) -> None:
+    """A file named like a photograph that holds none answers the header read's own sentence.
+
+    ``read_annotations`` and ``save_annotations`` are called through the server over a one-byte
+    ``.jpg``; each answers the error ``image_path_dimensions`` raises for it.
+    """
+    import json
+
+    import pytest
+
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.pipelines.image_utils import image_path_dimensions
+    from tests._producer_fixtures import stub_images
+    from tests.test_agent_identity_records import results_through_handshake
+
+    (stub,) = stub_images(image_dir(project, "2026-04-01"), ["a_1.jpg"])
+    with pytest.raises(OSError) as refused:
+        image_path_dimensions(stub)
+
+    results = results_through_handshake(
+        [
+            ("read_annotations", {"image_path": str(stub)}),
+            ("save_annotations", {"image_path": str(stub), "annotations": []}),
+        ],
+        bound=bound,
+    )
+
+    assert not any(result.is_error for result in results), results
+    assert [json.loads(result.content[0].text) for result in results] == [
+        {"error": str(refused.value)}
+    ] * 2

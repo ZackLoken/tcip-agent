@@ -963,6 +963,10 @@ class PlantRegistryNotFoundError(ValueError):
     """A plant registry name nothing is registered under in the project."""
 
 
+class RegisteredBytesError(ValueError):
+    """Registered plant CSVs that are missing or no longer hold the bytes they registered."""
+
+
 @with_config(ConfigDict(extra="forbid"))
 class RegistryCsv(TypedDict):
     """One plant-locations CSV a registry names: its path, content digest and plant count."""
@@ -1058,6 +1062,29 @@ def registry_entries_or_refusal(
     return registry_csv_entries(record, project), None
 
 
+def _read_registered_bytes(
+    registry_entries: list[RegistryCsv],
+) -> tuple[list[str], list[str], dict[str, bytes]]:
+    """Read each of ``registry_entries``' files once and compare its bytes to the registered hash.
+
+    Returns every missing path, every path whose bytes differ from the entry's ``sha256``, and
+    the bytes read for every present path, keyed by the entry's own ``path``.
+    """
+    missing: list[str] = []
+    rewritten: list[str] = []
+    bytes_by_path: dict[str, bytes] = {}
+    for entry in registry_entries:
+        p = Path(entry["path"])
+        if not p.is_file():
+            missing.append(entry["path"])
+            continue
+        data = p.read_bytes()
+        bytes_by_path[entry["path"]] = data
+        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            rewritten.append(entry["path"])
+    return missing, rewritten, bytes_by_path
+
+
 def verify_registry_csv_bytes(
     registry_entries: list[RegistryCsv],
 ) -> tuple[list[str], str | None, dict[str, bytes]]:
@@ -1068,20 +1095,46 @@ def verify_registry_csv_bytes(
     path's bytes still match what was registered), and the verified bytes this call read for every
     present path, keyed by the entry's own ``path``.
     """
-    missing: list[str] = []
-    rewritten: str | None = None
-    bytes_by_path: dict[str, bytes] = {}
-    for entry in registry_entries:
-        p = Path(entry["path"])
-        if not p.is_file():
-            missing.append(entry["path"])
-            continue
-        data = p.read_bytes()
-        bytes_by_path[entry["path"]] = data
-        digest = hashlib.sha256(data).hexdigest()
-        if digest != entry["sha256"] and rewritten is None:
-            rewritten = f"plant CSV {entry['path']} was rewritten since it was registered"
-    return missing, rewritten, bytes_by_path
+    missing, rewritten, bytes_by_path = _read_registered_bytes(
+        registry_entries
+    )
+    first = (
+        f"plant CSV {rewritten[0]} was rewritten since it was registered"
+        if rewritten
+        else None
+    )
+    return missing, first, bytes_by_path
+
+
+def registered_plants(
+    registry: PlantRegistry, project: Path | str
+) -> list[PlantRecord]:
+    """Return the plants of the CSVs ``registry`` registered, parsed from their registered bytes.
+
+    The CSVs are :func:`registry_csv_entries`' for ``project``; each file is read once and its
+    bytes hashed against the entry's ``sha256``. Refuses (:class:`RegisteredBytesError`), naming
+    every file that is missing and every file whose bytes differ from the registered ones.
+    """
+    entries = registry_csv_entries(registry, project)
+    missing, rewritten, bytes_by_path = _read_registered_bytes(entries)
+    if missing or rewritten:
+        named = [
+            f"{what}: {paths}"
+            for what, paths in (
+                ("plant CSV(s) not found", missing),
+                ("plant CSV(s) rewritten since registered", rewritten),
+            )
+            if paths
+        ]
+        raise RegisteredBytesError(
+            f"{'; '.join(named)}: restore the registered bytes, or register the "
+            "current file under a new name."
+        )
+    return [
+        plant
+        for entry in entries
+        for plant in read_plant_csv_bytes(bytes_by_path[entry["path"]])
+    ]
 
 
 def parse_plant_registry_csvs(
@@ -1358,7 +1411,7 @@ def resolve_nn_tolerance_m(
 
 def build_mapping(
     dataset_root: Path | str,
-    plant_csv_paths: list[Path],
+    plants: list[PlantRecord],
     *,
     name: str,
     dataset_id: str,
@@ -1371,9 +1424,8 @@ def build_mapping(
 
     The provenance binds the record to the inputs it was built from.
     ``name``/``dataset_root``/``dataset_id`` are taken as already resolved, and ``project`` is the
-    project the mapping belongs to. ``plant_csv_paths`` are the files this build reads the plants
-    from, those of the registry ``plant_registry`` names; ``plant_registry`` is the reference
-    stored on the record in their place.
+    project the mapping belongs to. ``plants`` are those of the registry ``plant_registry`` names
+    (:func:`registered_plants`); ``plant_registry`` is the reference stored on the record.
 
     Each date's captures are matched within its :func:`date_match_radius`, ``match_radius`` when
     stated and derived from the date's own positioning errors when not, which the record carries
@@ -1395,9 +1447,6 @@ def build_mapping(
         list_logical_images,
         scan_captures,
     )
-
-    plant_csv_paths = [Path(p) for p in plant_csv_paths]
-    plants = read_plant_csvs(plant_csv_paths)
 
     images = image_root(dataset_root)
     assignments: dict[str, list[Assignment]] = {}
@@ -1616,7 +1665,8 @@ def build_plant_mapping(
 
     Raises ``ValueError`` for a name the key refuses and for a root with no dataset identity
     record (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming
-    ``register_dataset``); :class:`PlantRegistryNotFoundError`; and every refusal of the two steps.
+    ``register_dataset``); :class:`PlantRegistryNotFoundError`; :class:`RegisteredBytesError`;
+    and every refusal of the two steps.
     """
     from tcip_mcp.dataset_layout import require_dataset_identity
 
@@ -1625,7 +1675,7 @@ def build_plant_mapping(
     registry = load_registry(project, plant_registry)
     build = build_mapping(
         dataset_root,
-        [Path(e["path"]) for e in registry_csv_entries(registry, project)],
+        registered_plants(registry, project),
         name=name,
         dataset_id=identity.id,
         project=project,
@@ -1653,13 +1703,15 @@ class _MappingBuilt(BaseModel):
 
 
 def _scan_receipts(project: Path | str, *, after: str | None) -> None:
-    from tcip_mcp.audit import acts_of
+    from tcip_mcp.audit import acts_of, audit_log_place
 
     root_key = tcip_store.canonical_path(project)
     entries, cursor = acts_of(project, ("plant_mapping_built",), after=after)
     seen = _receipt_seen.setdefault(root_key, {})
     for entry in entries:
-        built = _MappingBuilt.model_validate(entry.arguments)
+        built = tcip_store.validated(
+            _MappingBuilt, entry.arguments, audit_log_place(project)
+        )
         seen.setdefault(built.name, set()).add(built.record_sha256)
     _receipt_cursor[root_key] = cursor
 

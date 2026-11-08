@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { CANOPY_SEGMENTS, UNVALIDATED } from "@/api/types.generated";
+import { ANSWERS, CANOPY_SEGMENTS, UNANSWERED, UNVALIDATED } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { acknowledgmentOf, DELIVERY_RECORDS, disclosureOf } from "@/test/deliveryRecords";
 
@@ -35,6 +35,38 @@ describe("DeliveryEventsPanel bucket findings", () => {
     const acknowledgment = acknowledgmentOf(served);
     expect(within(row).getByText(acknowledgment.acknowledged_by)).toBeInTheDocument();
     expect(within(row).getByText(acknowledgment.reason)).toBeInTheDocument();
+  });
+
+  it("names the scale assessment that answered", () => {
+    const served = DELIVERY_RECORDS.scale_answered;
+    const { scale } = served.event;
+    if (scale?.kind !== ANSWERS) throw new Error("the produced scale read did not answer");
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
+    const row = screen.getByTestId(`delivery-${served.event.event_id}`);
+
+    expect(within(row).getByTestId("scale-finding")).toHaveTextContent(
+      `scale assessment ${scale.assessment_id}`,
+    );
+  });
+
+  it("names the reason a scale assessment answered for nothing", () => {
+    const served = DELIVERY_RECORDS.scale_unanswered;
+    const { scale } = served.event;
+    if (scale?.kind !== UNANSWERED) throw new Error("the produced scale read answered");
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
+    const row = screen.getByTestId(`delivery-${served.event.event_id}`);
+
+    expect(within(row).getByTestId("scale-finding")).toHaveTextContent(
+      `scale assessment ${scale.assessment_id} not validated (${scale.reason})`,
+    );
+  });
+
+  it("renders no scale line for a delivery that named none", () => {
+    const served = DELIVERY_RECORDS.validated;
+    expect(served.event.scale).toBeNull();
+    const { container } = render(<DeliveryEventsPanel records={[served]} loadError={null} />);
+
+    expect(within(container).queryByTestId("scale-finding")).not.toBeInTheDocument();
   });
 
   it("counts the plants a canopy delivery delivered from its recorded population", () => {

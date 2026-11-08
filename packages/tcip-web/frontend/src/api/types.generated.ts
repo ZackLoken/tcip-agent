@@ -11,6 +11,8 @@ export const AGENT = "agent";
 
 export const PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus";
 
+export const ANSWERS = "answers";
+
 export const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
 
 export const PANEL_EVENT_BANNER = "banner";
@@ -158,6 +160,8 @@ export const TOLD = "told";
 export const TRIAL = "trial";
 
 export const UNACKNOWLEDGEABLE = "unacknowledgeable";
+
+export const UNANSWERED = "unanswered";
 
 export const UNCOMPARED = "uncompared";
 
@@ -829,6 +833,11 @@ export interface AnnotationPayload {
   iscrowd: unknown;
 }
 
+export interface AnsweredScale {
+  kind: "answers";
+  assessment_id: string;
+}
+
 export interface AsRecordedChoice {
   case: "bound" | "drawn";
   line: string;
@@ -1135,7 +1144,7 @@ export interface DeliveryEventRecord {
   output_sha256: string;
   producer: Producer;
   buckets: BucketFinding[];
-  scale_assessment_id: string | null;
+  scale: ScaleRead | null;
   shipped: Shipped;
   population: string[];
   plant_mapping: PlantMapping | null;
@@ -1834,6 +1843,8 @@ export interface ScaleEvidence {
   relative_deviation: number | null;
 }
 
+export type ScaleRead = AnsweredScale | UnansweredScale;
+
 export interface ScorerEntry {
   name: string;
   values_schema: Record<string, unknown>;
@@ -2227,6 +2238,12 @@ export interface TrialRun {
 
 export interface Unacknowledgeable {
   kind: "unacknowledgeable";
+}
+
+export interface UnansweredScale {
+  kind: "unanswered";
+  assessment_id: string;
+  reason: string;
 }
 
 export interface UncomparedRun {

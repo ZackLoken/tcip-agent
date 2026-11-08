@@ -146,6 +146,35 @@ type BucketFinding = Annotated[
 """What the gate found for one delivered bucket, told apart by its ``kind``."""
 
 
+class AnsweredScale(BaseModel):
+    """The physical-scale assessment a delivery named, which answers for its unit and buckets."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["answers"] = "answers"
+    assessment_id: str
+
+
+class UnansweredScale(BaseModel):
+    """The physical-scale assessment a delivery named, which answers for nothing, and why.
+
+    ``reason`` is the sentence the gate refused the delivery with for this assessment.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["unanswered"] = "unanswered"
+    assessment_id: str
+    reason: str
+
+
+type ScaleRead = Annotated[
+    AnsweredScale | UnansweredScale, Field(discriminator="kind")
+]
+"""What the gate found for the physical-scale assessment a delivery named, told apart by its
+``kind``."""
+
+
 class Acknowledgment(BaseModel):
     """The breeder's recorded act of shipping one unvalidated result.
 
@@ -198,7 +227,9 @@ class DeliveryEventRecord(TraitRevisionRef):
 
     It holds the trait revision it shipped under (its
     :class:`~tcip_mcp.pipelines.schemas.TraitRevisionRef` fields), what shipped and of which kind,
-    from which producer, what the gate found per bucket, and how it shipped (:data:`Shipped`).
+    from which producer, what the gate found per bucket and for the physical-scale assessment the
+    delivery named (:data:`ScaleRead`, ``None`` when it named none), and how it shipped
+    (:data:`Shipped`).
     """
 
     event_id: str
@@ -208,7 +239,7 @@ class DeliveryEventRecord(TraitRevisionRef):
     output_sha256: str
     producer: Producer
     buckets: list[BucketFinding]
-    scale_assessment_id: str | None
+    scale: ScaleRead | None
     shipped: Shipped
     population: list[str]
     plant_mapping: PlantMapping | None

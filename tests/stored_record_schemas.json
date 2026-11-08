@@ -4956,6 +4956,27 @@
         "title": "Acknowledgment",
         "type": "object"
       },
+      "AnsweredScale": {
+        "additionalProperties": false,
+        "description": "The physical-scale assessment a delivery named, which answers for its unit and buckets.",
+        "properties": {
+          "assessment_id": {
+            "title": "Assessment Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "answers",
+            "default": "answers",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assessment_id"
+        ],
+        "title": "AnsweredScale",
+        "type": "object"
+      },
       "BucketFinding": {
         "discriminator": {
           "mapping": {
@@ -5468,6 +5489,23 @@
         "title": "RasterIdentity",
         "type": "object"
       },
+      "ScaleRead": {
+        "discriminator": {
+          "mapping": {
+            "answers": "#/$defs/AnsweredScale",
+            "unanswered": "#/$defs/UnansweredScale"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AnsweredScale"
+          },
+          {
+            "$ref": "#/$defs/UnansweredScale"
+          }
+        ]
+      },
       "SegmentTieDisclosure": {
         "additionalProperties": false,
         "description": "One resolved segment-to-plant tie: the attribution claim itself, and its derived margin.\n\nThe margin\n(:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m``) is\nwhat a displaced registry position would have to exceed to leave this segment.",
@@ -5572,6 +5610,32 @@
         "title": "StatedRadius",
         "type": "object"
       },
+      "UnansweredScale": {
+        "additionalProperties": false,
+        "description": "The physical-scale assessment a delivery named, which answers for nothing, and why.\n\n``reason`` is the sentence the gate refused the delivery with for this assessment.",
+        "properties": {
+          "assessment_id": {
+            "title": "Assessment Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "unanswered",
+            "default": "unanswered",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assessment_id",
+          "reason"
+        ],
+        "title": "UnansweredScale",
+        "type": "object"
+      },
       "UnvalidatedBucket": {
         "additionalProperties": false,
         "description": "A delivered bucket nothing validates, and why.\n\nThe bucket is named as a :class:`ValidatedBucket` is, beside the assessment it was published\nunder, ``None`` when it names none.",
@@ -5672,7 +5736,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "The stored per-delivery record.\n\nIt holds the trait revision it shipped under (its\n:class:`~tcip_mcp.pipelines.schemas.TraitRevisionRef` fields), what shipped and of which kind,\nfrom which producer, what the gate found per bucket, and how it shipped (:data:`Shipped`).",
+    "description": "The stored per-delivery record.\n\nIt holds the trait revision it shipped under (its\n:class:`~tcip_mcp.pipelines.schemas.TraitRevisionRef` fields), what shipped and of which kind,\nfrom which producer, what the gate found per bucket and for the physical-scale assessment the\ndelivery named (:data:`ScaleRead`, ``None`` when it named none), and how it shipped\n(:data:`Shipped`).",
     "properties": {
       "buckets": {
         "items": {
@@ -5726,16 +5790,15 @@
       "producer": {
         "$ref": "#/$defs/Producer"
       },
-      "scale_assessment_id": {
+      "scale": {
         "anyOf": [
           {
-            "type": "string"
+            "$ref": "#/$defs/ScaleRead"
           },
           {
             "type": "null"
           }
-        ],
-        "title": "Scale Assessment Id"
+        ]
       },
       "shipped": {
         "$ref": "#/$defs/Shipped"
@@ -5764,7 +5827,7 @@
       "output_sha256",
       "producer",
       "buckets",
-      "scale_assessment_id",
+      "scale",
       "shipped",
       "population",
       "plant_mapping",
