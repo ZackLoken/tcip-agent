@@ -123,7 +123,8 @@ def workspace_project(project_id: str) -> tuple[Path, ProjectRecord]:
     """Return the directory and record of the workspace project with ``project_id``.
 
     The project is the one whose record holds that id
-    (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none, or two, do.
+    (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none, or two, do, and 409
+    naming each unreadable record when none that read does and some record would not read.
     """
     try:
         with _WORKSPACE_TURN:
@@ -131,6 +132,8 @@ def workspace_project(project_id: str) -> tuple[Path, ProjectRecord]:
         return workspace.project_by_id(records, project_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except workspace.UnreadProjectsError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 class OpenRequest(BaseModel):
@@ -150,8 +153,10 @@ class OpenAnswer(BaseModel):
 async def open_project(req: OpenRequest) -> OpenAnswer:
     """Open the project ``req.id`` names and return it (:class:`OpenAnswer`).
 
-    400 for a request naming no one, 404 when the workspace holds no single project with it (a
-    project whose record will not read is not found by its id), 409 when its persisted GUI
+    400 for a request naming no one, 404 when the workspace holds no single project with it
+    and every record read, 409 naming each record that will not read when it holds none that
+    read with it and some record will not (the project asked for may be one of them), 409 when
+    its persisted GUI
     state, or the stats record of the project it replaces, will not read, its detail the
     :class:`~tcip_store.RefusedRead` naming the record and why, and 409 carrying the answer when
     the open committed and a departed session's audit line could not be written
