@@ -133,14 +133,23 @@ def project_records(workspace: Path) -> list[ListedProject]:
     return [listed_project(project) for project in project_dirs(workspace)]
 
 
+class UnreadProjectsError(Exception):
+    """No readable project record holds an id while some record would not read.
+
+    An unread record carries no id, so the project asked for may be one of those; the message
+    names each such record and why it would not read.
+    """
+
+
 def project_by_id(
     records: Iterable[ListedProject], project_id: str
 ) -> tuple[Path, ProjectRecord]:
     """Return the project among ``records`` whose record holds ``project_id``, with its record.
 
     ``records`` is as :func:`project_records` returns. Raises ``LookupError`` naming the id when
-    no project holds it, with every project whose record would not read and why; and naming the
-    directories when more than one holds it (a copied project).
+    every record read and none holds it, and naming the directories when more than one holds it
+    (a copied project). Raises :class:`UnreadProjectsError` when none that read holds it and
+    some record would not read.
     """
     found: list[tuple[Path, ProjectRecord]] = []
     unreadable: list[str] = []
@@ -150,14 +159,12 @@ def project_by_id(
         elif entry.record.id == project_id:
             found.append((entry.root, entry.record))
     if not found:
-        detail = (
-            f"; these projects' records would not read: {'; '.join(unreadable)}"
-            if (unreadable)
-            else ""
-        )
-        raise LookupError(
-            f"no project in the workspace has id {project_id!r}{detail}"
-        )
+        if unreadable:
+            raise UnreadProjectsError(
+                f"no readable project record has id {project_id!r}; these projects' "
+                f"records would not read: {'; '.join(unreadable)}"
+            )
+        raise LookupError(f"no project in the workspace has id {project_id!r}")
     if len(found) > 1:
         raise LookupError(
             f"projects {', '.join(str(p) for p, _ in found)} all have id "
