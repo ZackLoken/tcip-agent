@@ -398,6 +398,26 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
     assert "registry unreadable" in resp.json()["detail"]
 
 
+def test_compare_best_route_409s_naming_a_run_record_that_will_not_read(
+    opened_client: TestClient, tmp_path: Path
+) -> None:
+    """The compare-best route answers 409 naming a run record of the project that will not read.
+
+    The run's ``run.json`` is spoiled on disk after it opened.
+    """
+    from tcip_mcp.experiments import RUN_FILE
+
+    spoiled = _opened(tmp_path, "exp-spoiled") / RUN_FILE
+    spoiled.write_bytes(b"\xff\xfe not json")
+
+    resp = opened_client.post(
+        "/api/training/compare/best",
+        json={"experiment_ids": ["exp-spoiled"], "metric": "val_map50"},
+    )
+    assert resp.status_code == 409, resp.text
+    assert str(spoiled) in resp.json()["detail"]
+
+
 def test_compare_best_route_422s_on_the_tools_own_error(
     opened_client: TestClient, tmp_path: Path
 ) -> None:
