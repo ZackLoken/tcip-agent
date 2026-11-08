@@ -4,7 +4,7 @@
  * confirmed, which it names, so this panel carries no confirm/withdraw affordance.
  */
 
-import { ACKNOWLEDGED, type ServedDeliveryEvent } from "@/api/types.generated";
+import { ACKNOWLEDGED, ANSWERED, type ServedDeliveryEvent } from "@/api/types.generated";
 import { deliveredDatesLine, outsideRasterLine } from "@/lib/disclosureLines";
 
 function DeliveryEventRow({
@@ -53,6 +53,13 @@ function DeliveryEventRow({
                 : `not validated (${bucket.reason})`)}
           </div>
         ))}
+        {record.scale !== null && (
+          <div className="font-mono text-[13px] text-tcip-muted" data-testid="scale-finding">
+            {record.scale.kind === ANSWERED
+              ? `scale assessment ${record.scale.assessment_id}`
+              : `scale assessment ${record.scale.assessment_id} not validated (${record.scale.reason})`}
+          </div>
+        )}
       </div>
       {record.plant_mapping?.kind === "canopy_segments" && (
         <div className="mt-2 text-[13px] text-tcip-muted" data-testid="canopy-disclosure">
