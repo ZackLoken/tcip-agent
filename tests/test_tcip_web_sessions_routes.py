@@ -445,7 +445,8 @@ def test_an_open_whose_departing_lines_cannot_be_written_answers_the_audit_gap_w
     refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
     opened = store.opened
     assert opened is not None and opened.id == hill.id
-    assert refusal.committed == OpenAnswer(
+    assert refusal.committed is True
+    assert refusal.what == OpenAnswer(
         project=SnapshotProject.of(opened)
     ).model_dump(mode="json")
     (session,) = _sessions(valley.root)
@@ -713,9 +714,10 @@ def test_a_contribution_committed_without_its_line_answers_the_session_it_opened
 
     assert resp.status_code == 409, resp.text
     (stored,) = _sessions(opened.root)
-    assert _WRITE.validate_python(
-        resp.json()["detail"]["committed"]
-    ) == Landed(started=stored.started)
+    assert resp.json()["detail"]["committed"] is True
+    assert _WRITE.validate_python(resp.json()["detail"]["what"]) == Landed(
+        started=stored.started
+    )
     assert (
         _end(client, opened.id, stored.started).json()
         == SessionsEnded().model_dump()

@@ -488,7 +488,8 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
         / "results_export"
         / phenology.export_filename(body["trait"], "milestones")
     )
-    assert SavedExport.model_validate(refusal.committed) == SavedExport(
+    assert refusal.committed is True
+    assert SavedExport.model_validate(refusal.what) == SavedExport(
         saved_path=str(saved)
     )
     assert saved.exists()
@@ -783,7 +784,8 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     assert resp.status_code == 409
     refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
     saved = tmp_path / "results_export" / "counts.csv"
-    assert SavedExport.model_validate(refusal.committed) == SavedExport(
+    assert refusal.committed is True
+    assert SavedExport.model_validate(refusal.what) == SavedExport(
         saved_path=str(saved)
     )
     assert saved.exists()

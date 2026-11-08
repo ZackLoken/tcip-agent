@@ -266,7 +266,7 @@ def cancel_job(job_id: str, payload: PersonPayload) -> InferenceJob:
             scope=j.project,
         )
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, j) from exc
+        raise audit_gap_409(exc, committed=True, what=j) from exc
     return j
 
 

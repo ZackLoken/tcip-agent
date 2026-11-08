@@ -785,8 +785,8 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     """A lost audit line after a committed registry save answers 409 with the committed body.
 
     With the audit append refused, an identical resave answers 409 with an ``AuditGapRefusal``
-    whose ``committed`` body equals the first save's 200 body but for the version, and the
-    stored registry holds ``bud``.
+    that says ``committed`` and whose ``what`` body equals the first save's 200 body but for the
+    version, and the stored registry holds ``bud``.
     """
     healthy = client.post(
         "/api/subjects/save",
@@ -813,7 +813,9 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
         },
     )
     assert resp.status_code == 409
-    committed = AuditGapRefusal.model_validate(resp.json()["detail"]).committed
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+    assert refusal.committed is True
+    committed = refusal.what
     assert isinstance(committed, dict)
     assert committed["n_subjects"] == 1
     assert committed["subjects_path"] == str(tmp_path / "subjects.json")

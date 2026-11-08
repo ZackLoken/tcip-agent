@@ -184,7 +184,7 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
     except ReadRefusedError as exc:
         raise HTTPException(409, exc.served.model_dump()) from exc
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, answer) from exc
+        raise audit_gap_409(exc, committed=True, what=answer) from exc
     return answer
 
 

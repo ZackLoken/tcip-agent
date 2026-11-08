@@ -148,7 +148,7 @@ def build_plant_mapping(
     except plant_mapping.PlantRegistryNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, None) from exc
+        raise audit_gap_409(exc, committed=True, what=None) from exc
     except (
         plant_mapping.MappingRebuildError,
         plant_mapping.UngeoreferencedCaptureError,
@@ -416,7 +416,7 @@ def _recorded_acknowledgment(
             result_sha256=payload.acknowledgment.result_sha256,
         ).acknowledgment_id
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, exc.arguments) from exc
+        raise audit_gap_409(exc, committed=True, what=exc.arguments) from exc
     except ValueError as exc:
         raise HTTPException(
             400, f"an acknowledgment states why: {exc}"
@@ -478,7 +478,9 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
         )
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(
-            exc, SavedExport(saved_path=str(saved_path))
+            exc,
+            committed=True,
+            what=SavedExport(saved_path=str(saved_path)),
         ) from exc
     except DeliveryRefusedError as exc:
         raise HTTPException(400, exc.as_detail()) from exc
@@ -622,7 +624,9 @@ def export_count_csv(
             )
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(
-            exc, SavedExport(saved_path=str(saved_path))
+            exc,
+            committed=True,
+            what=SavedExport(saved_path=str(saved_path)),
         ) from exc
     except (OperationalizationRefusedError, DeliveryRefusedError) as exc:
         raise HTTPException(400, exc.as_detail()) from exc
