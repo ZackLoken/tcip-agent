@@ -22,14 +22,15 @@ AUDIT_ENTRY_KEYS = frozenset(AuditLine.model_fields) - {ACTOR_KEY}
 
 
 def audit_rows(
-    scope: Path, tool: str | None = None
+    scope: Path, tool: str | None = None, *, after: str | None = None
 ) -> list[Mapping[str, Any]]:
     """Return the entries of ``scope``'s audit log, or ``tool``'s entries when one is named.
 
-    The entries are :func:`tcip_mcp.audit.audit_entries`'s, in the order they landed, each as the
-    JSON it was stored as; a log carrying undecodable entries raises its ``ValueError``.
+    The entries are :func:`tcip_mcp.audit.audit_entries`'s past the cursor ``after``, in the order
+    they landed, each as the JSON it was stored as; a page holding an entry that will not decode
+    raises the reader's ``tcip_store.ReadRefusedError``.
     """
-    entries, _cursor = audit_entries(scope)
+    entries, _cursor = audit_entries(scope, after=after)
     return [
         row.model_dump(mode="json", exclude_unset=True)
         for row in entries
