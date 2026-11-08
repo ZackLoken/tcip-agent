@@ -109,4 +109,6 @@ door only an operator runs (an operator-only command module in `cli/` calls it, 
   library write holding its records and its line in one transaction appends the line inside it
   as `audit_line(...).stored()`, so neither lands without the other; a door whose line follows a committed
   write emits through `record_event_or_raise`, which raises `AuditEntryNotWrittenError` on a failed
-  append.
+  append. A line written before its change (the training envelope's opening `training_run` line)
+  is refused before anything is committed, and its caller says so rather than repeating the
+  error's committed reading.
