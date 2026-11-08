@@ -76,6 +76,11 @@ def audit_log_key(scope: str | Path) -> Key:
     return Key(AUDIT_LOG_STORE, str(scope), _AUDIT_PARTS)
 
 
+def audit_log_place(scope: str | Path) -> str:
+    """Return the place a refused read of ``scope``'s audit log or of one of its lines names."""
+    return f"the audit log at {audit_log_key(scope).root}"
+
+
 def audit_entries(
     scope: str | Path, *, after: str | None = None
 ) -> tuple[list[AuditLine], str]:
@@ -94,10 +99,9 @@ def audit_entries(
         validated,
     )
 
-    key = audit_log_key(scope)
-    log = f"the audit log at {key.root}"
+    log = audit_log_place(scope)
     with unreadable(log, *STORE_READ_REFUSALS):
-        page = read_log(key, after=after)
+        page = read_log(audit_log_key(scope), after=after)
     refuse_corrupt_entries(page, log)
     return [validated(AuditLine, r, log) for r in page.records], page.cursor
 
