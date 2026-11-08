@@ -129,7 +129,7 @@ def relaunch_route(payload: RelaunchPayload) -> Launched:
                 actor=person,
             )
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, exc.arguments) from exc
+        raise audit_gap_409(exc, committed=True, what=exc.arguments) from exc
     if isinstance(result, dict):
         raise _refused(result)
     return result
