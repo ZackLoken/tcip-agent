@@ -97,12 +97,22 @@ def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(
 def test_a_server_for_no_project_refuses_project_tools_naming_project_and_serves_knowledge() -> (
     None
 ):
+    """The refusal answers the server's own no-project sentence, carrying no class name."""
+    from tcip_mcp.server import NoProjectError, Session, _bound
+    from tcip_mcp.tools.meta_tools import report_friction
+
+    with pytest.raises(NoProjectError) as no_project:
+        _bound(report_friction, Session())(**_FRICTION[1])
+
     refused, knowledge = results_through_handshake(
         [_FRICTION, ("serve_domain_knowledge", {})], bound=None
     )
 
     assert refused.is_error
-    assert "--project" in refused.content[0].text
+    assert refused.content[0].text == (
+        f"Error executing tool report_friction: {no_project.value}"
+    )
+    assert "--project" in str(no_project.value)
     assert not knowledge.is_error, knowledge
 
 
