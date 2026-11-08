@@ -105,11 +105,9 @@ def orthomosaic_plant_counts(
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         PlantRegistryReference,
         assignment_is_attributed,
-        read_plant_csv_bytes,
-        registry_csv_entries,
+        registered_plants,
         require_named_plants,
         resolve_nn_tolerance_m,
-        verify_registry_csv_bytes,
     )
     from tcip_mcp.pipelines.raster_source import (
         georeferenced_raster_identity_mismatch,
@@ -154,18 +152,7 @@ def orthomosaic_plant_counts(
             f"{raster_path} is no longer the raster bucket {bucket!r} was predicted "
             f"on. {mismatch}"
         )
-    registry_entries = registry_csv_entries(registry_record, project)
-    missing, rewritten, csv_bytes = verify_registry_csv_bytes(registry_entries)
-    if missing or rewritten:
-        raise ValueError(
-            f"{rewritten or f'plant CSV(s) not found: {missing}'}: restore the "
-            "registered bytes, or register the current file under a new name."
-        )
-    registered = [
-        p
-        for e in registry_entries
-        for p in read_plant_csv_bytes(csv_bytes[e["path"]])
-    ]
+    registered = registered_plants(registry_record, project)
     boxes = [
         [b.x1, b.y1, b.x2, b.y2]
         for key in found.document_keys

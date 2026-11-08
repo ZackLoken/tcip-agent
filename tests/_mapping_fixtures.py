@@ -175,7 +175,7 @@ def mapping_over(
     dates: list[str] | None = None,
     match_radius: StatedRadius | None = None,
 ) -> MappingBuild:
-    """Return ``build_mapping``'s build ``name`` of ``dataset_root`` against ``plant_csvs``.
+    """Return ``build_mapping``'s build ``name`` of ``dataset_root`` against ``plant_csvs``' plants.
 
     It is ``project``'s, of the dataset ``ds-1``, under a registry reference no registration
     names, over ``dates`` within ``match_radius`` as ``build_mapping`` takes them.
@@ -183,11 +183,12 @@ def mapping_over(
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         PlantRegistryReference,
         build_mapping,
+        read_plant_csvs,
     )
 
     return build_mapping(
         dataset_root,
-        plant_csvs,
+        read_plant_csvs(plant_csvs),
         name=name,
         dataset_id="ds-1",
         project=project,
