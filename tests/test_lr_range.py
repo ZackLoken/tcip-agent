@@ -373,6 +373,32 @@ def test_a_preflight_below_the_ranges_low_end_is_refused_naming_the_rate_range_a
         assert named in issue, issue
 
 
+def test_a_preflight_admits_a_readable_range_test_and_refuses_one_whose_reading_will_not_read(
+    bound: BoundProject, project: Path
+) -> None:
+    """A preflight inside a range test's range admits it, until the test's reading will not read.
+
+    Then its issue names the reading's file.
+    """
+    from tcip_mcp.experiments import LR_RANGE_FILE, experiment_dir
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    config, answer = _ranged(bound, project)
+    inside = _naming(config, answer, answer["low"])
+    admitted = preflight_config(project, inside)
+    assert admitted["valid"] is True, admitted
+
+    reading = (
+        experiment_dir(answer["experiment_id"], project=project)
+        / LR_RANGE_FILE
+    )
+    reading.write_bytes(b"\xff\xfe not json")
+    report = preflight_config(project, inside)
+
+    assert report["valid"] is False
+    assert [i for i in report["issues"] if str(reading) in i], report
+
+
 def test_a_preflight_whose_stage_freezes_otherwise_than_the_probe_is_refused(
     bound: BoundProject, project: Path
 ) -> None:
