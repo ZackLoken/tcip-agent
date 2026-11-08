@@ -543,6 +543,36 @@ def test_a_delivery_tool_answers_the_fields_of_the_event_it_wrote(
     }
 
 
+@pytest.mark.parametrize(
+    "call",
+    [_per_plant_csv_call, _milestones_call],
+    ids=lambda call: call.__name__.strip("_").removesuffix("_call"),
+)
+def test_a_mapped_delivery_through_either_door_discloses_no_plant_csv_list(
+    tmp_path: Path, call: Callable[[Path], tuple[str, dict]]
+) -> None:
+    """A mapped delivery through either door ships disclosing nothing it could not verify.
+
+    The tool is called through the server under a breeder's recorded acknowledgment, over a
+    mapping whose every registered CSV and capture is intact; the served event's disclosure lists
+    no unverified capture and holds no list of plant CSVs.
+    """
+    from tcip_mcp.server import binding_for
+    from tests._server_calls import called_through_the_server
+
+    pytest.importorskip("torch")
+    tool, arguments = call(tmp_path)
+    bound = binding_for(tmp_path)
+
+    answer = called_through_the_server(tool, arguments, bound=bound)
+
+    assert isinstance(answer, dict) and "error" not in answer, answer
+    (event,) = read_delivery_events(bound.root)
+    disclosure = event.model_dump(mode="json")["plant_mapping"]
+    assert disclosure["captures_unverified"] == []
+    assert "plant_csvs_unverified" not in disclosure
+
+
 def test_a_per_image_counts_answer_leaves_its_bucket_to_the_event(
     tmp_path: Path,
 ) -> None:

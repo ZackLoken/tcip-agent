@@ -5265,13 +5265,6 @@
             "title": "Plant Attribution",
             "type": "string"
           },
-          "plant_csvs_unverified": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Plant Csvs Unverified",
-            "type": "array"
-          },
           "record_sha256": {
             "title": "Record Sha256",
             "type": "string"
@@ -5286,7 +5279,6 @@
           "match_radius",
           "capture_digests",
           "captures_unverified",
-          "plant_csvs_unverified",
           "dates_delivered",
           "images_unattributed",
           "plant_attribution"

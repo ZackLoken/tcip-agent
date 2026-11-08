@@ -1532,7 +1532,6 @@ export interface PlantMappingDisclosure {
   match_radius: Record<string, MatchRadius>;
   capture_digests: Record<string, Record<string, string>>;
   captures_unverified: string[];
-  plant_csvs_unverified: string[];
   dates_delivered: string[];
   images_unattributed: number;
   plant_attribution: string;
