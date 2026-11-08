@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt
 
 import tcip_store
 from tcip_annotation.flags import FlagRequest, ProposalTarget
+from tcip_annotation.text import Crop
 from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.workspace import PathSegment
 from tcip_store import Key
@@ -252,7 +253,7 @@ class DatasetRecord(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    crop: str
+    crop: Crop
     id: str
     fingerprint: str | None
 
