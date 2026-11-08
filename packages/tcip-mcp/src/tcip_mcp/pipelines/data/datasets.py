@@ -1075,7 +1075,7 @@ def build_from_dataset_source(
     if not isinstance(built, BaseDataset):
         raise ValueError(
             f"dataset_source builder {dataset_source.builder!r} returned a "
-            f"{type(built).__name__}, and the loaders and the run's geometry read a dataset's "
+            f"{type(built).__name__}, and the platform reads a dataset's "
             "num_samples and sample_classes, which a "
             "tcip_mcp.pipelines.data.datasets.BaseDataset states. Return a BaseDataset: one of "
             "the built-in loaders, or a subclass of it. The platform sets its expected_channels "

@@ -1138,13 +1138,13 @@ def run_loader(
         stated_sizes,
     )
 
+    num_channels = stated_sizes(data)["num_channels"]
+
     def admitted(build: Loader) -> Loader:
         def loader(
             *, samples: Sequence[Sample], transforms: Transforms | None
         ) -> BaseDataset:
-            refuse_unchained(
-                samples, stated_sizes(data)["num_channels"], transforms
-            )
+            refuse_unchained(samples, num_channels, transforms)
             return build(samples=samples, transforms=transforms)
 
         return loader
@@ -1156,7 +1156,7 @@ def run_loader(
                 (data.dataset_source, layout),
                 task=task,
                 scope=data.recorded_scope,
-                num_channels=stated_sizes(data)["num_channels"],
+                num_channels=num_channels,
             )
         )
     if spatial is None:
