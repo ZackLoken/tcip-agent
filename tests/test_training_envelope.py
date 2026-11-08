@@ -178,6 +178,35 @@ def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
     ]
 
 
+def test_a_run_whose_opening_audit_line_is_refused_says_the_training_did_not_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run whose opening audit line is refused records that the line was not written.
+
+    The worker's entry runs a run the platform opened over a log refusing every append, so the
+    opening and the closing lines are both refused. The final status reads ``failed`` naming the
+    unwritten line and that the training did not start, claims no committed change, and the log
+    holds no line.
+    """
+    from tests._verified_checkpoint_fixtures import worker_run
+
+    refuse_audit_appends(
+        monkeypatch, error=OSError("the log's disk is full"), landing=0
+    )
+    run_dir = worker_run(tmp_path, _bespoke(tmp_path, "_agent_train"))
+
+    final = observe_run(run_dir).final
+    assert final is not None and final.status_error is not None
+    assert final.state == "failed"
+    assert "audit entry could not be written" in final.status_error
+    assert "the log's disk is full" in final.status_error
+    assert "did not start" in final.status_error
+    assert "committed" not in final.status_error
+    assert completed_checkpoint(run_dir) is None
+    assert not (run_dir / "model_best.pt").exists()
+    assert audit_rows(tmp_path, "training_run") == []
+
+
 def _agent_train_raises(ctx: TrainContext) -> NoReturn:
     """Raise an error of the body's own."""
     raise RuntimeError("the body exploded")
