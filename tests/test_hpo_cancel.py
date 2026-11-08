@@ -318,14 +318,18 @@ def test_a_sweep_cancel_is_recorded_at_its_own_sweep_record_that_will_not_read(
     os.name == "nt",
     reason="Windows' chmod sets the read-only flag alone, so no read is denied",
 )
-def test_a_sweep_cancel_is_recorded_at_a_trial_record_whose_read_is_denied(
-    project: Path, real_hpo_base_config: dict
+@pytest.mark.parametrize("file", ["RUN_FILE", "METRICS_FILE"])
+def test_a_sweep_cancel_is_recorded_at_a_trial_file_whose_read_is_denied(
+    project: Path, real_hpo_base_config: dict, file: str
 ) -> None:
-    """A sweep's cancel over a trial whose record the process may not read places it there."""
-    from tcip_mcp.experiments import RUN_FILE
+    """A sweep's cancel over a trial whose record or log the process may not read places it there.
+
+    The second trial's file that ``experiments`` names ``file`` loses its read permission.
+    """
+    from tcip_mcp import experiments
 
     sweep, second = _two_trials(project, real_hpo_base_config)
-    record = second / RUN_FILE
+    record = second / getattr(experiments, file)
     mode = record.stat().st_mode
     record.chmod(0)
     try:
