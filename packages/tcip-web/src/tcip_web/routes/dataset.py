@@ -49,13 +49,12 @@ class Capture(BaseModel):
     date: datetime.date | None
 
 
-class DatasetTree(BaseModel):
+class TreeContents(BaseModel):
     """A dataset root's captures, subjects, subjects per capture and buckets per capture.
 
     ``captures`` are :func:`~tcip_mcp.dataset_layout.list_dates`', in its order.
     """
 
-    dataset_root: str
     captures: list[Capture]
     # Every subject the dataset's registry (``subjects.json``) declares, e.g. ["tree", "fruit"].
     subjects: list[str]
@@ -66,6 +65,12 @@ class DatasetTree(BaseModel):
     # The first date whose labels would not read, naming the documents; every other document's
     # subjects are still listed.
     label_problem: str | None
+
+
+class DatasetTree(TreeContents):
+    """A dataset root's contents (:class:`TreeContents`) and its directory."""
+
+    dataset_root: str
 
 
 def _label_problem(capture: str, unreadable: list[str]) -> str | None:
@@ -100,18 +105,22 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     return tree_of(root)
 
 
-def tree_of(root: Path) -> DatasetTree:
-    """Return the tree of the dataset root ``root``."""
+def contents_of(root: Path) -> TreeContents:
+    """Return what the dataset root ``root`` holds: its captures, subjects and buckets."""
     dates = list_dates(root)
     subjects_by_date, label_problem = _subjects_by_date(root, dates)
-    return DatasetTree(
-        dataset_root=str(root),
+    return TreeContents(
         captures=[Capture(name=d, date=capture_date(d)) for d in dates],
         subjects=list_subjects(root),
         subjects_by_date=subjects_by_date,
         buckets_by_date=buckets_by_date(root, dates),
         label_problem=label_problem,
     )
+
+
+def tree_of(root: Path) -> DatasetTree:
+    """Return the tree of the dataset root ``root``: :func:`contents_of` beside the root."""
+    return DatasetTree(dataset_root=str(root), **dict(contents_of(root)))
 
 
 class SelectAnswer(BaseModel):

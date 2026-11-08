@@ -5,7 +5,7 @@
 
 import { api } from "@/api/client";
 import { messageOf } from "@/api/http";
-import type { Capture, DatasetTree, ReadProject } from "@/api/types.generated";
+import type { Capture, ReadProject, TreeContents } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
 import { settleVisits } from "@/lib/sessionLifecycle";
@@ -113,18 +113,18 @@ export async function startOpen(
 
 /** The subjects with labels on date ``d``; empty when nothing is labeled there or no date is
  *  chosen, so a selector never offers a choice that would open a blank canvas. */
-export const subjectsForDate = (tree: DatasetTree, d: string | null): string[] =>
+export const subjectsForDate = (tree: TreeContents, d: string | null): string[] =>
   (d !== null && tree.subjects_by_date[d]) || [];
 
 /** The names of the buckets published over date ``d``; empty when none is or no date is chosen. */
-export const bucketsForDate = (tree: DatasetTree, d: string | null): string[] =>
+export const bucketsForDate = (tree: TreeContents, d: string | null): string[] =>
   (d !== null && tree.buckets_by_date[d]) || [];
 
 /** The subject and bucket to open ``tree`` on at date ``d``: ``kept`` when that date labels it,
  *  else the date's first subject (null ``kept`` keeps none), and the date's first bucket, since a
  *  bucket is published under one date; each null when the date offers none. */
 export function choiceForDate(
-  tree: DatasetTree,
+  tree: TreeContents,
   d: string | null,
   kept: string | null,
 ): { subject: string | null; bucket: string | null } {
@@ -136,7 +136,7 @@ export function choiceForDate(
 }
 
 /** The most-recent date that actually has a labeled subject, or null if none do. */
-function newestLabeledDate(tree: DatasetTree): string | null {
+function newestLabeledDate(tree: TreeContents): string | null {
   return defaultDate(tree.captures.filter((c) => subjectsForDate(tree, c.name).length > 0));
 }
 

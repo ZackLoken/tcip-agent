@@ -92,9 +92,7 @@ describe("recent-projects menu", () => {
     fireEvent.click(await screen.findByText(RIDGE.record.display_name));
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
     expect(api.projects.open).toHaveBeenCalledWith({ id: RIDGE.record.id, user: "grower" });
-    expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe(
-      RIDGE.tree.dataset_root,
-    );
+    expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe(RIDGE.root);
     expect(useStore.getState().openProject).toEqual(openedAs(RIDGE).project);
   });
 });
