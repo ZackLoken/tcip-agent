@@ -92,7 +92,8 @@ def test_a_dataset_with_a_crop_crops_yml_does_not_name_refuses_naming_crop(
 def test_each_door_stores_a_named_crop_stripped(tmp_path: Path) -> None:
     """A padded crop crops.yml names is stored stripped by both doors.
 
-    A same-name re-registration with the bare crop returns the stored record unchanged.
+    A same-name re-registration with the bare crop, and again with the padded one, returns the
+    stored record unchanged.
     """
     crop = _crop()
     root = tmp_path / "dataset"
@@ -100,11 +101,14 @@ def test_each_door_stores_a_named_crop_stripped(tmp_path: Path) -> None:
 
     registry = _registered_plants(tmp_path, f"  {crop} ")
     again = _registered_plants(tmp_path, crop)
+    padded_again = _registered_plants(tmp_path, f"  {crop} ")
     dataset = register_dataset(tmp_path, str(root), f" {crop}  ", actor=None)
 
     assert "error" not in registry, registry
-    assert plant_mapping.load_registry(tmp_path, "valley")["crop"] == crop
-    assert again == plant_mapping.load_registry(tmp_path, "valley")
+    stored = plant_mapping.load_registry(tmp_path, "valley")
+    assert stored["crop"] == crop
+    assert again == stored
+    assert padded_again == stored
     assert again["registered_at"] == registry["registered_at"]
     assert "error" not in dataset, dataset
     identity = read_dataset_identity(root)
