@@ -1531,10 +1531,11 @@ def launch_declarations(
     The lines are ``project``'s audit log's ``launch_training`` and ``derive_lr_range`` lines,
     keyed by the experiment id each names: the agent client the line carries, or none declared.
     """
-    from tcip_mcp.audit import acts_of
+    from tcip_mcp.audit import acts_of, audit_log_place
 
+    log = audit_log_place(project)
     return {
-        _Launched.model_validate(entry.arguments).experiment_id: (
+        validated(_Launched, entry.arguments, log).experiment_id: (
             NoAgentLaunch()
             if entry.agent_client_name is None
             else AgentLaunch.model_validate(entry, from_attributes=True)
