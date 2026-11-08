@@ -162,6 +162,27 @@ def test_the_dump_refuses_a_directory_inside_the_project_and_admits_one_outside(
     assert dump_store(project, tmp_path.parent / "dump")
 
 
+def test_the_dump_refuses_a_log_holding_an_entry_that_will_not_decode_at_its_key(
+    tmp_path: Path,
+) -> None:
+    """A log whose last entry will not decode refuses the dump, placed at the log's key.
+
+    The refusal's message names the damaged entry's position in the log.
+    """
+    from tcip_mcp.audit import audit_log_key
+    from tests._record_damage_fixtures import damage_last_log_entry
+
+    project = _project_with_records(tmp_path)
+    key = audit_log_key(project)
+    damage_last_log_entry(key)
+
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        dump_store(project, tmp_path.parent / "dump")
+
+    assert refused.value.served.where == f"the log {key}"
+    assert str(ts.read_log(key).corrupt) in str(refused.value.served.refusal)
+
+
 def test_the_command_writes_the_dump_and_answers_how_many_files(
     tmp_path: Path,
 ) -> None:
