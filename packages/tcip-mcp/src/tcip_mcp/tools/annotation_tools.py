@@ -44,7 +44,8 @@ def read_annotations(
 
     The bucket is one published under the image's dataset root. Both are the name-based
     per-image schema, one document per image, all subjects. A present document this schema cannot
-    read returns an ``error``.
+    read returns an ``error``, and so does a file that names no logical image or whose header
+    will not read (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`).
 
     Args:
         image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against the
@@ -56,8 +57,11 @@ def read_annotations(
     image_path = str(img)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
+    try:
+        w, h = image_path_dimensions(image_path)
+    except (OSError, ValueError) as exc:
+        return {"error": str(exc)}
 
-    w, h = image_path_dimensions(image_path)
     result: dict = {"image": image_path, "width": w, "height": h}
     try:
         key = label_key_of(image_path)
@@ -108,10 +112,11 @@ def save_annotations(
             coords); an empty list writes an empty document.
 
     Returns ``{capture, written, count}``, ``written`` the one-element list of the stem
-    written, or ``{error}`` with nothing written for a ``ValueError`` the save raises (a
-    payload that does not parse; a removed annotation an open flag sits on, since a tool names
-    no person and the person resolves the flag first). A stored document that does not decode
-    raises ``UnreadableLabelDocumentError`` through this door.
+    written, or ``{error}`` with nothing written for a file that names no logical image or whose
+    header will not read, and for a ``ValueError`` the save raises (a payload that does not
+    parse; a removed annotation an open flag sits on, since a tool names no person and the
+    person resolves the flag first). A stored document that does not decode raises
+    ``UnreadableLabelDocumentError`` through this door.
 
     """
     from tcip_mcp.dataset_layout import save_label_document
@@ -121,8 +126,11 @@ def save_annotations(
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
+    try:
+        w, h = image_path_dimensions(image_path)
+    except (OSError, ValueError) as exc:
+        return {"error": str(exc)}
 
-    w, h = image_path_dimensions(image_path)
     try:
         key = label_key_of(image_path)
         save_label_document(
@@ -350,6 +358,7 @@ def score_predictions(
         UnreadableLabelDocumentError,
         TraitUnknownError,
         ValueError,
+        FileNotFoundError,
     ) as exc:
         return {"error": str(exc)}
 
