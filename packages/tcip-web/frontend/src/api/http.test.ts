@@ -24,6 +24,7 @@ import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { IMAGE_ANSWERS } from "@/test/images";
 import { PICKER } from "@/test/projectRecords";
 import { answeredWith, fetchAnswers, thrown } from "@/test/refusals";
+import { TERMINAL_ANSWERS } from "@/test/terminal";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 /** A produced refusal whose detail is a sentence: the status route's answer for no such job. */
@@ -102,13 +103,22 @@ describe("http helpers", () => {
     expect(gap(null)).toBeNull();
   });
 
-  it("committedOf returns the committed body only for the marker, null otherwise", async () => {
+  it("committedOf reads whether the call committed and what, and is null for any other failure", async () => {
     const produced = RESULTS_ANSWERS.count_export_audit_gap;
-    expect(committedOf<SavedExport>(await thrown(produced))).toEqual(
-      produced.body.detail.committed,
-    );
+    expect(committedOf<SavedExport>(await thrown(produced))).toEqual({
+      committed: true,
+      what: produced.body.detail.what,
+    });
 
-    expect(committedOf(await thrown(RESULTS_ANSWERS.mapping_audit_gap))).toBeNull();
+    expect(committedOf(await thrown(RESULTS_ANSWERS.mapping_audit_gap))).toEqual({
+      committed: true,
+      what: null,
+    });
+
+    expect(committedOf(await thrown(TERMINAL_ANSWERS.start_audit_gap))).toEqual({
+      committed: false,
+      what: null,
+    });
 
     expect(committedOf(await thrown(ANNOTATE_ANSWERS.engine_refusal))).toBeNull();
   });

@@ -476,7 +476,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // The committed body is adopted as though the save had answered 200, and the optimistic
     // active subject is kept rather than reverted (unlike an ordinary refusal above).
-    expect(tokenOf(useStore.getState().registry.version)).toBe(gap.body.detail.committed.version);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(gap.body.detail.what.version);
     expect(useStore.getState().gui.active_subject).toBe("husk");
   });
 });

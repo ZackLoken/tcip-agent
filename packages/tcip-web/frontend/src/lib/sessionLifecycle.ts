@@ -5,11 +5,9 @@
  * anything acts on it and no answer arrives after the end that consumed it.
  */
 
-import { committedOf, messageOf, refusalOf, StructuredRefusalError } from "@/api/http";
+import { committedOf, messageOf, StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import {
-  AUDIT_ENTRY_NOT_WRITTEN,
-  type AuditGapRefusal,
   ENDED,
   type ImageEventPayload,
   NOTHING_RECORDED,
@@ -56,7 +54,7 @@ function adopt(contribution: ImageEventPayload, written: SessionWrite): void {
 /** Dispose of one posted contribution by its answer while it is still held; the answer to one
  *  retired meanwhile updates nothing. One the backend accepted, or committed and could not
  *  record the line of (the gap toasted), is adopted. One it refused by name (a 4xx answer other
- *  than that gap) is retired, the session its request named forgotten (`forgetSession`), since
+ *  than a gap saying it committed) is retired, the session its request named forgotten (`forgetSession`), since
  *  that named session is what a refusal answers about, so the next visit opens a fresh one, and
  *  its refusal added to the one notice of refused visits (`pushRefusal`). One with
  *  no answer or an indeterminate one stays held to be sent again under the same identity, and
@@ -70,15 +68,11 @@ function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>)
     (e: unknown) => {
       if (!held()) return;
       const s = useStore.getState();
-      const committed = committedOf<SessionWrite>(e);
-      if (committed !== null) {
-        adopt(contribution, committed);
+      const gap = committedOf<SessionWrite>(e);
+      if (gap?.committed && gap.what !== null) {
+        adopt(contribution, gap.what);
         s.pushToast(messageOf(e));
-      } else if (
-        !refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN) &&
-        e instanceof StructuredRefusalError &&
-        e.status < 500
-      ) {
+      } else if (!gap?.committed && e instanceof StructuredRefusalError && e.status < 500) {
         s.retireContribution(contribution);
         if (contribution.started !== null) forgetSession(contribution.started);
         s.pushRefusal(REFUSED_CHANNEL, contribution.image_name, e.message);

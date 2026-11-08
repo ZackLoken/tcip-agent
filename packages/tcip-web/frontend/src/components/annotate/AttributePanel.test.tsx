@@ -7,6 +7,7 @@ import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { adoptLoad } from "@/lib/registrySave";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
+import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import {
   BARE_REGISTRY,
   LABEL_ANSWERS,
@@ -17,6 +18,7 @@ import {
 } from "@/test/labels";
 import { thrown } from "@/test/refusals";
 import { openTestProject, selected } from "@/test/store";
+import { TERMINAL_ANSWERS } from "@/test/terminal";
 
 const initialStoreState = useStore.getState();
 
@@ -190,9 +192,27 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
 
     // The committed registry is adopted as though the save had answered 200, and the gap
     // itself is surfaced as a toast rather than swallowed.
-    const { committed, message } = gap.body.detail;
-    expect(tokenOf(useStore.getState().registry.version)).toBe(committed.version);
+    const { what, message } = gap.body.detail;
+    expect(tokenOf(useStore.getState().registry.version)).toBe(what.version);
     expect(useStore.getState().toasts.some((t) => t.message === message)).toBe(true);
+  });
+
+  it.each([
+    ["says nothing committed", TERMINAL_ANSWERS.start_audit_gap],
+    ["says a change committed and carries no registry", RESULTS_ANSWERS.mapping_audit_gap],
+  ])("reloads the registry from the server on an audit-gap refusal that %s", async (_name, gap) => {
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(gap));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
+
+    render(<AttributePanel focused={null} />);
+    fillAttributeDraft("opening", ["closed", "open"]);
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+
+    expect(useStore.getState().registry.subjects).toEqual(LOADED.subjects);
+    expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
+    expect(
+      useStore.getState().toasts.some((t) => t.message?.includes(gap.body.detail.message)),
+    ).toBe(true);
   });
 
   it("reloads the registry from the server on an ordinary refusal, unlike the audit-gap case", async () => {
