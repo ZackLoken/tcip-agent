@@ -346,7 +346,7 @@ describe("AnnotateTab session contributions", () => {
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().recordedSession).toEqual({
       project_id: useStore.getState().openProject!.id,
-      started: sessionOf(gap.body.detail.committed).started,
+      started: sessionOf(gap.body.detail.what).started,
       user: "jordan",
     });
   });

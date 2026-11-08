@@ -728,7 +728,8 @@ export interface BucketExistsRefusal {
 export interface AuditGapRefusal {
   kind: "audit_entry_not_written";
   message: string;
-  committed: unknown;
+  committed: boolean;
+  what: unknown;
 }
 
 export interface ProjectNotOpenRefusal {

@@ -958,7 +958,9 @@ def _end_by(session: TerminalSession, person: str) -> TerminalEnd:
         raise HTTPException(503, _SURVIVED)
     answer = TerminalEnd(undelivered=session.ended.undelivered)
     if unrecorded is not None:
-        raise audit_gap_409(unrecorded, answer) from unrecorded
+        raise audit_gap_409(
+            unrecorded, committed=True, what=answer
+        ) from unrecorded
     return answer
 
 
@@ -1011,7 +1013,7 @@ def session_start(
             _record(_REPORTED, reported.model_dump(), session._project, None)
         except AuditEntryNotWrittenError as exc:
             raise audit_gap_409(
-                exc, None, message=_line_unwritten(exc)
+                exc, committed=False, what=None, message=_line_unwritten(exc)
             ) from exc
     return pty_host.orientation(session._project, req.source)
 

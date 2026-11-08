@@ -94,7 +94,7 @@ def produce() -> dict[str, JsonValue]:
         with pytest.MonkeyPatch.context() as patch:
             refuse_audit_appends(patch)
             gap = answered(client, "image_event", 409, unlogged)
-        held = AuditGapRefusal.model_validate(detail_of(gap)).committed
+        held = AuditGapRefusal.model_validate(detail_of(gap)).what
         held_session = Landed.model_validate(held)
         ended_named = answered(
             client,
