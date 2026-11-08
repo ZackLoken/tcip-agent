@@ -293,6 +293,43 @@ def test_a_validated_delivery_carries_no_acknowledgment(
     assert read_delivery_events(tmp_path)[0].shipped.kind == "validated"
 
 
+def test_a_delivery_whose_assessment_will_not_read_refuses_acknowledgeably_then_ships_acknowledged(
+    tmp_path: Path,
+) -> None:
+    """A delivery over a bucket whose assessment record will not read refuses, naming that file.
+
+    The refusal is acknowledgeable; under an acknowledgment of its result the delivery ships
+    acknowledged, the bucket's unvalidated finding on its event naming the file.
+    """
+    from tcip_mcp.assessment import ASSESSMENT_FILE, assessment_dir
+    from tcip_mcp.delivery import read_delivery_events
+    from tests._chain_fixtures import run_the_chain
+
+    chain = run_the_chain(tmp_path, experiment_id="exp-unread-assessment")
+    record = (
+        assessment_dir(tmp_path, chain.assessment["assessment_id"])
+        / ASSESSMENT_FILE
+    )
+    record.write_bytes(b"\xff\xfe not json")
+
+    with pytest.raises(DeliveryRefusedError) as refused:
+        _deliver(tmp_path, chain.bucket)
+    assert str(record) in str(refused.value)
+    act = record_acknowledgment(
+        tmp_path,
+        acknowledged_by="user:breeder",
+        reason="the assessment record is being restored",
+        result_sha256=digest_of(refused.value),
+    )
+    result = _deliver(tmp_path, chain.bucket, act.acknowledgment_id)
+
+    assert result.shipped.kind == "acknowledged", result.shipped
+    (event,) = read_delivery_events(tmp_path)
+    (finding,) = event.buckets
+    assert finding.kind == "unvalidated", finding
+    assert str(record) in finding.reason
+
+
 def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(
     tmp_path: Path,
 ) -> None:

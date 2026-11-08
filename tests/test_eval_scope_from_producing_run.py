@@ -1,5 +1,7 @@
 """Evaluating by run id reads ground truth through the scope the run's checkpoint records.
 
+A run whose record will not read answers an error naming that record.
+
 The fixture images each hold two buds and five leaves under one label document per image, and
 the run is recorded over the leaf scope.
 """
@@ -70,6 +72,40 @@ def _two_subject_dataset(root: Path) -> Path:
         ).save(images_dir / f"img{i}.png")
         label_image(images_dir / f"img{i}.png", buds + leaves, 160, 96)
     return images_dir
+
+
+def test_evaluating_a_run_whose_record_will_not_read_answers_an_error_naming_it(
+    tmp_path: Path,
+) -> None:
+    """Evaluating by the id of a run whose ``run.json`` will not read answers an error naming it."""
+    from tcip_mcp.experiments import RUN_FILE
+    from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._training_values import IOU_THRESHOLD
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
+
+    record = (
+        opened_run(
+            tmp_path,
+            detection_config(tmp_path / "ds", project=tmp_path),
+            experiment_id="exp-unread",
+        )
+        / RUN_FILE
+    )
+    record.write_bytes(b"\xff\xfe not json")
+
+    res = evaluate_model(
+        tmp_path,
+        "exp-unread",
+        str(tmp_path / "ds"),
+        stated=Stated(),
+        iou_threshold=IOU_THRESHOLD,
+    )
+
+    assert str(record) in res["error"], res
 
 
 def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
