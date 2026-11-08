@@ -1,9 +1,9 @@
 """Plant-ID mapping across capture dates.
 
-Each image is assigned a plant by its capture sequence along a row and its GPS, or by
-nearest-neighbor GPS where no sequence anchors it, every assignment recording its match ``source``
-and its GPS ``distance_m``. A mapping is named project state, bound to the dataset it was built
-over and to the build receipt that names it.
+On each date, in capture-time order, each image is assigned the nearest plant no earlier image of
+the date has claimed, else the nearest plant, within the date's match radius, every assignment
+recording its match ``source`` and its GPS ``distance_m``. A mapping is named project state, bound
+to the dataset it was built over and to the build receipt that names it.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from enum import StrEnum
-from itertools import pairwise
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -123,8 +122,8 @@ class PlantRecord:
 _DECODED = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
 
 GpsSource = Literal["sequence", "nearest_neighbor", "unmapped"]
-"""Where a GPS assignment's plant came from: the capture sequence, the plain nearest plant, or
-none within the date's match radius."""
+"""What a GPS assignment's plant is: one claimed in capture order (``sequence``), the nearest plant
+within the match distance (``nearest_neighbor``), or none (``unmapped``)."""
 
 UnattributedSegmentSource = Literal[
     "outside_segments",
@@ -1219,92 +1218,11 @@ def nearest_plant(
     return (index if distance <= within_m else None), distance
 
 
-# ── Sequence anchoring ─────────────────────────────────────────────────
-
-
-# Iglewicz & Hoaglin's modified z-score outlier test (1993, ASQC Quality Press), tested in
-# log-space against the date's own consecutive-gap ratios; 3.5 is the convention's own cutoff.
-_ROW_BREAK_MODIFIED_Z = 3.5
-
-
-def _derive_row_break_threshold(gaps: list[float]) -> float | None:
-    """Find the natural break in a date's own consecutive-image gap distances, if one exists.
-
-    A walker's path produces small, roughly-uniform steps within a row and one or more much
-    larger jumps at a row transition, regardless of whether the row is straight or curved. This
-    looks for that break as the largest relative (log-space) jump between consecutive values in
-    the sorted gap sequence, then tests it against the rest of the sorted jumps via Iglewicz &
-    Hoaglin's modified z-score (median/MAD-based, robust to the small, often near-degenerate
-    samples a single date's image count produces). Returns ``None`` when there aren't enough gaps
-    to judge, or the gaps are too uniform to support a split.
-    """
-    if len(gaps) < 2:
-        return None
-    sorted_gaps = sorted(gaps)
-    # A near-zero gap carries no walking-pace information, so it is no candidate split.
-    candidates = [
-        (math.log(hi / lo), lo, hi)
-        for lo, hi in pairwise(sorted_gaps)
-        if lo > 1e-9
-    ]
-    if not candidates:
-        return None
-    best = max(candidates, key=lambda candidate: candidate[0])
-    best_log_ratio, best_lo, best_hi = best
-
-    other_log_ratios = [c[0] for c in candidates if c is not best]
-    if not other_log_ratios:
-        # Only one candidate split to compare against: no basis to call it a genuine transition.
-        return None
-    from scipy.stats import median_abs_deviation
-
-    median_other = statistics.median(other_log_ratios)
-    mad = float(median_abs_deviation(other_log_ratios, scale="normal"))
-    if mad > 0:
-        modified_z = (best_log_ratio - median_other) / mad
-        if modified_z < _ROW_BREAK_MODIFIED_Z:
-            return None
-    elif best_log_ratio <= median_other:
-        # With no spread in the other steps, only a strictly larger jump splits (MAD's limit at 0).
-        return None
-
-    return best_lo + (best_hi - best_lo) / 2
-
-
-def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
-    """Break an ordered list of stamps into row runs on GPS jumps.
-
-    A jump breaks a run when it stands out from that date's own walking gaps (see
-    ``_derive_row_break_threshold``).
-    """
-    if not stamps:
-        return []
-    pairs: list[tuple[ImageStamp, float | None]] = []
-    for prev, cur in pairwise(stamps):
-        d = None
-        if prev.position is not None and cur.position is not None:
-            (lat1, lon1), (lat2, lon2) = prev.position, cur.position
-            d = WGS84.inv(lon1, lat1, lon2, lat2)[2]
-        pairs.append((cur, d))
-
-    threshold = _derive_row_break_threshold(
-        [d for _, d in pairs if d is not None]
-    )
-
-    runs: list[list[ImageStamp]] = [[stamps[0]]]
-    for cur, d in pairs:
-        if d is None or threshold is None or d <= threshold:
-            runs[-1].append(cur)
-        else:
-            runs.append([cur])
-    return runs
-
-
 def _order_by_time(stamps: list[ImageStamp]) -> list[ImageStamp]:
-    ordered = sorted(
+    """Return ``stamps`` in capture-time order, the undated last, ties broken by stem."""
+    return sorted(
         stamps, key=lambda s: (s.timestamp is None, s.timestamp, s.stem)
     )
-    return ordered
 
 
 class NoMatchRadiusError(ValueError):
@@ -1346,38 +1264,35 @@ def assign_plants(
     *,
     radius: MatchRadius | None,
 ) -> list[Assignment]:
-    """Assign each image to a plant by sequence-anchored NN matching within ``radius``.
+    """Assign each image of one date to a plant within ``radius``, in capture-time order.
 
-    Each image takes its nearest unclaimed plant, else its nearest plant, else none; the
-    assignments come back in ``stamps`` order. A stamp with no position (a band group or an array
-    raster, or a photograph with no usable EXIF position) is unmapped.
+    Each image takes the nearest plant no earlier image has claimed (``sequence``); with none
+    unclaimed within ``radius`` it takes the nearest plant, claimed or not (``nearest_neighbor``);
+    with none within ``radius`` it is ``unmapped``. The assignments come back in ``stamps`` order.
+    A stamp with no position (a band group or an array raster, or a photograph with no usable EXIF
+    position) is unmapped.
     """
     out: list[Assignment] = []
     claimed: set[int] = set()
-    for run in _segment_runs(_order_by_time(stamps)):
-        for s in run:
-            if s.position is None or radius is None or not plants:
-                out.append(Assignment.of(s, None, "unmapped", None))
-                continue
-            index, distance = nearest_plant(
-                s.position, plants, within_m=radius.value, skip=claimed
-            )
-            if index is not None:
-                claimed.add(index)
-                out.append(
-                    Assignment.of(s, plants[index], "sequence", distance)
-                )
-                continue
-            index, distance = nearest_plant(
-                s.position, plants, within_m=radius.value
-            )
-            out.append(
-                Assignment.of(s, None, "unmapped", distance)
-                if index is None
-                else Assignment.of(
-                    s, plants[index], "nearest_neighbor", distance
-                )
-            )
+    for s in _order_by_time(stamps):
+        if s.position is None or radius is None or not plants:
+            out.append(Assignment.of(s, None, "unmapped", None))
+            continue
+        index, distance = nearest_plant(
+            s.position, plants, within_m=radius.value, skip=claimed
+        )
+        if index is not None:
+            claimed.add(index)
+            out.append(Assignment.of(s, plants[index], "sequence", distance))
+            continue
+        index, distance = nearest_plant(
+            s.position, plants, within_m=radius.value
+        )
+        out.append(
+            Assignment.of(s, None, "unmapped", distance)
+            if index is None
+            else Assignment.of(s, plants[index], "nearest_neighbor", distance)
+        )
 
     by_image = {(a.date_folder, a.image): a for a in out}
     return [by_image[(s.date_folder, s.name)] for s in stamps]
