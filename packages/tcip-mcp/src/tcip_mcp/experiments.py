@@ -73,8 +73,6 @@ from tcip_mcp.pipelines.schemas import (
 from tcip_mcp.pipelines.training.tensorboard_manager import TensorboardState
 from tcip_mcp.registry_paths import (
     PathFields,
-    RegistryPathEmptyError,
-    RegistryPathTraversalError,
     recorded_paths,
     runtime_paths,
     within,
@@ -497,9 +495,7 @@ def read_run_record(path: Path) -> JsonValue:
     at ``path``.
     """
     record, project = read_record(path), project_of_run(path)
-    with unreadable(
-        str(path), RegistryPathEmptyError, RegistryPathTraversalError
-    ):
+    with unreadable(str(path), ValueError):
         return runtime_paths(record, RECORD_PATHS[path.name], project)
 
 
