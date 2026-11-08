@@ -201,8 +201,7 @@ def build_server(session: Session) -> MCPServer:
     Each call acts on the project ``session`` is bound to at that call and is made by its person
     (:class:`Session`). With no project bound, only the tools taking neither ``project`` nor
     ``bound`` can run, and from the first project the creation door creates, every tool acts on
-    that one. A call that raises answers the exception's class and sentence
-    (:func:`_carrying_sentences`).
+    that one.
     """
     server = MCPServer(
         "tcip-pipeline", lifespan=agent_identity.session_lifespan
