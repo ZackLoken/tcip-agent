@@ -338,38 +338,43 @@ def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_s
 ) -> None:
     """A door naming one band of a grouped capture answers the resolver's refusal as its error.
 
-    ``read_annotations``, ``save_annotations``, ``overlay_reference_grid`` and
-    ``capture_live_canvas`` are called through the server, the canvas pushed through the
-    backend's own route; each answers the sentence ``resolve_image_path`` raises for the band, as
-    it answers a path that is not a file, and each serves the group's manifest.
+    ``read_annotations``, ``save_annotations``, ``overlay_reference_grid``,
+    ``capture_live_canvas`` and ``score_predictions`` are called through the server, the canvas
+    pushed through the backend's own route and a bucket published for the manifest; each answers
+    the sentence ``resolve_image_path`` raises for the band, as it answers a path that is not a
+    file, and each serves the group's manifest.
     """
     import json
 
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tests._producer_fixtures import published_document
     from tests._web_fixtures import bound_to
     from tests.test_agent_identity_records import results_through_handshake
+    from tests.test_canvas_liveview import _payload
 
     member = str(grouped_dataset.bands["Green"])
     with pytest.raises(FileNotFoundError) as refused:
         resolve_image_path(member)
 
+    published_document(
+        opened.root,
+        "preds",
+        grouped_dataset.manifest,
+        [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6), score=0.9)],
+        16,
+        16,
+    )
+
     def answers(image: str) -> list[dict]:
         pushed = client.post(
             "/api/canvas/state",
-            json={
-                "project_id": opened.id,
-                "tab": "annotate",
-                "image_path": image,
-                "viewport": {"x": 0, "y": 0, "w": 16, "h": 16, "scale": 1.0},
-                "mode": "box",
-                "active_subject": None,
-                "cut_armed": False,
-                "dirty": False,
-                "user": "breeder",
-                "classes": [{"name": "bud", "color": "#FF0000"}],
-                "counts": {},
-                "shapes": None,
-            },
+            json=_payload(
+                opened.id,
+                image,
+                viewport={"x": 0, "y": 0, "w": 16, "h": 16, "scale": 1.0},
+                mode="box",
+            ),
         )
         assert pushed.status_code == 200, pushed.text
         results = results_through_handshake(
@@ -381,15 +386,24 @@ def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_s
                     {"image_path": image, "overlap": 0.0},
                 ),
                 ("capture_live_canvas", {"refresh": False}),
+                (
+                    "score_predictions",
+                    {
+                        "path": image,
+                        "bucket": "preds",
+                        "iou_threshold": IOU_THRESHOLD,
+                        "conf_threshold": 0.0,
+                    },
+                ),
             ],
             bound=bound_to(opened),
         )
         assert not any(result.is_error for result in results), results
         return [json.loads(result.content[0].text) for result in results]
 
-    assert answers(member) == [{"error": str(refused.value)}] * 4
+    assert answers(member) == [{"error": str(refused.value)}] * 5
     served = answers(str(grouped_dataset.manifest))
-    assert [answer.get("error") for answer in served] == [None] * 4, served
+    assert [answer.get("error") for answer in served] == [None] * 5, served
 
 
 def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(

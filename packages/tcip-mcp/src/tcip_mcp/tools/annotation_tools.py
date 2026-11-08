@@ -358,6 +358,7 @@ def score_predictions(
         UnreadableLabelDocumentError,
         TraitUnknownError,
         ValueError,
+        FileNotFoundError,
     ) as exc:
         return {"error": str(exc)}
 
