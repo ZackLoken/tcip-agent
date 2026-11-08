@@ -7,6 +7,7 @@ cancel is the record ``experiments.request_cancel`` writes in the sweep director
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -210,35 +211,132 @@ def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
     assert "error" in cancel_training(elsewhere, sweep_id, actor=None)
 
 
-def test_a_sweep_cancel_is_recorded_when_a_trial_of_the_project_will_not_read(
-    project: Path, real_hpo_base_config: dict
-) -> None:
-    """A sweep's cancel is answered as recorded when a run of the project refuses to read.
+def cancel_unread(project: Path, directory: Path) -> dict:
+    """Cancel the run or sweep at ``directory`` and return the refused read its answer carries.
 
-    The sweep's detail reads every run of the project, so a trial's undecodable record refuses
-    the read after the cancel was written, and the answer names that record.
+    The answer is asserted to be ``cancel_recorded`` for that directory.
     """
-    from tcip_mcp.experiments import CANCEL_FILE, RUN_FILE
-    from tcip_mcp.tools.training_tools import cancel_training, open_trial
-    from tests._audit_fixtures import audit_rows
+    from tcip_mcp.tools.training_tools import cancel_training
 
-    sweep = opened_sweep(project, real_hpo_base_config)
-    trial = open_trial(sweep, "t0", {"optimizer.head_lr": 0.001})
-    (trial / RUN_FILE).write_bytes(b"\xff\xfe not json")
+    answer = cancel_training(project, directory.name, actor=None)
 
-    answer = cancel_training(project, sweep.name, actor=None)
-
-    assert not isinstance(answer, dict)
+    assert not isinstance(answer, dict), answer
     served = answer.model_dump(mode="json")
     assert (served["kind"], served["experiment_id"]) == (
         "cancel_recorded",
-        sweep.name,
+        directory.name,
     )
-    assert str(trial / RUN_FILE) in served["unread"]["refusal"]["message"]
+    return served["unread"]
+
+
+def _two_trials(project: Path, base_config: dict) -> tuple[Path, Path]:
+    """Open a sweep with two trials through the sweep's own producers; return it and the second."""
+    from tcip_mcp.tools.training_tools import open_trial
+
+    sweep = opened_sweep(project, base_config)
+    open_trial(sweep, "t0", {"optimizer.head_lr": 0.001})
+    return sweep, open_trial(sweep, "t1", {"optimizer.head_lr": 0.002})
+
+
+def test_a_sweep_cancel_is_recorded_at_the_trial_record_that_will_not_read(
+    project: Path, real_hpo_base_config: dict
+) -> None:
+    """A sweep's cancel is answered as recorded, its refused read placed at the trial's record.
+
+    The sweep's detail reads every run of the project, so the second of two trials' undecodable
+    record refuses the read after the cancel was written, and the answer's place is that record.
+    """
+    from tcip_mcp.experiments import CANCEL_FILE, RUN_FILE
+    from tests._audit_fixtures import audit_rows
+
+    sweep, second = _two_trials(project, real_hpo_base_config)
+    (second / RUN_FILE).write_bytes(b"\xff\xfe not json")
+
+    unread = cancel_unread(project, sweep)
+
+    assert (unread["where"], unread["refusal"]["kind"]) == (
+        str(second / RUN_FILE),
+        "unreadable",
+    )
     assert (sweep / CANCEL_FILE).is_file()
     assert [
         row["status"] for row in audit_rows(project, "cancel_training")
     ] == ["ok"]
+
+
+def test_a_sweep_cancel_places_a_trial_metrics_row_that_will_not_read_at_its_line(
+    project: Path, real_hpo_base_config: dict
+) -> None:
+    """A sweep's cancel over a trial whose logged row will not read places it at its log's line.
+
+    The second trial logs one epoch through the envelope's sink, then a line that does not decode.
+    """
+    from tcip_mcp.experiments import METRICS_FILE
+    from tests._verified_checkpoint_fixtures import log_epoch
+
+    sweep, second = _two_trials(project, real_hpo_base_config)
+    log_epoch(second, 1, {"loss": 0.5})
+    log = second / METRICS_FILE
+    line = log.read_bytes().count(b"\n") + 1
+    with log.open("ab") as handle:
+        handle.write(b"{not a row\n")
+
+    assert cancel_unread(project, sweep)["where"] == f"{log}:{line}"
+
+
+def test_a_sweep_cancel_is_recorded_at_another_runs_final_status_that_will_not_read(
+    project: Path, real_hpo_base_config: dict
+) -> None:
+    """A sweep's cancel over a project holding an ended run whose final status will not read.
+
+    The answer's place is that final status.
+    """
+    from tcip_mcp.audit import now
+    from tcip_mcp.experiments import FINAL_STATUS_FILE, write_final_status
+
+    sweep, ended = _two_trials(project, real_hpo_base_config)
+    write_final_status(ended, "failed", "stopped by hand", ended=now())
+    (ended / FINAL_STATUS_FILE).write_bytes(b"\xff\xfe not json")
+
+    assert cancel_unread(project, sweep)["where"] == str(
+        ended / FINAL_STATUS_FILE
+    )
+
+
+def test_a_sweep_cancel_is_recorded_at_its_own_sweep_record_that_will_not_read(
+    project: Path, real_hpo_base_config: dict
+) -> None:
+    from tcip_mcp.experiments import SWEEP_FILE
+
+    sweep = opened_sweep(project, real_hpo_base_config)
+    (sweep / SWEEP_FILE).write_bytes(b"\xff\xfe not json")
+
+    assert cancel_unread(project, sweep)["where"] == str(sweep / SWEEP_FILE)
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows' chmod sets the read-only flag alone, so no read is denied",
+)
+def test_a_sweep_cancel_is_recorded_at_a_trial_record_whose_read_is_denied(
+    project: Path, real_hpo_base_config: dict
+) -> None:
+    """A sweep's cancel over a trial whose record the process may not read places it there."""
+    from tcip_mcp.experiments import RUN_FILE
+
+    sweep, second = _two_trials(project, real_hpo_base_config)
+    record = second / RUN_FILE
+    mode = record.stat().st_mode
+    record.chmod(0)
+    try:
+        unread = cancel_unread(project, sweep)
+    finally:
+        record.chmod(mode)
+
+    assert (unread["where"], unread["refusal"]["kind"]) == (
+        str(record),
+        "unreadable",
+    )
 
 
 def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_canceled(
