@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
 
@@ -24,6 +24,13 @@ from tcip_mcp.tools.project_tools import (
     read_datasets,
     register_dataset,
     upsert_dataset,
+)
+from tests._busy_store_fixtures import (
+    GAVE_UP_WITHIN_S,
+    SHORT_WAIT_S,
+    held_by_another_connection,
+    seconds_given_up_after,
+    waiting,
 )
 from tests._record_damage_fixtures import damage_record
 from tests._server_calls import called_through_the_server
@@ -290,6 +297,31 @@ def test_inspect_project_surfaces_an_audit_log_in_a_database_that_will_not_open(
         "could not complete this store's identity check"
         in problem["refusal"]["message"]
     )
+
+
+def test_inspect_project_over_a_held_store_says_it_was_busy_and_how_long_it_waited(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """Pinning test: the busy store's sentence reaches the record's reading and the activity.
+
+    The store is held past a short wait, and each answer the server sends carries the sentence's
+    wait inside the band the store contract test holds a short wait to.
+    """
+    tcip_store.release_root(tmp_path)
+
+    with waiting(SHORT_WAIT_S), held_by_another_connection(tmp_path):
+        answer = called_through_the_server("inspect_project", {}, bound=bound)
+    assert isinstance(answer, dict), answer
+    status: dict[str, Any] = answer
+
+    assert status["reading"]["kind"] == "unread"
+    problem = status["reading"]["problem"]["refusal"]["message"]
+    unavailable = status["recent_activity"]["status_unavailable"]
+    for sentence in (problem, unavailable):
+        assert "was busy" in sentence, sentence
+        assert (
+            SHORT_WAIT_S <= seconds_given_up_after(sentence) < GAVE_UP_WITHIN_S
+        ), sentence
 
 
 def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(

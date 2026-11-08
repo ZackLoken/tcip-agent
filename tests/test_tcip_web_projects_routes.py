@@ -11,6 +11,13 @@ from fastapi.testclient import TestClient
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import REFUSED_NAMES
+from tests._busy_store_fixtures import (
+    GAVE_UP_WITHIN_S,
+    SHORT_WAIT_S,
+    held_by_another_connection,
+    seconds_given_up_after,
+    waiting,
+)
 from tests._web_fixtures import INVARIANCES
 
 if TYPE_CHECKING:
@@ -192,6 +199,30 @@ def test_list_ignores_dirs_without_tcip(
     (workspace_dir / "not_a_project").mkdir()  # no .tcip/
 
     assert set(_listed(client)) == {"real_project_site"}
+
+
+def test_list_over_a_held_store_answers_409_saying_it_was_busy_and_how_long_it_waited(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    """Pinning test: a project whose store is held past a short wait fails the listing as busy.
+
+    The answer is the store's own sentence at 409, its wait inside the band the store contract
+    test holds a short wait to.
+    """
+    import tcip_store
+
+    held = _make_project(workspace_dir, "held_project").root
+    tcip_store.release_root(held)
+
+    with waiting(SHORT_WAIT_S), held_by_another_connection(held):
+        resp = client.get("/api/projects")
+
+    assert resp.status_code == 409, resp.text
+    sentence = resp.json()["detail"]
+    assert "was busy" in sentence, sentence
+    assert (
+        SHORT_WAIT_S <= seconds_given_up_after(sentence) < GAVE_UP_WITHIN_S
+    ), sentence
 
 
 def test_list_sorted_by_modified_desc(
