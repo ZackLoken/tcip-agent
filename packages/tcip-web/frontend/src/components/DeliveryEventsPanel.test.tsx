@@ -64,9 +64,9 @@ describe("DeliveryEventsPanel bucket findings", () => {
   it("renders no scale line for a delivery that named none", () => {
     const served = DELIVERY_RECORDS.validated;
     expect(served.event.scale).toBeNull();
-    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
+    const { container } = render(<DeliveryEventsPanel records={[served]} loadError={null} />);
 
-    expect(screen.queryByTestId("scale-finding")).not.toBeInTheDocument();
+    expect(within(container).queryByTestId("scale-finding")).not.toBeInTheDocument();
   });
 
   it("counts the plants a canopy delivery delivered from its recorded population", () => {
