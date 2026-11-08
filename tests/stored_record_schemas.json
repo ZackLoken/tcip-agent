@@ -2194,6 +2194,7 @@
     "description": "A dataset's identity document, ``dataset.json``: its crop, its minted id, its fingerprint.\n\n``fingerprint`` is ``None`` for a dataset that yielded none when it was registered.",
     "properties": {
       "crop": {
+        "minLength": 1,
         "title": "Crop",
         "type": "string"
       },
@@ -6260,6 +6261,7 @@
     "description": "A plant registry record, the one :func:`plant_registry_key` stores.\n\nIt names its plant-locations CSVs, their ``crop`` and ``site``, the plant count, the content\ndigest over every parsed row and when it was registered.",
     "properties": {
       "crop": {
+        "minLength": 1,
         "title": "Crop",
         "type": "string"
       },
@@ -8613,6 +8615,7 @@
         "description": "A dataset's identity document, ``dataset.json``: its crop, its minted id, its fingerprint.\n\n``fingerprint`` is ``None`` for a dataset that yielded none when it was registered.",
         "properties": {
           "crop": {
+            "minLength": 1,
             "title": "Crop",
             "type": "string"
           },
