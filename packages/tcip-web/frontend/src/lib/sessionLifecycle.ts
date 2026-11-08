@@ -5,9 +5,11 @@
  * anything acts on it and no answer arrives after the end that consumed it.
  */
 
-import { committedOf, messageOf, StructuredRefusalError } from "@/api/http";
+import { committedOf, messageOf, refusalOf, StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import {
+  AUDIT_ENTRY_NOT_WRITTEN,
+  type AuditGapRefusal,
   ENDED,
   type ImageEventPayload,
   NOTHING_RECORDED,
@@ -68,11 +70,15 @@ function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>)
     (e: unknown) => {
       if (!held()) return;
       const s = useStore.getState();
-      const gap = committedOf<SessionWrite>(e);
-      if (gap?.committed && gap.what !== null) {
-        adopt(contribution, gap.what);
+      const committed = committedOf<SessionWrite>(e);
+      if (committed !== null) {
+        adopt(contribution, committed);
         s.pushToast(messageOf(e));
-      } else if (!gap?.committed && e instanceof StructuredRefusalError && e.status < 500) {
+      } else if (
+        !refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN)?.committed &&
+        e instanceof StructuredRefusalError &&
+        e.status < 500
+      ) {
         s.retireContribution(contribution);
         if (contribution.started !== null) forgetSession(contribution.started);
         s.pushRefusal(REFUSED_CHANNEL, contribution.image_name, e.message);

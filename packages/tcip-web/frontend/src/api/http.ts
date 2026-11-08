@@ -83,20 +83,14 @@ export function refusalOf<R extends { kind: string }>(e: unknown, kind: R["kind"
     : null;
 }
 
-/** What an audit-gap refusal says of the call: whether its change `committed`, and `what` it
- *  committed, the response a healthy call would have returned, null where the route holds no such
- *  body. */
-export interface CommittedGap<T> {
-  committed: boolean;
-  what: T | null;
-}
-
-/** The `CommittedGap` an audit-gap refusal carries, so a caller whose call `committed` adopts
- *  `what` and reaches the state a 200 would have left it in. Null when `e` is not one of these
- *  refusals. The one decode of a body the refusal carries uninterpreted. */
-export function committedOf<T>(e: unknown): CommittedGap<T> | null {
+/** The `what` body an audit-gap refusal carries when its call `committed`: the response a healthy
+ *  call would have returned, so a caller adopts it and reaches the state a 200 would have left it
+ *  in. Null when `e` is not one of these refusals, the call committed nothing, or the route holds
+ *  no body. The one decode of a body the refusal carries uninterpreted, and the one place the
+ *  `committed` boolean gates adopting it. */
+export function committedOf<T>(e: unknown): T | null {
   const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
-  return gap === null ? null : { committed: gap.committed, what: gap.what as T | null };
+  return gap?.committed ? (gap.what as T | null) : null;
 }
 
 /** The text a caught `e` reads as: an error's own message, anything else as it prints. */

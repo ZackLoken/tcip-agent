@@ -475,8 +475,7 @@ export function TerminalRail() {
       // A 404 says the backend no longer holds the session: it already ended, answering nothing.
       if (!(e instanceof StructuredRefusalError && e.status === 404)) {
         setError(messageOf(e));
-        const gap = committedOf<TerminalEnd>(e);
-        answer = gap?.committed ? gap.what : null;
+        answer = committedOf<TerminalEnd>(e);
         if (answer === null) {
           resume(was);
           return;
