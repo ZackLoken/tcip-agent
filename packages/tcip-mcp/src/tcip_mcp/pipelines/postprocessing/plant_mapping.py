@@ -1703,13 +1703,15 @@ class _MappingBuilt(BaseModel):
 
 
 def _scan_receipts(project: Path | str, *, after: str | None) -> None:
-    from tcip_mcp.audit import acts_of
+    from tcip_mcp.audit import acts_of, audit_log_place
 
     root_key = tcip_store.canonical_path(project)
     entries, cursor = acts_of(project, ("plant_mapping_built",), after=after)
     seen = _receipt_seen.setdefault(root_key, {})
     for entry in entries:
-        built = _MappingBuilt.model_validate(entry.arguments)
+        built = tcip_store.validated(
+            _MappingBuilt, entry.arguments, audit_log_place(project)
+        )
         seen.setdefault(built.name, set()).add(built.record_sha256)
     _receipt_cursor[root_key] = cursor
 

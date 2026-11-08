@@ -528,7 +528,7 @@ def _recent_activity(project: Path) -> dict:
     :func:`~tcip_mcp.audit.audit_entries`' refusal: the positions of entries that will not decode,
     or the store's sentence for a database that will not open or answer.
     """
-    from tcip_mcp.audit import acts_of
+    from tcip_mcp.audit import acts_of, audit_log_place
 
     try:
         lines, _cursor = acts_of(project, _ACTIVITY_TOOLS)
@@ -547,8 +547,10 @@ def _recent_activity(project: Path) -> dict:
         else:
             activity.reports_since_last_retrospective = 0
             activity.retrospectives_since_last_distillation += 1
-            activity.last_retrospective = LastRetrospective.model_validate(
-                line.arguments | {"modified_at": line.timestamp}
+            activity.last_retrospective = tcip_store.validated(
+                LastRetrospective,
+                line.arguments | {"modified_at": line.timestamp},
+                audit_log_place(project),
             )
         activity.last_activity = line.timestamp
     return activity.model_dump(mode="json")
