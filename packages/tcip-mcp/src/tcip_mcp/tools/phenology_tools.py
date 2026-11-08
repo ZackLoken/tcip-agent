@@ -145,14 +145,15 @@ def register_plant_registry(
             lowercase letters, digits, single hyphens).
         csv_paths: One or more plant-locations CSVs (columns ``plant_id``, ``accession_name``,
             ``WGS84_centroid_x/y``, …).
-        crop: The crop these plants are of. The expert's fact, never inferred.
+        crop: The crop these plants are of, as ``crops.yml`` names it: the expert's fact,
+            never inferred.
         site: The site or block these plants are of. The expert's fact, never inferred.
 
     Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
     (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with :func:`shp_to_plant_csv`), naming
-    any file that parsed no georeferenced, named plant or is not UTF-8 text, naming an empty crop,
-    and naming a name conflict's two digests or a name outside ``NAME_SEGMENT``. This does not
-    require a project record.
+    any file that parsed no georeferenced, named plant or is not UTF-8 text, naming a crop that is
+    empty or that ``crops.yml`` names for no trait, and naming a name conflict's two digests or a
+    name outside ``NAME_SEGMENT``. This does not require a project record.
 
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping

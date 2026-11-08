@@ -1,7 +1,7 @@
 """The crop a dataset identity and a plant registry record, through their registration doors.
 
-Each door refuses an empty crop and stores the crop stripped, and each reader refuses a stored
-record whose crop is empty.
+Each door refuses an empty crop and one crops.yml names for no trait, stores the crop stripped,
+and each reader refuses a stored record whose crop is empty.
 """
 
 from __future__ import annotations
@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic import JsonValue
+
+UNNAMED_CROP = "not-a-crop"
+"""A crop name chosen to be absent from crops.yml; each test using it asserts the absence."""
 
 
 def _crop(index: int = 0) -> str:
@@ -57,17 +60,33 @@ def _with_empty_crop(stored: JsonValue) -> bytes:
     )
 
 
-@pytest.mark.parametrize("crop", ["", "   "])
-def test_a_plant_registry_with_an_empty_crop_refuses_naming_crop(
+@pytest.mark.parametrize("crop", ["", "   ", UNNAMED_CROP])
+def test_a_plant_registry_with_an_empty_or_unnamed_crop_refuses_naming_crop(
     tmp_path: Path, crop: str
 ) -> None:
     """``register_plant_registry`` refuses the crop by name and stores nothing."""
+    assert UNNAMED_CROP not in registered_crops()
+
     refused = _registered_plants(tmp_path, crop)
 
     assert "crop" in refused.get("error", ""), refused
     assert not tcip_store.exists(
         plant_mapping.plant_registry_key(tmp_path, "valley")
     )
+
+
+def test_a_dataset_with_a_crop_crops_yml_does_not_name_refuses_naming_crop(
+    tmp_path: Path,
+) -> None:
+    """``register_dataset`` refuses an unnamed crop by name and writes no identity."""
+    assert UNNAMED_CROP not in registered_crops()
+    root = tmp_path / "dataset"
+    _make_dataset(root)
+
+    refused = register_dataset(tmp_path, str(root), UNNAMED_CROP, actor=None)
+
+    assert "crop" in refused.get("error", ""), refused
+    assert read_dataset_identity(root) is None
 
 
 def test_each_door_stores_a_named_crop_stripped(tmp_path: Path) -> None:
