@@ -70,11 +70,14 @@ def _reference(
     extents_mm: list[float] | None = None,
     unit: str = "mm",
     angles: dict[int, float] | None = None,
+    name: str = "",
 ) -> tuple[Path, Path]:
     """Return ``(selection_dir, reference_csv)`` over ``n`` frames of one 100 px bar each.
 
     The frames sit in a registered dataset, beside their breeder CSV (each physical extent
-    ``extents_mm[i]``, else the fixed scale's) and a selection drawn over them.
+    ``extents_mm[i]``, else the fixed scale's) and a selection drawn over them. A ``name``
+    suffixes the dataset, the CSV and the selection, so a second reference stands beside the
+    first in one project.
     """
     from PIL import Image
 
@@ -88,7 +91,7 @@ def _reference(
     )
     from tests._producer_fixtures import registry_of, registry_over
 
-    root = project / "ds"
+    root = project / f"ds{name}"
     place = plant_positions(["p1"])["p1"]
     images = image_dir(root, DATE)
     images.mkdir(parents=True)
@@ -125,9 +128,9 @@ def _reference(
         )
         extent = extents_mm[i] if extents_mm else 100.0 / PX_PER_MM
         rows.append((stem, extent, unit))
-    csv_path = project / "reference.csv"
+    csv_path = project / f"reference{name}.csv"
     _write_csv(csv_path, rows)
-    selection = project / "selection"
+    selection = project / f"selection{name}"
     drawn = draw_splits(
         project,
         str(root),
@@ -287,7 +290,11 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     (row,) = csv_rows(tmp_path / "scaled.csv")
     assert row["units"] == "mm2"
     (event,) = read_delivery_events(tmp_path)
-    assert event.scale_assessment_id == scale["assessment_id"]
+    assert event.scale is not None
+    assert event.scale.model_dump() == {
+        "kind": "answered",
+        "assessment_id": scale["assessment_id"],
+    }
 
     with pytest.raises(
         DeliveryRefusedError,
