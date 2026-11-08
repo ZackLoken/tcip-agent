@@ -47,6 +47,7 @@ from pydantic import (
 from pyproj import Geod
 
 import tcip_store
+from tcip_annotation.text import Crop
 from tcip_mcp.audit import now
 from tcip_mcp.project_paths import project_state_dir
 from tcip_store import Key, encode_record
@@ -981,7 +982,7 @@ class PlantRegistry(TypedDict):
     """
 
     name: str
-    crop: str
+    crop: Crop
     site: str
     csvs: list[RegistryCsv]
     n_plants: int
@@ -1143,12 +1144,24 @@ def register_plant_registry_record(
     Parses every path through :func:`parse_plant_registry_csvs`
     (:class:`NoGeoreferencedPlantsError` names the file that parsed no georeferenced, named
     plant); the record (:class:`PlantRegistry`) holds those entries plus ``crop``, ``site``,
-    ``registered_at`` and the parsed content's digest. The read-then-write is one transaction
+    ``registered_at`` and the parsed content's digest, validated before it is written
+    (``pydantic.ValidationError``). The read-then-write is one transaction
     (:func:`tcip_store.transaction`, this store's own ``concurrency="cas"``): a second
     registration under a taken name returns the existing record unchanged when the digest
     matches, and raises :class:`PlantRegistryNameConflictError` otherwise, naming the two digests.
     """
     csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths, project)
+    record = _PLANT_REGISTRY.validate_python(
+        PlantRegistry(
+            name=name,
+            crop=crop,
+            site=site,
+            csvs=csvs_meta,
+            n_plants=n_plants,
+            digest=digest,
+            registered_at=now(),
+        )
+    )
     key = plant_registry_key(project, name)
     with tcip_store.transaction(key) as txn:
         stored = txn.read(key, default=None)
@@ -1163,15 +1176,6 @@ def register_plant_registry_record(
                 f"(digest {existing['digest']!r}, this registration would write "
                 f"{digest!r}); register under a new name"
             )
-        record = PlantRegistry(
-            name=name,
-            crop=crop,
-            site=site,
-            csvs=csvs_meta,
-            n_plants=n_plants,
-            digest=digest,
-            registered_at=now(),
-        )
         txn.write(key, _PLANT_REGISTRY.dump_python(record, mode="json"))
     return record
 

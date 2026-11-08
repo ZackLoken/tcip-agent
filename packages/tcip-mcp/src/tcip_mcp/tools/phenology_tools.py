@@ -150,9 +150,9 @@ def register_plant_registry(
 
     Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
     (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with :func:`shp_to_plant_csv`), naming
-    any file that parsed no georeferenced, named plant or is not UTF-8 text, and naming a name
-    conflict's two digests or a name outside ``NAME_SEGMENT``. This does not require a project
-    record.
+    any file that parsed no georeferenced, named plant or is not UTF-8 text, naming an empty crop,
+    and naming a name conflict's two digests or a name outside ``NAME_SEGMENT``. This does not
+    require a project record.
 
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
