@@ -173,6 +173,7 @@ def test_inspect_project_counts_neither_models_nor_renders(
     render path is the viz directory's first.
     """
     pytest.importorskip("torch")
+    from tcip_mcp.experiments import experiment_dir
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path
     from tcip_mcp.project_paths import viz_output_path
@@ -181,7 +182,7 @@ def test_inspect_project_counts_neither_models_nor_renders(
     _initialized(tmp_path)
     checkpoint = produced_checkpoint(
         checkpoint_path(
-            tmp_path / ".tcip" / "experiments" / "run-a", "model_best"
+            experiment_dir("run-a", project=tmp_path), "model_best"
         ),
         "registered-weights",
     )
