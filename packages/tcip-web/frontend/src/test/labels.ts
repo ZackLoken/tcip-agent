@@ -39,7 +39,7 @@ export const LABEL_ANSWERS = produced as unknown as {
   registry_bare: Awaited<ReturnType<typeof subjectsApi.load>>;
   registry_saved: RegistrySave;
   registry_stale: Refusal<string>;
-  registry_audit_gap: Refusal<AuditGapRefusal & { committed: RegistrySave }>;
+  registry_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: RegistrySave }>;
   registry_loaded: Awaited<ReturnType<typeof subjectsApi.load>>;
 };
 

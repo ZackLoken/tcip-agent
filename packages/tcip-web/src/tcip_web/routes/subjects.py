@@ -152,7 +152,9 @@ def save_subjects(payload: SaveSubjectsPayload) -> RegistrySave:
         raise HTTPException(400, str(exc)) from exc
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(
-            exc, RegistrySave.model_validate(exc.arguments)
+            exc,
+            committed=True,
+            what=RegistrySave.model_validate(exc.arguments),
         ) from exc
     except OSError as exc:
         raise HTTPException(

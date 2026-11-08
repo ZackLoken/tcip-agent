@@ -125,13 +125,13 @@ export const REGISTERED_MODELS = produced.registered_models as unknown as Regist
 export const RESULTS_ANSWERS = produced.answers as unknown as {
   no_mapping_names: MappingNames;
   admitted_operating_point: OperatingPoint;
-  count_export_audit_gap: Refusal<AuditGapRefusal & { committed: SavedExport }>;
+  count_export_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: SavedExport }>;
   unreadable_deliveries: Refusal<RefusedRead>;
   unknown_mapping: Refusal<string>;
-  export_audit_gap: Refusal<AuditGapRefusal & { committed: SavedExport }>;
+  export_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: SavedExport }>;
   delivery_refusal: Refusal<DeliveryRefusal>;
   phenology: PhenologyAnswer;
-  mapping_audit_gap: Refusal<AuditGapRefusal & { committed: null }>;
+  mapping_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: null }>;
   mapping_cited: Refusal<string>;
   operationalization_refusal: Refusal<OperationalizationRefusal>;
   count_delivery_refusal: Refusal<DeliveryRefusal>;

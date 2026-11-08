@@ -21,7 +21,8 @@ holds, and the count frames its socket sends until the request is pasted are kep
 Then, with no override and every row's executable running the fake
 (``tests._terminal_fixtures.fake_executable``), a second project is opened, the first row is
 launched (``row_launch``), its hook's report of :data:`CONVERSATION`, naming no transcript, is
-posted through ``POST .../session-start`` once its agent wrote its banner, the backend's sessions
+posted through ``POST .../session-start`` once its agent wrote its banner, a second report of it
+posted while every audit append fails (``start_audit_gap``), the backend's sessions
 are ended by its shutdown (``shutdown_all``), and the row launched again (``resumed_launch``).
 Last, the status of those rows but the third, which names ``tests._terminal_fixtures.ABSENT``
 (``status_mixed``), and of rows all naming it (``status_absent``), are listed. The answers, each
@@ -233,6 +234,19 @@ def produce() -> dict[str, JsonValue]:
             ),
             path=first_row,
         )
+        with pytest.MonkeyPatch.context() as refusing:
+            refuse_audit_appends(refusing)
+            served["start_audit_gap"] = answered(
+                client,
+                "session_start",
+                409,
+                SessionStartReport(
+                    conversation=CONVERSATION,
+                    source="compact",
+                    transcript_path=None,
+                ),
+                path=first_row,
+            )
         terminal_routes.shutdown_all()
         served["resumed_launch"], second_row = create()
         acted("end_session", second_row, 200)
