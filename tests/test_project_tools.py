@@ -243,27 +243,21 @@ def test_inspect_project_folds_in_last_retrospective_by_id_not_path(
 def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(
     tmp_path: Path,
 ) -> None:
-    import sqlite3
-
+    """A log holding an entry that will not decode answers the log reader's refusal as text."""
+    from tcip_mcp.audit import audit_entries, audit_log_key
     from tcip_mcp.tools.meta_tools import report_friction
-    from tcip_store.file_backend import database_file
+    from tests._record_damage_fixtures import damage_last_log_entry
 
     _initialized(tmp_path)
     report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
-    conn = sqlite3.connect(
-        str(database_file(str(tmp_path))), isolation_level=None
-    )
-    try:
-        conn.execute(
-            "update log_entries set entry = ? where id = "
-            "(select max(id) from log_entries)",
-            (b"{not valid json",),
-        )
-    finally:
-        conn.close()
+    damage_last_log_entry(audit_log_key(tmp_path))
 
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
+        audit_entries(tmp_path)
     status = inspect_project(tmp_path)
-    assert "undecodable" in status["recent_activity"]["status_unavailable"]
+    assert status["recent_activity"]["status_unavailable"] == str(
+        refused.value
+    )
     # The record reads unaffected by a damaged log: different store, different rail.
     assert status["reading"]["kind"] == "read"
 

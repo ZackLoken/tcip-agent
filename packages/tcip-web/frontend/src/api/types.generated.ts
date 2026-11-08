@@ -218,12 +218,12 @@ export const CROSS_TILE_MERGE_DESCRIPTIONS: Record<string, string> = {
 };
 
 export interface DatasetTree {
-  dataset_root: string;
   captures: Capture[];
   subjects: string[];
   subjects_by_date: Record<string, string[]>;
   buckets_by_date: Record<string, string[]>;
   label_problem: string | null;
+  dataset_root: string;
 }
 
 export interface SelectAnswer {
@@ -1656,11 +1656,12 @@ export interface ReadEntry_Retrospective_ {
 }
 
 export interface ReadProject {
+  root: string;
   modified: number;
-  tree: DatasetTree;
-  image_count: number;
   kind: "read";
   record: ProjectRecord;
+  tree: TreeContents;
+  image_count: number;
 }
 
 export type ReadRefusal = Invalid | Unreadable;
@@ -2197,6 +2198,14 @@ export interface TraitRevisionRef {
   trait_revision_sha256: string;
 }
 
+export interface TreeContents {
+  captures: Capture[];
+  subjects: string[];
+  subjects_by_date: Record<string, string[]>;
+  buckets_by_date: Record<string, string[]>;
+  label_problem: string | null;
+}
+
 export interface TrialRun {
   experiment_id: string;
   state: string;
@@ -2240,9 +2249,8 @@ export interface UnreadEntry {
 }
 
 export interface UnreadProject {
+  root: string;
   modified: number;
-  tree: DatasetTree;
-  image_count: number;
   kind: "unread";
   problem: RefusedRead;
 }

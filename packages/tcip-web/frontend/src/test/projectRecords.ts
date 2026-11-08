@@ -21,7 +21,8 @@ type Listing = Awaited<ReturnType<typeof api.projects.list>>;
  * `project_not_open` refusal of a push naming the first; then, in the picker's workspace, its `empty_listing` before any project, its `picker`
  * listing and `picker_open` once `Valley farm` is open, the `removed` answer of a removal, the
  * `renamed` answer of `Valley farm`'s rename, and the `opened` answers of `Valley farm`, `Ridge
- * farm` and `Empty block`, in that order.
+ * farm` and `Empty block`, in that order; then, with `Valley farm` open again and its record
+ * damaged, the `picker_damaged` listing.
  */
 export const PROJECT_FIXTURES = fixtures as unknown as {
   listing: Listing;
@@ -33,6 +34,7 @@ export const PROJECT_FIXTURES = fixtures as unknown as {
   picker: Listing;
   opened: OpenAnswer[];
   picker_open: Listing;
+  picker_damaged: Listing;
   removed: ProjectRemoval;
   renamed: RecordCorrection;
 };

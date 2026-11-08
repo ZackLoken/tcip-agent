@@ -3,7 +3,8 @@
 :func:`validated` validates a raw value against its model and, when the model refuses it, raises
 :class:`ReadRefusedError` carrying every error the model raised, each by its place and message
 (:class:`Invalid`), at where the value lives (:class:`RefusedRead`). :func:`unreadable` raises
-the same error carrying :class:`Unreadable`, the sentence of any other error that stops a read.
+the same error carrying :class:`Unreadable`, the sentence of any other error that stops a read,
+and :func:`refuse_corrupt_entries` raises it for a log page holding entries that will not decode.
 :func:`read_raw` reads a record under the one set of errors that stops a store read, and
 :func:`read_record` validates what it read. A check that refuses a value states each objection as
 an issue of an :class:`Invalid`, its place empty when it names none. Each reads as text where a
@@ -25,7 +26,7 @@ from tcip_store.errors import (
     StoreBusyError,
     StoreError,
 )
-from tcip_store.model import REQUIRED, Key, ReadDefault
+from tcip_store.model import REQUIRED, Key, LogPage, ReadDefault
 
 
 class Issue(BaseModel):
@@ -179,6 +180,19 @@ def unreadable(where: str, *errors: type[Exception]) -> Iterator[None]:
         raise
     except errors as exc:
         raise ReadRefusedError(Unreadable(message=str(exc)), where) from exc
+
+
+def refuse_corrupt_entries(page: LogPage, where: str) -> None:
+    """Raise :class:`ReadRefusedError` when ``page`` holds entries that will not decode.
+
+    The error carries :class:`Unreadable` naming their positions in the page, behind ``where``,
+    the log the page was read from. A page whose every entry decoded passes.
+    """
+    if page.corrupt:
+        raise ReadRefusedError(
+            Unreadable(message=f"entries at {page.corrupt} will not decode"),
+            where,
+        )
 
 
 STORE_READ_REFUSALS: tuple[type[StoreError], ...] = (

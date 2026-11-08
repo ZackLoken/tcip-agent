@@ -31,7 +31,7 @@ from tcip_mcp.project_record import (
     replace_invariances,
 )
 from tcip_web.routes.audit_gap import audit_gap_409
-from tcip_web.routes.dataset import DatasetTree, tree_of
+from tcip_web.routes.dataset import TreeContents, contents_of
 from tcip_web.state import OpenProject, SnapshotProject, store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -44,22 +44,26 @@ project's store while its folder is being moved."""
 class ProjectFacts(BaseModel):
     """What a workspace project's directory holds, whether or not its record reads.
 
-    ``tree`` is the project root's :class:`~tcip_web.routes.dataset.DatasetTree`, its
-    ``dataset_root`` the project's directory, so the pickers never offer a date with nothing
-    there.
+    ``root`` is the project's directory and ``modified`` its modification time.
     """
 
+    root: str
     modified: float
-    tree: DatasetTree
-    image_count: int
 
 
 class ReadProject(ReadRecord, ProjectFacts):
-    """A workspace project whose record read: the record and its directory's facts."""
+    """A workspace project whose record read: the record and its directory's contents.
+
+    ``tree`` is the project root's contents, so the pickers never offer a date with nothing
+    there; ``image_count`` is its logical images.
+    """
+
+    tree: TreeContents
+    image_count: int
 
 
 class UnreadProject(UnreadRecord, ProjectFacts):
-    """A workspace project whose record will not read: why, and its directory's facts."""
+    """A workspace project whose record will not read: why, and its directory."""
 
 
 type ProjectSummary = Annotated[
@@ -73,16 +77,24 @@ _SUMMARY: TypeAdapter[ProjectSummary] = TypeAdapter(ProjectSummary)
 def _summarize(listed: workspace.ListedProject) -> ProjectSummary:
     """Summarize the workspace project ``listed``: its reading beside its directory's facts.
 
-    The directory itself is served once, as the facts' ``tree.dataset_root``.
+    A project whose record read also carries its directory's contents and image count; one
+    whose record will not read is not otherwise read, so a store another holder keeps does not
+    wait the listing again.
     """
     from tcip_mcp.pipelines.image_utils import logical_image_counts
 
     root = listed.root
+    facts = {
+        **dict(listed),
+        "root": str(root),
+        "modified": root.stat().st_mtime,
+    }
+    if listed.kind == "unread":
+        return _SUMMARY.validate_python(facts)
     return _SUMMARY.validate_python(
         {
-            **{field: value for field, value in listed if field != "root"},
-            "modified": root.stat().st_mtime,
-            "tree": tree_of(root),
+            **facts,
+            "tree": contents_of(root),
             "image_count": sum(logical_image_counts(root).values()),
         }
     )

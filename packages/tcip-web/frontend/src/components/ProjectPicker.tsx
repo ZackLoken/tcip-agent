@@ -317,21 +317,17 @@ export function ProjectPicker() {
         {projects && projects.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {projects.map((p, index) => {
-              const { tree } = p;
               if (p.kind === UNREAD) {
                 return (
-                  <div
-                    key={tree.dataset_root}
-                    className="tcip-panel p-4 flex flex-col gap-1 text-[13px]"
-                  >
-                    <span className="font-mono text-tcip-fg truncate" title={tree.dataset_root}>
-                      {tree.dataset_root}
+                  <div key={p.root} className="tcip-panel p-4 flex flex-col gap-1 text-[13px]">
+                    <span className="font-mono text-tcip-fg truncate" title={p.root}>
+                      {p.root}
                     </span>
                     <span className="tcip-problem">{readRefusalText(p.problem)}</span>
                   </div>
                 );
               }
-              const { record } = p;
+              const { record, tree } = p;
               const isSelected = record.id === selected;
               return (
                 <div
