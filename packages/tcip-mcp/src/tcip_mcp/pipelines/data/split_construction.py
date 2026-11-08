@@ -1156,6 +1156,7 @@ def run_loader(
                 (data.dataset_source, layout),
                 task=task,
                 scope=data.recorded_scope,
+                num_channels=stated_sizes(data)["num_channels"],
             )
         )
     if spatial is None:

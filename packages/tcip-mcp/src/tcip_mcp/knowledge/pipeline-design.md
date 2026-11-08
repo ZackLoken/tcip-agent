@@ -118,18 +118,19 @@ Tailor the architecture to the data in hand, derived rather than pinned:
 Three seams support bespoke work; the platform guarantees integrity around it:
 
 - `pipelines.data.datasets.build_from_dataset_source((dataset_source, layout), task=,
-  samples=, scope=, transforms=)` builds from a `dataset_source`: an *importable* builder you
-  wrote (`{"builder": "my_module:build_ds", "builder_kwargs": {...}, "source_files": [...]}`,
-  mirroring `model_source`), imported from the run's layout. A run naming one in its
-  `data.dataset_source` builds its loaders, and `ctx.build_dataset`'s, through it;
-  `build_dataset` builds the platform's own loaders only. It receives the samples the
+  samples=, scope=, transforms=, num_channels=)` builds from a `dataset_source`: an
+  *importable* builder you wrote (`{"builder": "my_module:build_ds", "builder_kwargs": {...},
+  "source_files": [...]}`, mirroring `model_source`), imported from the run's layout. A run
+  naming one in its `data.dataset_source` builds its loaders, and `ctx.build_dataset`'s,
+  through it; `build_dataset` builds the platform's own loaders only. It receives the samples the
   platform's own producer named for the side being built and the class space they were
   admitted under (`samples` / `scope` / `transforms` / `task`), each sample carrying the logical
   image its pixels are read from as `image` (a `BandGroupRef` for a grouped capture), sizing the
   dataset it builds itself, plus your own `builder_kwargs`, and must return a
   `pipelines.data.datasets.BaseDataset`: a built-in loader, or your own subclass stating
-  `num_samples` and `__getitem__`, its interface `num_samples`, `expected_channels` and
-  `sample_classes`; anything else refuses naming your builder.
+  `num_samples` and `__getitem__`, its interface `num_samples` and `sample_classes`; the
+  platform sets its `expected_channels` from the run's band count, so a builder never states
+  one; anything else refuses naming your builder.
   Never a directory, a document path or a format flag: the platform names the samples and your
   builder builds over them, so a strip split over your own samples composes the tiled wrapper
   inside `train(ctx)` at the lattice it states (`ctx.tiled_dataset(base, tile_size=,
