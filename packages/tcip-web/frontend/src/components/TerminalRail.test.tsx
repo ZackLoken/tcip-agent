@@ -99,6 +99,7 @@ import {
 import { TerminalRail } from "@/components/TerminalRail";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
+import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { thrown } from "@/test/refusals";
 import { TERMINAL_ANSWERS } from "@/test/terminal";
 
@@ -693,14 +694,34 @@ describe("TerminalRail", () => {
     it("an end whose line failed still stages what it answered and shows the gap", async () => {
       const gap = TERMINAL_ANSWERS.end_audit_gap;
       vi.mocked(terminalApi.end).mockRejectedValue(await thrown(gap));
-      const { message, committed } = gap.body.detail;
+      const { message, what } = gap.body.detail;
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
       expect(await screen.findByText((content) => content.includes(message))).toBeInTheDocument();
       expect(screen.getByText("Start")).toBeInTheDocument();
-      expect(useStore.getState().pendingTerminalMessages).toEqual(committed.undelivered);
+      expect(useStore.getState().pendingTerminalMessages).toEqual(what.undelivered);
     });
+
+    it.each([
+      ["says nothing committed", TERMINAL_ANSWERS.start_audit_gap],
+      ["says a change committed and carries no end", RESULTS_ANSWERS.mapping_audit_gap],
+    ])(
+      "an audit-gap refusal that %s stages nothing and reattaches to the session",
+      async (_name, gap) => {
+        vi.mocked(terminalApi.end).mockRejectedValue(await thrown(gap));
+        render(<TerminalRail />);
+        await openSocket();
+        exitAgent();
+        expect(
+          await screen.findByText((content) => content.includes(gap.body.detail.message)),
+        ).toBeInTheDocument();
+        await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+        expect(MockWebSocket.instances[1].url).toContain(`/api/terminal/ws/${FIRST_ID}`);
+        expect(screen.queryByText("Start")).not.toBeInTheDocument();
+        expect(useStore.getState().pendingTerminalMessages).toEqual([]);
+      },
+    );
 
     it("an end the backend could not carry out reattaches to the session it left running", async () => {
       const survived = TERMINAL_ANSWERS.end_survived;

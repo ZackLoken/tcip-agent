@@ -22,7 +22,7 @@ export const SESSION_ANSWERS = produced as unknown as {
   landed: SessionWrite;
   repeated: SessionWrite;
   empty: SessionWrite;
-  audit_gap: Refusal<AuditGapRefusal & { committed: SessionWrite }>;
+  audit_gap: Refusal<AuditGapRefusal & { committed: true; what: SessionWrite }>;
   ended_named: Refusal<string>;
   another_named: Refusal<string>;
   listing: SessionsListing;
@@ -35,7 +35,7 @@ export const SESSION_ANSWERS = produced as unknown as {
 export const SESSION_WRITES = {
   first: SESSION_ANSWERS.landed,
   firstEnded: SESSION_ANSWERS.repeated,
-  held: SESSION_ANSWERS.audit_gap.body.detail.committed,
+  held: SESSION_ANSWERS.audit_gap.body.detail.what,
 };
 
 /** The produced answer `write` narrowed to one naming a session; an answer that landed in none

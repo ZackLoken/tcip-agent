@@ -38,9 +38,9 @@ export async function saveRegistry(next: RegistrySubjects, failure: string): Pro
     return true;
   } catch (e) {
     const message = messageOf(e);
-    const saved = committedOf<RegistrySave>(e);
-    if (saved) {
-      setRegistry(next, { kind: STORED, version: saved.version }, registry.discovered);
+    const gap = committedOf<RegistrySave>(e);
+    if (gap?.committed && gap.what !== null) {
+      setRegistry(next, { kind: STORED, version: gap.what.version }, registry.discovered);
       pushToast(message);
       return true;
     }
