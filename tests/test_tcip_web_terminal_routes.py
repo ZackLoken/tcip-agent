@@ -2777,13 +2777,18 @@ def test_create_session_answers_503_and_terminates_the_process_when_the_start_li
 ) -> None:
     """A spawn whose launch line fails to append answers 503 and terminates the process.
 
-    The refusal says the line could not be written, no start line is recorded, and no session
-    is live.
+    The refusal says the start line was not written, names the store's refusal and says no
+    record of the project was changed, not that a change committed; no start line is recorded,
+    and no session is live.
     """
     refuse_audit_appends(monkeypatch)
     resp = client.post("/api/terminal/sessions", json=LAUNCH)
     assert resp.status_code == 503
-    assert "could not be written" in resp.json()["detail"]
+    why = resp.json()["detail"]
+    assert "agent_terminal_started audit line was not written" in why
+    assert "the audit log could not be appended to" in why
+    assert "No record of the project was changed" in why
+    assert "committed and unrecorded" not in why
     assert audit_rows(opened_project, "agent_terminal_started") == []
     assert all(not s.alive() for s in terminal_routes._SESSIONS.values())
 
@@ -3434,6 +3439,50 @@ def test_a_report_whose_line_fails_answers_the_audit_gap_and_holds_nothing(
     recorded = terminal_routes.recorded_session(LAUNCH["provider"], opened)
     assert recorded is not None and recorded.report is not None
     assert recorded.report.conversation == "conv-1"
+
+
+def test_a_report_whose_store_refuses_says_the_line_was_not_written_and_no_record_changed(
+    client: TestClient,
+    opened: OpenProject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 409 for a report line the store refused names the store's refusal and no commit.
+
+    The project's store is overwritten after the launch and one report, so the second report's
+    line cannot be written; the route's only write is that line, so nothing else changed.
+    """
+    import tcip_store
+    from tcip_store.file_backend import database_file
+
+    wire_stub_spawn(monkeypatch, StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    _report(client, sid, "conv-1")
+    tcip_store.release_root(opened.root)
+    database = database_file(str(opened.root))
+    intact = database.read_bytes()
+    database.write_bytes(b"not a database" * 100)
+
+    try:
+        resp = client.post(
+            f"/api/terminal/sessions/{sid}/session-start",
+            json=_start_report("conv-2", "compact"),
+        )
+    finally:
+        tcip_store.release_root(opened.root)
+        database.write_bytes(intact)
+
+    assert resp.status_code == 409, resp.text
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+    assert refusal.committed is None
+    assert (
+        "agent_terminal_reported audit line was not written" in refusal.message
+    )
+    assert "could not complete this store's identity check" in refusal.message
+    assert "No record of the project was changed" in refusal.message
+    assert "committed and unrecorded" not in refusal.message
+    assert _end(client, sid).status_code == 200
 
 
 def _held_until(ws: WebSocketTestSession, count: int) -> list[int]:
