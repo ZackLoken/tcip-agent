@@ -101,9 +101,13 @@ def test_register_dataset_refuses_an_empty_crop_by_type_and_admits_a_named_one(
 
     for crop in ("", "   "):
         refused = called_through_the_server(
-            "register_dataset", {"dataset_root": str(src), "crop": crop}
+            "register_dataset",
+            {"dataset_root": str(src), "crop": crop},
+            bound=bound,
         )
-        assert "crop" in refused, crop
+        assert isinstance(refused, dict), refused
+        assert "crop" in str(refused["error"]), crop
+        assert not (src / "dataset.json").exists()
 
     registered = called_through_the_server(
         "register_dataset",

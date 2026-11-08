@@ -165,6 +165,15 @@ def registered_crops() -> set[str]:
     return {c for t in _crops_traits() for c in t.get("crops", [])}
 
 
+def require_registered_crop(crop: str) -> None:
+    """Refuse (``ValueError``) a ``crop`` :func:`registered_crops` does not hold, naming both."""
+    if crop not in (crops := registered_crops()):
+        raise ValueError(
+            f"crop {crop!r} is named by no trait in crops.yml, which names "
+            f"{sorted(crops)}"
+        )
+
+
 def crops_units() -> dict[str, str]:
     """Return crops.yml's declared physical unit by trait name, for every trait declaring one.
 

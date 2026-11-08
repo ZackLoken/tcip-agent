@@ -47,6 +47,7 @@ from pydantic import (
 from pyproj import Geod
 
 import tcip_store
+from tcip_annotation.text import Crop
 from tcip_mcp.audit import now
 from tcip_mcp.project_paths import project_state_dir
 from tcip_store import Key, encode_record
@@ -919,7 +920,7 @@ class NoGeoreferencedPlantsError(Exception):
 
 
 class PlantRegistryNameConflictError(Exception):
-    """A registration's name is already taken by a different set of plants."""
+    """A registration's name is already taken by a different set of plants or another crop."""
 
 
 PLANT_REGISTRY_STORE = "plant_registries"
@@ -985,7 +986,7 @@ class PlantRegistry(TypedDict):
     """
 
     name: str
-    crop: str
+    crop: Crop
     site: str
     csvs: list[RegistryCsv]
     n_plants: int
@@ -1196,27 +1197,18 @@ def register_plant_registry_record(
     Parses every path through :func:`parse_plant_registry_csvs`
     (:class:`NoGeoreferencedPlantsError` names the file that parsed no georeferenced, named
     plant); the record (:class:`PlantRegistry`) holds those entries plus ``crop``, ``site``,
-    ``registered_at`` and the parsed content's digest. The read-then-write is one transaction
-    (:func:`tcip_store.transaction`, this store's own ``concurrency="cas"``): a second
-    registration under a taken name returns the existing record unchanged when the digest
-    matches, and raises :class:`PlantRegistryNameConflictError` otherwise, naming the two digests.
+    ``registered_at`` and the parsed content's digest, validated before it is written
+    (``pydantic.ValidationError``); a crop crops.yml names for no trait raises ``ValueError``. The
+    read-then-write is one transaction (:func:`tcip_store.transaction`, this store's own
+    ``concurrency="cas"``): a second registration under a taken name returns the existing record
+    unchanged when the crop and the digest match, and otherwise raises
+    :class:`PlantRegistryNameConflictError` naming the two crops, or else the two digests.
     """
+    from tcip_mcp.traits import require_registered_crop
+
     csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths, project)
-    key = plant_registry_key(project, name)
-    with tcip_store.transaction(key) as txn:
-        stored = txn.read(key, default=None)
-        if stored is not None:
-            existing = tcip_store.validated(
-                _PLANT_REGISTRY, stored, _plant_registry_place(project, name)
-            )
-            if existing["digest"] == digest:
-                return existing
-            raise PlantRegistryNameConflictError(
-                f"{_plant_registry_place(project, name)} already names different plants "
-                f"(digest {existing['digest']!r}, this registration would write "
-                f"{digest!r}); register under a new name"
-            )
-        record = PlantRegistry(
+    record = _PLANT_REGISTRY.validate_python(
+        PlantRegistry(
             name=name,
             crop=crop,
             site=site,
@@ -1225,6 +1217,28 @@ def register_plant_registry_record(
             digest=digest,
             registered_at=now(),
         )
+    )
+    require_registered_crop(record["crop"])
+    key = plant_registry_key(project, name)
+    with tcip_store.transaction(key) as txn:
+        stored = txn.read(key, default=None)
+        if stored is not None:
+            existing = tcip_store.validated(
+                _PLANT_REGISTRY, stored, _plant_registry_place(project, name)
+            )
+            if existing["crop"] != record["crop"]:
+                raise PlantRegistryNameConflictError(
+                    f"{_plant_registry_place(project, name)} is of crop "
+                    f"{existing['crop']!r}, this registration names crop "
+                    f"{record['crop']!r}; register under a new name"
+                )
+            if existing["digest"] == digest:
+                return existing
+            raise PlantRegistryNameConflictError(
+                f"{_plant_registry_place(project, name)} already names different plants "
+                f"(digest {existing['digest']!r}, this registration would write "
+                f"{digest!r}); register under a new name"
+            )
         txn.write(key, _PLANT_REGISTRY.dump_python(record, mode="json"))
     return record
 

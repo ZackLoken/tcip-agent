@@ -17,7 +17,6 @@ from pydantic import (
 )
 
 import tcip_store
-from tcip_annotation.text import Text
 from tcip_mcp.audit import audited
 from tcip_mcp.dataset_layout import DatasetRecord
 from tcip_mcp.project_record import CaptureInvariances
@@ -152,7 +151,7 @@ def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
 @tool()
 @audited(scope_arg="dataset_root")
 def register_dataset(
-    project: Path, dataset_root: str, crop: Text, *, actor: str | None
+    project: Path, dataset_root: str, crop: str, *, actor: str | None
 ) -> dict:
     """Record a dataset's identity with the dataset, and its id and path in the project's registry.
 
@@ -167,13 +166,14 @@ def register_dataset(
 
     A document present but refused by its model is rewritten, with the id of the registry entry
     whose path is ``dataset_root``, the answer's ``repaired`` stating what was refused; at a root
-    the registry does not hold it refuses, minting no id.
+    the registry does not hold it refuses, minting no id. A crop that is empty or that
+    ``crops.yml`` names for no trait refuses, writing nothing.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
             its label documents are records in).
         crop: The crop this dataset's imagery is of, as ``crops.yml`` names it: the expert's
-            fact, required non-empty text and never inferred from a path or slug.
+            fact, never inferred from a path or slug.
 
     """
     from tcip_mcp.dataset_layout import (
@@ -183,6 +183,7 @@ def register_dataset(
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.project_record import mint_id
     from tcip_mcp.registry_paths import stored_path
+    from tcip_mcp.traits import require_registered_crop
 
     root = Path(dataset_root)
     if not root.is_dir():
@@ -215,9 +216,13 @@ def register_dataset(
             id=mint_id() if existing_id is None else existing_id,
             path=stored_path(root, project),
         )
-        identity = DatasetRecord(
-            crop=crop, id=entry.id, fingerprint=fingerprint
-        )
+        try:
+            identity = DatasetRecord(
+                crop=crop, id=entry.id, fingerprint=fingerprint
+            )
+            require_registered_crop(identity.crop)
+        except ValueError as exc:
+            return {"error": str(exc)}
         try:
             tcip_store.put_blob(
                 ident_path,

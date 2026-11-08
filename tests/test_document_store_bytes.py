@@ -43,7 +43,7 @@ REGISTRY_BYTES = (
 
 IDENTITY_BYTES = (
     b"{\n"
-    b'  "crop": "crop_under_test",\n'
+    b'  "crop": "currant",\n'
     b'  "id": "a1b2c3d4e5f6",\n'
     b'  "fingerprint": "9f2c1b0a4d6e8f31"\n'
     b"}\n"
@@ -152,7 +152,7 @@ def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_rea
     dataset.mkdir()
 
     assert "error" not in register_dataset(
-        tmp_path, str(dataset), crop="crop_under_test", actor=None
+        tmp_path, str(dataset), crop="currant", actor=None
     )
 
     assert dataset_identity_path(dataset).read_bytes() == IDENTITY_BYTES
