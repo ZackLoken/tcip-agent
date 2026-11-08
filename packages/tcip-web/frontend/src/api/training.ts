@@ -3,6 +3,7 @@
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type {
+  CancelAnswer,
   CompareBestPayload,
   Comparison,
   ExperimentComparePayload,
@@ -38,7 +39,7 @@ export const trainingApi = {
     ),
 
   cancel: (experiment_id: string, body: PersonPayload) =>
-    postJson<TrainingDetail>(ROUTES.postTrainingRunsByExperimentIdCancel(experiment_id), body),
+    postJson<CancelAnswer>(ROUTES.postTrainingRunsByExperimentIdCancel(experiment_id), body),
 
   compare: (body: ExperimentComparePayload) =>
     postJson<Comparison>(ROUTES.postTrainingCompare, body),
