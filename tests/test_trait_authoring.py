@@ -315,7 +315,7 @@ def test_bud_opening_reads_back_as_the_reference_fixture(
         attribute="opening", value="open"
     )
     assert t.localization_tolerance_frac == 0.5
-    assert t.majority_milestone == "95per"
+    assert t.majority_fraction == 0.95
     assert (
         t.count_bias_tolerance_frac is None
     )  # not yet authored by the domain expert

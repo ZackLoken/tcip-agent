@@ -19,7 +19,7 @@ BUD = entry(
     milestone_fractions=[0.05, 0.5, 0.95],
     milestone_on="positive_fraction",
     crossing_rule=CROSSING_RULE,
-    majority_milestone="95per",
+    majority_fraction=0.95,
     phenology_prefix="bud",
     majority_label="opening",
 )
@@ -31,7 +31,7 @@ PISTILLATE = entry(
     milestone_fractions=[0.5],
     milestone_on="positive_fraction",
     crossing_rule=CROSSING_RULE,
-    majority_milestone="50per",
+    majority_fraction=0.5,
     phenology_prefix="pistillate",
     majority_label="flowering",
 )

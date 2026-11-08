@@ -33,9 +33,10 @@ flower elongation/receptivity call.
 
 > Which crossing the majority date means. `crops.yml`, served whole by
 > `serve_domain_knowledge(name='crops')`, is the immutable authority ("Date when most catkins
-> have elongated"). The crossing `catkin_elongation_date` is computed at is the
-> trait entry's `majority_milestone`, and a disagreement over which crossing the majority date
-> means is corrected in the entry itself, not in this file; how an entry is revised, confirmed and
+> have elongated") and names no fraction for it. The crossing `catkin_elongation_date` is
+> computed at is the trait entry's `majority_fraction`, one of its own milestone fractions and
+> the breeder's to state, and a disagreement over which crossing the majority date means is
+> corrected in the entry itself, not in this file; how an entry is revised, confirmed and
 > bound to a delivery is the `delivery` skill's meaning door. `positive_onset_date` (first date any elongation appears)
 > remains a separate helper, not the delivered trait.
 
@@ -127,7 +128,7 @@ interpretable signals. It records no 0–1 "confidence" value.
 
 1. `positive_class_assessed` is true (predictions carry the elongation call).
 2. Every expected plant has a row; genotype/`accession` is carried through.
-3. Milestones are chronologically sane (`05per` ≤ `50per` ≤ `95per`; `elongation_date`, the
-   majority crossing, equals `95per`).
+3. Milestones are chronologically sane (`05per` ≤ `50per` ≤ `95per`), and `elongation_date`,
+   the majority crossing, equals the milestone column at the entry's `majority_fraction`.
 4. Plants that never reach a level have `null` for that milestone.
 5. The `undated/` image bucket is excluded from the time series (it has no capture date).
