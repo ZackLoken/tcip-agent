@@ -4,8 +4,10 @@ In a scratch session (``tools/fixture_session.py``), in projects each created th
 ``tests._web_fixtures.named_project``, deliveries are made through the platform's own producers
 and the test suite's own scenes for them: a per-image count delivery
 over a bucket its assessment validates, a phenology delivery through a plant mapping shipped
-under a breeder's acknowledgment, and the orthomosaic door's nearest-plant and canopy-segment
-deliveries. Each project is opened through ``POST /api/projects/open`` and its one record served
+under a breeder's acknowledgment, the orthomosaic door's nearest-plant and canopy-segment
+deliveries, and two per-plant area deliveries shipped under an acknowledgment, one over a
+physical-scale assessment that answers and one over a scale assessment that did not pass. Each
+project is opened through ``POST /api/projects/open`` and its one record served
 by ``GET /api/results/delivery-events``; the phenology project's listing is served again after a
 superseding rebuild archives the mapping it cites. The count project's checkpoint is assessed
 again at :data:`UNMET_CONF`, which fails, a second checkpoint is registered beside it, and its
@@ -117,6 +119,7 @@ HELD_RUNS = {
     FAILED_RUN: "<failed run>",
     "exp-acknowledged": "<acknowledged run>",
     "exp-attributed": "<attributed run>",
+    "exp-scale-event": "<scale run>",
 }
 """The experiment ids the scenes state, the count chain's and the chain helpers' own
 (``tests._chain_fixtures``), each read under the scene's name for it."""
@@ -203,6 +206,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     )
     from tests import (
         _trait_fixtures as fx,
+        test_delivery_scale_on_event as scaled,
         test_orthomosaic_tools as ortho,
         test_plant_mapping_binding as binding,
     )
@@ -686,6 +690,28 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         )
     )
     out["canopy"] = served(project, "canopy")
+
+    root = workspace / "scale_answered"
+    project = named_project(root, "ScaleAnswered")
+    scale, bucket = scaled._answered_scene(root)
+    minted[scale] = "<answering scale assessment>"
+    scale_refusal = scaled._refused(root, bucket, scale=scale, plants=["p1"])
+    scaled._deliver(
+        root,
+        bucket,
+        scale=scale,
+        acknowledgment=scaled._acknowledged(root, scale_refusal),
+        plants=["p1"],
+    )
+    out["scale_answered"] = served(project, "scale_answered")
+
+    root = workspace / "scale_unanswered"
+    project = named_project(root, "ScaleUnanswered")
+    bucket = scaled._validated_bucket(root)
+    scale = scaled._scale(root, extents_mm=scaled.UNPASSING_EXTENTS)
+    minted[scale] = "<unanswered scale assessment>"
+    scaled._delivered_acknowledged(root, bucket, scale=scale)
+    out["scale_unanswered"] = served(project, "scale_unanswered")
 
     root = workspace / "failed"
     project = named_project(root, "Failed")

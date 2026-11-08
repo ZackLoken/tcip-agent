@@ -31,12 +31,15 @@ from tcip_mcp.audit import append_or_raise, audit_line
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.delivery_events_schema import (
     Acknowledgment,
+    AnsweredScale,
     BucketFinding,
     DeliveryEventRecord,
     PlantMapping,
+    ScaleRead,
     Shipped,
     ShippedAcknowledged,
     ShippedValidated,
+    UnansweredScale,
     UnvalidatedBucket,
     ValidatedBucket,
 )
@@ -162,13 +165,14 @@ DELIVERY_COLUMNS = (
 class Clearance:
     """What the gate found.
 
-    It holds each bucket's own finding, the buckets' producer, the scale assessment, and how the
-    delivery ships: validated, or under an acknowledgment.
+    It holds each bucket's own finding, the buckets' producer, the finding for the physical-scale
+    assessment the delivery named (``None`` when it named none), and how the delivery ships:
+    validated, or under an acknowledgment.
     """
 
     buckets: list[BucketFinding]
     producer: Producer
-    scale_assessment_id: str | None
+    scale: ScaleRead | None
     shipped: Shipped
 
 
@@ -339,6 +343,23 @@ def _validating(
             f"capture ({bucket.dataset_id}, {bucket.date})."
         )
     return _Validates(assessment)
+
+
+def _scale_finding(
+    assessment_id: str | None, scale: Mapping[str, _Read]
+) -> ScaleRead | None:
+    """Return the finding for the physical-scale assessment ``assessment_id`` names.
+
+    ``scale`` holds the read of that assessment, as :func:`_at_scale` finds it. The finding is
+    ``None`` when ``assessment_id`` is ``None``; otherwise it is the assessment answering, or the
+    reason it answers for nothing.
+    """
+    if assessment_id is None:
+        return None
+    read = scale[assessment_id]
+    if read.kind == "unanswered":
+        return UnansweredScale(assessment_id=assessment_id, reason=read.reason)
+    return AnsweredScale(assessment_id=read.assessment.assessment_id)
 
 
 def _bucket_finding(
@@ -556,9 +577,14 @@ def gate(
         ).items()
     }
     producer = next(iter(producers))
+    scale_finding = _scale_finding(scale_assessment_id, scale)
     unvalidated = [
         *(r.reason for r in rows if r.kind == "unvalidated"),
-        *(r.reason for r in scale.values() if r.kind == "unanswered"),
+        *(
+            [scale_finding.reason]
+            if scale_finding is not None and scale_finding.kind == "unanswered"
+            else []
+        ),
     ]
     shipped: Shipped = ShippedValidated()
     if unvalidated:
@@ -586,7 +612,7 @@ def gate(
     return Clearance(
         buckets=rows,
         producer=producer,
-        scale_assessment_id=scale_assessment_id,
+        scale=scale_finding,
         shipped=shipped,
     )
 
@@ -744,13 +770,13 @@ def deliver_csv(
 
     ``result`` is composed as a CSV (each row carrying the :data:`DELIVERY_COLUMNS` cells of this
     delivery) and its one delivery event (the door, the kind, the trait revision it ships under,
-    the delivered file and its sha256, the producer, each bucket's finding, the scale assessment,
-    how it shipped, and the result's population and plant-mapping disclosure), the event
-    validated before anything is written; then the CSV is written at ``output_path``, the event,
-    and its one audit line by ``actor``, ``delivery_event``, in the log of the dataset root the
-    buckets are published under. Returns what the event records was delivered, the event read
-    back from the store with its paths resolved against ``project`` as the event reader serves
-    them.
+    the delivered file and its sha256, the producer, each bucket's finding, the finding for the
+    scale assessment it named, how it shipped, and the result's population and plant-mapping
+    disclosure), the event validated before anything is written; then the CSV is written at
+    ``output_path``, the event, and its one audit line by ``actor``, ``delivery_event``, in the log
+    of the dataset root the buckets are published under. Returns what the event records was
+    delivered, the event read back from the store with its paths resolved against ``project`` as
+    the event reader serves them.
     """
     event_id = uuid.uuid4().hex
     data = result.encoded(
@@ -771,7 +797,7 @@ def deliver_csv(
         output_sha256=hashlib.sha256(data).hexdigest(),
         producer=clearance.producer,
         buckets=clearance.buckets,
-        scale_assessment_id=clearance.scale_assessment_id,
+        scale=clearance.scale,
         shipped=clearance.shipped,
         population=list(result.population),
         plant_mapping=result.plant_mapping,
