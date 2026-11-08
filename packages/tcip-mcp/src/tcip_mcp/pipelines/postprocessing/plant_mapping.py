@@ -1062,6 +1062,29 @@ def registry_entries_or_refusal(
     return registry_csv_entries(record, project), None
 
 
+def _read_registered_bytes(
+    registry_entries: list[RegistryCsv],
+) -> tuple[list[str], list[str], dict[str, bytes]]:
+    """Read each of ``registry_entries``' files once and compare its bytes to the registered hash.
+
+    Returns every missing path, every path whose bytes differ from the entry's ``sha256``, and
+    the bytes read for every present path, keyed by the entry's own ``path``.
+    """
+    missing: list[str] = []
+    rewritten: list[str] = []
+    bytes_by_path: dict[str, bytes] = {}
+    for entry in registry_entries:
+        p = Path(entry["path"])
+        if not p.is_file():
+            missing.append(entry["path"])
+            continue
+        data = p.read_bytes()
+        bytes_by_path[entry["path"]] = data
+        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            rewritten.append(entry["path"])
+    return missing, rewritten, bytes_by_path
+
+
 def verify_registry_csv_bytes(
     registry_entries: list[RegistryCsv],
 ) -> tuple[list[str], str | None, dict[str, bytes]]:
@@ -1072,20 +1095,15 @@ def verify_registry_csv_bytes(
     path's bytes still match what was registered), and the verified bytes this call read for every
     present path, keyed by the entry's own ``path``.
     """
-    missing: list[str] = []
-    rewritten: str | None = None
-    bytes_by_path: dict[str, bytes] = {}
-    for entry in registry_entries:
-        p = Path(entry["path"])
-        if not p.is_file():
-            missing.append(entry["path"])
-            continue
-        data = p.read_bytes()
-        bytes_by_path[entry["path"]] = data
-        digest = hashlib.sha256(data).hexdigest()
-        if digest != entry["sha256"] and rewritten is None:
-            rewritten = f"plant CSV {entry['path']} was rewritten since it was registered"
-    return missing, rewritten, bytes_by_path
+    missing, rewritten, bytes_by_path = _read_registered_bytes(
+        registry_entries
+    )
+    first = (
+        f"plant CSV {rewritten[0]} was rewritten since it was registered"
+        if rewritten
+        else None
+    )
+    return missing, first, bytes_by_path
 
 
 def registered_plants(
@@ -1097,19 +1115,8 @@ def registered_plants(
     bytes hashed against the entry's ``sha256``. Refuses (:class:`RegisteredBytesError`), naming
     every file that is missing and every file whose bytes differ from the registered ones.
     """
-    missing: list[str] = []
-    rewritten: list[str] = []
-    registered: list[bytes] = []
-    for entry in registry_csv_entries(registry, project):
-        path = Path(entry["path"])
-        if not path.is_file():
-            missing.append(entry["path"])
-            continue
-        data = path.read_bytes()
-        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
-            rewritten.append(entry["path"])
-            continue
-        registered.append(data)
+    entries = registry_csv_entries(registry, project)
+    missing, rewritten, bytes_by_path = _read_registered_bytes(entries)
     if missing or rewritten:
         named = [
             f"{what}: {paths}"
@@ -1124,7 +1131,9 @@ def registered_plants(
             "current file under a new name."
         )
     return [
-        plant for data in registered for plant in read_plant_csv_bytes(data)
+        plant
+        for entry in entries
+        for plant in read_plant_csv_bytes(bytes_by_path[entry["path"]])
     ]
 
 
