@@ -335,7 +335,7 @@ def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
         tmp_path,
         name="Bad_Name",
         csv_paths=[payload["csv_path"]],
-        crop="c",
+        crop="currant",
         site="s",
         actor=None,
     )

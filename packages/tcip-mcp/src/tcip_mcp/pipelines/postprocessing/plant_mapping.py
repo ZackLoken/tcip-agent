@@ -1145,11 +1145,14 @@ def register_plant_registry_record(
     (:class:`NoGeoreferencedPlantsError` names the file that parsed no georeferenced, named
     plant); the record (:class:`PlantRegistry`) holds those entries plus ``crop``, ``site``,
     ``registered_at`` and the parsed content's digest, validated before it is written
-    (``pydantic.ValidationError``). The read-then-write is one transaction
-    (:func:`tcip_store.transaction`, this store's own ``concurrency="cas"``): a second
-    registration under a taken name returns the existing record unchanged when the digest
-    matches, and raises :class:`PlantRegistryNameConflictError` otherwise, naming the two digests.
+    (``pydantic.ValidationError``); a crop crops.yml names for no trait raises ``ValueError``. The
+    read-then-write is one transaction (:func:`tcip_store.transaction`, this store's own
+    ``concurrency="cas"``): a second registration under a taken name returns the existing record
+    unchanged when the digest matches, and raises :class:`PlantRegistryNameConflictError`
+    otherwise, naming the two digests.
     """
+    from tcip_mcp.traits import require_registered_crop
+
     csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths, project)
     record = _PLANT_REGISTRY.validate_python(
         PlantRegistry(
@@ -1162,6 +1165,7 @@ def register_plant_registry_record(
             registered_at=now(),
         )
     )
+    require_registered_crop(record["crop"])
     key = plant_registry_key(project, name)
     with tcip_store.transaction(key) as txn:
         stored = txn.read(key, default=None)

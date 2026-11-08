@@ -166,7 +166,8 @@ def register_dataset(
 
     A document present but refused by its model is rewritten, with the id of the registry entry
     whose path is ``dataset_root``, the answer's ``repaired`` stating what was refused; at a root
-    the registry does not hold it refuses, minting no id. An empty crop refuses, writing nothing.
+    the registry does not hold it refuses, minting no id. A crop that is empty or that
+    ``crops.yml`` names for no trait refuses, writing nothing.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
@@ -182,6 +183,7 @@ def register_dataset(
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.project_record import mint_id
     from tcip_mcp.registry_paths import stored_path
+    from tcip_mcp.traits import require_registered_crop
 
     root = Path(dataset_root)
     if not root.is_dir():
@@ -218,6 +220,7 @@ def register_dataset(
             identity = DatasetRecord(
                 crop=crop, id=entry.id, fingerprint=fingerprint
             )
+            require_registered_crop(identity.crop)
         except ValueError as exc:
             return {"error": str(exc)}
         try:
