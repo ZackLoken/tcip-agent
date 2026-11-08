@@ -4,7 +4,7 @@
  * confirmed, which it names, so this panel carries no confirm/withdraw affordance.
  */
 
-import { ACKNOWLEDGED, ANSWERED, type ServedDeliveryEvent } from "@/api/types.generated";
+import { ACKNOWLEDGED, ANSWERS, type ServedDeliveryEvent } from "@/api/types.generated";
 import { deliveredDatesLine, outsideRasterLine } from "@/lib/disclosureLines";
 
 function DeliveryEventRow({
@@ -55,7 +55,7 @@ function DeliveryEventRow({
         ))}
         {record.scale !== null && (
           <div className="font-mono text-[13px] text-tcip-muted" data-testid="scale-finding">
-            {record.scale.kind === ANSWERED
+            {record.scale.kind === ANSWERS
               ? `scale assessment ${record.scale.assessment_id}`
               : `scale assessment ${record.scale.assessment_id} not validated (${record.scale.reason})`}
           </div>

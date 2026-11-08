@@ -412,7 +412,7 @@ def _drop_the_reason(stored: dict) -> None:
 
 
 def _answer_with_a_reason(stored: dict) -> None:
-    stored["scale"]["kind"] = "answered"
+    stored["scale"]["kind"] = "answers"
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { ANSWERED, CANOPY_SEGMENTS, UNANSWERED, UNVALIDATED } from "@/api/types.generated";
+import { ANSWERS, CANOPY_SEGMENTS, UNANSWERED, UNVALIDATED } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { acknowledgmentOf, DELIVERY_RECORDS, disclosureOf } from "@/test/deliveryRecords";
 
@@ -40,7 +40,7 @@ describe("DeliveryEventsPanel bucket findings", () => {
   it("names the scale assessment that answered", () => {
     const served = DELIVERY_RECORDS.scale_answered;
     const { scale } = served.event;
-    if (scale?.kind !== ANSWERED) throw new Error("the produced scale read did not answer");
+    if (scale?.kind !== ANSWERS) throw new Error("the produced scale read did not answer");
     render(<DeliveryEventsPanel records={[served]} loadError={null} />);
     const row = screen.getByTestId(`delivery-${served.event.event_id}`);
 

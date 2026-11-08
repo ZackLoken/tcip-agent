@@ -292,7 +292,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     (event,) = read_delivery_events(tmp_path)
     assert event.scale is not None
     assert event.scale.model_dump() == {
-        "kind": "answered",
+        "kind": "answers",
         "assessment_id": scale["assessment_id"],
     }
 

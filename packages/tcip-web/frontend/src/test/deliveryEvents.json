@@ -433,7 +433,7 @@
                 "reason": "no assessment answers for bucket 'm/2026-01-01': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
               }
             ],
-            "scale": { "kind": "answered", "assessment_id": "<answering scale assessment>" },
+            "scale": { "kind": "answers", "assessment_id": "<answering scale assessment>" },
             "shipped": {
               "kind": "acknowledged",
               "acknowledgment": {
