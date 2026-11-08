@@ -62,11 +62,14 @@ def _picker() -> dict[str, JsonValue]:
     workspace is listed (``picker``), ``Valley farm`` opened and the workspace listed again
     (``picker_open``), ``Valley farm`` renamed through ``POST /api/projects/rename``
     (``renamed``), and ``Ridge farm`` then ``Empty block`` opened, the three open answers kept in
-    that order (``opened``). The answers
+    that order (``opened``). Last ``Valley farm`` is opened again, its record is damaged to bytes
+    that will not decode, and the workspace is listed with it open and unread (``picker_damaged``).
+    The answers
     are normalized by :data:`INSTANTS`, each minted project id and the removal's archive read as
     its name.
     """
     from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.project_record import project_record_key
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tcip_mcp.workspace import ProjectRemoval
     from tcip_web.routes.projects import RemovalRequest, RenameRequest
@@ -77,6 +80,7 @@ def _picker() -> dict[str, JsonValue]:
         registry_over,
         write_image,
     )
+    from tests._record_damage_fixtures import damage_record
     from tests._web_fixtures import named_project
 
     both_labeled, one_labeled, newest = CAPTURES
@@ -151,12 +155,18 @@ def _picker() -> dict[str, JsonValue]:
             opened_valley,
             *(opened(client, project) for project in (ridge, empty)),
         ]
+        opened(client, valley)
+        damage_record(
+            project_record_key(str(valley.root)), b"{not valley json"
+        )
+        picker_damaged = answered(client, "list_projects", 200)
         return normalized(
             {
                 "empty_listing": empty_listing,
                 "picker": picker,
                 "opened": opened_projects,
                 "picker_open": picker_open,
+                "picker_damaged": picker_damaged,
                 "removed": removed,
                 "renamed": renamed,
             },
