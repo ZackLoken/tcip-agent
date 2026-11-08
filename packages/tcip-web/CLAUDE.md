@@ -82,7 +82,10 @@ the room so a part needing less than an equal share keeps all of it, each cut pa
 it was cut from and a part that does not fit standing as a short fixed statement of it; Codex's hook
 passes its whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness
 reads from a hook's stdout, so it reaches the agent as context, never as a pasted message, and
-`diagnose_project` runs in the backend, outside every harness's sandbox. `TerminalSession.deliver`
+`diagnose_project` runs in the backend, outside every harness's sandbox. A start the route
+answers with anything but 2xx is printed the same way, as a sentence with the answer's status and
+body, never raised.
+`TerminalSession.deliver`
 decides when a paste goes and what it carries. Each launch probes the version its harness declares
 and records it, so a harness updated in place is seen at its next launch. No timer-free signal tells
 a launch whose sequence never arrives from one still starting, and a sequence that moved earlier
