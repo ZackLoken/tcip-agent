@@ -204,11 +204,11 @@ def build_plant_mapping(
 
     The build is ``actor``'s.
 
-    Orders each date's images by EXIF capture time (the walker's sequence), splits into row runs on
-    large GPS jumps, and assigns along the row, falling back to nearest-neighbor when the sequence
-    signal is weak, both within the date's match radius. Each assignment records its ``source``
-    and GPS ``distance_m``. The mapping is project state, persisted
-    under the project by ``name``.
+    Within each date, in capture-time order (EXIF), each image takes the nearest unclaimed plant
+    (``source`` ``sequence``) within the date's match radius; with no unclaimed plant within it,
+    the nearest plant (``nearest_neighbor``), or none (``unmapped``). Each assignment records its
+    ``source`` and GPS ``distance_m``. The mapping is project state, persisted under the project
+    by ``name``.
 
     Args:
         name: The mapping's name within this project (``plant_mapping_key``'s own naming rule). A

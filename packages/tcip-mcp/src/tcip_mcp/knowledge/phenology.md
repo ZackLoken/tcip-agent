@@ -86,7 +86,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): a registered dataset's geolocated captures (its `dataset_root`) + a `plant_registry` name → a named mapping persisted under the project. A same-name rebuild a delivery event still cites refuses by name unless `supersede=True`, which archives the cited record first (readable by digest, never enumerated) |
 | `deliver_phenology_milestones` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + one bucket per date (each at the date its own record states) → delivered `catkin_phenology.csv`; the gate refuses buckets whose scope classifies no positive state |
 | `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date` (dispatching on the entry's `crossing_rule`), `positive_onset_date`, `plant_milestones`, `measure_phenology` and the gated delivery door `deliver_phenology` (its revision binding is the `delivery` skill's meaning door). Every population plant has a point on every mapped date; a date the mapping assigns it no capture on counts against its completeness |
-| `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping`, `verify_mapping_inputs`, `plant_mapping_names`, `register_plant_registry_record`, `load_registry`. A mapping is project state, named and bound to the dataset it was built over and to its own build receipt: `load_mapping` refuses a record no receipt names, and `verify_mapping_inputs` re-checks the record's dates and plant CSVs (read through the named registry) at delivery time |
+| `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` by GPS, each date's images in capture-time order each taking the nearest unclaimed plant; `build_mapping`, `persist_mapping`, `load_mapping`, `verify_mapping_inputs`, `plant_mapping_names`, `register_plant_registry_record`, `load_registry`. A mapping is project state, named and bound to the dataset it was built over and to its own build receipt: `load_mapping` refuses a record no receipt names, and `verify_mapping_inputs` re-checks the record's dates and plant CSVs (read through the named registry) at delivery time |
 | Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/phenology_measurement` (both projections, curve and milestone, from one measurement), `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (the traits and their revision confirmation, delivery events, registered models) not enumerated here |
 
 Milestone math lives once, in the `phenology` module; plant mapping lives once, in the
@@ -104,18 +104,21 @@ state's check against the subject registry are the `delivery` skill's meaning do
 Don't confuse `score_predictions` (IoU GT-vs-prediction *eval* matching) with plant-GPS mapping;
 they are unrelated.
 
-## Plant mapping: why the sequence-anchored matcher
+## Plant mapping: why captures claim plants in capture-time order
 
 Image GPS (a handheld's EXIF) can carry more error than the spacing between adjacent plots, so
 nearest-neighbor GPS alone is ambiguous. The RTK-collected, GIS-rectified plant grid is
 accurate; the *image* GPS is the fuzzy side. `plant_mapping.py` resolves this by ordering each
-date's images by EXIF capture time (the walker's sequence), splitting into row runs on large
-GPS jumps, and assigning along the row. A capture is matched within its date's radius: a
+date's images by EXIF capture time (the walker's sequence) and giving each the nearest plant no
+earlier image of that date has claimed (`sequence`); when no unclaimed plant lies within the
+radius it takes the nearest plant (`nearest_neighbor`), and when none lies within it the image is
+`unmapped`. A capture is matched within its date's radius: a
 `match_radius` stated with its reason governs every date of the build, and without one each
 date's radius is the largest horizontal positioning error its photographs report in their EXIF,
 the build refusing until one is stated when any one positioned photograph of a date reports
-none; the mapping records which per date. Each assignment records its `source` (`sequence` / `nearest_neighbor` /
-`unmapped`) and `distance_m`: interpretable signals. It records no 0–1 "confidence" value.
+none; the mapping records which per date. Each assignment records its `source` (`sequence` /
+`nearest_neighbor` / `unmapped`) and `distance_m`: interpretable signals. It records no 0–1
+"confidence" value.
 
 ## Delivery checklist
 
