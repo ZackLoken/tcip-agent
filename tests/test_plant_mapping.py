@@ -15,7 +15,6 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MappingBuild,
     PlantRecord,
     StatedRadius,
-    _segment_runs,
     assign_plants,
     date_match_radius,
     load_mapping,
@@ -120,172 +119,6 @@ def test_a_plants_distance_is_the_wgs84_geodesic() -> None:
     assert distance == pytest.approx(6_378_137.0 * math.pi / 180, abs=1e-3)
 
 
-def test_the_row_break_is_the_midpoint_of_the_one_outstanding_jump() -> None:
-    """Gaps [1, 1, 1, 20] break between 1 and 20, at 10.5; uniform gaps hold no break."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        _derive_row_break_threshold,
-    )
-
-    assert _derive_row_break_threshold([20.0, 1.0, 1.0, 1.0]) == 10.5
-    assert _derive_row_break_threshold([2.0, 2.0, 2.0, 2.0]) is None
-
-
-def _textbook_row_break(gaps: list[float]) -> float | None:
-    """Return the row break Iglewicz and Hoaglin's modified z-score finds in ``gaps``.
-
-    The score is their 0.6745 times the largest log-space jump's distance from the other
-    jumps' median over scipy's unscaled median absolute deviation, a break past 3.5; with no
-    deviation, a jump strictly past the median breaks.
-    """
-    import math
-    import statistics
-    from itertools import pairwise
-
-    from scipy.stats import median_abs_deviation
-
-    jumps = [
-        (math.log(hi / lo), lo, hi)
-        for lo, hi in pairwise(sorted(gaps))
-        if lo > 1e-9
-    ]
-    if len(jumps) < 2:
-        return None
-    best = max(jumps, key=lambda jump: jump[0])
-    others = [jump[0] for jump in jumps if jump is not best]
-    median = statistics.median(others)
-    mad = median_abs_deviation(others)
-    breaks = (
-        0.6745 * (best[0] - median) / mad >= 3.5
-        if mad > 0
-        else best[0] > median
-    )
-    return best[1] + (best[2] - best[1]) / 2 if breaks else None
-
-
-@pytest.mark.parametrize(
-    "gaps",
-    [
-        [],
-        [4.0],
-        [2.0, 2.0, 2.0, 2.0],
-        [0.0, 1.0, 1.0, 1.0, 20.0],
-        [20.0, 1.0, 1.0, 1.0],
-        [1.0, 1.1, 0.9, 1.0, 1.05, 1.2, 30.0],
-        # The largest jump scores about 3.0 with the 0.6745 scaling and 4.45 without it.
-        [1.0, 1.0513, 1.2214, 1.5683, 2.2255, 3.4903, 7.0287],
-    ],
-)
-def test_the_row_break_agrees_with_the_modified_z_score_over_scipys_deviation(
-    gaps: list[float],
-) -> None:
-    """The row break derived from a date's gaps is the textbook modified z-score's break."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        _derive_row_break_threshold,
-    )
-
-    assert _derive_row_break_threshold(gaps) == pytest.approx(
-        _textbook_row_break(gaps)
-    )
-
-
-def test_segment_runs_splits_on_large_jumps(
-    stamp: Callable[[str, float, float, int], ImageStamp],
-) -> None:
-    stamps = [
-        stamp("a", 43.1960, -90.0580, 0),
-        stamp("b", 43.1961, -90.0580, 2),
-        stamp("c", 43.2000, -90.0580, 4),  # ~440 m jump -> new run
-        stamp("d", 43.2001, -90.0580, 6),
-    ]
-    runs = _segment_runs(stamps)
-    assert len(runs) == 2
-    assert [s.stem for s in runs[0]] == ["a", "b"]
-    assert [s.stem for s in runs[1]] == ["c", "d"]
-
-
-def test_segment_runs_splits_on_multiple_jumps(
-    stamp: Callable[[str, float, float, int], ImageStamp],
-) -> None:
-    # Three row runs of ~2 m in-row steps separated by two ~15 m row-transition jumps.
-    # 15 m is well under a fixed 25 m threshold, so this only splits under a derivation
-    # that reads the break relative to this date's own ~2 m walking pace.
-    stamps = [
-        stamp("a", 43.19600000, -90.0580, 0),
-        stamp("b", 43.19601797, -90.0580, 2),
-        stamp("c", 43.19603593, -90.0580, 4),
-        stamp("d", 43.19617068, -90.0580, 6),  # ~15 m jump -> new run
-        stamp("e", 43.19618865, -90.0580, 8),
-        stamp("f", 43.19632339, -90.0580, 10),  # ~15 m jump -> new run
-        stamp("g", 43.19634136, -90.0580, 12),
-    ]
-    runs = _segment_runs(stamps)
-    assert [[s.stem for s in r] for r in runs] == [
-        ["a", "b", "c"],
-        ["d", "e"],
-        ["f", "g"],
-    ]
-
-
-def test_segment_runs_curved_row_not_fragile_to_uneven_steps(
-    stamp: Callable[[str, float, float, int], ImageStamp],
-) -> None:
-    # In-row steps vary (20-28 m, simulating a curved row's uneven pace) and one includes a step
-    # larger than a fixed 25 m threshold, followed by one unambiguous ~300 m row-transition
-    # jump. A fixed-distance rule would split on every step over 25 m; the derivation should not.
-    stamps = [
-        stamp("a", 43.196000, -90.0580, 0),
-        stamp("b", 43.196180, -90.0580, 2),  # ~20 m
-        stamp("c", 43.196431, -90.0580, 4),  # ~28 m
-        stamp("d", 43.196628, -90.0580, 6),  # ~22 m
-        stamp("e", 43.196862, -90.0580, 8),  # ~26 m
-        stamp("f", 43.199556, -90.0580, 10),  # ~300 m jump -> new run
-    ]
-    runs = _segment_runs(stamps)
-    assert len(runs) == 2
-    assert [s.stem for s in runs[0]] == ["a", "b", "c", "d", "e"]
-    assert [s.stem for s in runs[1]] == ["f"]
-
-
-def test_segment_runs_uniform_gaps_stay_one_run(
-    stamp: Callable[[str, float, float, int], ImageStamp],
-) -> None:
-    # Roughly uniform ~27-32 m gaps throughout, all above a fixed 25 m threshold (which
-    # would split every consecutive pair) but with no real bimodal break in the sequence.
-    stamps = [
-        stamp("a", 43.196000, -90.0580, 0),
-        stamp("b", 43.196252, -90.0580, 2),  # ~28 m
-        stamp("c", 43.196521, -90.0580, 4),  # ~30 m
-        stamp("d", 43.196808, -90.0580, 6),  # ~32 m
-        stamp("e", 43.197069, -90.0580, 8),  # ~29 m
-        stamp("f", 43.197347, -90.0580, 10),  # ~31 m
-        stamp("g", 43.197590, -90.0580, 12),  # ~27 m
-    ]
-    runs = _segment_runs(stamps)
-    assert len(runs) == 1
-    assert [s.stem for s in runs[0]] == ["a", "b", "c", "d", "e", "f", "g"]
-
-
-def test_segment_runs_duplicate_gps_gap_does_not_hijack_the_split(
-    stamp: Callable[[str, float, float, int], ImageStamp],
-) -> None:
-    # A duplicate/cached EXIF GPS reading between two rapid captures (an exact 0 m gap) carries
-    # no walking-pace information; it must not be read as an "infinitely large" jump that wins
-    # over a genuine row-transition jump elsewhere in the sequence.
-    stamps = [
-        stamp("a", 43.19600000, -90.0580, 0),
-        stamp("b", 43.19601797, -90.0580, 2),  # ~2 m
-        stamp("c", 43.19603593, -90.0580, 4),  # ~2 m
-        stamp("d", 43.19603593, -90.0580, 6),  # duplicate of c: 0 m gap
-        stamp("e", 43.19605390, -90.0580, 8),  # ~2 m
-        stamp("f", 43.19874790, -90.0580, 10),  # ~300 m jump -> new run
-        stamp("g", 43.19876587, -90.0580, 12),  # ~2 m
-    ]
-    runs = _segment_runs(stamps)
-    assert len(runs) == 2
-    assert [s.stem for s in runs[0]] == ["a", "b", "c", "d", "e"]
-    assert [s.stem for s in runs[1]] == ["f", "g"]
-
-
 def test_assign_plants_one_to_one(
     stamp: Callable[[str, float, float, int], ImageStamp],
 ) -> None:
@@ -301,6 +134,40 @@ def test_assign_plants_one_to_one(
     # Each image should claim a different plant
     assert len({a.plant_id for a in assignments}) == 2
     assert all(a.source == "sequence" for a in assignments)
+
+
+def test_the_earlier_capture_claims_the_plant_two_captures_are_nearest_to(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
+    """Two captures nearest to one plant: the earlier claims it, the later takes the next nearest.
+
+    The stamps are given later capture first; the assignments come back in that order.
+    """
+    plants = [
+        _plant("P1", "A", 43.1960, -90.0580),
+        _plant("P2", "B", 43.19603, -90.0580),
+    ]
+    later = stamp("later", 43.1960, -90.0580, 10)
+    earlier = stamp("earlier", 43.1960, -90.0580, 0)
+    assigned = _assign([later, earlier], plants)
+    assert [(a.plant_id, a.source) for a in assigned] == [
+        ("P2", "sequence"),
+        ("P1", "sequence"),
+    ]
+
+
+def test_the_later_capture_takes_the_claimed_plant_when_no_other_is_in_range(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
+    """With no unclaimed plant within the radius, the later capture takes the claimed nearest."""
+    plants = [_plant("P1", "A", 43.1960, -90.0580)]
+    later = stamp("later", 43.1960, -90.0580, 10)
+    earlier = stamp("earlier", 43.1960, -90.0580, 0)
+    assigned = _assign([later, earlier], plants)
+    assert [(a.plant_id, a.source) for a in assigned] == [
+        ("P1", "nearest_neighbor"),
+        ("P1", "sequence"),
+    ]
 
 
 def test_assign_plants_handles_missing_gps(tmp_path: Path) -> None:
