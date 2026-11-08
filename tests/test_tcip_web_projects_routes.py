@@ -210,12 +210,9 @@ def test_list_over_a_held_store_answers_409_saying_it_was_busy_and_how_long_it_w
     The answer is the store's own sentence at 409, its wait inside the band the store contract
     test holds a short wait to.
     """
-    import tcip_store
-
     held = _make_project(workspace_dir, "held_project").root
-    tcip_store.release_root(held)
 
-    with waiting(SHORT_WAIT_S), held_by_another_connection(held):
+    with _locked_by_another_holder(held):
         resp = client.get("/api/projects")
 
     assert resp.status_code == 409, resp.text
