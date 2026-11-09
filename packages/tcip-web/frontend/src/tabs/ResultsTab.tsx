@@ -129,7 +129,6 @@ export function ResultsTab() {
   const [countTrait, setCountTrait] = useState("");
   const [countPlantRegistry, setCountPlantRegistry] = useState("");
   const [countDeliveredPhenotype, setCountDeliveredPhenotype] = useState("");
-  const [countPipelineVersion, setCountPipelineVersion] = useState("");
   const [countCanopySubject, setCountCanopySubject] = useState("");
   const [countPositionErrorM, setCountPositionErrorM] = useState("");
   const [countFilename, setCountFilename] = useState("");
@@ -325,7 +324,6 @@ export function ResultsTab() {
               plant_registry: countPlantRegistry,
               delivered_phenotype: countDeliveredPhenotype,
               plants,
-              pipeline_version: countPipelineVersion,
               canopy_subject: countCanopySubject,
               position_error_m:
                 countCanopySubject && countPositionErrorM !== ""
@@ -539,15 +537,6 @@ export function ResultsTab() {
                   className="tcip-input"
                   value={countDeliveredPhenotype}
                   onChange={(e) => setCountDeliveredPhenotype(e.target.value)}
-                />
-                <label className="tcip-label" htmlFor="count-pipeline-version">
-                  Pipeline version
-                </label>
-                <input
-                  id="count-pipeline-version"
-                  className="tcip-input"
-                  value={countPipelineVersion}
-                  onChange={(e) => setCountPipelineVersion(e.target.value)}
                 />
                 <label className="tcip-label" htmlFor="count-canopy-subject">
                   Canopy subject
