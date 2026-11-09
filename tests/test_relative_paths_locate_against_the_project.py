@@ -1408,6 +1408,12 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
         )
         records = _records(("P1", 2), ("P2", 1))
         published = [read_bucket(dataset_root, bucket)]
+        resolved = plant_mapping_disclosure(
+            project,
+            "valley",
+            by_recorded_date(published),
+            population(["P1", "P2"]),
+        )
         with pytest.raises(DeliveryRefusedError) as refused:
             deliver_per_plant_aggregate(
                 project,
@@ -1418,14 +1424,9 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
                 delivery_kind=KIND,
                 buckets=published,
                 plants=population(["P1", "P2"]),
-                crop="currant",
+                crop=resolved.verified.crop,
                 door="deliver_per_plant_csv",
-                plant_mapping=plant_mapping_disclosure(
-                    project,
-                    "valley",
-                    by_recorded_date(published),
-                    population(["P1", "P2"]),
-                ),
+                plant_mapping=resolved.disclosure,
                 actor=None,
             )
         act = record_acknowledgment(
@@ -1449,7 +1450,6 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
             [bucket],
             value_key="count",
             plant_mapping="valley",
-            crop="currant",
             acknowledgment_id=act.acknowledgment_id,
             actor=None,
         )

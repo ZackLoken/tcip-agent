@@ -23,11 +23,11 @@ from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tcip_mcp.tools.project_tools import register_dataset
-from tcip_mcp.traits import registered_crops
 from tcip_web.routes.audit_gap import AuditGapRefusal
 from tests._audit_fixtures import audit_rows, held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import (
+    CROP,
     PHOTO_POSITION_ERROR_M,
     PLANTS,
     geolocated_captures,
@@ -69,9 +69,7 @@ def _dataset(tmp_path: Path, name: str = "ds") -> Path:
 
     root = tmp_path / name
     root.mkdir(parents=True, exist_ok=True)
-    result = register_dataset(
-        tmp_path, str(root), crop=sorted(registered_crops())[0], actor=None
-    )
+    result = register_dataset(tmp_path, str(root), crop=CROP, actor=None)
     assert "error" not in result, result
     registry_over(root, FLOWERS)
     return root
@@ -1491,7 +1489,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
     reg = register_dataset(
         tmp_path,
         str(moved_root),
-        crop=sorted(registered_crops())[0],
+        crop=CROP,
         actor=None,
     )
     assert "error" not in reg, reg
@@ -1602,7 +1600,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
         reg = register_dataset(
             proj,
             str(dataset_root),
-            crop=sorted(registered_crops())[0],
+            crop=CROP,
             actor=None,
         )
         assert "error" not in reg, reg

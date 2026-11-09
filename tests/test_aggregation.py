@@ -18,6 +18,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     _per_plant,
     deliver_per_plant_aggregate,
 )
+from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
 from tcip_mcp.traits import (
     PER_PLANT_COUNT_AGGREGATE,
     PER_PLANT_REGRESSION_AGGREGATE,
@@ -244,7 +245,6 @@ def test_a_per_plant_count_delivery_writes_its_population_one_row_each(
         out_path,
         "stem_count",
         value_key="count",
-        crop="currant",
     )
 
     with open(out_path, newline="") as f:
@@ -253,7 +253,8 @@ def test_a_per_plant_count_delivery_writes_its_population_one_row_each(
         assert "trait_name" not in (reader.fieldnames or [])
         assert "plant_aggregation" not in (reader.fieldnames or [])
     assert [r["plant_id"] for r in rows] == ["PLANT_001", "PLANT_002"]
-    assert rows[0]["crop"] == "currant"
+    registry = load_registry(tmp_path, "valley-registry")
+    assert {r["crop"] for r in rows} == {registry["crop"]}
     assert rows[0]["delivered_phenotype"] == "stem_count"
     assert rows[0]["n_images"] == "3"
     assert rows[0]["units"] == ""

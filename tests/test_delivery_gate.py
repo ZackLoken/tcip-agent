@@ -460,6 +460,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     )
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
+        COUNT_CROP,
         PHOTO_POSITION_ERROR_M,
         map_plants,
         plant_positions,
@@ -473,7 +474,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
         datetime(2026, 1, 1, 9),
         h_pos_err=PHOTO_POSITION_ERROR_M,
     )
-    map_plants(tmp_path, tmp_path / "ds", ["p1"])
+    map_plants(tmp_path, tmp_path / "ds", ["p1"], crop=COUNT_CROP)
 
     def deliver(subject: str, name: str) -> PerPlantDelivered:
         pytest.importorskip("torch")

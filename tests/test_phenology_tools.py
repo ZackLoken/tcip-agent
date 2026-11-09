@@ -84,9 +84,9 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     from datetime import datetime
 
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
+        CROP,
         register_plant_registry_for,
         write_plant_csv,
     )
@@ -99,9 +99,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         -90.058000,
         datetime(2026, 2, 11, 9, 30),
     )
-    register_dataset(
-        tmp_path, str(tmp_path), crop=sorted(registered_crops())[0], actor=None
-    )
+    register_dataset(tmp_path, str(tmp_path), crop=CROP, actor=None)
     csv_path = write_plant_csv(
         tmp_path / "plants.csv",
         [{"plot": "P1", "accession": "acc-9", "lat": 43.197, "lon": -90.058}],

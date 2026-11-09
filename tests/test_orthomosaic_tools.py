@@ -17,6 +17,7 @@ import tifffile
 from tcip_mcp.pipelines.execution import Stated
 from tests import _trait_fixtures as fx
 from tests._mapping_fixtures import (
+    COUNT_CROP,
     GRID_COLUMNS,
     POSITION_ERROR_M,
     register_plant_registry_for,
@@ -137,7 +138,9 @@ def _pixel_to_wgs84(
 def _plant_registry(
     project: Path, plant_csv: Path, *, name: str = "reg"
 ) -> str:
-    return register_plant_registry_for(project, [plant_csv], name=name)
+    return register_plant_registry_for(
+        project, [plant_csv], name=name, crop=COUNT_CROP
+    )
 
 
 def _plants_csv_at(
@@ -197,11 +200,19 @@ def _raster_bucket(
 ) -> Bucket:
     """Publish a whole-raster bucket ``<name>/2026-01-01`` over ``raster_path`` and return it.
 
-    The bucket holds one detection per box and is published through the platform's own
-    publication (``_chain_fixtures.published``).
+    The raster's dataset is registered at :data:`~tests._mapping_fixtures.COUNT_CROP` first, so
+    the bucket records it. The bucket holds one detection per box and is published through the
+    platform's own publication (``_chain_fixtures.published``).
     """
+    from tcip_mcp.dataset_layout import image_capture
+    from tcip_mcp.tools.project_tools import register_dataset
     from tests._chain_fixtures import detected, detection_pass, published
 
+    dataset_root, _ = image_capture(raster_path)
+    registered = register_dataset(
+        project, str(dataset_root), crop=COUNT_CROP, actor=None
+    )
+    assert "error" not in registered, registered
     height, width = tifffile.imread(str(raster_path)).shape[:2]
     result = detection_pass(
         raster_path,
@@ -822,7 +833,7 @@ def _canopy_setup(
 
     dataset_root = tmp_path / "ds"
     raster_path = write_canonical_dataset_raster(
-        dataset_root, width=64, height=64
+        dataset_root, width=64, height=64, crop=COUNT_CROP
     )
     return (
         dataset_root,
