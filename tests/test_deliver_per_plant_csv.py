@@ -183,6 +183,34 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
     assert not (tmp_path / "o.csv").exists()
 
 
+def test_a_record_of_a_plant_outside_the_population_refuses_for_the_population(
+    tmp_path: Path,
+) -> None:
+    """Records naming a plant outside the population refuse for the population first.
+
+    That plant's every record carries no value; the refusal names the population, not the
+    missing observation, and no CSV is written.
+    """
+    dataset_root, date = _mapped(tmp_path, TWO_PLANTS)
+    bucket = _bucket(
+        tmp_path, dataset_root, date, {"P1": 2, "P2": 1}, name="run"
+    )
+
+    refused = _deliver(
+        tmp_path,
+        _records(("P1", 2), ("P2", None)),
+        ["P1"],
+        dataset_root,
+        [bucket],
+        plant_mapping="valley",
+    )
+
+    assert "a delivery ships exactly its population" in refused.get(
+        "error", ""
+    ), refused
+    assert not (tmp_path / "o.csv").exists()
+
+
 def test_an_unknown_plant_mapping_refuses_by_name(tmp_path: Path) -> None:
     """A ``plant_mapping`` with no stored record is refused by name, and no CSV is written.
 

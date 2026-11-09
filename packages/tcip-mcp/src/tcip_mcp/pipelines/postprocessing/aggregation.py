@@ -349,7 +349,9 @@ def deliver_per_plant_aggregate(
             records, plant_aggregation=meaning.revision.entry.plant_aggregation
         )
     }
-    none_valued = [p for p, s in by_plant.items() if s["value"] is None]
+    none_valued = [
+        p for p in plants if p in by_plant and by_plant[p]["value"] is None
+    ]
     if none_valued:
         raise ValueError(
             f"plant(s) {none_valued} carry no {delivered_phenotype!r} observation: a "
