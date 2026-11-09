@@ -472,7 +472,6 @@
                 "2026-01-01/r6.png",
                 "2026-01-01/r7.png"
               ],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-01-01"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -578,7 +577,6 @@
                 }
               },
               "captures_unverified": [],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-02-11"],
               "images_unattributed": 0,
               "plant_attribution": "image"
