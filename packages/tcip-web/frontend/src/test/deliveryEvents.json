@@ -146,7 +146,6 @@
                 }
               },
               "captures_unverified": [],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-02-11", "2026-02-25"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -226,7 +225,6 @@
                 }
               },
               "captures_unverified": [],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-02-11", "2026-02-25"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -474,7 +472,6 @@
                 "2026-01-01/r6.png",
                 "2026-01-01/r7.png"
               ],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-01-01"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -580,7 +577,6 @@
                 }
               },
               "captures_unverified": [],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-02-11"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -972,7 +968,6 @@
                 }
               },
               "captures_unverified": [],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-02-11", "2026-02-25"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -1048,7 +1043,6 @@
                 }
               },
               "captures_unverified": [],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-02-11", "2026-02-25"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -1124,7 +1118,6 @@
                 }
               },
               "captures_unverified": [],
-              "plant_csvs_unverified": [],
               "dates_delivered": ["2026-02-11", "2026-02-25"],
               "images_unattributed": 0,
               "plant_attribution": "image"
@@ -3265,7 +3258,6 @@
           "2026-02-25": { "P1_20260225": "efb5efc2a3abc515", "P2_20260225": "79d169ef0d7897cf" }
         },
         "captures_unverified": [],
-        "plant_csvs_unverified": [],
         "dates_delivered": ["2026-02-11", "2026-02-25"],
         "images_unattributed": 0,
         "plant_attribution": "image"
@@ -3457,7 +3449,6 @@
             }
           },
           "captures_unverified": ["2026-02-11/P2_20260211.jpg"],
-          "plant_csvs_unverified": [],
           "dates_delivered": ["2026-02-11", "2026-02-25"],
           "images_unattributed": 0,
           "plant_attribution": "image"
@@ -3537,7 +3528,6 @@
             }
           },
           "captures_unverified": ["2026-02-11/P2_20260211.jpg"],
-          "plant_csvs_unverified": [],
           "dates_delivered": ["2026-02-11", "2026-02-25"],
           "images_unattributed": 0,
           "plant_attribution": "image"
@@ -3621,7 +3611,6 @@
             }
           },
           "captures_unverified": ["2026-02-11/P2_20260211.jpg"],
-          "plant_csvs_unverified": [],
           "dates_delivered": ["2026-02-11", "2026-02-25"],
           "images_unattributed": 0,
           "plant_attribution": "image"
@@ -3772,7 +3761,6 @@
           }
         },
         "captures_unverified": [],
-        "plant_csvs_unverified": [],
         "dates_delivered": ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"],
         "images_unattributed": 40,
         "plant_attribution": "image"

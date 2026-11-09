@@ -348,7 +348,7 @@ def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
     )
 
 
-def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
+def test_delivery_refuses_naming_the_plant_registry_when_it_holds_no_plant(
     tmp_path: Path,
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -370,7 +370,7 @@ def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
         dataset_root,
         preds_by_date,
         "valley",
-        "parsed no plant",
+        "plant registry 'valley-registry'",
     )
 
 
