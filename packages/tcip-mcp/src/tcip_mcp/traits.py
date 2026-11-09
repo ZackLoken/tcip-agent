@@ -162,7 +162,7 @@ def _crops_traits() -> list[dict]:
 
 def registered_crops() -> set[str]:
     """Return every crop name crops.yml declares (the union of each trait's ``crops`` list)."""
-    return {c for t in _crops_traits() for c in t.get("crops", [])}
+    return {c for t in _crops_traits() for c in t["crops"]}
 
 
 def phenotype_crops(phenotype: str) -> list[str]:
