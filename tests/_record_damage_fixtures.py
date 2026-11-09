@@ -60,6 +60,32 @@ def damage_record(key: ts.Key, data: bytes) -> None:
         conn.close()
 
 
+def damage_log_entry(key: ts.Key, position: int, data: bytes) -> None:
+    """Overwrite the entry at ``position`` in the log at ``key`` with ``data``.
+
+    Positions count from the log's first entry, and a negative one from its last, as a list's
+    do. Asserts the log holds an entry at ``position``.
+    """
+    conn = _connected(key)
+    try:
+        ids = [
+            row[0]
+            for row in conn.execute(
+                "select id from log_entries where store = ? and parts = ? order by id",
+                (key.store, encode_parts(key.parts)),
+            )
+        ]
+        assert -len(ids) <= position < len(ids), (
+            f"{key} holds {len(ids)} entries, none at position {position}"
+        )
+        conn.execute(
+            "update log_entries set entry = ? where id = ?",
+            (data, ids[position]),
+        )
+    finally:
+        conn.close()
+
+
 def damage_last_log_entry(key: ts.Key) -> str:
     """Overwrite the last entry of the log at ``key`` with bytes that will not decode.
 
@@ -67,13 +93,5 @@ def damage_last_log_entry(key: ts.Key) -> str:
     entry.
     """
     past = ts.read_log(key).cursor
-    conn = _connected(key)
-    try:
-        damaged = conn.execute(
-            "update log_entries set entry = ? where id = ?",
-            (b"{not valid json", int(past)),
-        )
-    finally:
-        conn.close()
-    assert damaged.rowcount == 1, f"{key} holds no entry to damage"
+    damage_log_entry(key, -1, b"{not valid json")
     return past

@@ -7,19 +7,43 @@ finds no test spelling the same steps out again.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tcip_store as ts
-from tests._record_damage_fixtures import NON_DATABASE, unopenable_database
+from tests._record_damage_fixtures import (
+    NON_DATABASE,
+    damage_last_log_entry,
+    damage_log_entry,
+    unopenable_database,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 TEST_TREE = Path(__file__).resolve().parent
 DAMAGE_FIXTURES = "_record_damage_fixtures.py"
+DAMAGING_SQL = re.compile(r"\bupdate\s+(records|log_entries)\b", re.IGNORECASE)
+
+
+def _test_sources() -> Iterator[tuple[str, str]]:
+    """Yield each Python file under the test tree as its posix path from the tree and its text."""
+    for path in sorted(TEST_TREE.rglob("*.py")):
+        yield (
+            path.relative_to(TEST_TREE).as_posix(),
+            path.read_text(encoding="utf-8"),
+        )
 
 
 def _record_key(root: Path) -> ts.Key:
     return ts.Key("fixture_record", str(root), ("a",))
+
+
+def _log_key(root: Path) -> ts.Key:
+    return ts.Key("fixture_log", str(root), ("entries",))
 
 
 def _names_a_database(expr: ast.AST) -> bool:
@@ -119,14 +143,69 @@ def test_a_root_with_no_database_yet_is_spoiled_and_left_without_one(
 
 def test_no_test_writes_bytes_over_a_database_by_hand() -> None:
     """Only the damage fixtures write bytes over ``database_file(...)`` or a ``store.db`` path."""
-    found = {
-        f"{path.relative_to(TEST_TREE)}:{line}"
-        for path in sorted(TEST_TREE.rglob("*.py"))
-        if path.name != DAMAGE_FIXTURES
-        for line in _hand_spoils(path.read_text(encoding="utf-8"))
-    }
+    found = [
+        f"{name}:{line}"
+        for name, source in _test_sources()
+        if name != DAMAGE_FIXTURES
+        for line in _hand_spoils(source)
+    ]
 
     assert not found, (
         "these write bytes over a database; use "
-        f"tests._record_damage_fixtures.unopenable_database: {sorted(found)}"
+        f"tests._record_damage_fixtures.unopenable_database: {found}"
+    )
+
+
+def test_a_log_entry_damaged_at_a_position_is_reported_at_that_position(
+    tmp_path: Path,
+) -> None:
+    """The second of three entries, damaged, reads as ``corrupt`` at position 1; the rest decode.
+
+    Read from a cursor, the positions count from the first entry past it.
+    """
+    key = _log_key(tmp_path)
+    ts.append(key, {"i": 0})
+    first = ts.read_log(key).cursor
+    ts.append(key, {"i": 1})
+    ts.append(key, {"i": 2})
+
+    damage_log_entry(key, 1, b'{"i": bro')
+
+    page = ts.read_log(key)
+    assert [r["i"] for r in page.records] == [0, 2]
+    assert page.corrupt == (1,)
+    past_first = ts.read_log(key, after=first)
+    assert [r["i"] for r in past_first.records] == [2]
+    assert past_first.corrupt == (0,)
+
+
+def test_the_last_log_entry_is_damaged_and_the_cursor_returned_is_past_it(
+    tmp_path: Path,
+) -> None:
+    """The last of three entries reads as ``corrupt``; the cursor returned is the log's own."""
+    key = _log_key(tmp_path)
+    for i in range(3):
+        ts.append(key, {"i": i})
+
+    past = damage_last_log_entry(key)
+
+    page = ts.read_log(key)
+    assert [r["i"] for r in page.records] == [0, 1]
+    assert page.corrupt == (2,)
+    assert page.cursor == past
+
+
+def test_no_test_writes_the_sql_that_damages_a_record_or_a_log_entry() -> None:
+    """Only the damage fixtures hold the statements that rewrite a stored record or log entry."""
+    found = [
+        f"{name}:{number}"
+        for name, source in _test_sources()
+        if name != DAMAGE_FIXTURES
+        for number, line in enumerate(source.splitlines(), start=1)
+        if DAMAGING_SQL.search(line)
+    ]
+
+    assert not found, (
+        "these rewrite a stored entry by hand; use damage_record, damage_log_entry or "
+        f"damage_last_log_entry from tests._record_damage_fixtures: {found}"
     )
