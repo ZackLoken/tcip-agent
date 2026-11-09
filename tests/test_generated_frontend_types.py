@@ -55,6 +55,17 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
     )
 
 
+def test_the_audit_gap_refusal_declares_committed_as_a_required_boolean() -> (
+    None
+):
+    """The refusal's model requires ``committed`` as a boolean and ``what`` beside it."""
+    from tcip_web.routes.audit_gap import AuditGapRefusal
+
+    schema = AuditGapRefusal.model_json_schema()
+    assert schema["properties"]["committed"]["type"] == "boolean"
+    assert {"committed", "what"} <= set(schema["required"])
+
+
 class _OneMemberLiteral(BaseModel):
     """A scratch model whose one field is a single-value ``Literal``."""
 

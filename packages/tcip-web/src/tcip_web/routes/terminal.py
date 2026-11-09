@@ -38,10 +38,12 @@ from tcip_mcp.audit import (
     acts_among,
     acts_of,
     audit_entries,
+    audit_log_place,
     now,
     record_event_or_raise,
 )
 from tcip_mcp.identity import actor
+from tcip_store import validated
 from tcip_web import terminal as pty_host
 from tcip_web.routes.audit_gap import audit_gap_409
 from tcip_web.state import OpenProject, store
@@ -786,12 +788,13 @@ def recorded_session(
     """
     entries, _ = audit_entries(project.root)
     acts = acts_among(entries, (_STARTED, _REPORTED, _ENDED))
+    log = audit_log_place(project.root)
 
     def lines_of[R: (TerminalLaunch, SessionStartReported, TerminalEnded)](
         event: str, record: type[R]
     ) -> list[tuple[AuditLine, R]]:
         return [
-            (ln, record.model_validate(ln.arguments))
+            (ln, validated(record, ln.arguments, log))
             for ln in acts
             if ln.tool == event
         ]
@@ -955,7 +958,9 @@ def _end_by(session: TerminalSession, person: str) -> TerminalEnd:
         raise HTTPException(503, _SURVIVED)
     answer = TerminalEnd(undelivered=session.ended.undelivered)
     if unrecorded is not None:
-        raise audit_gap_409(unrecorded, answer) from unrecorded
+        raise audit_gap_409(
+            unrecorded, committed=True, what=answer
+        ) from unrecorded
     return answer
 
 
@@ -1008,7 +1013,7 @@ def session_start(
             _record(_REPORTED, reported.model_dump(), session._project, None)
         except AuditEntryNotWrittenError as exc:
             raise audit_gap_409(
-                exc, None, message=_line_unwritten(exc)
+                exc, committed=False, what=None, message=_line_unwritten(exc)
             ) from exc
     return pty_host.orientation(session._project, req.source)
 

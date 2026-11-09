@@ -134,8 +134,12 @@ checkpoint and execution record the bucket's own record states, and covers the b
 (one of its captures for an image bucket, the same mosaic for a raster bucket). The gate refuses
 outright buckets naming more than one producing checkpoint or run, staged proposals, a phenology
 delivery over a bucket whose scope declares no attribute listing the positive state's value,
-and a dimensional detector delivery no
-physical-scale assessment in the delivered unit answers for.
+a dimensional detector delivery that names no physical-scale assessment, and a named
+physical-scale assessment when the delivered values are in no physical unit. A named
+physical-scale assessment that does not answer (it did not pass, was judged under another
+revision, was measured over a reference that has changed since or does not cover every delivered
+capture, is not a physical scale or not in the delivered unit, or will not read) is a finding like
+an unvalidated bucket.
 
 A delivery with any unvalidated finding refuses, one sentence per finding, and the refusal carries
 the digest of the result it would write: its rows, population and plant-mapping disclosure
@@ -147,10 +151,11 @@ browser records one.
 
 Every delivery composes its CSV and its one `delivery_events` record, validated against its schema
 before anything is written, then writes the file and the record once: the door, the kind, the
-revision, the delivered file and its digest, the producer once, each bucket's finding, the scale
-assessment, whether it is validated, the acknowledgment, the population, and the plant-mapping
-disclosure. Its one audit line, naming only the record's `event_id`, files in
-the log of the dataset the buckets sit in.
+revision, the delivered file and its digest, the producer once, each bucket's finding, the finding
+for the named physical-scale assessment (its id when it answers, its id and the gate's sentence
+when it does not, none when the delivery names none), whether it is validated, the
+acknowledgment, the population, and the plant-mapping disclosure. Its one audit line, naming only
+the record's `event_id`, files in the log of the dataset the buckets sit in.
 
 A per-plant count from a whole raster is a raster-visible count, not a whole-tree total: where the
 crop's own knowledge document states 2D occlusion undercounts a canopy-borne quantity, a raster

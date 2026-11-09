@@ -22,7 +22,13 @@ import type { Refusal } from "@/test/refusals";
 
 /** Each scene's one served delivery event, by fixture name. */
 type Records = Record<
-  "validated" | "acknowledged_mapping" | "archived_mapping" | "registry" | "canopy",
+  | "validated"
+  | "acknowledged_mapping"
+  | "archived_mapping"
+  | "registry"
+  | "canopy"
+  | "scale_answered"
+  | "scale_unanswered",
   ServedDeliveryEvent
 >;
 
@@ -51,7 +57,9 @@ export function acknowledgmentOf(served: ServedDeliveryEvent): Acknowledgment {
  * delivery its assessment validates, `acknowledged_mapping` a phenology delivery through a plant
  * mapping shipped under a breeder's acknowledgment, `archived_mapping` that same record once a
  * superseding rebuild archived the mapping it cites, and `registry` and `canopy` the orthomosaic
- * door's nearest-plant and canopy-segment deliveries.
+ * door's nearest-plant and canopy-segment deliveries, and `scale_answered` and `scale_unanswered`
+ * per-plant area deliveries shipped under an acknowledgment over a physical-scale assessment that
+ * answers and one that did not pass.
  */
 export const DELIVERY_LISTINGS = produced.listings as unknown as {
   [N in keyof Records]: { records: [Records[N]] };
@@ -117,13 +125,13 @@ export const REGISTERED_MODELS = produced.registered_models as unknown as Regist
 export const RESULTS_ANSWERS = produced.answers as unknown as {
   no_mapping_names: MappingNames;
   admitted_operating_point: OperatingPoint;
-  count_export_audit_gap: Refusal<AuditGapRefusal & { committed: SavedExport }>;
+  count_export_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: SavedExport }>;
   unreadable_deliveries: Refusal<RefusedRead>;
   unknown_mapping: Refusal<string>;
-  export_audit_gap: Refusal<AuditGapRefusal & { committed: SavedExport }>;
+  export_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: SavedExport }>;
   delivery_refusal: Refusal<DeliveryRefusal>;
   phenology: PhenologyAnswer;
-  mapping_audit_gap: Refusal<AuditGapRefusal & { committed: null }>;
+  mapping_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: null }>;
   mapping_cited: Refusal<string>;
   operationalization_refusal: Refusal<OperationalizationRefusal>;
   count_delivery_refusal: Refusal<DeliveryRefusal>;

@@ -2466,7 +2466,8 @@ def test_an_end_whose_line_fails_answers_the_audit_gap_with_the_undelivered_requ
 
     assert resp.status_code == 409
     refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
-    assert refusal.committed == _end_answer("never given")
+    assert refusal.committed is True
+    assert refusal.what == _end_answer("never given")
     assert terminal_routes._SESSIONS == {}
 
 
@@ -3433,9 +3434,9 @@ def test_a_report_whose_line_fails_answers_the_audit_gap_and_holds_nothing(
         )
 
     assert resp.status_code == 409, resp.text
-    assert (
-        AuditGapRefusal.model_validate(resp.json()["detail"]).committed is None
-    )
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+    assert refusal.committed is False
+    assert refusal.what is None
     recorded = terminal_routes.recorded_session(LAUNCH["provider"], opened)
     assert recorded is not None and recorded.report is not None
     assert recorded.report.conversation == "conv-1"
@@ -3475,7 +3476,8 @@ def test_a_report_whose_store_refuses_says_the_line_was_not_written_and_no_recor
 
     assert resp.status_code == 409, resp.text
     refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
-    assert refusal.committed is None
+    assert refusal.committed is False
+    assert refusal.what is None
     assert (
         "agent_terminal_reported audit line was not written" in refusal.message
     )

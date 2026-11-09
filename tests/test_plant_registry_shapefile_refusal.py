@@ -60,7 +60,7 @@ def test_register_plant_registry_refuses_a_shp_naming_the_conversion(
         tmp_path,
         name="reg",
         csv_paths=[str(shp)],
-        crop="black locust",
+        crop="black_locust",
         site="block",
         actor=None,
     )
@@ -83,7 +83,7 @@ def test_register_plant_registry_refuses_a_binary_csv_as_not_utf8(
         tmp_path,
         name="reg",
         csv_paths=[str(binary_path)],
-        crop="black locust",
+        crop="black_locust",
         site="block",
         actor=None,
     )
@@ -113,7 +113,7 @@ def test_register_plant_registry_admits_a_shapefile_converted_first(
         tmp_path,
         name="reg",
         csv_paths=[str(csv_path)],
-        crop="black locust",
+        crop="black_locust",
         site="block",
         actor=None,
     )
