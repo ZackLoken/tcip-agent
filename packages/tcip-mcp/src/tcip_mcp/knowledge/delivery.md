@@ -9,8 +9,10 @@ description: "How to deliver phenotyping results: the per-plant CSV schema, per-
 
 The final deliverable is a CSV with one row per plant per trait:
 
-Columns, in the order `deliver_per_plant_aggregate` writes them (see
-`pipelines/postprocessing/aggregation.py`). Everything the delivery rests on beyond the row (the
+Columns, in the order the per-plant doors write them (see
+`pipelines/postprocessing/aggregation.py`). `deliver_orthomosaic_plant_counts` writes every column
+but the three marked per-image aggregate only: its value is one plant's count on one orthomosaic,
+which no per-plant statistic reduces. Everything the delivery rests on beyond the row (the
 producing checkpoint and its origin, each bucket's gate finding and the assessment behind it, the
 acknowledgment, the population) is recorded once on the delivery event the last column names:
 
@@ -21,11 +23,11 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 | delivered_phenotype | string | Delivered phenotype name (from crop skill) |
 | value | float/string | Measurement value |
 | units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. In a count delivery a unit-declared trait's `value_key` must itself imply a unit, and a dimensional value rests on a physical-scale assessment; in an ordinal or regression delivery a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` |
-| value_key | string | The quantity of the per-image values `value` aggregates, as the delivery names it (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
-| n_images | int | Number of source images |
-| plant_id_source | string | How the plant identity was resolved for this plant's images, the assignment rows' own `source` (`"mixed"` when they disagree); blank when the records carried no `source` |
+| value_key | string | The quantity `value` is, as the delivery names it (e.g. `count`, `area_mm2`): the quantity of the per-image values a per-image aggregate reduces, or `count` for an orthomosaic count, so a reader can detect a px/mm mismatch independently |
 | plant_attribution | string | The granularity objects were attributed to plants at: `"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's nearest-neighbor per-detection mapping, `"segment"` for an orthomosaic's canopy-segment mapping (a detection's box centroid fell inside a canopy boundary a person accepted, never a mask-level or area measurement). Distinct from `plant_id_source`, which names the matching method, not the granularity |
-| plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in meters, across this plant's images, the assignment rows' own `distance_m`; blank when none carried one |
+| n_images | int | Per-image aggregate only: number of source images |
+| plant_id_source | string | Per-image aggregate only: how the plant identity was resolved for this plant's images, the assignment rows' own `source` (`"mixed"` when they disagree); blank when the records carried no `source` |
+| plant_id_distance_m_max | float | Per-image aggregate only: worst per-image plant-assignment distance, in meters, across this plant's images, the assignment rows' own `distance_m`; blank when none carried one |
 | validated | bool | Whether every delivered bucket's assessment cleared the one delivery gate; false only on a delivery a breeder acknowledged shipping unvalidated |
 | trait | string | The trait the delivery ships under |
 | trait_revision | int | The confirmed trait revision the delivery ships under |
@@ -37,10 +39,15 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 The statistic a plant's per-image values combine into is part of the trait's definition: the
 entry's `plant_aggregation`, which every per-plant aggregate kind rests on and the breeder
 confirms. Ask the breeder its question when it is unauthored and propose their answer with
-`propose_trait`; a per-plant delivery takes the per-image records and aggregates them itself
-under the confirmed statistic, so nothing outside the delivery picks one. The table below is a
-starting reference for that conversation, never the answer (a skewed count may want a median; a
-date wants a crossing, whose rule is the entry's `crossing_rule`).
+`propose_trait`; a per-plant aggregate delivery takes the per-image records and aggregates them
+itself under the confirmed statistic, so nothing outside the delivery picks one. The table below
+is a starting reference for that conversation, never the answer (a skewed count may want a
+median; a date wants a crossing, whose rule is the entry's `crossing_rule`).
+
+A per-plant count on an orthomosaic is a kind of its own, `per_plant_orthomosaic_count`, resting on
+the count fields and no `plant_aggregation`: a mosaic is stitched from many aerial frames, so its
+count is neither one image's nor a statistic over several, and the door delivers each plant's
+attributed detection count as it is.
 
 Examples use real `crops.yml` trait names; verify any trait against `crops.yml`, served whole by
 `serve_domain_knowledge(name='crops')`, before use.
@@ -58,14 +65,14 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml`,
 | Tool | Purpose |
 |------|---------|
 | `assess_checkpoint` | Assess a checkpoint against the calibration and holdout sides of a drawn selection, for one delivery kind of a trait's latest confirmed revision; records the assessment (its execution record, the retained reference, the disjointness from the producing run, the criterion and its failures, none when it passed) under `.tcip/assessments/<id>/`, write-once |
-| `assess_reserved_regions` | The same assessment for a whole-mosaic checkpoint, over the reserved regions its training run held out of one mosaic |
+| `assess_reserved_regions` | The same assessment for a whole-mosaic checkpoint, over the reserved regions its training run held out of one mosaic, for a count kind (`per_image_count`, `per_plant_count_aggregate` or `per_plant_orthomosaic_count`) |
 | `calibrate_physical_scale` | Derive a per-pixel physical scale from reference objects of breeder-measured length on a selection's calibration side and check it on its holdout side; recorded as an assessment a dimensional delivery names |
 | `run_inference` | Run a checkpoint over images or a raster and publish the predictions as a new bucket named `bucket` under the images' dataset root: one document per image (one for a raster) and the bucket's record of the checkpoint, class scope, execution record, capture and assessment behind them, in one commit. A bucket is published once; a name already published refuses. With `assessment_id` the pass runs exactly that assessment's execution record and the bucket names it |
 | `deliver_per_image_counts` | Per-image detection-count CSV from one published bucket; see the Per-Image CSV Schema below |
 | `deliver_per_plant_csv` | The general per-plant CSV door: per-image records, each carrying its `plant_id` and its `value` (and, from a mapping's assignment, its `source` and `distance_m`; any other key refuses), with the `value_key` naming the quantity, aggregated per plant under the trait's confirmed `plant_aggregation` over the published buckets they came from, for the case neither specialist door's own composition covers; the required `plant_mapping` is resolved and verified against the delivered buckets, every delivered plant must be one it assigned on the delivered dates, and every row's `plant_attribution` is the mapping's own |
 | `deliver_phenology_milestones` | Per-plant milestone CSV from buckets whose scope classifies the trait's positive state, and a plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths; a shapefile is converted first by `shp_to_plant_csv` |
-| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a published whole-raster bucket plus a `plant_registry` name. Nearest-neighbor by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event |
+| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a published whole-raster bucket plus a `plant_registry` name, delivered under the trait's `per_plant_orthomosaic_count` operationalization. Nearest-neighbor by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event |
 
 A table or script you write yourself before a delivery door (the per-image records
 `deliver_per_plant_csv` takes, for one) lives where the `project-setup` skill places your own work
@@ -112,10 +119,12 @@ uncharacterized, which is a claim about a quantity that has been defined.
   operationalization.
 - The per-plant doors take `delivered_phenotype`, a crop-vocabulary delivered-phenotype name, and
   resolve it to the trait whose latest confirmed revision `delivers` it: none or more than one
-  refuses. The delivery kind (`per_plant_count_aggregate`, `per_plant_ordinal_aggregate` or
-  `per_plant_regression_aggregate`) names the operationalization, the records' value key has to
-  be inside its confirmed set, and the delivery aggregates each plant's records under the
-  revision's `plant_aggregation`.
+  refuses. `deliver_per_plant_csv`'s delivery kind, a kind whose per-plant value is the trait's
+  `plant_aggregation`, names the operationalization, the records' value key has to be inside its
+  confirmed set, and the delivery aggregates each plant's records under the revision's
+  `plant_aggregation`. `deliver_orthomosaic_plant_counts` rests on the
+  `per_plant_orthomosaic_count` operationalization, which names no value key: the door writes
+  `count` itself.
 - A `state_crossing_dates` operationalization and every delivery under it are checked against the
   delivered dataset's own subject registry, never a bare spec value: a delivery whose buckets'
   dataset carries no registry refuses, and a positive state naming an attribute the registry does

@@ -916,7 +916,7 @@ def _orthomosaic(project: Path) -> tuple[Any, str]:
     """Return an unassessed whole-raster bucket and a registered plant registry over its grid.
 
     The bucket covers the project's own image tree and the registry its 2x2 grid, in a project
-    whose per-plant count is confirmed; the return is ``(bucket, registry name)``.
+    whose orthomosaic count is confirmed; the return is ``(bucket, registry name)``.
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -929,7 +929,7 @@ def _orthomosaic(project: Path) -> tuple[Any, str]:
     )
 
     fx.seed_delivery_traits(project)
-    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_orthomosaic_count(project, "stem_count")
     raster_path = image_dir(project, UNDATED_BUCKET) / "mosaic.tif"
     raster_path.parent.mkdir(parents=True, exist_ok=True)
     _write_geo_raster(raster_path)

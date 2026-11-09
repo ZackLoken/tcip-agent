@@ -214,7 +214,7 @@ def _counted_per_plant(project: Path) -> Delivered:
     from tests._chain_fixtures import acknowledged
 
     fx.seed_delivery_traits(project)
-    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_orthomosaic_count(project, "stem_count")
     raster_path = ortho._raster(project)
     ortho._write_geo_raster(raster_path)
     bucket = ortho._raster_bucket(
@@ -416,7 +416,7 @@ def _orthomosaic_call(project: Path) -> tuple[str, dict]:
 
     named_project(project, "Orchard")
     fx.seed_delivery_traits(project)
-    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_orthomosaic_count(project, "stem_count")
     raster_path = ortho._raster(project)
     ortho._write_geo_raster(raster_path)
     bucket = ortho._raster_bucket(
@@ -793,13 +793,14 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
 def _delivered_disclosure(project: Path, deliver: Callable[[], dict]) -> dict:
     """Return the ``plant_mapping`` disclosure the one delivery ``deliver()`` records, as JSON.
 
-    The delivery records under ``project``, its delivered ``stem_count`` confirmed there first.
+    The delivery records under ``project``, its delivered ``stem_count`` confirmed there first as
+    an orthomosaic count.
     """
     from tcip_mcp.delivery import read_delivery_events
     from tests import _trait_fixtures as fx
 
     fx.seed_delivery_traits(project)
-    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_orthomosaic_count(project, "stem_count")
     delivered = deliver()
     assert "error" not in delivered, delivered
     (event,) = read_delivery_events(project)

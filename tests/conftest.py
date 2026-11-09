@@ -253,6 +253,19 @@ def confirmed_count_aggregate(tmp_path: Path) -> None:
 
 
 @pytest.fixture
+def confirmed_orthomosaic_count(tmp_path: Path) -> None:
+    """Confirm every delivery trait of ``tests/_trait_fixtures`` and one orthomosaic count meaning.
+
+    The project is ``tmp_path``; the meaning confirmed is the orthomosaic count of the trait
+    delivering ``stem_count``, its revision stating no other kind.
+    """
+    from tests import _trait_fixtures as fx
+
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_orthomosaic_count(tmp_path, "stem_count")
+
+
+@pytest.fixture
 def hpo_base_config_at(tmp_path: Path) -> Callable[[int], dict]:
     """Return a producer of ``tmp_path``'s base configs, one per split seed.
 
