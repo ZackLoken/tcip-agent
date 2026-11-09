@@ -39,10 +39,10 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 The statistic a plant's per-image values combine into is part of the trait's definition: the
 entry's `plant_aggregation`, which every per-plant aggregate kind rests on and the breeder
 confirms. Ask the breeder its question when it is unauthored and propose their answer with
-`propose_trait`; a per-plant delivery takes the per-image records and aggregates them itself
-under the confirmed statistic, so nothing outside the delivery picks one. The table below is a
-starting reference for that conversation, never the answer (a skewed count may want a median; a
-date wants a crossing, whose rule is the entry's `crossing_rule`).
+`propose_trait`; a per-plant aggregate delivery takes the per-image records and aggregates them
+itself under the confirmed statistic, so nothing outside the delivery picks one. The table below
+is a starting reference for that conversation, never the answer (a skewed count may want a
+median; a date wants a crossing, whose rule is the entry's `crossing_rule`).
 
 A per-plant count on an orthomosaic is a kind of its own, `per_plant_orthomosaic_count`, resting on
 the count fields and no `plant_aggregation`: a mosaic is stitched from many aerial frames, so its
@@ -119,10 +119,10 @@ uncharacterized, which is a claim about a quantity that has been defined.
   operationalization.
 - The per-plant doors take `delivered_phenotype`, a crop-vocabulary delivered-phenotype name, and
   resolve it to the trait whose latest confirmed revision `delivers` it: none or more than one
-  refuses. `deliver_per_plant_csv`'s delivery kind (`per_plant_count_aggregate`,
-  `per_plant_ordinal_aggregate` or `per_plant_regression_aggregate`) names the operationalization,
-  the records' value key has to be inside its confirmed set, and the delivery aggregates each
-  plant's records under the revision's `plant_aggregation`. `deliver_orthomosaic_plant_counts`
+  refuses. `deliver_per_plant_csv`'s delivery kind, a kind whose per-plant value is the trait's
+  `plant_aggregation`, names the operationalization, the records' value key has to be inside its
+  confirmed set, and the delivery aggregates each plant's records under the revision's
+  `plant_aggregation`. `deliver_orthomosaic_plant_counts`
   rests on the `per_plant_orthomosaic_count` operationalization, whose set must hold `count`.
 - A `state_crossing_dates` operationalization and every delivery under it are checked against the
   delivered dataset's own subject registry, never a bare spec value: a delivery whose buckets'
