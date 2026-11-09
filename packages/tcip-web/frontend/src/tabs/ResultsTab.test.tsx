@@ -674,6 +674,9 @@ describe("ResultsTab count export", () => {
       },
       filename: "plant_counts.csv",
     });
+    // The rows' crop is the plant registry's, so the panel takes none.
+    expect(within(panel).queryByLabelText("Crop")).not.toBeInTheDocument();
+    expect(downloadCountCsv.mock.calls[0][0].delivery).not.toHaveProperty("crop");
   });
 
   it("drops the position error with the canopy subject it belongs to", async () => {
