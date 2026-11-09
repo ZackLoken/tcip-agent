@@ -42,12 +42,9 @@ type Observed = tuple[Assignment, int | float | None]
 
 
 def _per_plant(
-    observed: Sequence[Observed],
-    *,
-    plants: Sequence[str],
-    plant_aggregation: PlantAggregation,
+    observed: Sequence[Observed], *, plant_aggregation: PlantAggregation
 ) -> list[dict]:
-    """Return per-plant summaries of ``observed`` images, one per plant of ``plants`` observed.
+    """Return per-plant summaries of ``observed`` images, one per plant, sorted by it.
 
     Each image counts toward the plant its assignment names. Each summary holds the plant, its
     image count as ``n_images``, and as ``value`` the :data:`PLANT_AGGREGATIONS` statistic
@@ -56,12 +53,14 @@ def _per_plant(
     summarized as ``plant_id_source``, their one ``source`` or ``"mixed"`` where they disagree,
     and ``plant_id_distance_m_max``, the largest ``distance_m`` among them.
     """
+    groups: dict[str | None, list[Observed]] = {}
+    for a, v in observed:
+        groups.setdefault(a.plant_id, []).append((a, v))
+
     statistic = PLANT_AGGREGATIONS[plant_aggregation]
     results = []
-    for plant_id in sorted(plants):
-        items = [(a, v) for a, v in observed if a.plant_id == plant_id]
-        if not items:
-            continue
+    for plant_id in sorted(groups, key=str):
+        items = groups[plant_id]
         values = [v for _, v in items if v is not None]
         sources = {a.source for a, _ in items}
         distances = [
@@ -311,9 +310,11 @@ def _attributed(
     refusing as it does). Refuses (``ValueError``), naming the image, a result whose date is not a
     delivered date, whose image's plant is not one of ``plants``, whose image the mapping's
     verification did not read (no document in the delivered bucket, or no longer on disk), or
-    whose image another result names too; and, naming each, an image the verification read whose
-    plant is one of ``plants`` and which no result names.
+    whose image another result names too; and, naming each, a read image of a plant of ``plants``
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.read_images`) no result names.
     """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_images
+
     delivered = mapping.disclosure.dates_delivered
     read_stems = mapping.verified.read_stems
     seen: set[tuple[str, str]] = set()
@@ -345,12 +346,10 @@ def _attributed(
         seen.add((result.date, result.stem))
         observed.append((assignment, result.value))
     uncovered = sorted(
-        f"{date}/{a.stem}"
-        for date in delivered
-        for a in mapping.build.assignments[date]
-        if a.stem in read_stems[date]
-        and a.plant_id in plants
-        and (date, a.stem) not in seen
+        f"{date}/{stem}"
+        for images in read_images(mapping, plants).values()
+        for date, stem in images
+        if (date, stem) not in seen
     )
     if uncovered:
         raise ValueError(
@@ -400,7 +399,6 @@ def deliver_per_plant_aggregate(
         s["plant_id"]: s
         for s in _per_plant(
             _attributed(results, mapping, plants),
-            plants=plants,
             plant_aggregation=meaning.revision.entry.plant_aggregation,
         )
     }

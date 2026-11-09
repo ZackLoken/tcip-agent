@@ -381,7 +381,7 @@ class MappingBuild:
         return list(self.assignments)
 
     @cached_property
-    def _by_stem(self) -> dict[str, dict[str, Assignment]]:
+    def by_stem(self) -> dict[str, dict[str, Assignment]]:
         """Each date's assignments by their image's stem."""
         return {
             date: {a.stem: a for a in rows}
@@ -395,7 +395,7 @@ class MappingBuild:
         on that date and when the image's assignment names no plant
         (:func:`assignment_is_attributed`).
         """
-        assignment = self._by_stem.get(date, {}).get(stem)
+        assignment = self.by_stem.get(date, {}).get(stem)
         if assignment is None:
             raise ValueError(
                 f"image {stem!r} of {date}: mapping {self.name!r} records no image of that "
@@ -491,6 +491,25 @@ class MappingBuild:
             images_unattributed=self.unattributed(dates_delivered),
             plant_attribution=self.plant_attribution,
         )
+
+
+def read_images(
+    mapping: MappingResolution, plants: Iterable[str]
+) -> dict[str, list[tuple[str, str]]]:
+    """Return the ``(date, stem)`` of each of ``plants``' images ``mapping``'s delivery read.
+
+    An image is read when its date is delivered, the build attributes it to that plant and the
+    verification read it (:attr:`MappingVerification.read_stems`); each plant's images come in
+    date and stem order.
+    """
+    wanted = list(plants)
+    read: dict[str | None, list[tuple[str, str]]] = {p: [] for p in wanted}
+    for date in mapping.disclosure.dates_delivered:
+        for stem in sorted(mapping.verified.read_stems[date]):
+            plant = mapping.build.by_stem[date][stem].plant_id
+            if plant in read:
+                read[plant].append((date, stem))
+    return {plant: read[plant] for plant in wanted}
 
 
 _MAPPING_RECORD = TypeAdapter(MappingBuild)
@@ -1937,8 +1956,7 @@ def verify_mapping_inputs(
     read_stems: dict[str, frozenset[str]] = {}
     for date in build.dates:
         rows = build.assignments.get(date, [])
-        recorded_by_stem = {a.stem: a for a in rows}
-        recorded_stems = set(recorded_by_stem)
+        recorded_stems = set(build.by_stem[date])
 
         bucket = buckets.get(date)
         logical = on_disk.get(date)
@@ -1964,7 +1982,7 @@ def verify_mapping_inputs(
         mapped_stems = {
             s
             for s in recorded_stems
-            if assignment_is_attributed(recorded_by_stem[s])
+            if assignment_is_attributed(build.by_stem[date][s])
         }
         full_mapped_coverage = not missing_stems and read_set == mapped_stems
 
@@ -1973,7 +1991,7 @@ def verify_mapping_inputs(
             # An unmapped capture (a raster, a band group) is never read through predictions, so
             # it always lands here unless the whole-date digest below re-checks it instead.
             unverified_names.update(
-                recorded_by_stem[s].image
+                build.by_stem[date][s].image
                 for s in (missing_stems | unread_stems)
             )
 
@@ -1987,7 +2005,7 @@ def verify_mapping_inputs(
         stamps = [s for s in observed if s.stem in read_set]
         was_unreadable = set(build.unreadable.get(date, []))
         for s in stamps:
-            row = recorded_by_stem[s.stem]
+            row = build.by_stem[date][s.stem]
             if s.kind == "photo":
                 if s.name not in was_unreadable and s.readable is False:
                     raise MappingDeliveryError(

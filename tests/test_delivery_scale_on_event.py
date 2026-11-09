@@ -32,6 +32,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
 )
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     plant_mapping_disclosure,
+    read_images,
 )
 from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
 from tests import _trait_fixtures as fx
@@ -40,7 +41,6 @@ from tests._chain_fixtures import (
     deliver_acknowledged,
     digest_of,
     mapped_results,
-    read_images,
     unassessed_bucket,
 )
 from tests._mapping_fixtures import COUNT_CROP
