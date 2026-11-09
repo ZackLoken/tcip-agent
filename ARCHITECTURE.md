@@ -118,9 +118,9 @@ Tables below group by defining module. Docstring is the function's docstring fir
 
 ### delivery_tools.py
 
-| tool                    | audited               | docstring first line                                                                  |
-| ----------------------- | --------------------- | ------------------------------------------------------------------------------------- |
-| `deliver_per_plant_csv` | no, its library event | The general per-plant CSV door: `aggregate_per_plant`'s own output delivered over the |
+| tool                    | audited               | docstring first line                                                                     |
+| ----------------------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| `deliver_per_plant_csv` | no, its library event | Deliver per-image `results` aggregated per plant as a CSV for the plants `plants` names. |
 
 ### phenology_tools.py
 
@@ -1254,8 +1254,8 @@ bucket, differing producers, and a detector delivery whose buckets do not count 
 subject). Side B: the three delivery functions, each calling it once and writing its rows and its
 one event through `delivery.py` (`def deliver_csv(`): `pipelines/postprocessing/export.py`
 (`def deliver_per_image_counts_csv(`), `pipelines/postprocessing/aggregation.py`
-(`def deliver_per_plant_aggregate(`, which the orthomosaic plant-count door also delivers through),
-and `pipelines/postprocessing/phenology.py` (`def deliver_phenology(`).
+(`def deliver_plant_values(`, which the per-image aggregate and the orthomosaic plant-count door
+both deliver through), and `pipelines/postprocessing/phenology.py` (`def deliver_phenology(`).
 
 ## S36. Count-objective vocabulary versus registered pickers
 
