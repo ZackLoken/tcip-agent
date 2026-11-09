@@ -9,14 +9,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Self, cast
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 import tcip_store as ts
 from tcip_annotation.text import Text
 from tcip_mcp.audit import append_or_raise, audit_line
+from tcip_mcp.pipelines.postprocessing.phenology import (
+    is_milestone_key,
+    is_whole_percent,
+    milestone_key,
+)
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_store import Key
 
@@ -246,10 +258,19 @@ class PositiveState(BaseModel):
         return f"{self.attribute}={self.value!r}"
 
 
+MilestoneFraction = Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
+"""A share of a plant's objects a milestone is crossed at, finite and in (0, 1]."""
+
+_TOKEN = re.compile(r"\S+")
+
+
 class TraitEntry(BaseModel):
     """One trait's complete entry: its spec fields and its operationalization per delivery kind.
 
-    Every field is required; a field not yet decided is stated as empty or null.
+    Every field is required; a field not yet decided is stated as empty or null. The milestone
+    values an entry states must agree with each other. Whether a field is stated at all is the
+    breeder's question (:func:`authored`), with one exception: a stated majority fraction requires
+    its majority label, the name of its column.
     """
 
     model_config = ConfigDict(
@@ -262,19 +283,22 @@ class TraitEntry(BaseModel):
     """The crops.yml phenotype names this trait delivers, at least one."""
     positive_state: PositiveState | None
     """The state a fraction counts, or null for a trait that counts none."""
-    milestone_fractions: tuple[float, ...]
-    """Crossing fractions for a milestone-delivering trait."""
+    milestone_fractions: tuple[MilestoneFraction, ...]
+    """Crossing fractions for a milestone-delivering trait, each a whole percent, no two naming
+    one milestone key."""
     milestone_on: str
     """The quantity the milestones cross, e.g. ``positive_fraction``."""
     crossing_rule: CrossingRule
     """How a milestone's date is read off the fraction curve between the two capture dates that
     bracket its crossing; empty until authored."""
-    majority_milestone: str
-    """The crossing key (e.g. ``95per``) the crops.yml majority-date milestone maps to, or empty."""
+    majority_fraction: MilestoneFraction | None
+    """The fraction, one of ``milestone_fractions`` once they are stated, whose crossing is the
+    majority date, or null for an entry naming no majority."""
     phenology_prefix: str
-    """The phenology CSV milestone-column prefix."""
+    """The phenology CSV milestone-column prefix, a token free of whitespace, or empty."""
     majority_label: str
-    """The label the majority-alias column carries."""
+    """The label the majority date's column carries, a token free of whitespace not shaped like a
+    milestone key; stated exactly when ``majority_fraction`` is."""
     count_objective: CountObjective
     """What the delivered number must be reliable for, a consequence judgment only the breeder
     makes; empty until decided."""
@@ -319,6 +343,73 @@ class TraitEntry(BaseModel):
     """Free-text notes on the trait's measurement."""
     operationalizations: dict[DeliveryKind, Operationalization]
     """What the delivered number means, per delivery kind this trait delivers."""
+
+    @model_validator(mode="after")
+    def _milestones_agree(self) -> Self:
+        """Refuse (``ValueError``) milestone values that disagree, naming them, in this order.
+
+        A fraction or majority that is not a whole percent; two fractions giving one
+        :func:`~tcip_mcp.pipelines.postprocessing.phenology.milestone_key`; a majority that is
+        not one of the stated fractions; a majority label empty while a majority is stated, or
+        stated while none is; a label or prefix that is not a token free of whitespace; a label
+        shaped like a milestone key. The empty label beside a stated majority is the one
+        unstated field refused here.
+        """
+        fractions = self.milestone_fractions
+        majority = self.majority_fraction
+        stated = (*fractions, *(() if majority is None else (majority,)))
+        inexact = {f for f in stated if not is_whole_percent(f)}
+        if any(f in inexact for f in fractions):
+            raise ValueError(
+                f"milestone_fractions {[f for f in fractions if f in inexact]} are not whole "
+                "percents; each names its column by its whole percent, so state each as a whole "
+                "percent"
+            )
+        if majority in inexact:
+            raise ValueError(
+                f"majority_fraction {majority} is not a whole percent; it names its crossing's "
+                "column by its whole percent"
+            )
+        by_key: dict[str, list[float]] = {}
+        for f in fractions:
+            by_key.setdefault(milestone_key(f), []).append(f)
+        for key, shared in by_key.items():
+            if len(shared) > 1:
+                raise ValueError(
+                    f"milestone_fractions {' and '.join(map(str, shared))} both give the key "
+                    f"{key!r}, so one milestone would overwrite the other; state each once"
+                )
+        if fractions and majority is not None and majority not in fractions:
+            raise ValueError(
+                f"majority_fraction {majority} is not one of milestone_fractions "
+                f"{list(fractions)}; the majority date is the crossing at one of them"
+            )
+        label = self.majority_label
+        if majority is not None and not label:
+            raise ValueError(
+                f"majority_label is empty while majority_fraction is {majority}; it names the "
+                "majority date's column"
+            )
+        if majority is None and label:
+            raise ValueError(
+                f"majority_label {label!r} is set while majority_fraction is None; a label "
+                "names the majority date's column, and this entry names no majority"
+            )
+        for field, value in (
+            ("majority_label", label),
+            ("phenology_prefix", self.phenology_prefix),
+        ):
+            if value and not _TOKEN.fullmatch(value):
+                raise ValueError(
+                    f"{field} {value!r} is not a token free of whitespace; it is spelled into "
+                    "a column name"
+                )
+        if is_milestone_key(label):
+            raise ValueError(
+                f"majority_label {label!r} is shaped like a milestone key, which names the "
+                "column of a crossing at that percent; choose a label that is not"
+            )
+        return self
 
 
 QUESTIONS: dict[str, str] = {
