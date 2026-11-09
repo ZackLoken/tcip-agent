@@ -9360,7 +9360,7 @@
             "type": "array"
           },
           "delivered_value_keys": {
-            "description": "The value keys delivered rows may carry: at least one for the per-plant aggregate kinds,\nempty for the others, whose row schema is fixed by their writer.",
+            "description": "The value keys delivered rows may carry, authored for the value-key kinds\n(:data:`VALUE_KEY_KINDS`, at least one); empty for the others, whose writer fixes the row\nschema, the orthomosaic count's ``count`` among them.",
             "items": {
               "type": "string"
             },
@@ -9618,6 +9618,7 @@
                 "state_crossing_dates",
                 "per_image_count",
                 "per_plant_count_aggregate",
+                "per_plant_orthomosaic_count",
                 "per_plant_ordinal_aggregate",
                 "per_plant_regression_aggregate"
               ]
@@ -9643,7 +9644,7 @@
             "type": "string"
           },
           "plant_aggregation": {
-            "description": "The statistic a plant's per-image values combine into for a per-plant delivery; empty until\nauthored.",
+            "description": "The statistic a plant's per-image values combine into for a per-plant aggregate delivery\n(:data:`PLANT_AGGREGATE_KINDS`); empty until authored.",
             "enum": [
               "",
               "median",

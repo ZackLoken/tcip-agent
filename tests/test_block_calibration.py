@@ -229,9 +229,10 @@ def _assess(
     *,
     k_cal: int = 3,
     k_test: int = 3,
+    delivery_kind: str = "per_image_count",
     **stated: bool | int | float | str | MaskCut | None,
 ) -> dict:
-    """Assess the count trait's per-image count over ``exp``'s reserved regions.
+    """Assess the count trait's ``delivery_kind`` count over ``exp``'s reserved regions.
 
     ``assess_reserved_regions`` runs for ``exp``'s checkpoint in ``k_cal`` and ``k_test`` bands
     under the sample collection pass with the ``stated`` execution values over it (an NMS merge
@@ -248,7 +249,7 @@ def _assess(
             exp["project"],
             checkpoint_path=exp["checkpoint_path"],
             trait=fx.COUNT_TRAIT,
-            delivery_kind="per_image_count",
+            delivery_kind=delivery_kind,
             device="cpu",
             stated=collection_pass(
                 **{
@@ -485,6 +486,36 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path) -> None:
         "checkpoint_sha256": produced.sha256,
         "origin": "run",
     }
+
+
+def test_the_reserved_regions_are_assessed_for_a_count_on_the_mosaic(
+    tmp_path: Path,
+) -> None:
+    """A mosaic's reserved regions are assessed for the orthomosaic count, recorded under it.
+
+    The count trait's revision states the orthomosaic count of the mosaic's subject beside its
+    per-image count.
+    """
+    from tcip_mcp.assessment import read_assessment
+
+    kind = "per_plant_orthomosaic_count"
+    fx.propose_and_confirm(
+        tmp_path,
+        fx.with_operationalization(
+            fx.count_revision(tmp_path).entry,
+            kind,
+            measured_subject="bud",
+            delivered_phenotypes=("stem_count",),
+        ),
+    )
+
+    record = _assess(_attested(tmp_path), delivery_kind=kind)
+
+    assert "error" not in record, record
+    assert (
+        read_assessment(tmp_path, record["assessment_id"]).delivery_kind
+        == kind
+    )
 
 
 def test_a_run_with_no_reserved_region_refuses_naming_the_remedy(

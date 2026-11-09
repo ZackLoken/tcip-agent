@@ -200,7 +200,7 @@ def _orthomosaic_scene(project: Path, *, registered: bool = True) -> Bucket:
     )
 
     fx.seed_delivery_traits(project)
-    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_orthomosaic_count(project, "stem_count")
     raster_path = _raster(project)
     _write_geo_raster(raster_path)
     box = (8.0, 8.0, 12.0, 12.0)
@@ -358,7 +358,8 @@ def test_an_orthomosaic_count_over_a_bucket_recording_another_dataset_than_its_r
 def _count_trait_delivering_off_crop(project: Path) -> None:
     """Confirm the count trait delivering ``stem_count`` and :data:`OFF_CROP_PHENOTYPE`.
 
-    Its per-plant count operationalization covers ``stem_count`` alone.
+    The revision states no operationalization; the caller confirms the one its door ships under,
+    covering ``stem_count`` alone.
     """
     fx.propose_and_confirm(
         project,
@@ -366,7 +367,6 @@ def _count_trait_delivering_off_crop(project: Path) -> None:
             fx.COUNT_SPEC, delivers=("stem_count", OFF_CROP_PHENOTYPE)
         ),
     )
-    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
 
 
 def _names_the_off_crop_phenotype(error: str, crop: str) -> None:
@@ -391,6 +391,7 @@ def test_a_per_plant_delivery_of_a_revision_with_a_phenotype_off_the_registrys_c
     )
 
     _count_trait_delivering_off_crop(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
     dataset_root, date = _mapped(tmp_path)
 
     refused = _deliver(
@@ -481,6 +482,7 @@ def test_an_orthomosaic_delivery_of_a_revision_with_a_phenotype_off_the_registry
     )
 
     _count_trait_delivering_off_crop(tmp_path)
+    fx.seed_confirmed_orthomosaic_count(tmp_path, "stem_count")
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])

@@ -63,6 +63,7 @@ decided."""
 STATE_CROSSING_DATES = "state_crossing_dates"
 PER_IMAGE_COUNT = "per_image_count"
 PER_PLANT_COUNT_AGGREGATE = "per_plant_count_aggregate"
+PER_PLANT_ORTHOMOSAIC_COUNT = "per_plant_orthomosaic_count"
 PER_PLANT_ORDINAL_AGGREGATE = "per_plant_ordinal_aggregate"
 PER_PLANT_REGRESSION_AGGREGATE = "per_plant_regression_aggregate"
 
@@ -70,22 +71,23 @@ DELIVERY_KINDS = (
     STATE_CROSSING_DATES,
     PER_IMAGE_COUNT,
     PER_PLANT_COUNT_AGGREGATE,
+    PER_PLANT_ORTHOMOSAIC_COUNT,
     PER_PLANT_ORDINAL_AGGREGATE,
     PER_PLANT_REGRESSION_AGGREGATE,
 )
 """The delivered artifact shapes. Each kind decides which spec fields an operationalization of it
 rests on, whether it names delivered phenotypes, and whether it names value keys."""
 
-DETECTOR_KINDS = frozenset(
-    {STATE_CROSSING_DATES, PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE}
+COUNT_KINDS = frozenset(
+    {PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE, PER_PLANT_ORTHOMOSAIC_COUNT}
 )
-"""Kinds measured off a detector's detections of the operationalization's measured subject; the
-other kinds are measured off a scalar head (ordinal or regression)."""
+"""Kinds whose delivered number is a count of the measured subject's detections: per image, per
+plant over its images, or per plant on one orthomosaic."""
 
-if TYPE_CHECKING:
-    DeliveryKind = str
-else:
-    DeliveryKind = Literal[DELIVERY_KINDS]
+DETECTOR_KINDS = COUNT_KINDS | {STATE_CROSSING_DATES}
+"""Kinds measured off a detector's detections of the operationalization's measured subject: the
+count kinds and the state crossing; the other kinds are measured off a scalar head (ordinal or
+regression)."""
 
 _COUNT_FIELDS = (
     "count_objective",
@@ -105,6 +107,7 @@ CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
     ),
     PER_IMAGE_COUNT: _COUNT_FIELDS,
     PER_PLANT_COUNT_AGGREGATE: (*_COUNT_FIELDS, "plant_aggregation"),
+    PER_PLANT_ORTHOMOSAIC_COUNT: _COUNT_FIELDS,
     PER_PLANT_ORDINAL_AGGREGATE: (
         "ordinal_agreement_floor",
         "plant_aggregation",
@@ -117,6 +120,19 @@ CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
 }
 """The spec fields an operationalization of each kind rests on, its assessment's criterion
 included, each required to hold a value before the operationalization is proposed."""
+
+PLANT_AGGREGATE_KINDS = tuple(
+    k for k in DELIVERY_KINDS if "plant_aggregation" in CONSTITUTING_FIELDS[k]
+)
+"""Kinds whose per-plant value is the trait's ``plant_aggregation`` over the plant's per-image
+values, in :data:`DELIVERY_KINDS` order."""
+
+if TYPE_CHECKING:
+    DeliveryKind = str
+    PlantAggregateKind = str
+else:
+    DeliveryKind = Literal[DELIVERY_KINDS]
+    PlantAggregateKind = Literal[PLANT_AGGREGATE_KINDS]
 
 LOCALIZATION_FIELDS: dict[Localization, tuple[str, ...]] = {
     "center_match": (),
@@ -143,6 +159,7 @@ PHENOTYPE_NAMING_KINDS = frozenset(
     {
         STATE_CROSSING_DATES,
         PER_PLANT_COUNT_AGGREGATE,
+        PER_PLANT_ORTHOMOSAIC_COUNT,
         PER_PLANT_ORDINAL_AGGREGATE,
         PER_PLANT_REGRESSION_AGGREGATE,
     }
@@ -156,7 +173,8 @@ VALUE_KEY_KINDS = frozenset(
         PER_PLANT_REGRESSION_AGGREGATE,
     }
 )
-"""Kinds whose rows carry a value key, hence whose operationalization bounds the set."""
+"""Kinds whose operationalization states the value keys the breeder bounds its door to write; a
+door of any other kind fixes its rows' value key itself."""
 
 
 class TraitUnknownError(KeyError):
@@ -261,8 +279,9 @@ class Operationalization(BaseModel):
     """Which of the trait's ``delivers`` entries this kind ships under; empty for
     ``per_image_count``, whose CSV names no phenotype, and at least one for every other kind."""
     delivered_value_keys: tuple[str, ...]
-    """The value keys delivered rows may carry: at least one for the per-plant aggregate kinds,
-    empty for the others, whose row schema is fixed by their writer."""
+    """The value keys delivered rows may carry, authored for the value-key kinds
+    (:data:`VALUE_KEY_KINDS`, at least one); empty for the others, whose writer fixes the row
+    schema, the orthomosaic count's ``count`` among them."""
 
 
 class PositiveState(BaseModel):
@@ -356,8 +375,8 @@ class TraitEntry(BaseModel):
     regression_skill_floor: float | None
     """Min acceptable value of ``regression_criterion``; null until authored."""
     plant_aggregation: PlantAggregation
-    """The statistic a plant's per-image values combine into for a per-plant delivery; empty until
-    authored."""
+    """The statistic a plant's per-image values combine into for a per-plant aggregate delivery
+    (:data:`PLANT_AGGREGATE_KINDS`); empty until authored."""
     scale_tolerance_frac: float | None
     """Max relative disagreement a physical-scale reference half may show; null until authored."""
     holdout_match_quality_floor: float | None = Field(gt=0, le=1)

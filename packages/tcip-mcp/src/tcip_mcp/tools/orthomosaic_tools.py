@@ -55,7 +55,7 @@ def orthomosaic_plant_counts(
     """Deliver per-plant detection counts from a whole-raster prediction bucket as a CSV.
 
     The counts come from the bucket ``bucket`` published under ``dataset_root``, for exactly the
-    plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV at
+    plants ``plants`` names, delivered as a ``per_plant_orthomosaic_count`` CSV at
     ``output_csv_path`` (both established locations) under ``project`` by ``actor`` through the
     door ``door`` names, over the registered plant registry ``registry_record``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`), whose ``crop`` every
@@ -80,10 +80,11 @@ def orthomosaic_plant_counts(
     error of its segment's boundary, or in one whose detection is ambiguous) refuses, naming it
     and why. The registry's files must still hash to the bytes it registered.
 
-    Delivered through
-    :func:`~tcip_mcp.pipelines.postprocessing.aggregation.deliver_per_plant_aggregate`
-    under the bucket's gate, the recorded acknowledgment ``acknowledgment_id`` shipping it
-    unvalidated. The delivery event carries a
+    Each plant's count is its value as it is, no per-plant statistic applied, under the meaning
+    :func:`~tcip_mcp.pipelines.postprocessing.aggregation.plant_value_meaning` resolves, and is
+    delivered through :func:`~tcip_mcp.pipelines.postprocessing.aggregation.deliver_plant_values`
+    with no per-image cell, under the bucket's gate, the recorded acknowledgment
+    ``acknowledgment_id`` shipping it unvalidated. The delivery event carries a
     ``PlantRegistryDisclosure`` or, under ``canopy_subject``, a ``CanopySegmentDisclosure``.
     Refuses (``ValueError``) everything named above and whatever the delivery refuses.
     """
@@ -241,21 +242,26 @@ def orthomosaic_plant_counts(
             f"these population plants cannot be counted from this raster: {refused}."
         )
     from tcip_mcp.pipelines.postprocessing.aggregation import (
-        PlantObservation,
-        deliver_per_plant_aggregate,
+        deliver_plant_values,
+        plant_value_meaning,
     )
-    from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
+    from tcip_mcp.traits import PER_PLANT_ORTHOMOSAIC_COUNT
 
-    delivered = deliver_per_plant_aggregate(
+    meaning = plant_value_meaning(
         project,
-        [PlantObservation(plant_id=p, value=counts[p]) for p in wanted],
-        str(output_csv_path),
-        value_key=_PER_PLANT_VALUE_KEY,
+        delivery_kind=PER_PLANT_ORTHOMOSAIC_COUNT,
         delivered_phenotype=delivered_phenotype,
-        delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+        value_key=_PER_PLANT_VALUE_KEY,
+        crop=registry_record["crop"],
+    )
+    delivered = deliver_plant_values(
+        project,
+        meaning,
+        {p: counts[p] for p in wanted},
+        str(output_csv_path),
+        door_columns={},
         buckets=[found],
         plants=wanted,
-        crop=registry_record["crop"],
         door=door,
         plant_mapping=disclosure,
         acknowledgment_id=acknowledgment_id,

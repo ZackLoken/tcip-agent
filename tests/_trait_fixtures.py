@@ -346,11 +346,7 @@ def seed_confirmed_aggregate(
     It adds a ``delivery_kind`` operationalization over the trait's latest entry with its floors
     filled, passing that phenotype, ``value_keys`` and fixture wording, with ``fields`` over them.
     """
-    (trait,) = [
-        name
-        for name in traits.trait_names(project_root)
-        if delivered_phenotype in latest(name, project_root).delivers
-    ]
+    trait = _delivering(project_root, delivered_phenotype)
     return propose_and_confirm(
         project_root,
         with_operationalization(
@@ -362,3 +358,39 @@ def seed_confirmed_aggregate(
             **fields,
         ),
     )
+
+
+def seed_confirmed_orthomosaic_count(
+    project_root: Path, delivered_phenotype: str, **fields: object
+) -> TraitRevision:
+    """Confirm a revision of the trait delivering ``delivered_phenotype`` stating one count kind.
+
+    The revision's one operationalization is a ``per_plant_orthomosaic_count`` over the trait's
+    latest entry with its floors filled and ``plant_aggregation`` left unauthored, covering that
+    phenotype and naming no value key, with ``fields`` over its fixture wording.
+    """
+    trait = _delivering(project_root, delivered_phenotype)
+    return propose_and_confirm(
+        project_root,
+        with_operationalization(
+            with_fields(
+                with_floors(latest(trait, project_root)),
+                plant_aggregation="",
+                operationalizations={},
+            ),
+            traits.PER_PLANT_ORTHOMOSAIC_COUNT,
+            statement=f"the {delivered_phenotype} counted at one plant's place on a mosaic",
+            delivered_phenotypes=(delivered_phenotype,),
+            **fields,
+        ),
+    )
+
+
+def _delivering(project_root: Path, delivered_phenotype: str) -> str:
+    """Return the one trait at ``project_root`` whose latest entry delivers the phenotype named."""
+    (trait,) = [
+        name
+        for name in traits.trait_names(project_root)
+        if delivered_phenotype in latest(name, project_root).delivers
+    ]
+    return trait
