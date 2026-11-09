@@ -66,9 +66,8 @@ from tcip_mcp.registry_paths import (
     within,
 )
 from tcip_mcp.traits import (
+    COUNT_KINDS,
     DETECTOR_KINDS,
-    PER_IMAGE_COUNT,
-    PER_PLANT_COUNT_AGGREGATE,
     PER_PLANT_ORDINAL_AGGREGATE,
     STATE_CROSSING_DATES,
 )
@@ -1137,7 +1136,7 @@ def assess_reserved_regions(
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.raster_source import BandGroupRef, open_raster
 
-    if delivery_kind not in (PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE):
+    if delivery_kind not in COUNT_KINDS:
         raise AssessmentRefusedError(
             f"a mosaic's reserved regions answer for a count, not a "
             f"{delivery_kind} delivery."

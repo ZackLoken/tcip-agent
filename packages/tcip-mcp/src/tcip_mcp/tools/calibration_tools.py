@@ -85,8 +85,9 @@ def assess_checkpoint(
         checkpoint_path: A checkpoint registered in this project.
         trait: The trait whose latest confirmed revision states the criterion's floors.
         delivery_kind: The delivered kind assessed (``per_image_count``,
-            ``per_plant_count_aggregate``, ``state_crossing_dates``,
-            ``per_plant_ordinal_aggregate``, ``per_plant_regression_aggregate``).
+            ``per_plant_count_aggregate``, ``per_plant_orthomosaic_count``,
+            ``state_crossing_dates``, ``per_plant_ordinal_aggregate``,
+            ``per_plant_regression_aggregate``).
         selection_dir: A selection drawn with calibration and holdout sides (``draw_splits``).
         equivalence_z: The one-sided standard-error multiplier of a count's bias equivalence
             test (1.645 is a one-sided 95 percent test).
@@ -150,7 +151,8 @@ def assess_reserved_regions(
     Args:
         checkpoint_path: A checkpoint registered in this project, produced by a run of it.
         trait: The trait whose latest confirmed revision states the criterion's floors.
-        delivery_kind: ``per_image_count`` or ``per_plant_count_aggregate``.
+        delivery_kind: A count kind: ``per_image_count``, ``per_plant_count_aggregate`` or
+            ``per_plant_orthomosaic_count``.
         k_cal / k_test: Bands per reserved region, recorded with the assessment; a side holding
             fewer bands carrying ground truth than the reference floor refuses before any
             inference.
