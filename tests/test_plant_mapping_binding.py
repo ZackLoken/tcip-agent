@@ -36,6 +36,7 @@ from tests._mapping_fixtures import (
     write_plant_csv,
 )
 from tests._web_fixtures import named_project
+from tests.test_registered_plants import CHANGES
 from tests.test_second_trait_acceptance import (
     BLOOM_STATE,
     FLOWERS,
@@ -877,6 +878,63 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
     assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg", DATES[1]]
 
 
+@pytest.mark.parametrize(
+    ("unpredicted", "disclosed"),
+    [
+        (UNREAD_P2, [f"{next(iter(UNREAD_P2))}.jpg", "stray.jpg"]),
+        (frozenset(), []),
+    ],
+    ids=["short_of_full", "full"],
+)
+def test_coverage_short_of_full_discloses_every_unread_stem_and_full_coverage_none(
+    tmp_path: Path, unpredicted: frozenset[str], disclosed: list[str]
+) -> None:
+    """A date read short of full coverage discloses each present stem it did not read.
+
+    The date holds a capture far from every plant, which the mapping attributes to none, beside
+    the plants' own. With the second plant's prediction document left out, the unattributed
+    capture and that plant's capture are both disclosed; with every prediction present, coverage
+    is full and nothing is.
+    """
+    _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    plant_csv, preds_by_date = _write_scene(
+        dataset_root, dates=[DATES[0]], unpredicted=unpredicted
+    )
+    write_geo_image(
+        image_dir(dataset_root, DATES[0]) / "stray.jpg",
+        PLANTS[0]["lat"] + 0.01,
+        PLANTS[0]["lon"],
+        datetime(2026, 2, 11, 10, 0),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
+    )
+    build_res = build_plant_mapping(
+        tmp_path,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
+    )
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    res = _deliver(
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        plants=POPULATION,
+        dataset_root=dataset_root,
+        buckets=preds_by_date.values(),
+        output_csv_path=str(tmp_path / "out.csv"),
+    )
+    assert "error" not in res, res
+
+    pm = _events(tmp_path)[-1]["plant_mapping"]
+    assert pm["captures_unverified"] == [
+        f"{DATES[0]}/{name}" for name in sorted(disclosed)
+    ]
+
+
 def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1299,13 +1357,19 @@ def test_the_delivery_events_plant_mapping_block_carries_the_match_radius(
     )
 
 
-# ── rail 12: a moved plant CSV and an archived date deliver, disclosed rather than refused
+# ── rail 12: a registry CSV gone refuses, naming it; an archived date is disclosed ──────
 
 
-def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
+def test_deliver_phenology_milestones_refuses_a_removed_plant_csv_naming_it(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A plant CSV moved away after the build refuses the delivery tool, naming the CSV.
+
+    The refusal comes before any gate, so no output is written and no delivery event recorded.
+    """
+    from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     plant_csv, preds_by_date = _write_scene(dataset_root)
@@ -1319,8 +1383,46 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    moved = tmp_path / "plants_moved.csv"
-    plant_csv.rename(moved)
+    plant_csv.rename(tmp_path / "plants_moved.csv")
+
+    out_csv = tmp_path / "out.csv"
+    res = deliver_phenology_milestones(
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        dataset_root=str(dataset_root),
+        buckets=list(preds_by_date.values()),
+        output_csv_path=str(out_csv),
+        plants=POPULATION,
+        actor=None,
+    )
+    assert "not found" in res["error"], res
+    assert str(plant_csv) in res["error"], res
+    assert not out_csv.exists()
+    assert read_delivery_events(tmp_path) == []
+
+
+def test_an_archived_date_folder_beside_intact_plant_csvs_delivers_disclosing_the_date(
+    tmp_path: Path,
+) -> None:
+    """A delivered date whose capture folder is gone delivers, the bare date disclosed.
+
+    Every registered plant CSV is intact and every date's bucket is delivered; only the first
+    date's folder is removed, so that date is the one entry disclosed as unverified.
+    """
+    _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
+    build_res = build_plant_mapping(
+        tmp_path,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
+    )
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
     shutil.rmtree(image_dir(dataset_root, DATES[0]))
 
     out_csv = tmp_path / "out.csv"
@@ -1337,20 +1439,15 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
     assert out_csv.exists()
 
     events = _events(tmp_path)
-    pm = events[-1]["plant_mapping"]
-    assert str(plant_csv) in pm["plant_csvs_unverified"]
-    assert DATES[0] in pm["captures_unverified"]
+    assert events[-1]["plant_mapping"]["captures_unverified"] == [DATES[0]]
 
 
-def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_reports_it_moved(
+def test_one_removed_plant_csv_of_a_registrys_two_refuses_naming_that_csv_alone(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A read capture whose plant's own CSV is missing is disclosed, not reported moved.
+    """A registry of one CSV per plant, one of them removed, refuses the delivery naming it.
 
-    One plant's verified CSV does not answer for another plant's missing one: a read capture whose
-    recorded plant sits in the unreachable CSV did not move, and the delivery succeeds with that
-    CSV in plant_csvs_unverified and the capture among the unverified captures.
+    The CSV still on disk is not named, and no output is written.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -1382,25 +1479,19 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
         buckets=preds_by_date.values(),
         output_csv_path=str(out_csv),
     )
-    assert "error" not in res, res
-    assert out_csv.exists()
-
-    events = _events(tmp_path)
-    pm = events[-1]["plant_mapping"]
-    assert str(per_plant_csvs[1]) in pm["plant_csvs_unverified"]
-    p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
-    assert f"{DATES[0]}/{p2_stem}.jpg" in pm["captures_unverified"]
+    assert str(per_plant_csvs[1]) in res["error"], res
+    assert str(per_plant_csvs[0]) not in res["error"], res
+    assert not out_csv.exists()
 
 
-def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_read(
+def test_a_moved_capture_whose_own_csv_is_removed_refuses_under_a_partial_read(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A moved capture whose own CSV is missing is disclosed under a partial read.
+    """A moved capture whose own CSV is removed refuses the delivery under a partial read.
 
     Three plants, one CSV each: one plant's capture moves on disk and that plant's own CSV is
-    deleted, with a third plant's prediction absent. The delivery succeeds and discloses the moved
-    capture as unverified.
+    deleted, with a third plant's prediction absent. The delivery refuses naming the removed CSV,
+    and no output is written.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -1455,12 +1546,79 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
         buckets=preds_by_date.values(),
         output_csv_path=str(out_csv),
     )
-    assert "error" not in res, res
-    assert out_csv.exists()
+    assert str(per_plant_csvs[1]) in res["error"], res
+    assert not out_csv.exists()
 
-    events = _events(tmp_path)
-    pm = events[-1]["plant_mapping"]
-    assert f"{DATES[0]}/{p2_stem}.jpg" in pm["captures_unverified"]
+
+@pytest.mark.parametrize(("rewritten", "removed"), CHANGES)
+def test_a_delivery_over_a_changed_registry_refuses_naming_each_changed_csv_as_the_build_does(
+    tmp_path: Path, rewritten: list[int], removed: list[int]
+) -> None:
+    """A delivery over a registry whose CSVs changed names every changed CSV and no intact one.
+
+    Three plants, one CSV each, mapped before the change. The delivery tool's refusal names
+    exactly the rewritten and removed CSVs and carries the sentence ``build_plant_mapping``
+    answers over the same changed registry, and no output is written.
+    """
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    plants3 = [
+        *PLANTS,
+        {
+            "plot": "P3",
+            "accession": "acc-C",
+            "lat": 43.19670,
+            "lon": -90.058074,
+        },
+    ]
+    _plant_csv, preds_by_date = _write_scene(
+        dataset_root, dates=[DATES[0]], plants=plants3
+    )
+    per_plant_csvs = [
+        write_plant_csv(tmp_path / f"plants_{p['plot']}.csv", [p])
+        for p in plants3
+    ]
+    registry = register_plant_registry_for(tmp_path, per_plant_csvs)
+    build_res = build_plant_mapping(
+        tmp_path,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=registry,
+        actor=None,
+    )
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    for i in rewritten:
+        per_plant_csvs[i].write_bytes(per_plant_csvs[i].read_bytes() + b"\n")
+    for i in removed:
+        per_plant_csvs[i].unlink()
+    changed = {per_plant_csvs[i] for i in (*rewritten, *removed)}
+
+    out_csv = tmp_path / "out.csv"
+    res = deliver_phenology_milestones(
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        dataset_root=str(dataset_root),
+        buckets=list(preds_by_date.values()),
+        output_csv_path=str(out_csv),
+        plants=[p["plot"] for p in plants3],
+        actor=None,
+    )
+    for csv_path in per_plant_csvs:
+        assert (csv_path.name in res["error"]) == (csv_path in changed), res
+    built = build_plant_mapping(
+        tmp_path,
+        name="probe",
+        dataset_root=str(dataset_root),
+        plant_registry=registry,
+        actor=None,
+    )
+    assert built["error"] in res["error"], (built, res)
+    assert not out_csv.exists()
 
 
 # ── rail 15: the build route's happy path, and a moved+re-registered dataset still binds ─

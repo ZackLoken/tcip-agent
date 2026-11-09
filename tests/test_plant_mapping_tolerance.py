@@ -125,7 +125,7 @@ def test_the_served_build_and_its_disclosure_read_the_recorded_radius(
     recorded = build.to_record()["match_radius"]
     assert recorded == {DATE: DerivedRadius(value=2.5).model_dump()}
     assert build.served().model_dump()["match_radius"] == recorded
-    disclosure = build.delivery_disclosure(MappingVerification([], []), [DATE])
+    disclosure = build.delivery_disclosure(MappingVerification([]), [DATE])
     assert disclosure.model_dump()["match_radius"] == recorded
 
 
