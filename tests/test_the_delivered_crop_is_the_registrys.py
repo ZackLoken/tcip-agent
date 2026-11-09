@@ -5,7 +5,9 @@ phenology tool and its two routes, and the orthomosaic tool and its route. A dat
 registry of different crops refuse at the build and at every mapped delivery, naming both; an
 orthomosaic count is tied to the dataset its bucket recorded; a trait revision delivering a
 phenotype crops.yml does not name for the registry's crop refuses, naming both; and every
-delivered row's ``crop`` cell is the registry's, with no door taking one.
+delivered row's ``crop`` cell is the registry's, with no door taking one. The delivered CSV also
+carries no ``pipeline_version`` column, what produced it being the producer its delivery event
+records, and no door takes one.
 """
 
 from __future__ import annotations
@@ -492,13 +494,13 @@ def test_an_orthomosaic_delivery_of_a_revision_with_a_phenotype_off_the_registry
 # ── the delivered crop cell ─────────────────────────────────────────────
 
 
-def test_a_per_plant_delivery_writes_its_registrys_crop_in_every_row(
+def test_a_per_plant_delivery_derives_its_crop_and_writes_no_pipeline_version(
     tmp_path: Path,
 ) -> None:
     """A validated per-plant delivery through the tool writes the registry's crop in every row.
 
     The bucket is published under a per-plant count assessment and mapped by ``valley`` at
-    :data:`COUNT_CROP`, read back from the written CSV.
+    :data:`COUNT_CROP`, read back from the written CSV, whose header has no ``pipeline_version``.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
@@ -531,12 +533,13 @@ def test_a_per_plant_delivery_writes_its_registrys_crop_in_every_row(
     registry = load_registry(tmp_path, "valley-registry")
     assert registry["crop"] == COUNT_CROP
     assert {row["crop"] for row in csv_rows(out)} == {registry["crop"]}
+    assert "pipeline_version" not in csv_rows(out)[0]
 
 
-def test_an_orthomosaic_delivery_writes_its_registrys_crop_in_every_row_at_both_doors(
+def test_an_orthomosaic_delivery_derives_its_crop_and_writes_no_pipeline_version_at_both_doors(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """The orthomosaic tool and route each write the registry's crop in every row.
+    """The orthomosaic tool and route each write the registry's crop and no ``pipeline_version``.
 
     Each ships under an acknowledgment of the digest its own refusal named, the route's through
     a breeder's acknowledgment from the page, read back from the CSV each wrote.
@@ -560,21 +563,29 @@ def test_an_orthomosaic_delivery_writes_its_registrys_crop_in_every_row_at_both_
     )
 
     assert "error" not in tool, tool
-    assert {row["crop"] for row in csv_rows(tmp_path / "counts.csv")} == {crop}
+    written = csv_rows(tmp_path / "counts.csv")
+    assert {row["crop"] for row in written} == {crop}
+    assert "pipeline_version" not in written[0]
     assert route.status_code == 200, route.text[:300]
     served = csv_rows(tmp_path / "results_export" / "plant_counts.csv")
     assert {row["crop"] for row in served} == {crop}
+    assert "pipeline_version" not in served[0]
 
 
-# ── no door takes a crop ────────────────────────────────────────────────
+# ── no door takes a derived column ──────────────────────────────────────
 
 
-def test_neither_delivering_tool_nor_the_count_payload_takes_a_crop(
-    client: TestClient, opened_project: Path
+@pytest.mark.parametrize(
+    ("key", "value"), [("crop", CROP), ("pipeline_version", "v1")]
+)
+def test_neither_delivering_tool_nor_the_count_payload_takes_the_key(
+    client: TestClient, opened_project: Path, key: str, value: str
 ) -> None:
-    """The two per-plant tools list no ``crop`` parameter, and the count payload refuses one.
+    """The two per-plant tools list no ``key`` parameter, and the count payload refuses one.
 
-    The listing is the MCP server's own; the payload's refusal is its schema's, 422.
+    ``key`` is a column the delivered CSV derives or drops: ``crop`` (the registry's) or
+    ``pipeline_version`` (the delivery event's producer). The listing is the MCP server's own;
+    the payload's refusal is its schema's, 422.
     """
     import anyio
 
@@ -595,7 +606,7 @@ def test_neither_delivering_tool_nor_the_count_payload_takes_a_crop(
                 "plant_registry": "reg",
                 "delivered_phenotype": "stem_count",
                 "plants": ["plot0"],
-                "crop": CROP,
+                key: value,
             },
             "filename": "counts.csv",
             "user": "breeder",
@@ -604,6 +615,6 @@ def test_neither_delivering_tool_nor_the_count_payload_takes_a_crop(
 
     for name in ("deliver_per_plant_csv", "deliver_orthomosaic_plant_counts"):
         assert {"plant_registry", "plant_mapping"} & set(listed[name])
-        assert "crop" not in listed[name], name
+        assert key not in listed[name], name
     assert refused.status_code == 422, refused.text
-    assert "crop" in refused.text
+    assert key in refused.text
