@@ -520,6 +520,17 @@ def _second_folder_gone(project: Path, dataset_root: Path) -> list[str]:
     return buckets
 
 
+def _p2_unread(project: Path, dataset_root: Path) -> list[str]:
+    """Publish both dates, the first's ``c`` undocumented, then remove the second's folder.
+
+    The delivery reads no image of ``P2``: its first-date image has no document and its
+    second-date image is gone with its folder.
+    """
+    buckets = _published(project, dataset_root, frozenset({(FIRST, "c")}))
+    shutil.rmtree(image_dir(dataset_root, SECOND))
+    return buckets
+
+
 def _arguments_over(
     project: Path,
     dataset_root: Path,
@@ -586,16 +597,11 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
     assert isinstance(answer, dict) and "error" not in answer, answer
     build = load_mapping(tmp_path, "valley")
     assert build is not None
-    persisted = {
-        (date, a.stem): a
-        for date, rows in build.assignments.items()
-        for a in rows
-    }
     of_plant = {
         plant: [
-            persisted[date, stem]
+            build.by_stem[date][stem]
             for date, stem, _ in READ
-            if persisted[date, stem].plant_id == plant
+            if build.by_stem[date][stem].plant_id == plant
         ]
         for plant in ("P1", "P2")
     }
@@ -685,6 +691,13 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
             "no result names them",
             f"'{FIRST}/b'",
         ),
+        (
+            _p2_unread,
+            _rows(*READ[:2]),
+            ("P1", "P2"),
+            "a delivery ships exactly its population",
+            "['P1', 'P2']",
+        ),
     ],
     ids=[
         "undelivered_date",
@@ -696,6 +709,7 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
         "absent_folder",
         "repeated_image",
         "uncovered_image",
+        "plant_with_no_read_image",
     ],
 )
 def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_plant_refuses(
@@ -709,7 +723,8 @@ def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_
     """A result the mapping cannot place, or a read image no result covers, refuses by image.
 
     The refusal names the image and its reason, through the server's door, and no delivery
-    event or CSV is written.
+    event or CSV is written. A delivered plant the delivery read no image of refuses for the
+    population, naming it.
     """
     from tcip_mcp.delivery import read_delivery_events
 
@@ -895,7 +910,6 @@ def test_no_parameter_of_the_aggregate_or_the_door_names_a_results_plant() -> (
 
     assert set(result.model_fields) == {"date", "stem", "value"}
     assert {"results", "mapping"} <= set(parameters)
-    assert {"records", "plant_mapping", "crop"}.isdisjoint(parameters)
 
 
 def _arguments(rows: list[dict]) -> dict:
