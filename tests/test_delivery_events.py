@@ -373,6 +373,12 @@ def _acknowledged_per_plant_csv(
         read_bucket(Path(arguments["dataset_root"]), name)
         for name in arguments["buckets"]
     ]
+    resolved = plant_mapping_disclosure(
+        project,
+        arguments["plant_mapping"],
+        by_recorded_date(published),
+        arguments["plants"],
+    )
     return "deliver_per_plant_csv", {
         **arguments,
         "acknowledgment_id": _acknowledged_for(
@@ -389,13 +395,9 @@ def _acknowledged_per_plant_csv(
                 delivery_kind=arguments["delivery_kind"],
                 buckets=published,
                 plants=arguments["plants"],
+                crop=resolved.verified.crop,
                 door="deliver_per_plant_csv",
-                plant_mapping=plant_mapping_disclosure(
-                    project,
-                    arguments["plant_mapping"],
-                    by_recorded_date(published),
-                    arguments["plants"],
-                ),
+                plant_mapping=resolved.disclosure,
                 actor=None,
             ),
         ),
@@ -814,7 +816,7 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(
     }
     mapping = plant_mapping_disclosure(
         mapped, "valley", buckets, binding.POPULATION
-    )
+    ).disclosure
 
     nearest = tmp_path / "nearest"
     raster_path = ortho._raster(nearest)

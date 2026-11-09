@@ -42,6 +42,7 @@ from tests._chain_fixtures import (
     digest_of,
     unassessed_bucket,
 )
+from tests._mapping_fixtures import COUNT_CROP
 from tests.test_physical_scale_assessment import (
     SUBJECT as REFERENCE_SUBJECT,
     _calibrate,
@@ -129,7 +130,7 @@ def _validated_bucket(project: Path) -> Bucket:
         actor=None,
     )
     assert "error" not in published, published
-    map_plants(project, root, PLANTS)
+    map_plants(project, root, PLANTS, crop=COUNT_CROP)
     return read_bucket(root, bucket)
 
 
@@ -153,6 +154,9 @@ def _deliver(
     plants: list[str] = PLANTS,
 ) -> PerPlantDelivered:
     """Deliver the area of ``plants`` over ``bucket`` under the scale assessment ``scale``."""
+    resolved = plant_mapping_disclosure(
+        project, "valley", by_recorded_date([bucket]), plants
+    )
     return deliver_per_plant_aggregate(
         project,
         [PlantObservation(plant_id=plant, value=12.5) for plant in plants],
@@ -162,10 +166,9 @@ def _deliver(
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket],
         plants=plants,
+        crop=resolved.verified.crop,
         door="test_scale_on_event",
-        plant_mapping=plant_mapping_disclosure(
-            project, "valley", by_recorded_date([bucket]), plants
-        ),
+        plant_mapping=resolved.disclosure,
         scale_assessment_id=scale,
         acknowledgment_id=acknowledgment,
         actor=None,
@@ -330,7 +333,7 @@ def _answered_scene(project: Path) -> tuple[str, Bucket]:
         ],
         scope={"subject": REFERENCE_SUBJECT},
     )
-    map_plants(project, project / "ds", ["p1"])
+    map_plants(project, project / "ds", ["p1"], crop=COUNT_CROP)
     return scale, bucket
 
 

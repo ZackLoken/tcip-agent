@@ -210,6 +210,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     from tests._chain_fixtures import acknowledged, predicted, published
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
+        COUNT_CROP,
         PHOTO_POSITION_ERROR_M,
         map_plants,
         plant_positions,
@@ -250,12 +251,15 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         [predicted(image_dir(tmp_path / "ds", later) / "r0.png", [SUBJECT])],
         scope={"subject": SUBJECT},
     )
-    map_plants(tmp_path, tmp_path / "ds", ["p1"])
+    map_plants(tmp_path, tmp_path / "ds", ["p1"], crop=COUNT_CROP)
     records = [PlantObservation(plant_id="p1", value=12.5)]
 
     def delivered(
         out: Path, ack: str | None, over: Bucket, **kw: str | None
     ) -> PerPlantDelivered:
+        resolved = plant_mapping_disclosure(
+            tmp_path, "valley", by_recorded_date([over]), ["p1"]
+        )
         return deliver_per_plant_aggregate(
             tmp_path,
             records,
@@ -265,10 +269,9 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
             delivery_kind="per_plant_count_aggregate",
             buckets=[over],
             plants=["p1"],
+            crop=resolved.verified.crop,
             door="test_scale",
-            plant_mapping=plant_mapping_disclosure(
-                tmp_path, "valley", by_recorded_date([over]), ["p1"]
-            ),
+            plant_mapping=resolved.disclosure,
             acknowledgment_id=ack,
             actor=None,
             **kw,

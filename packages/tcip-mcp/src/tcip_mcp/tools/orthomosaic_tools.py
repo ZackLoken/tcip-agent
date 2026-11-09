@@ -44,7 +44,6 @@ def orthomosaic_plant_counts(
     output_csv_path: Path,
     delivered_phenotype: str,
     plants: list[str],
-    crop: str = "",
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
@@ -60,8 +59,12 @@ def orthomosaic_plant_counts(
     plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV at
     ``output_csv_path`` (both established locations) under ``project`` by ``actor`` through the
     door ``door`` names, over the registered plant registry ``registry_record``
-    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`).
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`), whose ``crop`` every
+    row carries.
 
+    The bucket must record the dataset its root's identity names, and that dataset must be of the
+    registry's crop
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_agreeing_crops`).
     The raster is the one the bucket's record names; it must still be the raster its recorded
     content identity and georeferencing describe
     (:func:`~tcip_mcp.pipelines.raster_source.georeferenced_raster_identity_mismatch`). Each
@@ -91,6 +94,7 @@ def orthomosaic_plant_counts(
     )
     from tcip_annotation.state import bbox_of
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.delivery import OrthomosaicDelivered
     from tcip_mcp.pipelines.delivery_events_schema import (
         PlantRegistryDisclosure,
@@ -106,6 +110,7 @@ def orthomosaic_plant_counts(
         PlantRegistryReference,
         assignment_is_attributed,
         registered_plants,
+        require_agreeing_crops,
         require_named_plants,
         resolve_nn_tolerance_m,
     )
@@ -141,6 +146,25 @@ def orthomosaic_plant_counts(
             f"bucket {bucket!r} is a bucket of per-image predictions, not of one "
             "raster: deliver its counts through deliver_per_image_counts."
         )
+    identity = require_dataset_identity(found.root)
+    if found.dataset_id is None:
+        raise ValueError(
+            f"bucket {bucket!r} under {found.root} records no dataset: its raster was published "
+            "outside a capture of a registered dataset, so nothing ties its counts to a "
+            "dataset's plants; register the dataset and publish the raster's predictions again."
+        )
+    if found.dataset_id != identity.id:
+        raise ValueError(
+            f"bucket {bucket!r} records dataset {found.dataset_id!r}, and its root "
+            f"{found.root} is dataset {identity.id!r}: deliver it under the root of the dataset "
+            "it records."
+        )
+    require_agreeing_crops(
+        identity,
+        found.root,
+        registry_name=registry_record["name"],
+        registry_crop=registry_record["crop"],
+    )
     raster, fresh = open_as_recorded(recorded_identity, raster_path)
     with raster:
         # The header's one georeference outcome: the identity's geotransform is derived from it,
@@ -232,7 +256,7 @@ def orthomosaic_plant_counts(
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[found],
         plants=wanted,
-        crop=crop,
+        crop=registry_record["crop"],
         pipeline_version=pipeline_version,
         door=door,
         plant_mapping=disclosure,
@@ -376,7 +400,6 @@ def deliver_orthomosaic_plant_counts(
     output_csv_path: str,
     delivered_phenotype: str,
     plants: list[str],
-    crop: str = "",
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
@@ -407,7 +430,6 @@ def deliver_orthomosaic_plant_counts(
             located(output_csv_path, project),
             delivered_phenotype,
             plants,
-            crop=crop,
             pipeline_version=pipeline_version,
             nn_tolerance_m=nn_tolerance_m,
             canopy_subject=canopy_subject,

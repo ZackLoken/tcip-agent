@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
-from tcip_annotation.text import Text
+from tcip_annotation.text import Crop, Text
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -143,7 +143,7 @@ def deliver_per_plant_aggregate(
     delivery_kind: str,
     buckets: Sequence[Bucket],
     plants: list[str],
-    crop: str = "",
+    crop: Crop,
     pipeline_version: str = "",
     door: str,
     plant_mapping: PlantMapping,
@@ -160,7 +160,9 @@ def deliver_per_plant_aggregate(
     ``buckets`` the values came from.
 
     ``delivered_phenotype`` resolves to the one trait whose latest confirmed revision delivers it,
-    and that revision's ``delivery_kind`` operationalization must cover it and ``value_key``. The
+    and that revision's ``delivery_kind`` operationalization must cover it and ``value_key``; a
+    revision delivering a phenotype crops.yml does not name for ``crop``, the delivered plants'
+    registry's crop, refuses (:func:`~tcip_mcp.traits.require_delivered_for_crop`). The
     records are aggregated per plant under the revision's ``plant_aggregation``
     (:func:`_per_plant`); the plants must be exactly the population, every one carrying a value.
     The units come from ``value_key``, cross-checked against crops.yml. The buckets, the
@@ -168,7 +170,7 @@ def deliver_per_plant_aggregate(
     :func:`~tcip_mcp.delivery.gate`, the recorded acknowledgment ``acknowledgment_id`` shipping
     them unvalidated when it does not validate them.
 
-    Each row carries the plant, its value and unit, its provenance of attribution, and the
+    Each row carries the plant, ``crop``, its value and unit, its provenance of attribution, and the
     delivery's own cells, written with the delivery's one event under ``door`` with its
     population and ``plant_mapping`` disclosure (:func:`~tcip_mcp.delivery.deliver_csv`); returns
     what was delivered.
@@ -181,7 +183,10 @@ def deliver_per_plant_aggregate(
         gate,
     )
     from tcip_mcp.operationalization import confirmed_revision
-    from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
+    from tcip_mcp.traits import (
+        PER_PLANT_COUNT_AGGREGATE,
+        require_delivered_for_crop,
+    )
 
     units, linear_basis, declared = _resolve_units(
         delivered_phenotype,
@@ -199,6 +204,7 @@ def deliver_per_plant_aggregate(
         delivered_phenotype=delivered_phenotype,
         value_key=value_key,
     )
+    require_delivered_for_crop(revision.entry, crop)
     by_plant = {
         s["plant_id"]: s
         for s in _per_plant(

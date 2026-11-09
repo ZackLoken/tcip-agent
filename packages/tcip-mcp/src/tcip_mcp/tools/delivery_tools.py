@@ -23,7 +23,6 @@ def deliver_per_plant_csv(
     buckets: list[str],
     value_key: str,
     plant_mapping: str,
-    crop: str = "",
     pipeline_version: str = "",
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
@@ -46,7 +45,7 @@ def deliver_per_plant_csv(
     ``plant_mapping`` is the claim about where the rows' plant identities came from, disclosed
     through ``plant_mapping.plant_mapping_disclosure``, which refuses an unstored mapping and a
     delivered plant the mapping assigned on no delivered date; the rows' ``plant_attribution`` is
-    that disclosure's.
+    that disclosure's, and their ``crop`` the crop of the plant registry the mapping verified.
 
     Args:
         results: Per-image observations, each the plant ``build_plant_mapping`` assigned its
@@ -63,7 +62,7 @@ def deliver_per_plant_csv(
             each stands for the date its own record states.
         value_key: The quantity every value is, one the operationalization covers.
         plant_mapping: The persisted plant mapping the rows' plant ids came from.
-        crop / pipeline_version: Written into every row.
+        pipeline_version: Written into every row.
         scale_assessment_id: The physical-scale assessment a dimensional value rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
 
@@ -78,7 +77,7 @@ def deliver_per_plant_csv(
         root = located(dataset_root, project)
         delivered = [read_bucket(root, b) for b in buckets]
         wanted = population(plants)
-        disclosure = mapping.plant_mapping_disclosure(
+        resolved = mapping.plant_mapping_disclosure(
             project, plant_mapping, by_recorded_date(delivered), wanted
         )
         return deliver_per_plant_aggregate(
@@ -90,10 +89,10 @@ def deliver_per_plant_csv(
             delivery_kind=delivery_kind,
             buckets=delivered,
             plants=wanted,
-            crop=crop,
+            crop=resolved.verified.crop,
             pipeline_version=pipeline_version,
             door="deliver_per_plant_csv",
-            plant_mapping=disclosure,
+            plant_mapping=resolved.disclosure,
             scale_assessment_id=scale_assessment_id,
             acknowledgment_id=acknowledgment_id,
             actor=actor,

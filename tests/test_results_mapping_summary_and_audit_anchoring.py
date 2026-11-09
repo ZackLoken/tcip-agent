@@ -113,15 +113,12 @@ def _capture_fixture(root: Path) -> dict:
         1.0,
     )
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
-    from tests._mapping_fixtures import register_plant_registry_for
+    from tests._mapping_fixtures import CROP, register_plant_registry_for
     from tests._web_fixtures import open_new_project
 
     # The mapping doors build for the project the GUI has open, the one these captures belong to.
     open_new_project(root)
-    register_dataset(
-        root, str(root), sorted(registered_crops())[0], actor=None
-    )
+    register_dataset(root, str(root), CROP, actor=None)
     registry = register_plant_registry_for(root, [csv_path])
     return {
         "name": "valley",

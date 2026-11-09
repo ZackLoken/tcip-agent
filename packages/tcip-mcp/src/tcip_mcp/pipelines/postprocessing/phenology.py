@@ -596,14 +596,18 @@ def measure_phenology(
     Reads the trait's latest confirmed revision stating a ``state_crossing_dates``
     operationalization, bound against the dataset's registry (refusing, ``ValueError``, a dataset
     with none), then the buckets and the mapping (``plant_mapping.resolve_delivery_mapping``);
-    each refuses as it does, and so does :func:`per_plant_phenology`
-    (:func:`measurement_refusals`).
+    each refuses as it does, a revision delivering a phenotype crops.yml does not name for the
+    mapping's registry's crop refuses (:func:`~tcip_mcp.traits.require_delivered_for_crop`), and
+    so does :func:`per_plant_phenology` (:func:`measurement_refusals`).
     """
     from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.subject_registry import registry_for_dataset_root
-    from tcip_mcp.traits import STATE_CROSSING_DATES
+    from tcip_mcp.traits import (
+        STATE_CROSSING_DATES,
+        require_delivered_for_crop,
+    )
 
     registry = registry_for_dataset_root(dataset_root)
     if registry is None:
@@ -621,6 +625,7 @@ def measure_phenology(
     mapping_build, verified = plant_mapping.resolve_delivery_mapping(
         project, mapping_name, dated
     )
+    require_delivered_for_crop(revision.entry, verified.crop)
     return PhenologyMeasurement(
         revision=revision,
         buckets=dated,

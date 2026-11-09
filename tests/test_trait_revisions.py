@@ -199,6 +199,7 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     from tests._chain_fixtures import deliver_acknowledged
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
+        COUNT_CROP,
         PHOTO_POSITION_ERROR_M,
         map_plants,
         plant_positions,
@@ -219,7 +220,7 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
         datetime(2026, 2, 11, 9),
         h_pos_err=PHOTO_POSITION_ERROR_M,
     )
-    map_plants(tmp_path, tmp_path / "ds", ["p1"])
+    map_plants(tmp_path, tmp_path / "ds", ["p1"], crop=COUNT_CROP)
     deliver_acknowledged(
         tmp_path,
         [PlantObservation(plant_id="p1", value=5)] * 2,
