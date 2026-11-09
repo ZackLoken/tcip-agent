@@ -271,25 +271,39 @@ run_inference(
     bucket="stage-b/<date>",
 )
 
-# Plant identity is never guessed from a filename: the door applies build_plant_mapping's mapping.
-from pathlib import Path
+# Plant identity is never guessed from a filename: build_plant_mapping assigns each image its plant.
+from tcip_mcp.buckets import by_recorded_date, read_bucket
+from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    plant_mapping_disclosure,
+    read_images,
+)
 
-# Each record names its image by capture date and stem, and carries the image's value.
+plants = [...]
+resolved = plant_mapping_disclosure(
+    project_root,
+    mapping_name,  # from a prior build_plant_mapping call
+    by_recorded_date([read_bucket(dataset_root, "stage-b/<date>")]),
+    plants,
+)
+# Your own per-image reader, answering {(date, stem): count}.
+counts = read_stage_b_counts("stage-b/<date>")
+
+# The door admits exactly one record per image the mapping attributes to a plant of `plants` that
+# the delivery read (read_images), and refuses a record of any other image, naming it.
 records = [
-    {"date": "<date>", "stem": Path(r["image"]).stem, "value": r["count"]}
-    for r in read_stage_b_preds_as_image_results(
-        "stage-b/<date>"
-    )  # your own per-image count reader
+    {"date": date, "stem": stem, "value": counts[date, stem]}
+    for images in read_images(resolved, plants).values()
+    for date, stem in images
 ]
 
-# The door counts each record toward its image's mapped plant and aggregates under plant_aggregation;
-# it clears the one gate over the buckets; an unvalidated bucket needs a recorded acknowledgment.
+# The door counts each record toward its image's plant, aggregates under plant_aggregation and
+# clears the one gate over the buckets; an unvalidated bucket needs a recorded acknowledgment.
 deliver_per_plant_csv(
     records,
     "outputs/phenotype.csv",
     delivered_phenotype="<phenotype>",
     delivery_kind="per_plant_count_aggregate",
-    plants=[...],
+    plants=plants,
     dataset_root=dataset_root,
     buckets=["stage-b/<date>"],
     value_key="count",
