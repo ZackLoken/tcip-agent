@@ -17,7 +17,7 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 | Column | Type | Description |
 |--------|------|-------------|
 | plant_id | string | Unique plant identifier |
-| crop | string | Crop species |
+| crop | string | The crop of the plant registry the rows' plant identities came from |
 | delivered_phenotype | string | Delivered phenotype name (from crop skill) |
 | value | float/string | Measurement value |
 | units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. In a count delivery a unit-declared trait's `value_key` must itself imply a unit, and a dimensional value rests on a physical-scale assessment; in an ordinal or regression delivery a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` |
