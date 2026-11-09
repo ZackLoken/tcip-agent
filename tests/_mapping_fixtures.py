@@ -214,6 +214,22 @@ def plant_positions(plants: Sequence[str]) -> dict[str, tuple[float, float]]:
     }
 
 
+def register_dataset_at(
+    project: Path, dataset_root: Path, *, crop: str
+) -> None:
+    """Register ``dataset_root`` in ``project`` at ``crop``, asserting it returned no error.
+
+    A bucket published under the root afterwards records the root's dataset id; registering again
+    keeps the id.
+    """
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    registered = register_dataset(
+        project, str(dataset_root), crop=crop, actor=None
+    )
+    assert "error" not in registered, registered
+
+
 def map_plants(
     project: Path,
     dataset_root: Path,
@@ -229,12 +245,8 @@ def map_plants(
     ``project`` at ``crop`` too and mapped by ``build_plant_mapping``.
     """
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tcip_mcp.tools.project_tools import register_dataset
 
-    registered = register_dataset(
-        project, str(dataset_root), crop=crop, actor=None
-    )
-    assert "error" not in registered, registered
+    register_dataset_at(project, dataset_root, crop=crop)
     plant_csv = write_plots_csv(
         project / f"{name}_plants.csv", plant_positions(plants)
     )
