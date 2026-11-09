@@ -422,6 +422,7 @@ def per_plant_series(
     buckets: dict[str, Bucket],
     state: PositiveState | None,
     plants: list[str],
+    read_stems: dict[str, frozenset[str]],
 ) -> dict[str, list[CurveRow]]:
     """Aggregate the buckets' predictions into each plant's curve rows, one per mapping date.
 
@@ -430,22 +431,23 @@ def per_plant_series(
 
     ``mapping`` is ``{date: [assignment, ...]}``, a mapping build's own per-date
     :class:`~tcip_mcp.pipelines.postprocessing.plant_mapping.Assignment` rows; ``buckets`` is
-    each delivered date's published bucket, by its recorded date. ``plants`` is the delivery's
-    population: every plant in it gets an entry, in the order given, and a plant the mapping names
-    that is not in it is never read. Every population plant has a row on every date the mapping
-    names, in capture order, one the mapping assigns it no capture on carrying no image. Returns
-    ``{plant_id: [CurveRow, ...]}``, every row of a plant carrying the accession its first
-    attributed assignment in capture order names. An entry naming no plant
-    (``plant_mapping.assignment_is_attributed`` false) is excluded from every plant's coverage.
+    each delivered date's published bucket, by its recorded date. ``read_stems`` is the images
+    the delivery read, each mapping date's stems (``MappingVerification.read_stems``); it has a
+    key for every date of ``mapping``. ``plants`` is the delivery's population: every plant in it
+    gets an entry, in the order given, and a plant the mapping names that is not in it is never
+    read. Every population plant has a row on every date the mapping names, in capture order, one
+    the mapping assigns it no capture on carrying no image. Returns ``{plant_id: [CurveRow, ...]}``,
+    every row of a plant carrying the accession its first attributed assignment in capture order
+    names. An entry naming no plant (``plant_mapping.assignment_is_attributed`` false) is excluded
+    from every plant's coverage.
 
     Coverage is measured against the stems the plant mapping names for each (plant, date): a named
-    stem with no corresponding prediction document is a missing observation, and a date the
-    mapping names with no delivered bucket counts every stem it names as missing.
+    stem not in ``read_stems`` for its date is an assigned image the delivery did not read: a
+    missing observation, counted in ``n_images`` and ``n_missing`` and never in the totals.
     """
     from tcip_mcp.dataset_layout import capture_order
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         assignment_is_attributed,
-        stems_delivery_reads,
     )
 
     # The mapping's own dates are the coverage reference, so a date it names is never absent; they
@@ -472,19 +474,15 @@ def per_plant_series(
     }
     rows: dict[str, list[CurveRow]] = {plant_id: [] for plant_id in plants}
     for date_str in dates:
-        bucket = buckets.get(date_str)
-        read_stems = (
-            stems_delivery_reads(mapping[date_str], bucket)
-            if bucket
-            else set()
-        )
         for plant_id, assigned in named[date_str].items():
             counts = [
                 count_by_class(
-                    bucket.stem_keys[a.stem], state, scope=bucket.scope
+                    buckets[date_str].stem_keys[a.stem],
+                    state,
+                    scope=buckets[date_str].scope,
                 )
                 for a in assigned
-                if bucket and a.stem in read_stems
+                if a.stem in read_stems[date_str]
             ]
             rows[plant_id].append(
                 CurveRow(
@@ -518,11 +516,14 @@ def per_plant_phenology(
     buckets: dict[str, Bucket],
     spec: TraitEntry,
     plants: list[str],
+    read_stems: dict[str, frozenset[str]],
 ) -> PlantPhenology:
     """Measure per-plant milestones from predictions and a plant mapping against ``spec``.
 
     The milestones are measured against ``spec``'s ``positive_state`` and milestones, one row per
-    plant in ``plants`` and no other, in its order (see :func:`per_plant_series`).
+    plant in ``plants`` and no other, in its order (see :func:`per_plant_series`). ``read_stems``
+    is the images the delivery read; an assigned image outside it is a missing image, so its date
+    counts in ``n_dates_missing_images`` and carries no ratio, and the plant has no milestones.
 
     Each milestone row carries the milestone dates, coverage-disclosure fields
     (``n_dates_unclassified``, ``n_dates_missing_images``, a date the mapping captured the plant on
@@ -531,7 +532,9 @@ def per_plant_phenology(
     milestones are computed only when it is complete. Each curve row is one date of a plant's
     positive-fraction series.
     """
-    per_plant = per_plant_series(mapping, buckets, spec.positive_state, plants)
+    per_plant = per_plant_series(
+        mapping, buckets, spec.positive_state, plants, read_stems
+    )
     milestones: list[MilestoneRow] = []
     curves: list[CurveRow] = []
     for plant_id, rows in per_plant.items():
@@ -621,7 +624,9 @@ def measure_phenology(
     Reads the trait's latest confirmed revision stating a ``state_crossing_dates``
     operationalization, bound against the dataset's registry (refusing, ``ValueError``, a dataset
     with none), then the buckets and the mapping (``plant_mapping.resolve_delivery_mapping``);
-    each refuses as it does, a revision delivering a phenotype crops.yml does not name for the
+    each refuses as it does; the images the mapping's verification read
+    (``MappingVerification.read_stems``) are the ones counted, an assigned image it did not read
+    being a missing image. A revision delivering a phenotype crops.yml does not name for the
     mapping's registry's crop refuses (:func:`~tcip_mcp.traits.require_delivered_for_crop`), and
     so does :func:`per_plant_phenology` (:func:`measurement_refusals`).
     """
@@ -655,7 +660,11 @@ def measure_phenology(
         revision=revision,
         buckets=dated,
         phenology=per_plant_phenology(
-            mapping_build.assignments, dated, revision.entry, wanted
+            mapping_build.assignments,
+            dated,
+            revision.entry,
+            wanted,
+            verified.read_stems,
         ),
         plant_mapping=mapping_build.delivery_disclosure(verified, list(dated)),
         plants=wanted,
