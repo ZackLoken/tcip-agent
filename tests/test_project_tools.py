@@ -32,7 +32,7 @@ from tests._busy_store_fixtures import (
     seconds_given_up_after,
     waiting,
 )
-from tests._record_damage_fixtures import damage_record
+from tests._record_damage_fixtures import damage_record, unopenable_database
 from tests._server_calls import called_through_the_server
 from tests._web_fixtures import INVARIANCES
 
@@ -269,21 +269,13 @@ def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(
 def test_inspect_project_surfaces_an_audit_log_in_a_database_that_will_not_open(
     tmp_path: Path,
 ) -> None:
-    import tcip_store
     from tcip_mcp.tools.meta_tools import report_friction
-    from tcip_store.file_backend import database_file
 
     _initialized(tmp_path)
     report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
-    tcip_store.release_root(tmp_path)
-    foreign = database_file(str(tmp_path))
-    foreign.write_bytes(b"not a database" * 100)
 
-    try:
+    with unopenable_database(tmp_path):
         status = inspect_project(tmp_path)
-    finally:
-        tcip_store.release_root(tmp_path)
-        foreign.unlink()
 
     unavailable = status["recent_activity"]["status_unavailable"]
     assert "could not complete this store's identity check" in unavailable

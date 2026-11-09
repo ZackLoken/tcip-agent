@@ -43,6 +43,7 @@ from tests._busy_store_fixtures import (
     held_by_another_connection,
     waiting,
 )
+from tests._record_damage_fixtures import unopenable_database
 from tests._store_worker import (
     CAS,
     LOG,
@@ -1301,12 +1302,9 @@ def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
 
     The refusal is the identity check's, carrying the driver's own error.
     """
-    path = database_file(str(store.root))
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"not a database, only bytes under its name" * 100)
-
-    with pytest.raises(ts.DatabaseRefusedError) as raised:
-        ts.read(store.key(LWW, "anything"), default=None)
+    with unopenable_database(store.root) as path:
+        with pytest.raises(ts.DatabaseRefusedError) as raised:
+            ts.read(store.key(LWW, "anything"), default=None)
     message = str(raised.value)
     assert "could not complete this store's identity check" in message
     assert str(path) in message
@@ -1317,16 +1315,14 @@ def test_a_file_that_is_not_a_database_refuses_a_transaction_as_the_same_error(
     store: Harness,
 ) -> None:
     """A transaction opened over a non-database file raises the error a plain read raises."""
-    path = database_file(str(store.root))
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"not a database, only bytes under its name" * 100)
     key = store.key(LWW, "anything")
 
-    with pytest.raises(ts.DatabaseRefusedError) as in_transaction:
-        with ts.transaction(key):
-            pass
-    with pytest.raises(ts.DatabaseRefusedError) as read:
-        ts.read(key, default=None)
+    with unopenable_database(store.root):
+        with pytest.raises(ts.DatabaseRefusedError) as in_transaction:
+            with ts.transaction(key):
+                pass
+        with pytest.raises(ts.DatabaseRefusedError) as read:
+            ts.read(key, default=None)
 
     assert str(in_transaction.value) == str(read.value)
 
@@ -1338,13 +1334,13 @@ def test_a_file_that_is_not_a_database_reads_raw_as_an_unreadable_refusal(
 
     The refusal carries the store's sentence behind the caller's place.
     """
-    path = database_file(str(store.root))
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"not a database, only bytes under its name" * 100)
     key = store.key(LWW, "anything")
 
-    with pytest.raises(ts.ReadRefusedError) as refused:
-        ts.read_raw(ts.read, key, "the record this test reads", default=None)
+    with unopenable_database(store.root):
+        with pytest.raises(ts.ReadRefusedError) as refused:
+            ts.read_raw(
+                ts.read, key, "the record this test reads", default=None
+            )
 
     served = refused.value.served
     assert served.where == "the record this test reads"
