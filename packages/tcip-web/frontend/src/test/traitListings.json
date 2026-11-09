@@ -14,7 +14,7 @@
                 "milestone_fractions": [],
                 "milestone_on": "",
                 "crossing_rule": "",
-                "majority_milestone": "",
+                "majority_fraction": null,
                 "phenology_prefix": "",
                 "majority_label": "",
                 "count_objective": "count_unbiased",
@@ -43,7 +43,7 @@
                   }
                 }
               },
-              "entry_sha256": "3d502a098e0df682b20b103f6983e1359159de3324e4f13cfea309d888ed3d34",
+              "entry_sha256": "b2dbec1e914fcc468d658fe9dce56f3b4b06082d3be84cdc9f60b186edeff907",
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:00+00:00",
@@ -62,7 +62,7 @@
                 "milestone_fractions": [],
                 "milestone_on": "",
                 "crossing_rule": "",
-                "majority_milestone": "",
+                "majority_fraction": null,
                 "phenology_prefix": "",
                 "majority_label": "",
                 "count_objective": "count_unbiased",
@@ -91,7 +91,7 @@
                   }
                 }
               },
-              "entry_sha256": "8ec1be6302a2e5c76c2a843c7fbd8fba424faab51db704723eaad291fb4e7d42",
+              "entry_sha256": "1d5d9dd6d5de3cf4bb3fcb0fcaa0144a00411dca5e7a8238b238b85172971d9b",
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:02+00:00",
@@ -107,7 +107,7 @@
               "milestone_fractions": [],
               "milestone_on": "",
               "crossing_rule": "",
-              "majority_milestone": "",
+              "majority_fraction": null,
               "phenology_prefix": "",
               "majority_label": "",
               "count_objective": "count_unbiased",
@@ -136,7 +136,7 @@
                 }
               }
             },
-            "entry_sha256": "3d502a098e0df682b20b103f6983e1359159de3324e4f13cfea309d888ed3d34",
+            "entry_sha256": "b2dbec1e914fcc468d658fe9dce56f3b4b06082d3be84cdc9f60b186edeff907",
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "2000-01-01T00:00:00+00:00",
@@ -165,7 +165,7 @@
                 "milestone_fractions": [0.5, 0.95],
                 "milestone_on": "positive_fraction",
                 "crossing_rule": "",
-                "majority_milestone": "",
+                "majority_fraction": null,
                 "phenology_prefix": "",
                 "majority_label": "",
                 "count_objective": "count_unbiased",
@@ -186,7 +186,7 @@
                 "notes": "",
                 "operationalizations": {}
               },
-              "entry_sha256": "41a896db60848428b4805762f99772f81ba2fc72b89c5bae4a7a127ac05ecf9c",
+              "entry_sha256": "d6cbbb4d6ed1e16a66a593218d682d8cd14abcd1be2ccb4a410b5909f85b2d6b",
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:06+00:00",
@@ -213,7 +213,7 @@
                 "milestone_fractions": [0.5, 0.95],
                 "milestone_on": "positive_fraction",
                 "crossing_rule": "",
-                "majority_milestone": "",
+                "majority_fraction": null,
                 "phenology_prefix": "",
                 "majority_label": "",
                 "count_objective": "count_unbiased",
@@ -234,7 +234,7 @@
                 "notes": "",
                 "operationalizations": {}
               },
-              "entry_sha256": "41a896db60848428b4805762f99772f81ba2fc72b89c5bae4a7a127ac05ecf9c",
+              "entry_sha256": "d6cbbb4d6ed1e16a66a593218d682d8cd14abcd1be2ccb4a410b5909f85b2d6b",
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:06+00:00",
@@ -254,7 +254,7 @@
               "milestone_fractions": [0.5, 0.95],
               "milestone_on": "positive_fraction",
               "crossing_rule": "",
-              "majority_milestone": "",
+              "majority_fraction": null,
               "phenology_prefix": "",
               "majority_label": "",
               "count_objective": "count_unbiased",
@@ -275,7 +275,7 @@
               "notes": "",
               "operationalizations": {}
             },
-            "entry_sha256": "41a896db60848428b4805762f99772f81ba2fc72b89c5bae4a7a127ac05ecf9c",
+            "entry_sha256": "d6cbbb4d6ed1e16a66a593218d682d8cd14abcd1be2ccb4a410b5909f85b2d6b",
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "2000-01-01T00:00:06+00:00",
@@ -322,7 +322,7 @@
       "body": {
         "detail": {
           "kind": "revision_moved",
-          "message": "revision 2 of 'stem' holds entry 8ec1be6302a2e5c76c2a843c7fbd8fba424faab51db704723eaad291fb4e7d42, not the 3d502a098e0df682b20b103f6983e1359159de3324e4f13cfea309d888ed3d34 named; re-read it",
+          "message": "revision 2 of 'stem' holds entry 1d5d9dd6d5de3cf4bb3fcb0fcaa0144a00411dca5e7a8238b238b85172971d9b, not the b2dbec1e914fcc468d658fe9dce56f3b4b06082d3be84cdc9f60b186edeff907 named; re-read it",
           "record": {
             "trait": "stem",
             "revisions": [
@@ -335,7 +335,7 @@
                   "milestone_fractions": [],
                   "milestone_on": "",
                   "crossing_rule": "",
-                  "majority_milestone": "",
+                  "majority_fraction": null,
                   "phenology_prefix": "",
                   "majority_label": "",
                   "count_objective": "count_unbiased",
@@ -364,7 +364,7 @@
                     }
                   }
                 },
-                "entry_sha256": "3d502a098e0df682b20b103f6983e1359159de3324e4f13cfea309d888ed3d34",
+                "entry_sha256": "b2dbec1e914fcc468d658fe9dce56f3b4b06082d3be84cdc9f60b186edeff907",
                 "rationale": "The breeder counts every stem.",
                 "relayed_note": "",
                 "proposed_at": "2000-01-01T00:00:00+00:00",
@@ -383,7 +383,7 @@
                   "milestone_fractions": [],
                   "milestone_on": "",
                   "crossing_rule": "",
-                  "majority_milestone": "",
+                  "majority_fraction": null,
                   "phenology_prefix": "",
                   "majority_label": "",
                   "count_objective": "count_unbiased",
@@ -412,7 +412,7 @@
                     }
                   }
                 },
-                "entry_sha256": "8ec1be6302a2e5c76c2a843c7fbd8fba424faab51db704723eaad291fb4e7d42",
+                "entry_sha256": "1d5d9dd6d5de3cf4bb3fcb0fcaa0144a00411dca5e7a8238b238b85172971d9b",
                 "rationale": "The breeder counts every stem.",
                 "relayed_note": "",
                 "proposed_at": "2000-01-01T00:00:02+00:00",
@@ -428,7 +428,7 @@
                 "milestone_fractions": [],
                 "milestone_on": "",
                 "crossing_rule": "",
-                "majority_milestone": "",
+                "majority_fraction": null,
                 "phenology_prefix": "",
                 "majority_label": "",
                 "count_objective": "count_unbiased",
@@ -457,7 +457,7 @@
                   }
                 }
               },
-              "entry_sha256": "3d502a098e0df682b20b103f6983e1359159de3324e4f13cfea309d888ed3d34",
+              "entry_sha256": "b2dbec1e914fcc468d658fe9dce56f3b4b06082d3be84cdc9f60b186edeff907",
               "rationale": "The breeder counts every stem.",
               "relayed_note": "",
               "proposed_at": "2000-01-01T00:00:00+00:00",
@@ -481,7 +481,7 @@
           "milestone_fractions": [],
           "milestone_on": "",
           "crossing_rule": "",
-          "majority_milestone": "",
+          "majority_fraction": null,
           "phenology_prefix": "",
           "majority_label": "",
           "count_objective": "count_unbiased",
@@ -510,7 +510,7 @@
             }
           }
         },
-        "entry_sha256": "8ec1be6302a2e5c76c2a843c7fbd8fba424faab51db704723eaad291fb4e7d42",
+        "entry_sha256": "1d5d9dd6d5de3cf4bb3fcb0fcaa0144a00411dca5e7a8238b238b85172971d9b",
         "rationale": "The breeder counts every stem.",
         "relayed_note": "",
         "proposed_at": "2000-01-01T00:00:02+00:00",
@@ -532,7 +532,7 @@
           "milestone_fractions": [],
           "milestone_on": "",
           "crossing_rule": "",
-          "majority_milestone": "",
+          "majority_fraction": null,
           "phenology_prefix": "",
           "majority_label": "",
           "count_objective": "count_unbiased",
@@ -561,7 +561,7 @@
             }
           }
         },
-        "entry_sha256": "3d502a098e0df682b20b103f6983e1359159de3324e4f13cfea309d888ed3d34",
+        "entry_sha256": "b2dbec1e914fcc468d658fe9dce56f3b4b06082d3be84cdc9f60b186edeff907",
         "rationale": "The breeder counts every stem.",
         "relayed_note": "",
         "proposed_at": "2000-01-01T00:00:00+00:00",
@@ -585,7 +585,7 @@
           "milestone_fractions": [],
           "milestone_on": "",
           "crossing_rule": "",
-          "majority_milestone": "",
+          "majority_fraction": null,
           "phenology_prefix": "",
           "majority_label": "",
           "count_objective": "count_unbiased",
@@ -614,7 +614,7 @@
             }
           }
         },
-        "entry_sha256": "8ec1be6302a2e5c76c2a843c7fbd8fba424faab51db704723eaad291fb4e7d42",
+        "entry_sha256": "1d5d9dd6d5de3cf4bb3fcb0fcaa0144a00411dca5e7a8238b238b85172971d9b",
         "rationale": "The breeder counts every stem.",
         "relayed_note": "",
         "proposed_at": "2000-01-01T00:00:02+00:00",

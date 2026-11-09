@@ -6,7 +6,7 @@
           "event": {
             "trait": "stem",
             "trait_revision": 1,
-            "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77",
+            "trait_revision_sha256": "50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1",
             "event_id": "<validated event>",
             "door": "deliver_per_image_counts",
             "delivery_kind": "per_image_count",
@@ -83,7 +83,7 @@
           "event": {
             "trait": "currant_bloom",
             "trait_revision": 2,
-            "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
+            "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37",
             "event_id": "<acknowledged_mapping event>",
             "door": "test_mapping_delivery",
             "delivery_kind": "state_crossing_dates",
@@ -163,7 +163,7 @@
           "event": {
             "trait": "currant_bloom",
             "trait_revision": 2,
-            "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
+            "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37",
             "event_id": "<acknowledged_mapping event>",
             "door": "test_mapping_delivery",
             "delivery_kind": "state_crossing_dates",
@@ -243,7 +243,7 @@
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
+            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
             "event_id": "<registry event>",
             "door": "test_orthomosaic",
             "delivery_kind": "per_plant_count_aggregate",
@@ -317,7 +317,7 @@
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
+            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
             "event_id": "<canopy event>",
             "door": "test_orthomosaic",
             "delivery_kind": "per_plant_count_aggregate",
@@ -412,7 +412,7 @@
           "event": {
             "trait": "plant_surface_area",
             "trait_revision": 2,
-            "trait_revision_sha256": "13e38918a769d82bd9016c10048e36615165830aaa4e0f6ce77e658c76026d8c",
+            "trait_revision_sha256": "ebf2322d1f49cc3f2d97da1250d6baf1ff92ee12159f6ea19cbcef7e4d65f9af",
             "event_id": "<scale_answered event>",
             "door": "test_scale_on_event",
             "delivery_kind": "per_plant_count_aggregate",
@@ -491,7 +491,7 @@
           "event": {
             "trait": "plant_surface_area",
             "trait_revision": 2,
-            "trait_revision_sha256": "b98046be90ce55a7d981983cf2ada3b67535892f6d70a3cf5e60210c80f177c2",
+            "trait_revision_sha256": "b0cded256fab413ea00a62d2f2264721a61367e75912374fcb0f671b69dc7ef2",
             "event_id": "<scale_unanswered event>",
             "door": "deliver_per_plant_csv",
             "delivery_kind": "per_plant_count_aggregate",
@@ -596,14 +596,14 @@
     "headers": {
       "X-TCIP-Export": "{\"saved_path\":\"/scratch/workspace/counts/results_export/counts.csv\",\"shipped\":{\"kind\":\"validated\"},\"filename\":\"counts.csv\"}"
     },
-    "file": "image,detection_count,avg_confidence,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\ns00.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns01.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns02.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns03.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns04.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns05.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns06.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns07.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns08.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns09.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns10.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns11.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns12.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns13.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns14.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns15.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns16.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns17.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns18.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns19.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns20.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns21.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns22.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns23.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns24.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns25.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns26.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns27.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns28.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns29.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns30.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns31.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns32.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns33.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns34.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns35.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns36.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns37.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns38.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\ns39.png,1,0.9244,True,stem,1,01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77,<export 0>\r\n",
+    "file": "image,detection_count,avg_confidence,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\ns00.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns01.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns02.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns03.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns04.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns05.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns06.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns07.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns08.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns09.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns10.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns11.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns12.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns13.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns14.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns15.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns16.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns17.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns18.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns19.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns20.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns21.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns22.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns23.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns24.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns25.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns26.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns27.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns28.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns29.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns30.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns31.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns32.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns33.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns34.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns35.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns36.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns37.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns38.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\ns39.png,1,0.9244,True,stem,1,50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1,<export 0>\r\n",
     "events": {
       "records": [
         {
           "event": {
             "trait": "stem",
             "trait_revision": 1,
-            "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77",
+            "trait_revision_sha256": "50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1",
             "event_id": "<validated event>",
             "door": "deliver_per_image_counts",
             "delivery_kind": "per_image_count",
@@ -676,7 +676,7 @@
           "event": {
             "trait": "stem",
             "trait_revision": 1,
-            "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77",
+            "trait_revision_sha256": "50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1",
             "event_id": "<export 0>",
             "door": "results.export_count_csv",
             "delivery_kind": "per_image_count",
@@ -752,14 +752,14 @@
     "headers": {
       "X-TCIP-Export": "{\"saved_path\":\"/scratch/workspace/nearest/results_export/plant_counts.csv\",\"shipped\":{\"kind\":\"acknowledged\",\"acknowledgment\":{\"acknowledgment_id\":\"<export 2 acknowledgment>\",\"acknowledged_by\":\"user:grower\",\"reason\":\"the assessment is not run yet\",\"result_sha256\":\"<export 2 digest>\",\"recorded_at\":\"2000-01-01T00:00:19+00:00\"}},\"filename\":\"plant_counts.csv\"}"
     },
-    "file": "plant_id,crop,delivered_phenotype,value,units,value_key,n_images,pipeline_version,plant_id_source,plant_attribution,plant_id_distance_m_max,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nplot0,hazelnut,stem_count,1,,count,1,,,detection,,False,stem,2,8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77,<export 2>\r\nplot2,hazelnut,stem_count,1,,count,1,,,detection,,False,stem,2,8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77,<export 2>\r\n",
+    "file": "plant_id,crop,delivered_phenotype,value,units,value_key,n_images,pipeline_version,plant_id_source,plant_attribution,plant_id_distance_m_max,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nplot0,hazelnut,stem_count,1,,count,1,,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\nplot2,hazelnut,stem_count,1,,count,1,,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\n",
     "events": {
       "records": [
         {
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
+            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
             "event_id": "<registry event>",
             "door": "test_orthomosaic",
             "delivery_kind": "per_plant_count_aggregate",
@@ -829,7 +829,7 @@
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
+            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
             "event_id": "<export 2>",
             "door": "results.export_count_csv",
             "delivery_kind": "per_plant_count_aggregate",
@@ -902,14 +902,14 @@
     "headers": {
       "X-TCIP-Export": "{\"saved_path\":\"/scratch/workspace/phenology/results_export/currant_bloom_curves.csv\",\"filename\":\"currant_bloom_curves.csv\"}"
     },
-    "file": "plant_id,accession,capture,n_images,n_total,n_positive,n_unclassified,n_missing,ratio,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nP1,acc-P1,2026-02-11,1,1,1,0,0,1.0,False,currant_bloom,2,2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08,<export 1>\r\nP1,acc-P1,2026-02-25,1,1,1,0,0,1.0,False,currant_bloom,2,2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08,<export 1>\r\nP2,acc-P2,2026-02-11,1,1,1,0,0,1.0,False,currant_bloom,2,2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08,<export 1>\r\nP2,acc-P2,2026-02-25,1,1,1,0,0,1.0,False,currant_bloom,2,2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08,<export 1>\r\n",
+    "file": "plant_id,accession,capture,n_images,n_total,n_positive,n_unclassified,n_missing,ratio,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nP1,acc-P1,2026-02-11,1,1,1,0,0,1.0,False,currant_bloom,2,15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37,<export 1>\r\nP1,acc-P1,2026-02-25,1,1,1,0,0,1.0,False,currant_bloom,2,15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37,<export 1>\r\nP2,acc-P2,2026-02-11,1,1,1,0,0,1.0,False,currant_bloom,2,15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37,<export 1>\r\nP2,acc-P2,2026-02-25,1,1,1,0,0,1.0,False,currant_bloom,2,15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37,<export 1>\r\n",
     "events": {
       "records": [
         {
           "event": {
             "trait": "currant_bloom",
             "trait_revision": 2,
-            "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
+            "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37",
             "event_id": "<acknowledged_mapping event>",
             "door": "test_mapping_delivery",
             "delivery_kind": "state_crossing_dates",
@@ -985,7 +985,7 @@
           "event": {
             "trait": "currant_bloom",
             "trait_revision": 2,
-            "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
+            "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37",
             "event_id": "<event_id n33>",
             "door": "results.export_csv",
             "delivery_kind": "state_crossing_dates",
@@ -1061,7 +1061,7 @@
           "event": {
             "trait": "currant_bloom",
             "trait_revision": 2,
-            "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
+            "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37",
             "event_id": "<export 1>",
             "door": "results.export_csv",
             "delivery_kind": "state_crossing_dates",
@@ -1145,7 +1145,7 @@
           "revision": {
             "trait": "stem",
             "trait_revision": 1,
-            "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77"
+            "trait_revision_sha256": "50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1"
           },
           "reference": {
             "ground_truth": [
@@ -1778,7 +1778,7 @@
           "revision": {
             "trait": "stem",
             "trait_revision": 1,
-            "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77"
+            "trait_revision_sha256": "50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1"
           },
           "reference": {
             "ground_truth": [
@@ -2385,7 +2385,7 @@
           "revision": {
             "trait": "stem",
             "trait_revision": 1,
-            "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77"
+            "trait_revision_sha256": "50ff60e944c02aa51b1d1f031629f44c689b09ac03b25ee084b04922e4d86dd1"
           },
           "reference": {
             "ground_truth": [
@@ -3165,7 +3165,7 @@
       "revision": {
         "trait": "currant_bloom",
         "trait_revision": 2,
-        "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08"
+        "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37"
       },
       "curves": [
         {
@@ -3387,7 +3387,7 @@
         "revision": {
           "trait": "currant_bloom",
           "trait_revision": 2,
-          "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08"
+          "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37"
         },
         "curves": [
           {
@@ -3467,7 +3467,7 @@
         "revision": {
           "trait": "currant_bloom",
           "trait_revision": 2,
-          "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08"
+          "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37"
         },
         "curves": [
           {
@@ -3547,7 +3547,7 @@
         "revision": {
           "trait": "currant_bloom",
           "trait_revision": 2,
-          "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08"
+          "trait_revision_sha256": "15fc0d9e56e129ac7869ac1f0860b890f152b87fa25d9361d7c73dc315c8ef37"
         },
         "curves": [
           {
@@ -3633,7 +3633,7 @@
       "revision": {
         "trait": "bud_opening",
         "trait_revision": 1,
-        "trait_revision_sha256": "0efd48a4c98bc35e6c126970a2f4f88711b08d3e7e5396d995a4ff9a446cef90"
+        "trait_revision_sha256": "147d07b26a049284b875ce4b90c985c302f44abf341471b4c729830c0dbeee1a"
       },
       "curves": [
         {

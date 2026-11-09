@@ -438,7 +438,7 @@ def test_a_changed_majority_crossing_ships_only_once_confirmed_and_then_needs_as
     body = _series(tmp_path)
     shipped = traits.read_trait("bud_opening", tmp_path).latest.entry
     changed = fx.propose(
-        tmp_path, fx.with_fields(shipped, majority_milestone="50per")
+        tmp_path, fx.with_fields(shipped, majority_fraction=0.50)
     )
 
     out = tmp_path / "before.csv"
@@ -449,6 +449,41 @@ def test_a_changed_majority_crossing_ships_only_once_confirmed_and_then_needs_as
     fx.confirm(tmp_path, changed)
     res = deliver_milestones(tmp_path, body, tmp_path / "after.csv")
     assert "assess again under the revision delivered" in res["error"]
+
+
+def test_a_majority_at_the_fifty_percent_crossing_ships_that_crossing_as_its_column(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A majority authored at 0.50 is delivered as the 50 percent crossing, not a fixed 95.
+
+    Read back from the CSV the web export wrote.
+    """
+    pytest.importorskip("torch")
+    from tcip_web.routes.results import EXPORT_HEADER, SavedExport
+    from tests._chain_fixtures import attributed_series
+    from tests._web_fixtures import acknowledged_post
+
+    body = attributed_series(tmp_path, assessed=False).body()
+    shipped = traits.read_trait("bud_opening", tmp_path).latest.entry
+    fx.confirm(
+        tmp_path,
+        fx.propose(tmp_path, fx.with_fields(shipped, majority_fraction=0.50)),
+    )
+
+    resp = acknowledged_post(
+        client,
+        "/api/results/export_csv",
+        {**body, "payload": "milestones"},
+        reason="the majority at half the buds open",
+    )
+
+    assert resp.status_code == 200, resp.text
+    saved = SavedExport.model_validate_json(resp.headers[EXPORT_HEADER])
+    rows = _rows(Path(saved.saved_path).read_text(encoding="utf-8"))
+    assert rows and all(
+        row["bud_majority_date"] == row["bud_50per_date"] for row in rows
+    )
+    assert any(row["bud_50per_date"] != row["bud_95per_date"] for row in rows)
 
 
 def test_an_assessment_answers_for_its_own_revision_never_a_later_one_of_equal_content(

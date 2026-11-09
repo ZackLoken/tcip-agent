@@ -48,7 +48,7 @@ _STEM_ENTRY: dict[str, Any] = {
     "milestone_fractions": [],
     "milestone_on": "",
     "crossing_rule": "",
-    "majority_milestone": "",
+    "majority_fraction": None,
     "phenology_prefix": "",
     "majority_label": "",
     "count_objective": "count_unbiased",
