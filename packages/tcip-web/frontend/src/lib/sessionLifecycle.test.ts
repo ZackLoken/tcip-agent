@@ -5,9 +5,11 @@ import type { ImageEventPayload, SessionWrite, SnapshotProject } from "@/api/typ
 import { endRecordedSession, postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { textOf } from "@/store/slices/toasts";
+import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, SESSION_WRITES, sessionOf } from "@/test/sessions";
 import { openTestProject, stateEnvelope, TEST_PROJECT, testProject } from "@/test/store";
+import { TERMINAL_ANSWERS } from "@/test/terminal";
 
 const initialStoreState = useStore.getState();
 
@@ -186,6 +188,56 @@ describe("session lifecycle", () => {
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().recordedSession).toBeNull();
     expect(useStore.getState().toasts.map(textOf)).toEqual([`Not recorded (${reason}): a.jpg`]);
+  });
+
+  it("adopts the session a refusal says committed and toasts its message", async () => {
+    const gap = SESSION_ANSWERS.audit_gap;
+    vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(gap));
+    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+
+    postHeldContributions();
+    await flush();
+
+    expect(useStore.getState().heldContributions).toEqual([]);
+    expect(useStore.getState().recordedSession).toEqual({
+      project_id: TEST_PROJECT.id,
+      started: S2,
+      user: "jordan",
+    });
+    expect(useStore.getState().toasts.map(textOf)).toEqual([gap.body.detail.message]);
+  });
+
+  it("retires a contribution whose audit-gap refusal says nothing committed, saying why", async () => {
+    const gap = TERMINAL_ANSWERS.start_audit_gap;
+    const post = vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(gap));
+    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+
+    postHeldContributions();
+    await flush();
+    postHeldContributions();
+    await flush();
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().heldContributions).toEqual([]);
+    expect(useStore.getState().recordedSession).toBeNull();
+    expect(useStore.getState().toasts.map(textOf)).toEqual([
+      `Not recorded (${gap.body.detail.message}): a.jpg`,
+    ]);
+  });
+
+  it("keeps a contribution unconfirmed when its refusal says committed and carries no session", async () => {
+    const gap = RESULTS_ANSWERS.mapping_audit_gap;
+    vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(gap));
+    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+
+    postHeldContributions();
+    await flush();
+
+    expect(useStore.getState().heldContributions).toEqual([contribution("a.jpg")]);
+    expect(useStore.getState().recordedSession).toBeNull();
+    expect(useStore.getState().toasts.map(textOf)).toEqual([
+      "Could not confirm these visits were recorded; they are sent again with the next visit: a.jpg",
+    ]);
   });
 
   const UNCONFIRMED = "Recording not confirmed before their project was switched away from: a.jpg";

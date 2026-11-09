@@ -86,7 +86,7 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
             )
         )
     ],
-    "scale_assessment_id": None,
+    "scale": None,
     "shipped": dict.fromkeys(("kind",)),
     "population": ["plot_ü"],
     "plant_mapping": dict.fromkeys(

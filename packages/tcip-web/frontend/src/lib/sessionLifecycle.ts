@@ -56,7 +56,7 @@ function adopt(contribution: ImageEventPayload, written: SessionWrite): void {
 /** Dispose of one posted contribution by its answer while it is still held; the answer to one
  *  retired meanwhile updates nothing. One the backend accepted, or committed and could not
  *  record the line of (the gap toasted), is adopted. One it refused by name (a 4xx answer other
- *  than that gap) is retired, the session its request named forgotten (`forgetSession`), since
+ *  than a gap saying it committed) is retired, the session its request named forgotten (`forgetSession`), since
  *  that named session is what a refusal answers about, so the next visit opens a fresh one, and
  *  its refusal added to the one notice of refused visits (`pushRefusal`). One with
  *  no answer or an indeterminate one stays held to be sent again under the same identity, and
@@ -75,7 +75,7 @@ function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>)
         adopt(contribution, committed);
         s.pushToast(messageOf(e));
       } else if (
-        !refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN) &&
+        !refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN)?.committed &&
         e instanceof StructuredRefusalError &&
         e.status < 500
       ) {

@@ -383,7 +383,7 @@ def _answering(
     try:
         record()
     except audit.AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, written) from exc
+        raise audit_gap_409(exc, committed=True, what=written) from exc
 
 
 class SessionsListing(BaseModel):

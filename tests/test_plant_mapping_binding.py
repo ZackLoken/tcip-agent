@@ -1089,8 +1089,9 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     assert resp.status_code == 409, resp.text
     refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
     assert "plant_mapping_built" in refusal.message
-    # A record no receipt names is no mapping a reader loads, so nothing is offered as committed.
-    assert refusal.committed is None
+    # The mapping record committed before its receipt; the route holds no body to offer for it.
+    assert refusal.committed is True
+    assert refusal.what is None
     with pytest.raises(ValueError, match="no plant_mapping_built receipt"):
         plant_mapping.load_mapping(tmp_path, "valley")
 
@@ -1172,9 +1173,9 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
         },
     )
     assert resp.status_code == 409, resp.text
-    assert (
-        AuditGapRefusal.model_validate(resp.json()["detail"]).committed is None
-    )
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+    assert refusal.committed is True
+    assert refusal.what is None
 
     archived_digest = plant_mapping.record_digest(old_record)
     archived = plant_mapping.load_mapping(

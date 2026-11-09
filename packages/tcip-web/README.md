@@ -15,7 +15,7 @@ packages/tcip-web/
     terminal.py         # in-app agent terminal (spawns a provider table row's harness)
     routes/
       annotate.py       # the editor: label document load/save with gestures, proposals, review queue
-      audit_gap.py      # the 409 a committed write whose audit line was lost answers
+      audit_gap.py      # the 409 a call whose audit line was lost answers, saying whether it committed
       canvas.py         # live canvas capture for the agent's own image-capable read tool
       dataset.py        # tree + select + nav position
       fs.py             # filesystem browsing for path pickers

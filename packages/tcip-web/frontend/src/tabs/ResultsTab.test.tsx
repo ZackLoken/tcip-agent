@@ -30,6 +30,7 @@ import {
 } from "@/test/deliveryRecords";
 import { fetchAnswers, thrown } from "@/test/refusals";
 import { DATASET_TREES, DS_BUCKET, DS_DATE, openTestProject, RAW_SELECTION } from "@/test/store";
+import { TERMINAL_ANSWERS } from "@/test/terminal";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
@@ -247,10 +248,28 @@ describe("ResultsTab evidence gate", () => {
 
     await waitFor(() => {
       const toast = useStore.getState().toasts.at(-1)?.message ?? "";
-      expect(toast).toContain(gap.committed.saved_path);
+      expect(toast).toContain(gap.what.saved_path);
       expect(toast).toContain("already written");
       expect(toast).toContain("second delivery");
       expect(toast).toContain(gap.message);
+    });
+  });
+
+  it.each([
+    ["says nothing committed", TERMINAL_ANSWERS.start_audit_gap],
+    ["says a change committed and names no file", RESULTS_ANSWERS.mapping_audit_gap],
+  ])("toasts a failed CSV export for an audit-gap refusal that %s", async (_name, gap) => {
+    mockDatasetTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
+    vi.spyOn(resultsApi, "downloadCsv").mockRejectedValue(await thrown(gap));
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
+
+    await waitFor(() => {
+      const toast = useStore.getState().toasts.at(-1)?.message ?? "";
+      expect(toast).toBe(`CSV export failed: ${gap.body.detail.message}`);
     });
   });
 
@@ -705,10 +724,26 @@ describe("ResultsTab count export", () => {
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
     const errorText = await within(panel).findByText((content) =>
-      content.startsWith(`The file is already written at ${gap.committed.saved_path},`),
+      content.startsWith(`The file is already written at ${gap.what.saved_path},`),
     );
     expect(errorText.textContent).toContain("second delivery");
     expect(errorText.textContent).toContain(gap.message);
+  });
+
+  it.each([
+    ["says nothing committed", TERMINAL_ANSWERS.start_audit_gap],
+    ["says a change committed and names no file", RESULTS_ANSWERS.mapping_audit_gap],
+  ])("shows the refusal's own message for a count export audit gap that %s", async (_name, gap) => {
+    const panel = await renderCountPanel();
+    vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(await thrown(gap));
+
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
+    fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    expect(await within(panel).findByText(gap.body.detail.message)).toBeInTheDocument();
+    expect(within(panel).queryByText(/already written/)).not.toBeInTheDocument();
   });
 
   it("decodes a delivery refusal and offers the acknowledgment controls", async () => {
