@@ -30,6 +30,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     resolve_nn_tolerance_m,
 )
 from tests._mapping_fixtures import (
+    CROP,
     mapping_over,
     plant_rows,
     write_photos,
@@ -125,7 +126,9 @@ def test_the_served_build_and_its_disclosure_read_the_recorded_radius(
     recorded = build.to_record()["match_radius"]
     assert recorded == {DATE: DerivedRadius(value=2.5).model_dump()}
     assert build.served().model_dump()["match_radius"] == recorded
-    disclosure = build.delivery_disclosure(MappingVerification([]), [DATE])
+    disclosure = build.delivery_disclosure(
+        MappingVerification([], CROP), [DATE]
+    )
     assert disclosure.model_dump()["match_radius"] == recorded
 
 

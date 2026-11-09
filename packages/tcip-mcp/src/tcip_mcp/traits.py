@@ -174,7 +174,31 @@ def _crops_traits() -> list[dict]:
 
 def registered_crops() -> set[str]:
     """Return every crop name crops.yml declares (the union of each trait's ``crops`` list)."""
-    return {c for t in _crops_traits() for c in t.get("crops", [])}
+    return {c for t in _crops_traits() for c in t["crops"]}
+
+
+def phenotype_crops(phenotype: str) -> list[str]:
+    """Return the crops crops.yml names for the phenotype ``phenotype``, in the file's order.
+
+    A name crops.yml holds no trait record under refuses (``ValueError``) naming it.
+    """
+    for t in _crops_traits():
+        if t["name"] == phenotype:
+            return list(t["crops"])
+    raise ValueError(f"crops.yml holds no phenotype named {phenotype!r}")
+
+
+def require_delivered_for_crop(entry: TraitEntry, crop: str) -> None:
+    """Refuse (``ValueError``) an ``entry`` delivering a phenotype crops.yml names not for ``crop``.
+
+    The refusal names the trait, each such phenotype of its ``delivers`` and ``crop``.
+    """
+    off_crop = [p for p in entry.delivers if crop not in phenotype_crops(p)]
+    if off_crop:
+        raise ValueError(
+            f"trait {entry.name!r} delivers {off_crop}, which crops.yml does not name for "
+            f"crop {crop!r}, the crop of the delivered plants"
+        )
 
 
 def require_registered_crop(crop: str) -> None:

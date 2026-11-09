@@ -1482,7 +1482,6 @@ export interface OrthomosaicPlantCountsDelivery {
   plant_registry: string;
   delivered_phenotype: string;
   plants: string[];
-  crop: string;
   pipeline_version: string;
   canopy_subject: string;
   position_error_m: number | null;

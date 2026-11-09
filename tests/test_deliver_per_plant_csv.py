@@ -14,7 +14,7 @@ import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx
-from tests._mapping_fixtures import PLOTS, write_plots_csv
+from tests._mapping_fixtures import COUNT_CROP, PLOTS, write_plots_csv
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,7 +42,6 @@ def _scene(
         initialize_project,
         register_dataset,
     )
-    from tcip_mcp.traits import registered_crops
     from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M, write_photos
     from tests._web_fixtures import INVARIANCES
 
@@ -64,10 +63,7 @@ def _scene(
         timedelta(minutes=5),
     )
     result = register_dataset(
-        tmp_path,
-        str(dataset_root),
-        crop=sorted(registered_crops())[0],
-        actor=None,
+        tmp_path, str(dataset_root), crop=COUNT_CROP, actor=None
     )
     assert "error" not in result, result
     plant_csv = write_plots_csv(tmp_path / PLANT_CSV, plants)
@@ -90,7 +86,9 @@ def _mapped(
         tmp_path,
         name="valley",
         dataset_root=str(dataset_root),
-        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        plant_registry=register_plant_registry_for(
+            tmp_path, [plant_csv], crop=COUNT_CROP
+        ),
         actor=None,
     )
     assert "error" not in mapped, mapped
@@ -178,7 +176,6 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
         ["P1", "P2"],
         dataset_root,
         [bucket],
-        crop="currant",
         plant_mapping="valley",
     )
 

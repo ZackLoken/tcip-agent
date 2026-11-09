@@ -32,6 +32,13 @@ PHOTO_POSITION_ERROR_M = 1.0
 """A sample horizontal positioning error (meters) a capture's EXIF reports, under the spacing of
 :data:`PLOTS`."""
 
+CROP = "currant"
+"""The sample crop a mapped scene's dataset and plant registry are both registered at, one
+crops.yml names for the bloom phenotypes the crossing fixture trait delivers."""
+
+COUNT_CROP = "hazelnut"
+"""The sample crop of a scene delivering ``stem_count``, the one crop crops.yml names for it."""
+
 
 def write_plant_csv(
     path: Path, plants: list[dict], *, extra: tuple[str, ...] = ()
@@ -76,7 +83,7 @@ def register_plant_registry_for(
     csv_paths: list[str | Path],
     *,
     name: str = "reg",
-    crop: str = "currant",
+    crop: str = CROP,
     site: str = "orchard",
 ) -> str:
     """Register ``csv_paths`` under ``name`` in ``project`` and return ``name``.
@@ -212,24 +219,20 @@ def map_plants(
     dataset_root: Path,
     plants: Sequence[str],
     *,
+    crop: str,
     name: str = "valley",
 ) -> None:
     """Persist the mapping ``name`` of ``dataset_root``'s captures against ``plants``.
 
     The plants stand at :func:`plant_positions`, written as a plant CSV and registered under
-    :func:`register_plant_registry_for`'s name; ``dataset_root`` is registered in ``project``
-    (a dataset the project already registers is left as it is) and mapped by
-    ``build_plant_mapping``.
+    :func:`register_plant_registry_for`'s name at ``crop``; ``dataset_root`` is registered in
+    ``project`` at ``crop`` too and mapped by ``build_plant_mapping``.
     """
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
 
     registered = register_dataset(
-        project,
-        str(dataset_root),
-        crop=sorted(registered_crops())[0],
-        actor=None,
+        project, str(dataset_root), crop=crop, actor=None
     )
     assert "error" not in registered, registered
     plant_csv = write_plots_csv(
@@ -240,7 +243,7 @@ def map_plants(
         name=name,
         dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(
-            project, [plant_csv], name=f"{name}-registry"
+            project, [plant_csv], name=f"{name}-registry", crop=crop
         ),
         actor=None,
     )
@@ -253,23 +256,20 @@ def map_captures(
     dates: list[str],
     *,
     name: str = "valley",
+    crop: str = CROP,
 ) -> dict[str, list[Path]]:
     """Register ``dataset_root`` in ``project`` and map geolocated captures under ``name``.
 
     The captures are :func:`geolocated_captures` on each of ``dates``, mapped against
-    :func:`write_plots_csv` (``register_plant_registry`` then ``build_plant_mapping``). Returns
-    each date's captures.
+    :func:`write_plots_csv` (``register_plant_registry`` then ``build_plant_mapping``), the
+    dataset and the registry both registered at ``crop``. Returns each date's captures.
     """
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
 
     dataset_root.mkdir(parents=True, exist_ok=True)
     registered = register_dataset(
-        project,
-        str(dataset_root),
-        crop=sorted(registered_crops())[0],
-        actor=None,
+        project, str(dataset_root), crop=crop, actor=None
     )
     assert "error" not in registered, registered
     captures = geolocated_captures(dataset_root, dates)
@@ -278,7 +278,9 @@ def map_captures(
         project,
         name=name,
         dataset_root=str(dataset_root),
-        plant_registry=register_plant_registry_for(project, [plant_csv]),
+        plant_registry=register_plant_registry_for(
+            project, [plant_csv], crop=crop
+        ),
         actor=None,
     )
     assert "error" not in built, built
