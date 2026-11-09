@@ -121,7 +121,7 @@ export function ResultsTab() {
   const [deliveryEvents, setDeliveryEvents] = useState<DeliveryEvents | null>(null);
   const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
 
-  // Count export: per_image_count and orthomosaic_plant_counts, the two delivery kinds this
+  // Count export: per_image_count and orthomosaic_plant_counts, the two payload kinds this
   // route serves; an acknowledgment of either is recorded here.
   const [countKind, setCountKind] =
     useState<ExportCountCsvPayload["delivery"]["kind"]>("per_image_count");
