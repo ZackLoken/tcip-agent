@@ -19,7 +19,12 @@ from tcip_mcp import subject_registry as cr
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests import csv_rows
-from tests._producer_fixtures import mapping_of, registry_of, scope_over
+from tests._producer_fixtures import (
+    mapping_of,
+    reads_of,
+    registry_of,
+    scope_over,
+)
 from tests._trait_fixtures import BUD_OPENING
 
 # An attribute whose positive value sits at id 2 with no record ever carrying id 1.
@@ -161,7 +166,7 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
     )
 
     out = phenology.per_plant_phenology(
-        mapping, buckets, BUD_OPENING, ["P1", "P2"]
+        mapping, buckets, BUD_OPENING, ["P1", "P2"], reads_of(mapping, buckets)
     )
 
     rows = {r.plant_id: r.csv_record(BUD_OPENING) for r in out.milestones}

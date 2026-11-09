@@ -252,7 +252,7 @@ def test_golden_per_plant_phenology_series_and_milestones(
 ) -> None:
     from tcip_mcp import subject_registry as cr
     from tests._chain_fixtures import predicted, published
-    from tests._producer_fixtures import mapping_of, registry_of
+    from tests._producer_fixtures import mapping_of, reads_of, registry_of
 
     opening = cr.Attribute("opening", "categorical", ("closed", "open"))
     registry = registry_of("bud", opening)
@@ -282,7 +282,7 @@ def test_golden_per_plant_phenology_series_and_milestones(
         }
     )
     res = phenology_mod.per_plant_phenology(
-        mapping, buckets, BUD_OPENING, ["P1"]
+        mapping, buckets, BUD_OPENING, ["P1"], reads_of(mapping, buckets)
     )
 
     # Both buckets carry the state's attribute on every detection, so the fraction is delivered.

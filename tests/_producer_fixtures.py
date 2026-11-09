@@ -970,3 +970,24 @@ def mapping_of(
         ]
         for date, assigned in rows.items()
     }
+
+
+def reads_of(
+    mapping: dict[str, list[plant_mapping.Assignment]],
+    buckets: dict[str, Bucket],
+) -> dict[str, frozenset[str]]:
+    """Return each date of ``mapping``'s read stems, as a mapping verification holds them.
+
+    A date with a bucket reads the attributed stems the bucket documents
+    (``plant_mapping.stems_delivery_reads``); a date with none reads nothing.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        stems_delivery_reads,
+    )
+
+    return {
+        date: frozenset(stems_delivery_reads(rows, buckets[date]))
+        if date in buckets
+        else frozenset()
+        for date, rows in mapping.items()
+    }
