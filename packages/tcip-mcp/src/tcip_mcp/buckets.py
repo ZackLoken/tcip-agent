@@ -28,6 +28,7 @@ from tcip_mcp.pipelines.execution import ProposalExecution
 from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 if TYPE_CHECKING:
+    from tcip_mcp.dataset_layout import DatasetRecord
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.execution import Pass
     from tcip_mcp.pipelines.inference.passes import DetectionPass, HeadPass
@@ -214,6 +215,27 @@ def shared_root(buckets: Iterable[Bucket]) -> Path:
     Buckets under more than one root, or no bucket, refuse (``ValueError``) naming them.
     """
     return _one_root((b.root for b in buckets), "a delivery's buckets")
+
+
+def require_bucket_of_dataset(bucket: Bucket, identity: DatasetRecord) -> None:
+    """Require ``bucket`` to record the dataset ``identity`` is the identity of.
+
+    ``identity`` is its root's identity record. A bucket recording no dataset (published outside a
+    capture of a registered dataset), and a bucket recording another dataset than ``identity``'s,
+    refuse (``ValueError``) naming the bucket, its root and the ids.
+    """
+    if bucket.dataset_id is None:
+        raise ValueError(
+            f"bucket {bucket.name!r} under {bucket.root} records no dataset: its predictions were "
+            "published outside a capture of a registered dataset, so nothing ties them to a "
+            "dataset's plants; register the dataset and publish the predictions again."
+        )
+    if bucket.dataset_id != identity.id:
+        raise ValueError(
+            f"bucket {bucket.name!r} records dataset {bucket.dataset_id!r}, and its root "
+            f"{bucket.root} is dataset {identity.id!r}: deliver it under the root of the dataset "
+            "it records."
+        )
 
 
 def buckets_by_date(
