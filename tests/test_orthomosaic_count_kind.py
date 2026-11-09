@@ -1,10 +1,11 @@
 """The orthomosaic count's own delivery kind, from its proposal to the rows its doors write.
 
-Covered: an entry stating only that kind is proposed with no ``plant_aggregation``; the tool and
-the export route write its rows with no per-image cell under both attribution regimes; a revision
-stating only the per-image aggregate refuses it; an acknowledgment binds one of its results; a
-unit-declared phenotype refuses at it; and its rows and provenance agree with the per-image
-aggregate door's over one bucket and one revision.
+Covered: an entry stating only that kind is proposed with no ``plant_aggregation`` and is held to
+the count fields; the tool and the export route write its rows with no per-image cell under both
+attribution regimes; a revision stating only the per-image aggregate refuses it; an
+acknowledgment binds one of its results; a unit-declared phenotype refuses at it; and its shared
+columns and provenance agree with the per-image aggregate door's under one revision and one
+producer.
 """
 
 from __future__ import annotations
@@ -194,27 +195,8 @@ def test_an_entry_stating_only_the_orthomosaic_count_is_proposed_with_no_plant_a
     The same entry stating the per-image aggregate instead is refused asking the breeder the
     statistic's question, and appends nothing; both go through ``propose_trait``'s server door.
     """
-    from tests._server_calls import called_through_the_server
-
-    entry = fx.with_fields(fx.COUNT_SPEC, plant_aggregation="").model_dump(
-        mode="json"
-    )
-    stated = fx.operationalization(
-        delivered_phenotypes=["stem_count"], delivered_value_keys=["count"]
-    )
-
-    def proposed(kind: str) -> object:
-        return called_through_the_server(
-            "propose_trait",
-            {
-                "entry": {**entry, "operationalizations": {kind: stated}},
-                "rationale": "the breeder counts each plant on the mosaic",
-            },
-            bound=bound,
-        )
-
-    admitted = proposed(KIND)
-    refused = proposed(traits.PER_PLANT_COUNT_AGGREGATE)
+    admitted = _proposed(bound, KIND)
+    refused = _proposed(bound, traits.PER_PLANT_COUNT_AGGREGATE)
 
     assert isinstance(admitted, dict) and "error" not in admitted, admitted
     assert (
@@ -225,6 +207,47 @@ def test_an_entry_stating_only_the_orthomosaic_count_is_proposed_with_no_plant_a
     question = traits.QUESTIONS["plant_aggregation"]
     assert f"plant_aggregation: {question}" in str(refused), refused
     assert len(traits.read_trait(fx.COUNT_TRAIT, bound.root).revisions) == 1
+
+
+def test_an_orthomosaic_count_leaving_a_count_field_unauthored_is_refused_asking_for_it(
+    bound: BoundProject,
+) -> None:
+    """An entry stating only the orthomosaic count rests on the count fields.
+
+    With ``count_bias_tolerance_frac`` unauthored it is refused through ``propose_trait``'s server
+    door, asking the breeder that field's question, and nothing is appended.
+    """
+    from tcip_mcp.traits import trait_names
+
+    refused = _proposed(bound, KIND, count_bias_tolerance_frac=None)
+
+    question = traits.QUESTIONS["count_bias_tolerance_frac"]
+    assert f"count_bias_tolerance_frac: {question}" in str(refused), refused
+    assert fx.COUNT_TRAIT not in trait_names(bound.root)
+
+
+def _proposed(bound: BoundProject, kind: str, **fields: object) -> object:
+    """Return ``propose_trait``'s server answer for the count trait stating ``kind`` alone.
+
+    The entry is the fixture count trait with ``plant_aggregation`` unauthored and ``fields``
+    over it, its one operationalization covering ``stem_count`` and the value key ``count``.
+    """
+    from tests._server_calls import called_through_the_server
+
+    entry = fx.with_fields(
+        fx.COUNT_SPEC, plant_aggregation="", **fields
+    ).model_dump(mode="json")
+    stated = fx.operationalization(
+        delivered_phenotypes=["stem_count"], delivered_value_keys=["count"]
+    )
+    return called_through_the_server(
+        "propose_trait",
+        {
+            "entry": {**entry, "operationalizations": {kind: stated}},
+            "rationale": "the breeder counts each plant on the mosaic",
+        },
+        bound=bound,
+    )
 
 
 # ── the delivered rows ──────────────────────────────────────────────────
@@ -376,23 +399,25 @@ def test_an_acknowledgment_of_one_mosaic_count_refuses_another_and_writes_nothin
 # ── agreement with the per-image aggregate door ─────────────────────────
 
 
-def test_the_two_per_plant_doors_write_their_shared_cells_and_provenance_alike(
+def test_the_two_per_plant_doors_write_their_shared_columns_and_provenance_alike(
     tmp_path: Path,
 ) -> None:
-    """Both per-plant doors over one raster bucket and one revision agree on what they share.
+    """Both per-plant doors in one project, under one revision and one producer, agree.
 
-    The revision states both count kinds; the orthomosaic door delivers the bucket's counts and
-    the per-image aggregate door the same counts as three images per plant, under the orthomosaic
-    event's own disclosure. The orthomosaic header is the per-image header without that door's
-    own cells, every shared cell but the event id agrees row by row, and the two events name one
-    producer and one revision, each read from its own event.
+    The revision states both count kinds. ``deliver_per_plant_csv``, called through the server,
+    delivers a mapped capture's records over a bucket ``build_plant_mapping`` mapped; the
+    orthomosaic tool delivers a raster bucket of another dataset; the fixture checkpoint
+    predicted both. The orthomosaic header is the per-image header without that door's own
+    columns, and the two events name one producer and one revision, each read from its own event.
     """
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_mcp.delivery import read_delivery_events
-    from tcip_mcp.pipelines.postprocessing.aggregation import (
-        PlantObservation,
-        deliver_per_plant_aggregate,
+    from tcip_mcp.server import binding_for
+    from tests import (
+        test_deliver_per_plant_csv as per_plant,
+        test_delivery_events as delivery_events,
     )
-    from tests._chain_fixtures import acknowledged
+    from tests._server_calls import called_through_the_server
 
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
@@ -405,50 +430,53 @@ def test_the_two_per_plant_doors_write_their_shared_cells_and_provenance_alike(
             delivered_value_keys=("count",),
         ),
     )
-    scene = _nearest(tmp_path)
-    bucket, _registry, plants, _regime = scene
-    assert "error" not in _acknowledged_tool(tmp_path, scene)
-    (mosaic_event,) = read_delivery_events(tmp_path)
-    counted = csv_rows(tmp_path / "counts.csv")
-
-    acknowledged(
+    dataset_root, date = per_plant._mapped(tmp_path)
+    tool, arguments = delivery_events._acknowledged_per_plant_csv(
         tmp_path,
-        lambda ack: deliver_per_plant_aggregate(
-            tmp_path,
-            [
-                PlantObservation(plant_id=r["plant_id"], value=int(r["value"]))
-                for r in counted
-                for _image in range(3)
+        {
+            "results": [{"plant_id": "P1", "value": 2}],
+            "output_path": str(tmp_path / "per_image.csv"),
+            "delivered_phenotype": "stem_count",
+            "delivery_kind": traits.PER_PLANT_COUNT_AGGREGATE,
+            "plants": ["P1"],
+            "dataset_root": str(dataset_root),
+            "buckets": [
+                per_plant._bucket(tmp_path, dataset_root, date, {"P1": 2})
             ],
-            str(tmp_path / "per_image.csv"),
-            value_key="count",
-            delivered_phenotype="stem_count",
-            delivery_kind=traits.PER_PLANT_COUNT_AGGREGATE,
-            buckets=[bucket],
-            plants=plants,
-            crop=counted[0]["crop"],
-            door="test_per_image",
-            plant_mapping=mosaic_event.plant_mapping,
-            acknowledgment_id=ack,
-            actor=None,
-        ),
+            "value_key": "count",
+            "plant_mapping": "valley",
+        },
     )
+    answered = called_through_the_server(
+        tool, arguments, bound=binding_for(tmp_path)
+    )
+    assert isinstance(answered, dict) and "error" not in answered, answered
+    raster_path = (
+        image_dir(tmp_path / "mosaic_ds", UNDATED_BUCKET) / "mosaic.tif"
+    )
+    ortho._write_geo_raster(raster_path)
+    mosaic_scene = (
+        ortho._raster_bucket(tmp_path, raster_path, THREE_DETECTIONS),
+        ortho._plant_registry(
+            tmp_path,
+            ortho._plant_grid_csv(tmp_path, raster_path, ortho._PLANT_PIXELS),
+            name="mosaic-grid",
+        ),
+        ortho._GRID,
+        {},
+    )
+    delivered = _acknowledged_tool(tmp_path, mosaic_scene)
+    assert "error" not in delivered, delivered
 
     events = {e.door: e for e in read_delivery_events(tmp_path)}
     mosaic = events["deliver_orthomosaic_plant_counts"]
-    per_image = events["test_per_image"]
+    per_image = events["deliver_per_plant_csv"]
     mosaic_header = _header(tmp_path / "counts.csv")
     per_image_header = _header(tmp_path / "per_image.csv")
     assert mosaic_header == [
         c for c in per_image_header if c not in PER_IMAGE_COLUMNS
     ]
     assert set(per_image_header) - set(mosaic_header) == set(PER_IMAGE_COLUMNS)
-    shared = [c for c in mosaic_header if c != "delivery_event_id"]
-    aggregated = csv_rows(tmp_path / "per_image.csv")
-    assert [{c: r[c] for c in shared} for r in counted] == [
-        {c: r[c] for c in shared} for r in aggregated
-    ]
-    assert [r["n_images"] for r in aggregated] == ["3"] * len(plants)
     provenance = (
         "producer",
         "trait",
