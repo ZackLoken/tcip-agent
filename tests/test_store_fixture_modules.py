@@ -1,6 +1,7 @@
 """The test tree's shared ways of spoiling a store or binding a backend are used, not written out.
 
-Each helper in ``tests._record_damage_fixtures`` is exercised here, and a scan over the test tree
+``unopenable_database``, ``damage_log_entry`` and ``damage_last_log_entry`` of
+``tests._record_damage_fixtures`` are exercised here, and a scan over the test tree
 finds no test spelling the same steps out again, nor binding a backend with a lock wait of its own
 beside ``tests._busy_store_fixtures``.
 """
@@ -61,10 +62,21 @@ def _names_a_database(expr: ast.AST) -> bool:
     return False
 
 
+def _own_nodes(scope: ast.AST) -> Iterator[ast.AST]:
+    """Yield the nodes under ``scope`` without entering a function nested in it."""
+    pending = list(ast.iter_child_nodes(scope))
+    while pending:
+        node = pending.pop()
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            pending.extend(ast.iter_child_nodes(node))
+
+
 def _hand_spoils(source: str) -> list[int]:
     """Return the lines of ``source`` writing bytes to a path built as a database's.
 
-    The receiver is the path expression itself, or a name assigned from one in the same function.
+    The receiver is the path expression itself, or a name assigned from one in the same function
+    (or at the module's top level), a nested function being a scope of its own.
     """
     module = ast.parse(source)
     scopes = [
@@ -78,12 +90,12 @@ def _hand_spoils(source: str) -> list[int]:
     lines: set[int] = set()
     for scope in scopes:
         assigned: dict[str, list[ast.expr]] = {}
-        for node in ast.walk(scope):
+        for node in _own_nodes(scope):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         assigned.setdefault(target.id, []).append(node.value)
-        for node in ast.walk(scope):
+        for node in _own_nodes(scope):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
@@ -99,6 +111,21 @@ def _hand_spoils(source: str) -> list[int]:
             if any(_names_a_database(source) for source in sources):
                 lines.add(node.lineno)
     return sorted(lines)
+
+
+def test_the_hand_spoil_scan_reads_a_name_in_its_own_function_alone() -> None:
+    """A name assigned from a database path in one function is not one in another function."""
+    source = (
+        "def spoils(root):\n"
+        "    path = database_file(root)\n"
+        "    path.write_bytes(b'x')\n"
+        "\n"
+        "def writes_an_image(root):\n"
+        "    path = root / 'image.png'\n"
+        "    path.write_bytes(b'')\n"
+    )
+
+    assert _hand_spoils(source) == [3]
 
 
 def test_a_spoiled_database_is_refused_by_the_identity_check_and_gone_after_the_block(
