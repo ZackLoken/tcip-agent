@@ -17,13 +17,13 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.tools.doctor_tools import diagnose_project
 from tcip_store.file_backend import database_file
 from tests import _trait_fixtures as fx
 from tests._producer_fixtures import write_image
+from tests._record_damage_fixtures import unopenable_database
 from tests._web_fixtures import new_project
 from tests.test_diagnose_project_selections import (
     FINDING_PREFIX,
@@ -35,16 +35,10 @@ from tests.test_diagnose_project_selections import (
 NOT_COMPLETED = "could not be completed"
 """What the doctor's finding says of a check whose listing the store refused."""
 
-NON_DATABASE = b"not a database, only bytes under its name" * 100
-"""Bytes that fail the store's identity check."""
 
-
-def _overwritten(root: Path) -> None:
-    """Replace the database of the store rooted at ``root`` with :data:`NON_DATABASE`."""
-    ts.release_root(str(root))
-    database = database_file(str(root))
-    assert database.is_file()
-    database.write_bytes(NON_DATABASE)
+def _holds_a_database(root: Path) -> None:
+    """Assert the store rooted at ``root`` has a database to spoil."""
+    assert database_file(str(root)).is_file()
 
 
 def _project_with_a_trait_and_a_selection_that_will_not_read(
@@ -68,9 +62,11 @@ def test_the_doctor_command_reports_a_traits_store_that_will_not_list_and_runs_t
     project = _project_with_a_trait_and_a_selection_that_will_not_read(
         tmp_path
     )
-    _overwritten(project_state_dir(project))
+    traits_root = project_state_dir(project)
+    _holds_a_database(traits_root)
 
-    found = _findings(project)
+    with unopenable_database(traits_root):
+        found = _findings(project)
 
     assert [
         level
@@ -110,9 +106,10 @@ def test_the_doctor_reports_each_listing_of_a_project_store_that_will_not_list(
     project = tmp_path / "proj"
     new_project(project)
     write_image(image_dir(project, "2026-03-04") / "a.png", (32, 32))
-    _overwritten(project)
+    _holds_a_database(project)
 
-    found = diagnose_project(project)["findings"]
+    with unopenable_database(project):
+        found = diagnose_project(project)["findings"]
 
     for check in (
         "label census",

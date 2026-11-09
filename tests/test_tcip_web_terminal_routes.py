@@ -3452,27 +3452,19 @@ def test_a_report_whose_store_refuses_says_the_line_was_not_written_and_no_recor
     The project's store is overwritten after the launch and one report, so the second report's
     line cannot be written; the route's only write is that line, so nothing else changed.
     """
-    import tcip_store
-    from tcip_store.file_backend import database_file
+    from tests._record_damage_fixtures import unopenable_database
 
     wire_stub_spawn(monkeypatch, StubPty(survives=False))
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
     _report(client, sid, "conv-1")
-    tcip_store.release_root(opened.root)
-    database = database_file(str(opened.root))
-    intact = database.read_bytes()
-    database.write_bytes(b"not a database" * 100)
 
-    try:
+    with unopenable_database(opened.root):
         resp = client.post(
             f"/api/terminal/sessions/{sid}/session-start",
             json=_start_report("conv-2", "compact"),
         )
-    finally:
-        tcip_store.release_root(opened.root)
-        database.write_bytes(intact)
 
     assert resp.status_code == 409, resp.text
     refusal = AuditGapRefusal.model_validate(resp.json()["detail"])

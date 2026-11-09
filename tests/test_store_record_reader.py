@@ -20,7 +20,7 @@ from tcip_mcp.tools.meta_tools import (
     memory_key,
     report_friction,
 )
-from tests._record_damage_fixtures import damage_record
+from tests._record_damage_fixtures import damage_record, unopenable_database
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -181,7 +181,6 @@ def test_a_label_document_in_a_database_that_will_not_open_answers_the_editors_4
     store's sentence rather than escaping.
     """
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_store.file_backend import database_file
     from tests._producer_fixtures import label_image, write_image
 
     dataset = tmp_path / "ds"
@@ -191,12 +190,11 @@ def test_a_label_document_in_a_database_that_will_not_open_answers_the_editors_4
         project=opened_project,
         labels=[{"subject": "bud", "bbox": [40.0, 30.0, 60.0, 50.0]}],
     )
-    tcip_store.release_root(dataset)
-    database_file(str(dataset)).write_bytes(b"not a database" * 100)
 
-    loaded = client.get(
-        "/api/annotate/labels", params={"image_path": str(image)}
-    )
+    with unopenable_database(dataset):
+        loaded = client.get(
+            "/api/annotate/labels", params={"image_path": str(image)}
+        )
 
     assert loaded.status_code == 400, loaded.text
     assert (

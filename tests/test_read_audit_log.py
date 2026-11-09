@@ -179,22 +179,15 @@ def test_read_audit_log_refuses_a_log_in_a_database_that_will_not_open(
     project: Path,
 ) -> None:
     """A non-database file at the project's database answers the tool's error naming the log."""
-    import tcip_store
     from tcip_mcp.tools.meta_tools import report_friction
-    from tcip_store.file_backend import database_file
+    from tests._record_damage_fixtures import unopenable_database
 
     report_friction(
         project, "unexpected_behavior", "a project-scoped line", actor=None
     )
-    tcip_store.release_root(project)
-    foreign = database_file(str(project))
-    foreign.write_bytes(b"not a database" * 100)
 
-    try:
+    with unopenable_database(project):
         result = read_audit_log(project)
-    finally:
-        tcip_store.release_root(project)
-        foreign.unlink()
 
     assert "entries" not in result
     assert result["error"].startswith(
