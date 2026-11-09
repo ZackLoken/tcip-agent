@@ -103,7 +103,7 @@ def test_a_per_plant_delivery_over_a_dataset_registered_again_with_another_crop_
         _bucket,
         _deliver,
         _mapped,
-        _records,
+        _results,
     )
 
     dataset_root, date = _mapped(tmp_path)
@@ -115,7 +115,7 @@ def test_a_per_plant_delivery_over_a_dataset_registered_again_with_another_crop_
 
     refused = _deliver(
         tmp_path,
-        _records(("P1", 1)),
+        _results(date, ("P1", 1)),
         ["P1"],
         dataset_root,
         [bucket],
@@ -387,7 +387,7 @@ def test_a_per_plant_delivery_of_a_revision_with_a_phenotype_off_the_registrys_c
         _bucket,
         _deliver,
         _mapped,
-        _records,
+        _results,
     )
 
     _count_trait_delivering_off_crop(tmp_path)
@@ -396,7 +396,7 @@ def test_a_per_plant_delivery_of_a_revision_with_a_phenotype_off_the_registrys_c
 
     refused = _deliver(
         tmp_path,
-        _records(("P1", 1)),
+        _results(date, ("P1", 1)),
         ["P1"],
         dataset_root,
         [_bucket(tmp_path, dataset_root, date, {"P1": 1})],
@@ -507,10 +507,12 @@ def test_a_per_plant_delivery_derives_its_crop_and_writes_no_pipeline_version(
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
+    from tests._chain_fixtures import mapped_results
     from tests.test_aggregation_multi_plant_delivery import (
         _PLANTS,
-        _RECORDS,
+        _VALUES,
         _assessed,
+        _resolved,
     )
 
     fx.seed_delivery_traits(tmp_path)
@@ -519,7 +521,7 @@ def test_a_per_plant_delivery_derives_its_crop_and_writes_no_pipeline_version(
 
     delivered = deliver_per_plant_csv(
         tmp_path,
-        _RECORDS,
+        mapped_results(_resolved(tmp_path, bucket), _VALUES),
         str(out),
         "stem_count",
         PER_PLANT_COUNT_AGGREGATE,

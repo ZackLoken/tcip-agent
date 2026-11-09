@@ -2,7 +2,7 @@
 
 The fixtures give each plant statistics distinct from the other plants' and from the cohort's,
 and the tests compare each plant's value, observation count and identity provenance with its own
-records. The gate cases deliver a per-plant count under a per-plant and under a per-image count
+images. The gate cases deliver a per-plant count under a per-plant and under a per-image count
 assessment.
 """
 
@@ -14,10 +14,7 @@ import pytest
 
 from tcip_mcp.assessment import read_assessment
 from tcip_mcp.pipelines.execution import Stated
-from tcip_mcp.pipelines.postprocessing.aggregation import (
-    PlantObservation,
-    _per_plant,
-)
+from tcip_mcp.pipelines.postprocessing.aggregation import _per_plant
 from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE
 from tests import _trait_fixtures as fx, csv_rows
 from tests._training_values import (
@@ -32,6 +29,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        Assignment,
         MappingResolution,
     )
 
@@ -56,157 +54,186 @@ def _by_plant(rows: list[dict]) -> dict[str, dict]:
     return indexed
 
 
-# -- each plant's summary comes from that plant's own records ----------------
+# -- each plant's summary comes from that plant's own images ----------------
+
+COHORT = ("PLANT_A", "PLANT_B", "PLANT_C")
+COHORT_DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 
 
-def test_each_plants_summary_describes_only_that_plants_records() -> None:
-    """Each plant's median and image count are computed over that plant's own records.
+def _cohort(tmp_path: Path) -> dict[str, list[Assignment]]:
+    """Return each plant's assignments of a mapping of :data:`COHORT` over :data:`COHORT_DATES`.
+
+    The mapping is ``build_mapping``'s (``mapping_over``) of one geolocated capture of each plant
+    on each date, each at its plant's place.
+    """
+    from tests._mapping_fixtures import (
+        geolocated_captures,
+        mapping_over,
+        plant_positions,
+        plant_rows,
+        write_plots_csv,
+    )
+
+    places = plant_positions(COHORT)
+    root = tmp_path / "ds"
+    geolocated_captures(root, COHORT_DATES, plant_rows(places))
+    build = mapping_over(
+        root,
+        [write_plots_csv(tmp_path / "cohort.csv", places)],
+        tmp_path,
+        dates=COHORT_DATES,
+    )
+    return {
+        plant: [
+            a
+            for date in COHORT_DATES
+            for a in build.assignments[date]
+            if a.plant_id == plant
+        ]
+        for plant in COHORT
+    }
+
+
+def _observed(
+    tmp_path: Path, values: dict[str, list[float]]
+) -> list[tuple[Assignment, float]]:
+    """Return each plant's first images of :func:`_cohort`, valued by ``values``."""
+    assigned = _cohort(tmp_path)
+    return [
+        (a, v)
+        for plant, plant_values in values.items()
+        for a, v in zip(assigned[plant], plant_values)
+    ]
+
+
+def test_each_plants_summary_describes_only_that_plants_images(
+    tmp_path: Path,
+) -> None:
+    """Each plant's median and image count are computed over that plant's own images.
 
     Three plants have deliberately different count distributions, none of which equals the
     cohort-wide statistic.
     """
-    results = [
-        PlantObservation(plant_id=plant, value=count)
-        for plant, count in (
-            ("PLANT_A", 2),
-            ("PLANT_A", 4),
-            ("PLANT_A", 9),
-            ("PLANT_B", 10),
-            ("PLANT_B", 20),
-            ("PLANT_C", 7),
-        )
-    ]
-    out = _by_plant(_per_plant(results, plant_aggregation="median"))
+    observed = _observed(
+        tmp_path, {"PLANT_A": [2, 4, 9], "PLANT_B": [10, 20], "PLANT_C": [7]}
+    )
+    out = _by_plant(
+        _per_plant(observed, plants=COHORT, plant_aggregation="median")
+    )
 
     assert out["PLANT_A"]["value"] == 4
     assert out["PLANT_B"]["value"] == 15.0
     assert out["PLANT_C"]["value"] == 7
-    assert [out[p]["n_images"] for p in ("PLANT_A", "PLANT_B", "PLANT_C")] == [
-        3,
-        2,
-        1,
-    ]
+    assert [out[p]["n_images"] for p in COHORT] == [3, 2, 1]
 
 
-def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort() -> (
-    None
-):
-    """Each plant's identity provenance is summarized over its own records.
+def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort(
+    tmp_path: Path,
+) -> None:
+    """Each plant's identity provenance is summarized over its own images' assignments.
 
-    One plant is resolved from a single source, another from two, a third with no provenance at
-    all: each reports its own source and its own worst assignment distance, and the third
-    reports neither.
+    One plant is assigned by a single source, another by two: each reports its own source and
+    its own worst assignment distance.
     """
-    results = [
-        PlantObservation(
-            plant_id="PLANT_A", value=2, source="gnss_sequence", distance_m=0.4
-        ),
-        PlantObservation(
-            plant_id="PLANT_A", value=4, source="gnss_sequence", distance_m=1.9
-        ),
-        PlantObservation(
-            plant_id="PLANT_B",
-            value=10,
-            source="gnss_sequence",
-            distance_m=6.5,
-        ),
-        PlantObservation(plant_id="PLANT_B", value=20, source="qr_code"),
-        PlantObservation(plant_id="PLANT_C", value=7),
-    ]
-    out = _by_plant(_per_plant(results, plant_aggregation="median"))
+    from dataclasses import replace
 
-    assert out["PLANT_A"]["plant_id_source"] == "gnss_sequence"
-    assert out["PLANT_A"]["plant_id_distance_m_max"] == pytest.approx(1.9)
+    assigned = _cohort(tmp_path)
+    a1, a2, _ = assigned["PLANT_A"]
+    b1, b2, _ = assigned["PLANT_B"]
+    observed = [
+        (replace(a1, distance_m=0.4), 2),
+        (replace(a2, distance_m=0.9), 4),
+        (replace(b1, distance_m=0.7), 10),
+        (replace(b2, source="nearest_neighbor", distance_m=0.2), 20),
+    ]
+    out = _by_plant(
+        _per_plant(observed, plants=COHORT, plant_aggregation="median")
+    )
+
+    assert out["PLANT_A"]["plant_id_source"] == "sequence"
+    assert out["PLANT_A"]["plant_id_distance_m_max"] == pytest.approx(0.9)
     assert out["PLANT_B"]["plant_id_source"] == "mixed"
-    assert out["PLANT_B"]["plant_id_distance_m_max"] == pytest.approx(6.5)
-    assert "plant_id_source" not in out["PLANT_C"]
-    assert "plant_id_distance_m_max" not in out["PLANT_C"]
+    assert out["PLANT_B"]["plant_id_distance_m_max"] == pytest.approx(0.7)
 
 
 def test_delivery_csv_carries_each_plants_own_value_and_image_count(
     tmp_path: Path,
 ) -> None:
-    """Each delivery CSV row carries its own plant's value and image count.
+    """Each delivery CSV row carries its own plant's value, image count and assignments.
 
-    The delivery runs from per-image records to the CSV; each of three rows carries its plant's
-    value and n_images, PLANT_A its maximum distance, PLANT_B its source and an empty distance,
-    and PLANT_C an empty source.
+    The delivery runs from per-image values to the CSV; each of three rows carries its plant's
+    value and n_images, and the source and worst distance of the mapping's assignments of its
+    images: the plants imaged more than once find their place claimed after the first image.
     """
     pytest.importorskip("torch")
-    from tests._chain_fixtures import deliver_acknowledged
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
+    from tests._chain_fixtures import DATE, deliver_acknowledged
 
-    results = [
-        PlantObservation(
-            plant_id="PLANT_A", value=2, source="gnss_sequence", distance_m=0.4
-        ),
-        PlantObservation(
-            plant_id="PLANT_A", value=4, source="gnss_sequence", distance_m=1.9
-        ),
-        PlantObservation(plant_id="PLANT_A", value=9, source="gnss_sequence"),
-        PlantObservation(plant_id="PLANT_B", value=10, source="qr_code"),
-        PlantObservation(plant_id="PLANT_B", value=20, source="qr_code"),
-        PlantObservation(plant_id="PLANT_C", value=7),
-    ]
     out_path = tmp_path / "per_plant.csv"
     deliver_acknowledged(
         tmp_path,
-        results,
+        {"PLANT_A": [2, 4, 9], "PLANT_B": [10, 20], "PLANT_C": [7]},
         out_path,
         "stem_count",
         value_key="count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
     )
     rows = _by_plant(csv_rows(out_path))
+    build = load_mapping(tmp_path, "valley")
+    assert build is not None
 
-    assert [
-        int(rows[p]["n_images"]) for p in ("PLANT_A", "PLANT_B", "PLANT_C")
-    ] == [3, 2, 1]
+    assert [int(rows[p]["n_images"]) for p in COHORT] == [3, 2, 1]
     assert float(rows["PLANT_A"]["value"]) == 4
     assert float(rows["PLANT_B"]["value"]) == 15.0
     assert float(rows["PLANT_C"]["value"]) == 7
-    assert rows["PLANT_A"]["plant_id_distance_m_max"] == "1.9"
-    assert rows["PLANT_B"]["plant_id_source"] == "qr_code"
-    assert rows["PLANT_B"]["plant_id_distance_m_max"] == ""
-    assert rows["PLANT_C"]["plant_id_source"] == ""
+    assert [rows[p]["plant_id_source"] for p in COHORT] == [
+        "mixed",
+        "mixed",
+        "sequence",
+    ]
+    for plant in COHORT:
+        assert float(rows[plant]["plant_id_distance_m_max"]) == pytest.approx(
+            max(
+                a.distance_m
+                for a in build.assignments[DATE]
+                if a.plant_id == plant and a.distance_m is not None
+            )
+        )
 
 
 # -- a plant's mean is its own -------------------------------------------------
 
 
-def test_each_plants_mean_describes_only_that_plants_records() -> None:
-    """Each plant's mean is computed over that plant's own records.
+def test_each_plants_mean_describes_only_that_plants_images(
+    tmp_path: Path,
+) -> None:
+    """Each plant's mean is computed over that plant's own images.
 
     The samples are skewed, each plant's mean and median several units apart.
     """
-    results = [
-        PlantObservation(plant_id=plant, value=value)
-        for plant, value in (
-            ("PLANT_A", 1.0),
-            ("PLANT_A", 2.0),
-            ("PLANT_A", 9.0),
-            ("PLANT_B", 10.0),
-            ("PLANT_B", 11.0),
-            ("PLANT_B", 30.0),
-        )
-    ]
-    out = _by_plant(_per_plant(results, plant_aggregation="mean"))
+    observed = _observed(
+        tmp_path, {"PLANT_A": [1.0, 2.0, 9.0], "PLANT_B": [10.0, 11.0, 30.0]}
+    )
+    out = _by_plant(
+        _per_plant(observed, plants=COHORT, plant_aggregation="mean")
+    )
 
     assert out["PLANT_A"]["value"] == pytest.approx(4.0)
     assert out["PLANT_B"]["value"] == pytest.approx(17.0)
 
 
-def test_summed_areas_stay_within_their_own_plant() -> None:
+def test_summed_areas_stay_within_their_own_plant(tmp_path: Path) -> None:
     """Each plant's summed area is taken over its own images.
 
     The plants have different numbers of contributing images, and each reports its own image
     count.
     """
-    results = [
-        PlantObservation(plant_id="PLANT_A", value=100.0),
-        PlantObservation(plant_id="PLANT_A", value=250.0),
-        PlantObservation(plant_id="PLANT_B", value=40.0),
-    ]
-    out = _by_plant(_per_plant(results, plant_aggregation="sum"))
+    observed = _observed(
+        tmp_path, {"PLANT_A": [100.0, 250.0], "PLANT_B": [40.0]}
+    )
+    out = _by_plant(
+        _per_plant(observed, plants=COHORT, plant_aggregation="sum")
+    )
 
     assert out["PLANT_A"]["value"] == pytest.approx(350.0)
     assert out["PLANT_A"]["n_images"] == 2
@@ -251,7 +278,10 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         ),
     )
     root = project / "ds"
-    images_dir = synthetic_capture(root, positions=plant_captures(_PLANTS))
+    images_dir = synthetic_capture(
+        root,
+        positions=plant_captures({p: len(v) for p, v in _VALUES.items()}),
+    )
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, experiment_id)
     assessment = assess_checkpoint(
@@ -296,10 +326,9 @@ def _resolved(project: Path, bucket: Bucket) -> MappingResolution:
     )
 
 
-_PLANTS = ["PLANT_A"]
-_RECORDS = [
-    PlantObservation(plant_id="PLANT_A", value=count) for count in (2, 4, 9)
-]
+_VALUES = {"PLANT_A": [2, 4, 9]}
+"""Each delivered plant's per-image values, one per capture :func:`_assessed` takes at it."""
+_PLANTS = list(_VALUES)
 
 
 def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
@@ -309,21 +338,21 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
+    from tests._chain_fixtures import mapped_results
 
     bucket = _assessed(tmp_path, PER_PLANT_COUNT_AGGREGATE, "exp-kind-matched")
     resolved = _resolved(tmp_path, bucket)
     delivered = deliver_per_plant_aggregate(
         tmp_path,
-        _RECORDS,
+        mapped_results(resolved, _VALUES),
         str(tmp_path / "matched.csv"),
         value_key="count",
         delivered_phenotype="stem_count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket],
         plants=_PLANTS,
-        crop=resolved.verified.crop,
+        mapping=resolved,
         door="test",
-        plant_mapping=resolved.disclosure,
         actor=None,
     )
 
@@ -343,6 +372,7 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
+    from tests._chain_fixtures import mapped_results
 
     bucket = _assessed(tmp_path, PER_IMAGE_COUNT, "exp-kind-crossed")
     resolved = _resolved(tmp_path, bucket)
@@ -353,16 +383,15 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     ):
         deliver_per_plant_aggregate(
             tmp_path,
-            _RECORDS,
+            mapped_results(resolved, _VALUES),
             str(tmp_path / "crossed.csv"),
             value_key="count",
             delivered_phenotype="stem_count",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[bucket],
             plants=_PLANTS,
-            crop=resolved.verified.crop,
+            mapping=resolved,
             door="test",
-            plant_mapping=resolved.disclosure,
             actor=None,
         )
     assert not (tmp_path / "crossed.csv").exists()
