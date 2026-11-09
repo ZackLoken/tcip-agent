@@ -122,8 +122,9 @@ uncharacterized, which is a claim about a quantity that has been defined.
   refuses. `deliver_per_plant_csv`'s delivery kind, a kind whose per-plant value is the trait's
   `plant_aggregation`, names the operationalization, the records' value key has to be inside its
   confirmed set, and the delivery aggregates each plant's records under the revision's
-  `plant_aggregation`. `deliver_orthomosaic_plant_counts`
-  rests on the `per_plant_orthomosaic_count` operationalization, whose set must hold `count`.
+  `plant_aggregation`. `deliver_orthomosaic_plant_counts` rests on the
+  `per_plant_orthomosaic_count` operationalization, which names no value key: the door writes
+  `count` itself.
 - A `state_crossing_dates` operationalization and every delivery under it are checked against the
   delivered dataset's own subject registry, never a bare spec value: a delivery whose buckets'
   dataset carries no registry refuses, and a positive state naming an attribute the registry does

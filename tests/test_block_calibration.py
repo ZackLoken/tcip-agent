@@ -506,7 +506,6 @@ def test_the_reserved_regions_are_assessed_for_a_count_on_the_mosaic(
             kind,
             measured_subject="bud",
             delivered_phenotypes=("stem_count",),
-            delivered_value_keys=("count",),
         ),
     )
 

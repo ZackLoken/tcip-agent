@@ -9360,7 +9360,7 @@
             "type": "array"
           },
           "delivered_value_keys": {
-            "description": "The value keys delivered rows may carry: at least one for the per-plant kinds\n(:data:`VALUE_KEY_KINDS`), empty for the others, whose row schema is fixed by their writer.",
+            "description": "The value keys delivered rows may carry, authored for the value-key kinds\n(:data:`VALUE_KEY_KINDS`, at least one); empty for the others, whose writer fixes the row\nschema, the orthomosaic count's ``count`` among them.",
             "items": {
               "type": "string"
             },

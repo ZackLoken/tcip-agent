@@ -169,12 +169,12 @@ PHENOTYPE_NAMING_KINDS = frozenset(
 VALUE_KEY_KINDS = frozenset(
     {
         PER_PLANT_COUNT_AGGREGATE,
-        PER_PLANT_ORTHOMOSAIC_COUNT,
         PER_PLANT_ORDINAL_AGGREGATE,
         PER_PLANT_REGRESSION_AGGREGATE,
     }
 )
-"""Kinds whose rows carry a value key, hence whose operationalization bounds the set."""
+"""Kinds whose operationalization states the value keys the breeder bounds its door to write; a
+door of any other kind fixes its rows' value key itself."""
 
 
 class TraitUnknownError(KeyError):
@@ -279,8 +279,9 @@ class Operationalization(BaseModel):
     """Which of the trait's ``delivers`` entries this kind ships under; empty for
     ``per_image_count``, whose CSV names no phenotype, and at least one for every other kind."""
     delivered_value_keys: tuple[str, ...]
-    """The value keys delivered rows may carry: at least one for the per-plant kinds
-    (:data:`VALUE_KEY_KINDS`), empty for the others, whose row schema is fixed by their writer."""
+    """The value keys delivered rows may carry, authored for the value-key kinds
+    (:data:`VALUE_KEY_KINDS`, at least one); empty for the others, whose writer fixes the row
+    schema, the orthomosaic count's ``count`` among them."""
 
 
 class PositiveState(BaseModel):
