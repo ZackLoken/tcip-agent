@@ -53,7 +53,7 @@ RASTER_PASS = Stated(
 )
 """The execution values every raster pass here states."""
 SCOPE = {"subject": fx.COUNT_SUBJECT}
-pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
+pytestmark = pytest.mark.usefixtures("confirmed_orthomosaic_count")
 
 
 def _geokeys() -> tuple[int, ...]:

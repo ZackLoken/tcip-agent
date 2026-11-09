@@ -241,10 +241,10 @@
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
+            "trait_revision_sha256": "cd943b73c08f62116682369af7d3b894243d3f538b30174eedd64c98c0f8e46b",
             "event_id": "<registry event>",
             "door": "test_orthomosaic",
-            "delivery_kind": "per_plant_count_aggregate",
+            "delivery_kind": "per_plant_orthomosaic_count",
             "output_path": "/scratch/workspace/nearest/counts.csv",
             "output_sha256": "<output_sha256 n8>",
             "producer": {
@@ -315,10 +315,10 @@
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
+            "trait_revision_sha256": "cd943b73c08f62116682369af7d3b894243d3f538b30174eedd64c98c0f8e46b",
             "event_id": "<canopy event>",
             "door": "test_orthomosaic",
-            "delivery_kind": "per_plant_count_aggregate",
+            "delivery_kind": "per_plant_orthomosaic_count",
             "output_path": "/scratch/workspace/segmented/counts.csv",
             "output_sha256": "<output_sha256 n12>",
             "producer": {
@@ -748,17 +748,17 @@
     "headers": {
       "X-TCIP-Export": "{\"saved_path\":\"/scratch/workspace/nearest/results_export/plant_counts.csv\",\"shipped\":{\"kind\":\"acknowledged\",\"acknowledgment\":{\"acknowledgment_id\":\"<export 2 acknowledgment>\",\"acknowledged_by\":\"user:grower\",\"reason\":\"the assessment is not run yet\",\"result_sha256\":\"<export 2 digest>\",\"recorded_at\":\"2000-01-01T00:00:19+00:00\"}},\"filename\":\"plant_counts.csv\"}"
     },
-    "file": "plant_id,crop,delivered_phenotype,value,units,value_key,n_images,plant_id_source,plant_attribution,plant_id_distance_m_max,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nplot0,hazelnut,stem_count,1,,count,1,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\nplot2,hazelnut,stem_count,1,,count,1,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\n",
+    "file": "plant_id,crop,delivered_phenotype,value,units,value_key,plant_attribution,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nplot0,hazelnut,stem_count,1,,count,detection,False,stem,2,cd943b73c08f62116682369af7d3b894243d3f538b30174eedd64c98c0f8e46b,<export 2>\r\nplot2,hazelnut,stem_count,1,,count,detection,False,stem,2,cd943b73c08f62116682369af7d3b894243d3f538b30174eedd64c98c0f8e46b,<export 2>\r\n",
     "events": {
       "records": [
         {
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
+            "trait_revision_sha256": "cd943b73c08f62116682369af7d3b894243d3f538b30174eedd64c98c0f8e46b",
             "event_id": "<registry event>",
             "door": "test_orthomosaic",
-            "delivery_kind": "per_plant_count_aggregate",
+            "delivery_kind": "per_plant_orthomosaic_count",
             "output_path": "/scratch/workspace/nearest/counts.csv",
             "output_sha256": "<output_sha256 n8>",
             "producer": {
@@ -825,10 +825,10 @@
           "event": {
             "trait": "stem",
             "trait_revision": 2,
-            "trait_revision_sha256": "8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934",
+            "trait_revision_sha256": "cd943b73c08f62116682369af7d3b894243d3f538b30174eedd64c98c0f8e46b",
             "event_id": "<export 2>",
             "door": "results.export_count_csv",
-            "delivery_kind": "per_plant_count_aggregate",
+            "delivery_kind": "per_plant_orthomosaic_count",
             "output_path": "/scratch/workspace/nearest/results_export/plant_counts.csv",
             "output_sha256": "<output_sha256 n32>",
             "producer": {
