@@ -1,7 +1,8 @@
-"""The test tree's shared ways of spoiling a store are used, not written out by hand.
+"""The test tree's shared ways of spoiling a store or binding a backend are used, not written out.
 
 Each helper in ``tests._record_damage_fixtures`` is exercised here, and a scan over the test tree
-finds no test spelling the same steps out again.
+finds no test spelling the same steps out again, nor binding a backend with a lock wait of its own
+beside ``tests._busy_store_fixtures``.
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ if TYPE_CHECKING:
 TEST_TREE = Path(__file__).resolve().parent
 DAMAGE_FIXTURES = "_record_damage_fixtures.py"
 DAMAGING_SQL = re.compile(r"\bupdate\s+(records|log_entries)\b", re.IGNORECASE)
+BACKEND_WITH_WAIT = re.compile(r"SqliteBackend\(\s*lock_timeout_s")
+CHILD_PROCESS_PROGRAM = "test_concurrent_audit_appends.py"
 
 
 def _test_sources() -> Iterator[tuple[str, str]]:
@@ -209,3 +212,18 @@ def test_no_test_writes_the_sql_that_damages_a_record_or_a_log_entry() -> None:
         "these rewrite a stored entry by hand; use damage_record, damage_log_entry or "
         f"damage_last_log_entry from tests._record_damage_fixtures: {found}"
     )
+
+
+def test_no_test_binds_a_backend_with_its_own_lock_wait_by_hand() -> None:
+    """Only a child-process program binds a backend with a lock wait of its own.
+
+    That program, in ``test_concurrent_audit_appends.py``, runs under ``python -c`` and cannot
+    enter the in-process ``tests._busy_store_fixtures.waiting``; every other test binds through it.
+    """
+    found = {
+        name: len(BACKEND_WITH_WAIT.findall(source))
+        for name, source in _test_sources()
+        if BACKEND_WITH_WAIT.search(source)
+    }
+
+    assert found == {CHILD_PROCESS_PROGRAM: 1}, found

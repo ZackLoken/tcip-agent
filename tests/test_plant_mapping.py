@@ -311,14 +311,13 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
 ) -> None:
     """Persisting a mapping under another writer's lock raises ``StoreBusyError``, writing none."""
     from tcip_store import StoreBusyError
-    from tcip_store.sqlite_backend import SqliteBackend
     from tests._audit_fixtures import held_by_another_writer
+    from tests._busy_store_fixtures import waiting
 
     build = replace(_one_build(tmp_path), name="again")
     key = plant_mapping_key(tmp_path, "again")
-    backend = tcip_store.bind(SqliteBackend(lock_timeout_s=0.2))
 
-    with held_by_another_writer(key), pytest.raises(StoreBusyError):
-        persist_mapping(build, tmp_path, actor=None)
-    assert not tcip_store.exists(key)
-    backend.close()
+    with waiting(0.2):
+        with held_by_another_writer(key), pytest.raises(StoreBusyError):
+            persist_mapping(build, tmp_path, actor=None)
+        assert not tcip_store.exists(key)
