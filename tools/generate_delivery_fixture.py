@@ -583,7 +583,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     root = workspace / "nearest"
     project = named_project(root, "Nearest")
     fx.seed_delivery_traits(root)
-    fx.seed_confirmed_aggregate(root, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_orthomosaic_count(root, "stem_count")
     raster_path = ortho._raster(root)
     ortho._write_geo_raster(raster_path)
     bucket = ortho._raster_bucket(
@@ -646,7 +646,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     root = workspace / "segmented"
     project = named_project(root, "Segmented")
     fx.seed_delivery_traits(root)
-    fx.seed_confirmed_aggregate(root, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_orthomosaic_count(root, "stem_count")
     _dataset_root, raster_path, bucket = ortho._canopy_setup(
         root,
         [

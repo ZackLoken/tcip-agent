@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.buckets import Bucket
 
-pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
+pytestmark = pytest.mark.usefixtures("confirmed_orthomosaic_count")
 
 DATE = "2026-02-11"
 PLANTS = ["plot0", "plot1", "plot2"]

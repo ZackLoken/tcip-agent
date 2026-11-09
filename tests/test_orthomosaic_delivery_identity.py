@@ -28,7 +28,7 @@ from tests.test_orthomosaic_tools import (  # noqa: E402, F401
 )
 
 BUCKET = "preds/2026-01-01"
-pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
+pytestmark = pytest.mark.usefixtures("confirmed_orthomosaic_count")
 
 
 def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
