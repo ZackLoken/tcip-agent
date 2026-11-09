@@ -219,6 +219,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         trained_detector,
     )
     from tests._mapping_fixtures import (
+        COUNT_CROP,
         PLANTS,
         POSITION_ERROR_M,
         geolocated_captures,
@@ -606,7 +607,9 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         )
     )
     out["registry"] = served(project, "registry")
-    nearest = register_dataset(root, str(bucket.root), crop=crop, actor=None)
+    nearest = register_dataset(
+        root, str(bucket.root), crop=COUNT_CROP, actor=None
+    )
     delivered(nearest)
     minted[nearest["id"]] = "<nearest dataset>"
     plant_counts = ExportCountCsvPayload(
