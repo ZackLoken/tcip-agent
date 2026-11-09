@@ -9,6 +9,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     deliver_per_plant_aggregate,
 )
 from tcip_mcp.server import tool
+from tcip_mcp.traits import PlantAggregateKind
 
 
 @tool()
@@ -17,7 +18,7 @@ def deliver_per_plant_csv(
     results: list[PlantObservation],
     output_path: str,
     delivered_phenotype: str,
-    delivery_kind: str,
+    delivery_kind: PlantAggregateKind,
     plants: list[str],
     dataset_root: str,
     buckets: list[str],
@@ -53,8 +54,8 @@ def deliver_per_plant_csv(
             them; a row naming any other key, or no plant, is refused.
         output_path: Where to write the CSV.
         delivered_phenotype: The crop-vocabulary phenotype this CSV ships under.
-        delivery_kind: ``per_plant_count_aggregate``, ``per_plant_ordinal_aggregate`` or
-            ``per_plant_regression_aggregate``.
+        delivery_kind: A kind whose per-plant value is the trait's ``plant_aggregation`` over
+            the plant's records.
         plants: The delivery's population.
         dataset_root: The dataset root the buckets are published under.
         buckets: The names of the published buckets the values came from, one per capture date;

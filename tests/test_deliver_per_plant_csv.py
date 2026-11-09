@@ -449,6 +449,36 @@ def test_the_door_refuses_a_call_naming_no_plant_mapping_at_its_schema() -> (
     assert "plant_mapping" in str(refused)
 
 
+def test_the_door_offers_the_plant_aggregate_kinds_and_refuses_the_mosaic_count() -> (
+    None
+):
+    """The door's schema offers the kinds a per-plant statistic reduces, and no other.
+
+    The schema the server lists names the three aggregate kinds; a call naming the orthomosaic
+    count's kind is refused by that schema, by the parameter's name, before any delivery runs.
+    """
+    from tests._server_calls import called_through_the_server, client_server
+
+    tools = {t.name: t for t in client_server(None)._tool_manager.list_tools()}
+    refused = called_through_the_server(
+        "deliver_per_plant_csv",
+        {
+            **_arguments([{"plant_id": "P1", "value": 2}]),
+            "delivery_kind": "per_plant_orthomosaic_count",
+            "plant_mapping": "valley",
+        },
+    )
+
+    assert "validation error" in str(refused), refused
+    assert "delivery_kind" in str(refused), refused
+    offered = tools["deliver_per_plant_csv"].parameters["properties"]
+    assert offered["delivery_kind"].get("enum") == [
+        "per_plant_count_aggregate",
+        "per_plant_ordinal_aggregate",
+        "per_plant_regression_aggregate",
+    ]
+
+
 @pytest.mark.parametrize(
     ("row", "named"),
     [
