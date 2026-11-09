@@ -221,8 +221,9 @@ def require_bucket_of_dataset(bucket: Bucket, identity: DatasetRecord) -> None:
     """Require ``bucket`` to record the dataset ``identity`` is the identity of.
 
     ``identity`` is its root's identity record. A bucket recording no dataset (published outside a
-    capture of a registered dataset), and a bucket recording another dataset than ``identity``'s,
-    refuse (``ValueError``) naming the bucket, its root and the ids.
+    capture of a registered dataset) refuses (``ValueError``) naming the bucket and its root. A
+    bucket recording another dataset than ``identity``'s refuses (``ValueError``) naming the
+    bucket, its root, the id it records and the id of its root.
     """
     if bucket.dataset_id is None:
         raise ValueError(
