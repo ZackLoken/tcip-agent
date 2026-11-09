@@ -34,7 +34,6 @@ from tcip_store.file_backend import (
 )
 from tcip_store.sqlite_backend import (
     SqliteBackend,
-    encode_parts,
     open_verified,
 )
 from tests._busy_store_fixtures import (
@@ -43,7 +42,11 @@ from tests._busy_store_fixtures import (
     held_by_another_connection,
     waiting,
 )
-from tests._record_damage_fixtures import unopenable_database
+from tests._record_damage_fixtures import (
+    damage_log_entry,
+    damage_record,
+    unopenable_database,
+)
 from tests._store_worker import (
     CAS,
     LOG,
@@ -77,37 +80,6 @@ class Harness:
         return sqlite3.connect(
             str(database_file(str(self.root))), isolation_level=None
         )
-
-    def damage_record(self, key: ts.Key, data: bytes) -> None:
-        """Replace the stored value of the record ``key`` names with ``data``."""
-        conn = self.connect()
-        try:
-            conn.execute(
-                "update records set value = ? where store = ? and parts = ?",
-                (data, key.store, encode_parts(key.parts)),
-            )
-        finally:
-            conn.close()
-
-    def damage_log_entry(
-        self, key: ts.Key, position: int, data: bytes
-    ) -> None:
-        """Replace the stored bytes of the log entry at ``position`` under ``key`` with ``data``."""
-        conn = self.connect()
-        try:
-            ids = [
-                row[0]
-                for row in conn.execute(
-                    "select id from log_entries where store = ? and parts = ? order by id",
-                    (key.store, encode_parts(key.parts)),
-                )
-            ]
-            conn.execute(
-                "update log_entries set entry = ? where id = ?",
-                (data, ids[position]),
-            )
-        finally:
-            conn.close()
 
     def spawn(self, *args: object) -> subprocess.Popen:
         proc = subprocess.Popen(
@@ -789,7 +761,7 @@ def test_a_damaged_entry_is_reported_and_the_rest_still_read(
     for i in range(3):
         ts.append(key, {"i": i})
 
-    store.damage_log_entry(key, 1, b'{"i": bro')
+    damage_log_entry(key, 1, b'{"i": bro')
     page = ts.read_log(key)
     assert [r["i"] for r in page.records] == [0, 2]
     assert page.corrupt == (1,)
@@ -893,7 +865,7 @@ def test_absence_and_corruption_are_different_answers(store: Harness) -> None:
 
     ts.replace(key, {"n": 1})
     assert ts.read(key) == {"n": 1}
-    store.damage_record(key, b"{not json at all")
+    damage_record(key, b"{not json at all")
     with pytest.raises(ts.DecodeError):
         ts.read(key, default={"fallback": True})
 

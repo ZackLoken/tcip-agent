@@ -137,11 +137,10 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
     Such a bucket has no scope to read its documents under.
     """
     pytest.importorskip("torch")
-    import sqlite3
-
     from tcip_mcp.buckets import NotABucketError, read_bucket
-    from tcip_store.file_backend import database_file
+    from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import predicted, published
+    from tests._record_damage_fixtures import damage_record
 
     image = image_dir(tmp_path / "ds", "2026-05-02") / "s1.png"
     image.parent.mkdir(parents=True)
@@ -152,11 +151,7 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
         [predicted(image, ["one"])],
         scope={"subject": SUBJECT},
     )
-    with sqlite3.connect(database_file(str(bucket.root))) as db:
-        db.execute(
-            "update records set value = ? where store = 'prediction_buckets'",
-            (b"{not json",),
-        )
+    damage_record(bucket_key(bucket.root, bucket.name), b"{not json")
 
     with pytest.raises(
         NotABucketError, match=r"prediction_buckets\['classifier/2026-05-02'\]"
