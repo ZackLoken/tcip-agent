@@ -216,11 +216,11 @@ def plant_positions(plants: Sequence[str]) -> dict[str, tuple[float, float]]:
 
 def register_dataset_at(
     project: Path, dataset_root: Path, *, crop: str
-) -> None:
+) -> str:
     """Register ``dataset_root`` in ``project`` at ``crop``, asserting it returned no error.
 
-    A bucket published under the root afterwards records the root's dataset id; registering again
-    keeps the id.
+    Returns the dataset's id. A bucket published under the root afterwards records that id;
+    registering again keeps it.
     """
     from tcip_mcp.tools.project_tools import register_dataset
 
@@ -228,6 +228,25 @@ def register_dataset_at(
         project, str(dataset_root), crop=crop, actor=None
     )
     assert "error" not in registered, registered
+    return registered["id"]
+
+
+def registered_copy(
+    project: Path, root: Path, name: str, *, crop: str
+) -> tuple[Path, str]:
+    """Copy ``root`` with its store and without its identity document, and register the copy.
+
+    The copy is ``name`` beside ``root`` and is registered at ``crop``, which mints it its own id.
+    Returns the copy and that id.
+    """
+    import shutil
+
+    import tcip_store as ts
+
+    copy = root.parent / name
+    ts.release_root(root)
+    shutil.copytree(root, copy, ignore=shutil.ignore_patterns("dataset.json"))
+    return copy, register_dataset_at(project, copy, crop=crop)
 
 
 def map_plants(
@@ -277,13 +296,9 @@ def map_captures(
     dataset and the registry both registered at ``crop``. Returns each date's captures.
     """
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tcip_mcp.tools.project_tools import register_dataset
 
     dataset_root.mkdir(parents=True, exist_ok=True)
-    registered = register_dataset(
-        project, str(dataset_root), crop=crop, actor=None
-    )
-    assert "error" not in registered, registered
+    register_dataset_at(project, dataset_root, crop=crop)
     captures = geolocated_captures(dataset_root, dates)
     plant_csv = write_plots_csv(project / f"{name}_plants.csv")
     built = build_plant_mapping(

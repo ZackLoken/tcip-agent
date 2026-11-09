@@ -12,7 +12,6 @@ records, and no door takes one.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ from tests._mapping_fixtures import (
     COUNT_CROP,
     CROP,
     register_plant_registry_for,
+    registered_copy,
 )
 
 if TYPE_CHECKING:
@@ -329,27 +329,18 @@ def test_an_orthomosaic_count_over_a_bucket_recording_another_dataset_than_its_r
     The dataset ``ds`` is copied with its store but without its identity document and the copy
     registered, which mints it its own id; the copy's bucket still records the original's.
     """
-    import tcip_store as ts
-    from tcip_mcp.tools.project_tools import register_dataset
-
     bucket = _orthomosaic_scene(tmp_path)
-    copy = tmp_path / "ds-copy"
-    ts.release_root(bucket.root)
-    shutil.copytree(
-        bucket.root, copy, ignore=shutil.ignore_patterns("dataset.json")
+    copy, minted = registered_copy(
+        tmp_path, bucket.root, "ds-copy", crop=COUNT_CROP
     )
-    registered = register_dataset(
-        tmp_path, str(copy), crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in registered, registered
-    assert registered["id"] != bucket.dataset_id
+    assert minted != bucket.dataset_id
 
     for refusal in _orthomosaic_refusals(
         client, tmp_path, copy, bucket.name, _grid_registry(tmp_path)
     ):
         assert bucket.dataset_id is not None
         assert bucket.dataset_id in refusal, refusal
-        assert registered["id"] in refusal, refusal
+        assert minted in refusal, refusal
 
 
 # ── a revision delivering a phenotype the registry's crop does not carry ──

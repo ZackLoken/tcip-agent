@@ -10,7 +10,6 @@ refusals there.
 
 from __future__ import annotations
 
-import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +20,8 @@ from tests._mapping_fixtures import (
     COUNT_CROP,
     CROP,
     PHOTO_POSITION_ERROR_M,
+    register_dataset_at,
+    registered_copy,
     write_photos,
 )
 
@@ -29,25 +30,6 @@ if TYPE_CHECKING:
 
 pytest.importorskip("torch")
 pytest.importorskip("torchvision")
-
-
-def _registered_copy(
-    project: Path, root: Path, name: str, *, crop: str
-) -> tuple[Path, str]:
-    """Copy ``root`` with its store and without its identity document, and register the copy.
-
-    The copy is ``name`` beside ``root`` and is registered at ``crop``, which mints it its own id.
-    Returns the copy and that id.
-    """
-    import tcip_store as ts
-    from tcip_mcp.tools.project_tools import register_dataset
-
-    copy = root.parent / name
-    ts.release_root(root)
-    shutil.copytree(root, copy, ignore=shutil.ignore_patterns("dataset.json"))
-    registered = register_dataset(project, str(copy), crop=crop, actor=None)
-    assert "error" not in registered, registered
-    return copy, registered["id"]
 
 
 def _map(project: Path, name: str, root: Path, registry: str) -> None:
@@ -94,7 +76,7 @@ def test_a_per_plant_delivery_of_a_bucket_recording_another_dataset_than_its_roo
     dataset_root, date = _mapped(tmp_path)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
     recorded = read_bucket(dataset_root, bucket).dataset_id
-    copy, minted = _registered_copy(
+    copy, minted = registered_copy(
         tmp_path, dataset_root, "ds-copy", crop=COUNT_CROP
     )
     _map(tmp_path, "copy-valley", copy, "reg")
@@ -127,7 +109,6 @@ def test_a_per_plant_delivery_of_a_bucket_recording_no_dataset_refuses(
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests.test_deliver_per_plant_csv import (
         DATE,
         ONE_PLANT,
@@ -150,10 +131,7 @@ def test_a_per_plant_delivery_of_a_bucket_recording_no_dataset_refuses(
     )
     bucket = _bucket(tmp_path, bare, DATE, {"P1": 1})
     assert read_bucket(bare, bucket).dataset_id is None
-    registered = register_dataset(
-        tmp_path, str(bare), crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in registered, registered
+    register_dataset_at(tmp_path, bare, crop=COUNT_CROP)
     _map(tmp_path, "bare-valley", bare, "reg")
 
     refused = _deliver(
@@ -192,7 +170,7 @@ def test_a_phenology_delivery_of_a_bucket_recording_another_dataset_than_its_roo
     body = _currant_bloom_body(tmp_path)
     bucket = body["buckets"][0]
     recorded = read_bucket(body["dataset_root"], bucket).dataset_id
-    copy, minted = _registered_copy(
+    copy, minted = registered_copy(
         tmp_path, Path(body["dataset_root"]), "ds-copy", crop=CROP
     )
     _map(tmp_path, "copy-valley", copy, "reg")
@@ -220,7 +198,6 @@ def test_a_phenology_delivery_of_a_bucket_recording_no_dataset_refuses(
     is then registered and a mapping built over it.
     """
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._producer_fixtures import registry_over
     from tests.test_plant_mapping_binding import _write_scene
     from tests.test_second_trait_acceptance import (
@@ -237,8 +214,7 @@ def test_a_phenology_delivery_of_a_bucket_recording_no_dataset_refuses(
     _, buckets = _write_scene(bare)
     recorded = {read_bucket(bare, b).dataset_id for b in buckets.values()}
     assert recorded == {None}
-    registered = register_dataset(tmp_path, str(bare), crop=CROP, actor=None)
-    assert "error" not in registered, registered
+    register_dataset_at(tmp_path, bare, crop=CROP)
     registry_over(bare, FLOWERS)
     _map(tmp_path, "bare-valley", bare, "reg")
 
