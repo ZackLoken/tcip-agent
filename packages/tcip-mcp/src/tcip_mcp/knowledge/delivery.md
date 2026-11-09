@@ -11,7 +11,7 @@ The final deliverable is a CSV with one row per plant per trait:
 
 Columns, in the order `deliver_per_plant_aggregate` writes them (see
 `pipelines/postprocessing/aggregation.py`). Everything the delivery rests on beyond the row (the
-producing checkpoint and run, each bucket's gate finding and the assessment behind it, the
+producing checkpoint and its origin, each bucket's gate finding and the assessment behind it, the
 acknowledgment, the population) is recorded once on the delivery event the last column names:
 
 | Column | Type | Description |
@@ -23,7 +23,6 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 | units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. In a count delivery a unit-declared trait's `value_key` must itself imply a unit, and a dimensional value rests on a physical-scale assessment; in an ordinal or regression delivery a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` |
 | value_key | string | The quantity of the per-image values `value` aggregates, as the delivery names it (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
 | n_images | int | Number of source images |
-| pipeline_version | string | Pipeline that produced this result |
 | plant_id_source | string | How the plant identity was resolved for this plant's images, the assignment rows' own `source` (`"mixed"` when they disagree); blank when the records carried no `source` |
 | plant_attribution | string | The granularity objects were attributed to plants at: `"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's nearest-neighbor per-detection mapping, `"segment"` for an orthomosaic's canopy-segment mapping (a detection's box centroid fell inside a canopy boundary a person accepted, never a mask-level or area measurement). Distinct from `plant_id_source`, which names the matching method, not the granularity |
 | plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in meters, across this plant's images, the assignment rows' own `distance_m`; blank when none carried one |

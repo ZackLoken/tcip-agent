@@ -23,7 +23,6 @@ def deliver_per_plant_csv(
     buckets: list[str],
     value_key: str,
     plant_mapping: str,
-    pipeline_version: str = "",
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
     *,
@@ -62,7 +61,6 @@ def deliver_per_plant_csv(
             each stands for the date its own record states.
         value_key: The quantity every value is, one the operationalization covers.
         plant_mapping: The persisted plant mapping the rows' plant ids came from.
-        pipeline_version: Written into every row.
         scale_assessment_id: The physical-scale assessment a dimensional value rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
 
@@ -90,7 +88,6 @@ def deliver_per_plant_csv(
             buckets=delivered,
             plants=wanted,
             crop=resolved.verified.crop,
-            pipeline_version=pipeline_version,
             door="deliver_per_plant_csv",
             plant_mapping=resolved.disclosure,
             scale_assessment_id=scale_assessment_id,

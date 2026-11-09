@@ -518,7 +518,6 @@ class OrthomosaicPlantCountsDelivery(BaseModel):
     plant_registry: str
     delivered_phenotype: str
     plants: list[str]
-    pipeline_version: str = ""
     canopy_subject: str = ""
     position_error_m: PositionError | None = None
 
@@ -613,7 +612,6 @@ def export_count_csv(
                 saved_path,
                 delivery.delivered_phenotype,
                 delivery.plants,
-                pipeline_version=delivery.pipeline_version,
                 canopy_subject=delivery.canopy_subject,
                 position_error_m=delivery.position_error_m,
                 acknowledgment_id=acknowledgment_id,

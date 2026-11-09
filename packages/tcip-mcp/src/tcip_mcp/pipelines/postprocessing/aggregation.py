@@ -144,7 +144,6 @@ def deliver_per_plant_aggregate(
     buckets: Sequence[Bucket],
     plants: list[str],
     crop: Crop,
-    pipeline_version: str = "",
     door: str,
     plant_mapping: PlantMapping,
     scale_assessment_id: str | None = None,
@@ -232,7 +231,6 @@ def deliver_per_plant_aggregate(
             "units",
             "value_key",
             "n_images",
-            "pipeline_version",
             "plant_id_source",
             "plant_attribution",
             "plant_id_distance_m_max",
@@ -247,7 +245,6 @@ def deliver_per_plant_aggregate(
                 "units": units,
                 "value_key": value_key,
                 "n_images": by_plant[plant]["n_images"],
-                "pipeline_version": pipeline_version,
                 "plant_id_source": by_plant[plant].get("plant_id_source", ""),
                 "plant_attribution": plant_mapping.plant_attribution,
                 "plant_id_distance_m_max": by_plant[plant].get(
