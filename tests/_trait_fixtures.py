@@ -30,7 +30,7 @@ def entry(name: str, delivers: Sequence[str], **fields: object) -> TraitEntry:
             "milestone_fractions": (),
             "milestone_on": "",
             "crossing_rule": "",
-            "majority_milestone": "",
+            "majority_fraction": None,
             "phenology_prefix": "",
             "majority_label": "",
             "count_objective": "",
@@ -79,7 +79,7 @@ BUD_OPENING = entry(
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
     crossing_rule=CROSSING_RULE,
-    majority_milestone="95per",
+    majority_fraction=0.95,
     phenology_prefix="bud",
     majority_label="majority",
     notes="The fraction of a plant's bud objects that are open: a texture call on the object "

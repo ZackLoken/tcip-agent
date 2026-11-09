@@ -7,9 +7,9 @@ each ``milestone_fractions`` entry):
 
     ``<prefix>_<NN>per_date``            = the date the positive fraction first crosses NN%,
                                             for each fraction the spec declares
-    ``<prefix>_<majority_label>_date``   = the majority-crossing alias
-                                            (``TraitEntry.majority_milestone``), present only
-                                            when the spec names one
+    ``<prefix>_<majority_label>_date``   = the crossing at ``TraitEntry.majority_fraction``,
+                                            one of those fractions, present only when the
+                                            spec names one
 
 ``positive_onset_date`` (the first date any positive-state observation appears) is a separate
 helper, not the delivered trait.
@@ -17,6 +17,7 @@ helper, not the delivered trait.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -44,24 +45,48 @@ if TYPE_CHECKING:
     )
 
 
-def _milestone_targets(spec: TraitEntry) -> dict[str, float]:
-    """Return milestone crossing fractions from the trait's confirmed semantics, per call.
+_KEY_SUFFIX = "per"
+_KEY_SHAPE = re.compile(rf"\d{{2,}}{_KEY_SUFFIX}")
 
-    Keyed "NNper" to match the CSV column names.
+
+def _percent(fraction: float) -> int:
+    """Return the whole percent nearest ``fraction``."""
+    return int(round(fraction * 100))
+
+
+def milestone_key(fraction: float) -> str:
+    """Return the key a milestone crossing at ``fraction`` is named by, ``NNper``.
+
+    ``NN`` is the fraction's whole percent; the key is the milestone's CSV column suffix.
     """
-    return {
-        f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions
-    }
+    return f"{_percent(fraction):02d}{_KEY_SUFFIX}"
+
+
+def is_milestone_key(text: str) -> bool:
+    """Return whether ``text`` is shaped like a :func:`milestone_key`: digits, then ``per``."""
+    return _KEY_SHAPE.fullmatch(text) is not None
+
+
+def is_whole_percent(fraction: float) -> bool:
+    """Return whether ``fraction`` is exactly the fraction its :func:`milestone_key` names."""
+    return _percent(fraction) / 100 == fraction
+
+
+def _milestone_targets(spec: TraitEntry) -> dict[str, float]:
+    """Return the trait's milestone crossing fractions, each by its :func:`milestone_key`."""
+    return {milestone_key(f): f for f in spec.milestone_fractions}
 
 
 def _milestone_columns(spec: TraitEntry) -> list[tuple[str, str]]:
     """Return ``(column_suffix, crossing_key)`` for every milestone this trait delivers.
 
-    The majority alias enters, first, only when the spec names a crossing for it.
+    The majority alias enters, first, only when the spec names a majority fraction.
     """
     cols = [(key, key) for key in _milestone_targets(spec)]
-    if spec.majority_milestone:
-        cols.insert(0, (spec.majority_label, spec.majority_milestone))
+    if spec.majority_fraction is not None:
+        cols.insert(
+            0, (spec.majority_label, milestone_key(spec.majority_fraction))
+        )
     return cols
 
 
@@ -308,7 +333,7 @@ def plant_milestones(
         key: crossing_date(series, frac, spec.crossing_rule)
         for key, frac in _milestone_targets(spec).items()
     }
-    return {sfx: crossings.get(key) for sfx, key in _milestone_columns(spec)}
+    return {sfx: crossings[key] for sfx, key in _milestone_columns(spec)}
 
 
 # ── positive-fraction from predictions under the positive state's attribute ──
