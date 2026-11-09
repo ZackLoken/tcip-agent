@@ -233,3 +233,54 @@ def test_a_phenology_delivery_of_a_bucket_recording_no_dataset_refuses(
         assert "records no dataset" in refusal, refusal
         assert any(b in refusal for b in buckets.values()), refusal
     _no_delivery_recorded(tmp_path)
+
+
+# ── a delivery that shipped before the tie ───────────────────────────────
+
+
+def test_an_acknowledged_per_plant_delivery_of_a_bucket_recording_another_dataset_refuses(
+    tmp_path: Path,
+) -> None:
+    """A delivery shipping under a breeder's acknowledgment still refuses the bucket's dataset.
+
+    The unassessed bucket of ``ds`` is read under a registered copy of ``ds`` whose mapping
+    ``valley`` matches the copy's identity. The assessment-gate refusal an acknowledgment ships
+    past is not the refusal: the delivery reaches the mapping and refuses there, naming the bucket
+    and both ids, and writes no CSV and no delivery event.
+    """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MappingDeliveryError,
+    )
+    from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
+    from tests import _trait_fixtures as fx
+    from tests._chain_fixtures import deliver_acknowledged, unassessed_bucket
+
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(
+        tmp_path, "stem_count", value_keys=["count"], measured_subject="bud"
+    )
+    bucket = unassessed_bucket(
+        tmp_path, experiment_id="exp-copied", images={"p1": 1}
+    )
+    assert bucket.dataset_id is not None
+    copy, minted = registered_copy(
+        tmp_path, bucket.root, "ds-copy", crop=COUNT_CROP
+    )
+    _map(tmp_path, "valley", copy, "valley-registry")
+
+    with pytest.raises(MappingDeliveryError) as refused:
+        deliver_acknowledged(
+            tmp_path,
+            {"p1": [1]},
+            tmp_path / "o.csv",
+            "stem_count",
+            value_key="count",
+            delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+            buckets=[read_bucket(copy, bucket.name)],
+        )
+
+    for named in (bucket.name, bucket.dataset_id, minted):
+        assert named in str(refused.value), refused.value
+    assert not (tmp_path / "o.csv").exists()
+    _no_delivery_recorded(tmp_path)
