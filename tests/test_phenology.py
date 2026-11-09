@@ -26,7 +26,12 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, capture_date
 from tcip_mcp.pipelines.postprocessing import phenology
-from tests._producer_fixtures import mapping_of, registry_of, scope_over
+from tests._producer_fixtures import (
+    mapping_of,
+    reads_of,
+    registry_of,
+    scope_over,
+)
 from tests._trait_fixtures import BUD_OPENING, entry
 
 if TYPE_CHECKING:
@@ -406,6 +411,7 @@ def test_per_plant_phenology_builds_fraction_series_over_attributed_buckets(
         buckets,
         BUD_OPENING,
         ["P1"],
+        reads_of(mapping, buckets),
     )
 
     assert out.any_date_complete is True
@@ -434,6 +440,7 @@ def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(
         buckets,
         BUD_OPENING,
         ["P1"],
+        reads_of(mapping, buckets),
     )
 
     assert out.any_date_complete is False
@@ -455,6 +462,7 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(
         buckets,
         BUD_OPENING,
         ["P1"],
+        reads_of(mapping, buckets),
     )
 
     row = out.milestones[0].model_dump()
@@ -476,7 +484,9 @@ def test_a_plant_detecting_nothing_is_classified_on_its_dates_and_observed_on_no
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": []})}
     mapping = mapping_of({"2024-05-01": [("P1_a.jpg", ("P1", "acc-9"), 0.0)]})
 
-    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"])
+    out = phenology.per_plant_phenology(
+        mapping, buckets, BUD_OPENING, ["P1"], reads_of(mapping, buckets)
+    )
 
     (row,) = out.milestones
     assert out.any_date_complete is True
@@ -508,6 +518,7 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(
         buckets,
         BUD_OPENING,
         ["P1"],
+        reads_of(mapping, buckets),
     )
 
     row = out.milestones[0].model_dump()
@@ -549,6 +560,7 @@ def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
         buckets,
         BUD_OPENING,
         ["P1", "P2"],
+        reads_of(mapping, buckets),
     )
 
     p1, p2 = (row.model_dump() for row in out.milestones)
@@ -602,7 +614,7 @@ def test_the_curve_rows_carry_each_plants_accession_and_counts_on_every_date(
     )
 
     out = phenology.per_plant_phenology(
-        mapping, buckets, BUD_OPENING, ["P2", "P1"]
+        mapping, buckets, BUD_OPENING, ["P2", "P1"], reads_of(mapping, buckets)
     )
 
     fields = (
@@ -753,6 +765,7 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(
         buckets,
         BUD_OPENING,
         ["GOOD", "BAD"],
+        reads_of(mapping, buckets),
     )
     by_plant = {r.plant_id: r.csv_record(BUD_OPENING) for r in res.milestones}
     assert by_plant["BAD"]["n_dates_missing_images"] == 1  # genuinely excluded
@@ -784,7 +797,9 @@ def test_per_plant_series_counts_the_images_the_mapping_names(
             ]
         }
     )
-    (row,) = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])["P1"]
+    (row,) = phenology.per_plant_series(
+        mapping, buckets, OPENED, ["P1"], reads_of(mapping, buckets)
+    )["P1"]
     assert (
         row.n_total,
         row.n_positive,
@@ -820,7 +835,9 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
             ]
         }
     )
-    per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
+    per_plant = phenology.per_plant_series(
+        mapping, buckets, OPENED, ["P1"], reads_of(mapping, buckets)
+    )
     assert list(per_plant) == ["P1"]
 
 
@@ -845,6 +862,7 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(
         buckets,
         BUD_OPENING,
         ["P1"],
+        reads_of(mapping, buckets),
     )
     assert [r.plant_id for r in out.milestones] == ["P1"]
     assert {c.plant_id for c in out.curves} == {"P1"}

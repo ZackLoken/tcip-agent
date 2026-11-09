@@ -38,7 +38,7 @@ from tests._mapping_fixtures import (
     register_plant_registry_for,
     write_plant_csv,
 )
-from tests._producer_fixtures import mapping_of, write_image
+from tests._producer_fixtures import mapping_of, reads_of, write_image
 from tests.test_plant_mapping_binding import (
     _dataset,
     _deliver,
@@ -469,11 +469,13 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
     )
     assert build.unattributed() == 1
 
+    assignments = {DATE: [blank, named]}
     per_plant = phenology.per_plant_series(
-        {DATE: [blank, named]},
+        assignments,
         {},
         state=PositiveState(attribute="state", value="open"),
         plants=["P1"],
+        read_stems=reads_of(assignments, {}),
     )
     assert list(per_plant) == ["P1"]
 
