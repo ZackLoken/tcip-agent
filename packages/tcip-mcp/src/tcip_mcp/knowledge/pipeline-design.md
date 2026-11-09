@@ -271,32 +271,19 @@ run_inference(
     bucket="stage-b/<date>",
 )
 
-# Plant identity is never guessed from a filename: build_plant_mapping assigns each image its plant.
+# Plant identity is never guessed from a filename: the door applies build_plant_mapping's mapping.
 from pathlib import Path
-from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
-from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
-build = load_mapping(
-    project_root, mapping_name
-)  # from a prior build_plant_mapping call
-by_stem = {a.stem: a for rows in build.assignments.values() for a in rows}
-
-# Each record carries its assignment's plant, source and distance_m, and the image's value.
+# Each record names its image by capture date and stem, and carries the image's value.
 records = [
-    PlantObservation(
-        plant_id=a.plant_id,
-        value=r["count"],
-        source=a.source,
-        distance_m=a.distance_m,
-    )
+    {"date": "<date>", "stem": Path(r["image"]).stem, "value": r["count"]}
     for r in read_stage_b_preds_as_image_results(
         "stage-b/<date>"
     )  # your own per-image count reader
-    if (a := by_stem.get(Path(r["image"]).stem))
 ]
 
-# The delivery door aggregates each plant's records under the trait's confirmed plant_aggregation
-# and clears the one gate over the buckets; an unvalidated bucket needs a recorded acknowledgment.
+# The door counts each record toward its image's mapped plant and aggregates under plant_aggregation;
+# it clears the one gate over the buckets; an unvalidated bucket needs a recorded acknowledgment.
 deliver_per_plant_csv(
     records,
     "outputs/phenotype.csv",
