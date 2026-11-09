@@ -2118,7 +2118,7 @@ def resolve_delivery_mapping(
     every one of them, a date recorded with no capture at all included) refuses on the record's own
     evidence, before ``verify_mapping_inputs`` re-reads anything.
 
-    Returns the loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
+    Returns the loaded build and :func:`verify_mapping_inputs`'s verification; raises
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
     from, a mapping that will not read included.
     """
