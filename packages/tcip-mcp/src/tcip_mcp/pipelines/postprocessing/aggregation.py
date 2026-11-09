@@ -170,7 +170,8 @@ def plant_value_meaning(
     The units come from ``value_key``, cross-checked against crops.yml; a count kind's value key
     must itself imply the unit crops.yml declares for the phenotype, if any. The phenotype,
     ``delivered_phenotype``, resolves to the one trait whose latest confirmed revision delivers
-    it, and that revision's ``delivery_kind`` operationalization must cover it and ``value_key``
+    it, and that revision's ``delivery_kind`` operationalization must cover it and, for a kind
+    whose operationalization bounds its value keys, ``value_key``
     (:func:`~tcip_mcp.operationalization.confirmed_revision`); a revision delivering a phenotype
     crops.yml does not name for ``crop``, the delivered plants' registry's crop, refuses
     (:func:`~tcip_mcp.traits.require_delivered_for_crop`). Each refusal is a ``ValueError``.

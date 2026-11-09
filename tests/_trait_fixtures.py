@@ -367,7 +367,7 @@ def seed_confirmed_orthomosaic_count(
 
     The revision's one operationalization is a ``per_plant_orthomosaic_count`` over the trait's
     latest entry with its floors filled and ``plant_aggregation`` left unauthored, covering that
-    phenotype and the value key ``count``, with ``fields`` over its fixture wording.
+    phenotype and naming no value key, with ``fields`` over its fixture wording.
     """
     trait = _delivering(project_root, delivered_phenotype)
     return propose_and_confirm(
@@ -381,7 +381,6 @@ def seed_confirmed_orthomosaic_count(
             traits.PER_PLANT_ORTHOMOSAIC_COUNT,
             statement=f"the {delivered_phenotype} counted at one plant's place on a mosaic",
             delivered_phenotypes=(delivered_phenotype,),
-            delivered_value_keys=("count",),
             **fields,
         ),
     )

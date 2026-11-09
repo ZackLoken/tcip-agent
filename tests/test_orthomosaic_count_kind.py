@@ -22,7 +22,7 @@ from tests import _trait_fixtures as fx, csv_rows
 from tests._mapping_fixtures import POSITION_ERROR_M
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from fastapi.testclient import TestClient
 
@@ -196,7 +196,9 @@ def test_an_entry_stating_only_the_orthomosaic_count_is_proposed_with_no_plant_a
     statistic's question, and appends nothing; both go through ``propose_trait``'s server door.
     """
     admitted = _proposed(bound, KIND)
-    refused = _proposed(bound, traits.PER_PLANT_COUNT_AGGREGATE)
+    refused = _proposed(
+        bound, traits.PER_PLANT_COUNT_AGGREGATE, value_keys=["count"]
+    )
 
     assert isinstance(admitted, dict) and "error" not in admitted, admitted
     assert (
@@ -226,11 +228,35 @@ def test_an_orthomosaic_count_leaving_a_count_field_unauthored_is_refused_asking
     assert fx.COUNT_TRAIT not in trait_names(bound.root)
 
 
-def _proposed(bound: BoundProject, kind: str, **fields: object) -> object:
+def test_an_orthomosaic_count_names_no_value_keys(bound: BoundProject) -> None:
+    """An entry stating only the orthomosaic count states no value keys; its door fixes ``count``.
+
+    Through ``propose_trait``'s server door, the entry stating the set ``count`` is refused naming
+    ``delivered_value_keys``, and the same entry stating none is admitted as the one revision.
+    """
+    refused = _proposed(bound, KIND, value_keys=["count"])
+    admitted = _proposed(bound, KIND)
+
+    assert "delivered_value_keys must be empty" in str(refused), refused
+    assert isinstance(admitted, dict) and "error" not in admitted, admitted
+    assert (
+        admitted["entry"]["operationalizations"][KIND]["delivered_value_keys"]
+        == []
+    )
+    assert len(traits.read_trait(fx.COUNT_TRAIT, bound.root).revisions) == 1
+
+
+def _proposed(
+    bound: BoundProject,
+    kind: str,
+    *,
+    value_keys: Sequence[str] = (),
+    **fields: object,
+) -> object:
     """Return ``propose_trait``'s server answer for the count trait stating ``kind`` alone.
 
     The entry is the fixture count trait with ``plant_aggregation`` unauthored and ``fields``
-    over it, its one operationalization covering ``stem_count`` and the value key ``count``.
+    over it, its one operationalization covering ``stem_count`` and the value keys ``value_keys``.
     """
     from tests._server_calls import called_through_the_server
 
@@ -238,7 +264,8 @@ def _proposed(bound: BoundProject, kind: str, **fields: object) -> object:
         fx.COUNT_SPEC, plant_aggregation="", **fields
     ).model_dump(mode="json")
     stated = fx.operationalization(
-        delivered_phenotypes=["stem_count"], delivered_value_keys=["count"]
+        delivered_phenotypes=["stem_count"],
+        delivered_value_keys=list(value_keys),
     )
     return called_through_the_server(
         "propose_trait",
@@ -427,7 +454,6 @@ def test_the_two_per_plant_doors_write_their_shared_columns_and_provenance_alike
             fx.count_revision(tmp_path).entry,
             traits.PER_PLANT_ORTHOMOSAIC_COUNT,
             delivered_phenotypes=("stem_count",),
-            delivered_value_keys=("count",),
         ),
     )
     dataset_root, date = per_plant._mapped(tmp_path)
