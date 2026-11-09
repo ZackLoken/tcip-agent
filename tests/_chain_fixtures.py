@@ -16,6 +16,7 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.assessment import read_assessment
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.execution import Stated
+from tests._mapping_fixtures import COUNT_CROP, CROP
 from tests._training_values import (
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
@@ -554,12 +555,14 @@ def unassessed_bucket(
     experiment_id: str,
     bucket_name: str = "plain",
     plants: Sequence[str] = (),
+    crop: str = COUNT_CROP,
 ) -> Bucket:
     """Return a bucket published under no assessment.
 
     Ingests, draws, trains and publishes under ``project``. With ``plants``, the captures stand
     at their places (:func:`plant_captures`) and the project's mapping ``valley`` of them
-    (:func:`~tests._mapping_fixtures.map_plants`) is built before the bucket is published.
+    (:func:`~tests._mapping_fixtures.map_plants`, the dataset and its plants at ``crop``) is
+    built after the bucket is published.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
@@ -583,7 +586,7 @@ def unassessed_bucket(
     )
     assert "error" not in published, published
     if plants:
-        map_plants(project, root, plants)
+        map_plants(project, root, plants, crop=crop)
     return read_bucket(root, bucket)
 
 
@@ -647,9 +650,10 @@ def deliver_acknowledged(
 
     ``deliver_per_plant_aggregate`` runs for the plants the records carry over ``buckets`` (by
     default a bucket published under no assessment, :func:`unassessed_bucket`, its captures
-    mapped to those plants), shipped unvalidated under the breeder's acknowledgment
-    (:func:`acknowledged`). Its disclosure is ``plant_mapping_disclosure``'s over the project's
-    persisted mapping ``valley``, which ``buckets`` a caller names must already have.
+    mapped to those plants at the first crop crops.yml names for ``delivered_phenotype``),
+    shipped unvalidated under the breeder's acknowledgment (:func:`acknowledged`). Its
+    disclosure and crop are ``plant_mapping_disclosure``'s over the project's persisted mapping
+    ``valley``, which ``buckets`` a caller names must already have.
     """
     from tcip_mcp.buckets import by_recorded_date
     from tcip_mcp.pipelines.postprocessing.aggregation import (
@@ -658,6 +662,7 @@ def deliver_acknowledged(
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_mapping_disclosure,
     )
+    from tcip_mcp.traits import phenotype_crops
 
     plants = list(dict.fromkeys(r.plant_id for r in records))
     delivered = (
@@ -665,11 +670,14 @@ def deliver_acknowledged(
         if buckets is not None
         else [
             unassessed_bucket(
-                project, experiment_id="exp-acknowledged", plants=plants
+                project,
+                experiment_id="exp-acknowledged",
+                plants=plants,
+                crop=phenotype_crops(delivered_phenotype)[0],
             )
         ]
     )
-    disclosure = plant_mapping_disclosure(
+    resolved = plant_mapping_disclosure(
         project, "valley", by_recorded_date(delivered), plants
     )
     return acknowledged(
@@ -683,8 +691,9 @@ def deliver_acknowledged(
             delivery_kind=delivery_kind,
             buckets=delivered,
             plants=plants,
+            crop=resolved.verified.crop,
             door="test_delivery",
-            plant_mapping=disclosure,
+            plant_mapping=resolved.disclosure,
             acknowledgment_id=ack,
             actor=None,
             **kwargs,
@@ -1004,7 +1013,6 @@ def attributed_series(
     from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
         register_plant_registry_for,
@@ -1082,9 +1090,7 @@ def attributed_series(
                 IMG,
                 IMG,
             )
-    registered = register_dataset(
-        project, str(root), crop=sorted(registered_crops())[0], actor=None
-    )
+    registered = register_dataset(project, str(root), crop=CROP, actor=None)
     assert "error" not in registered, registered
 
     selection_dir = project / "selection"

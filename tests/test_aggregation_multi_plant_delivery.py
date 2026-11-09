@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        PlantMappingDisclosure,
+        MappingResolution,
     )
 
 
@@ -155,7 +155,6 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(
         "stem_count",
         value_key="count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
-        crop="currant",
     )
     rows = _by_plant(csv_rows(out_path))
 
@@ -236,7 +235,7 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         synthetic_capture,
         train_on,
     )
-    from tests._mapping_fixtures import map_plants
+    from tests._mapping_fixtures import COUNT_CROP, map_plants
 
     entry = fx.with_operationalization(
         fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=SUBJECT
@@ -281,12 +280,12 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         actor=None,
     )
     assert "error" not in published, published
-    map_plants(project, root, _PLANTS)
+    map_plants(project, root, _PLANTS, crop=COUNT_CROP)
     return read_bucket(root, bucket)
 
 
-def _disclosure(project: Path, bucket: Bucket) -> PlantMappingDisclosure:
-    """Return the ``plant_mapping`` disclosure of delivering :data:`_PLANTS` over ``bucket``."""
+def _resolved(project: Path, bucket: Bucket) -> MappingResolution:
+    """Return the resolved mapping of delivering :data:`_PLANTS` over ``bucket``."""
     from tcip_mcp.buckets import by_recorded_date
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_mapping_disclosure,
@@ -312,6 +311,7 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
     )
 
     bucket = _assessed(tmp_path, PER_PLANT_COUNT_AGGREGATE, "exp-kind-matched")
+    resolved = _resolved(tmp_path, bucket)
     delivered = deliver_per_plant_aggregate(
         tmp_path,
         _RECORDS,
@@ -321,8 +321,9 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket],
         plants=_PLANTS,
+        crop=resolved.verified.crop,
         door="test",
-        plant_mapping=_disclosure(tmp_path, bucket),
+        plant_mapping=resolved.disclosure,
         actor=None,
     )
 
@@ -344,6 +345,7 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     )
 
     bucket = _assessed(tmp_path, PER_IMAGE_COUNT, "exp-kind-crossed")
+    resolved = _resolved(tmp_path, bucket)
     with pytest.raises(
         DeliveryRefusedError,
         match=f"{PER_IMAGE_COUNT} delivery, not a "
@@ -358,8 +360,9 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[bucket],
             plants=_PLANTS,
+            crop=resolved.verified.crop,
             door="test",
-            plant_mapping=_disclosure(tmp_path, bucket),
+            plant_mapping=resolved.disclosure,
             actor=None,
         )
     assert not (tmp_path / "crossed.csv").exists()

@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.dataset_layout import DatasetRecord
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         DetectionAssignment,
@@ -209,9 +210,22 @@ class ServedMapping(BaseModel):
 
 
 class MappingVerification(NamedTuple):
-    """What :func:`verify_mapping_inputs` could not re-check: captures, by name."""
+    """What :func:`verify_mapping_inputs` read of a mapping's inputs.
+
+    It holds the captures it could not re-check, by name, and the ``crop`` of the plant registry
+    it verified.
+    """
 
     captures_unverified: list[str]
+    crop: Crop
+
+
+class MappingResolution(NamedTuple):
+    """One per-plant delivery's resolved mapping: the build, its verification and its disclosure."""
+
+    build: MappingBuild
+    verified: MappingVerification
+    disclosure: PlantMappingDisclosure
 
 
 class PlantMappingDisclosure(BaseModel):
@@ -1059,6 +1073,27 @@ def registry_or_refusal(
     return record
 
 
+def require_agreeing_crops(
+    identity: DatasetRecord,
+    dataset_root: Path | str,
+    *,
+    registry_name: str,
+    registry_crop: str,
+) -> None:
+    """Refuse (``ValueError``) a dataset identity and a plant registry whose crops differ.
+
+    ``identity`` is the dataset at ``dataset_root``'s, and the registry is ``registry_name``, of
+    ``registry_crop``; the refusal names both crops and where each is recorded.
+    """
+    if identity.crop != registry_crop:
+        raise ValueError(
+            f"the dataset at {dataset_root} is of crop {identity.crop!r} and plant registry "
+            f"{registry_name!r} is of crop {registry_crop!r}: the plants a dataset is "
+            "attributed to are of its own crop; register the dataset's plants under a registry "
+            "of its crop, or register the dataset again with the crop it is of"
+        )
+
+
 def registered_plants(
     registry: PlantRegistry, project: Path | str
 ) -> list[PlantRecord]:
@@ -1640,16 +1675,23 @@ def build_plant_mapping(
     ``actor`` (:func:`persist_mapping`, whose receipt is the act's one audit line), and the build
     is returned.
 
-    Raises ``ValueError`` for a name the key refuses and for a root with no dataset identity
+    Raises ``ValueError`` for a name the key refuses, for a root with no dataset identity
     record (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming
-    ``register_dataset``); :class:`PlantRegistryNotFoundError`; :class:`RegisteredBytesError`;
-    and every refusal of the two steps.
+    ``register_dataset``) and for a dataset and a registry of different crops
+    (:func:`require_agreeing_crops`); :class:`PlantRegistryNotFoundError`;
+    :class:`RegisteredBytesError`; and every refusal of the two steps.
     """
     from tcip_mcp.dataset_layout import require_dataset_identity
 
     plant_mapping_key(project, name)
     identity = require_dataset_identity(dataset_root)
     registry = load_registry(project, plant_registry)
+    require_agreeing_crops(
+        identity,
+        dataset_root,
+        registry_name=registry["name"],
+        registry_crop=registry["crop"],
+    )
     build = build_mapping(
         dataset_root,
         registered_plants(registry, project),
@@ -1961,7 +2003,7 @@ def verify_mapping_inputs(
                     "rebuild to cover the images actually on disk"
                 )
 
-    return MappingVerification(captures_unverified)
+    return MappingVerification(captures_unverified, registry["crop"])
 
 
 def ungeoreferenced_capture_message(
@@ -2021,13 +2063,14 @@ def resolve_delivery_mapping(
     A delivered bucket's recorded date the mapping does not cover is refused (``buckets`` keyed
     by those dates); the delivered buckets' one dataset root is resolved and required to carry the
     mapping's own minted dataset id; then the mapping's recorded inputs are verified against that
-    resolved root for exactly the captures the buckets read.
+    resolved root for exactly the captures the buckets read, and the root's dataset identity is
+    required to be of its verified registry's crop (:func:`require_agreeing_crops`).
 
     A delivery whose delivered dates attribute nothing (:func:`assignment_is_attributed` false for
     every one of them, a date recorded with no capture at all included) refuses on the record's own
     evidence, before ``verify_mapping_inputs`` re-reads anything.
 
-    Returns the loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
+    Returns the loaded build and :func:`verify_mapping_inputs`'s verification; raises
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
     from, a mapping that will not read included.
     """
@@ -2118,9 +2161,19 @@ def resolve_delivery_mapping(
             "plant CSV names this block, or rebuild the mapping with a stated match_radius"
         )
 
-    return mapping_build, verify_mapping_inputs(
+    verified = verify_mapping_inputs(
         mapping_build, delivered_root, buckets, project=project
     )
+    try:
+        require_agreeing_crops(
+            delivered_identity,
+            delivered_root,
+            registry_name=mapping_build.plant_registry.name,
+            registry_crop=verified.crop,
+        )
+    except ValueError as exc:
+        raise MappingDeliveryError(str(exc)) from exc
+    return mapping_build, verified
 
 
 def plant_mapping_disclosure(
@@ -2128,13 +2181,14 @@ def plant_mapping_disclosure(
     name: str,
     buckets: Mapping[str, Bucket],
     plants: list[str],
-) -> PlantMappingDisclosure:
-    """Return the ``plant_mapping`` disclosure of a per-plant delivery of the population ``plants``.
+) -> MappingResolution:
+    """Return the resolved mapping of a per-plant delivery of the population ``plants``.
 
     The delivery's plant ids came from mapping ``name``. The mapping is resolved and verified
     against the delivered ``buckets`` by recorded date (:func:`resolve_delivery_mapping`, refusing
     as it does), and a population plant the mapping assigns on no delivered date is refused
-    (:class:`MappingDeliveryError`) naming each.
+    (:class:`MappingDeliveryError`) naming each. Returns the build, its verification and the
+    delivery's ``plant_mapping`` disclosure.
     """
     build, verified = resolve_delivery_mapping(project, name, buckets)
     assigned = {
@@ -2149,4 +2203,6 @@ def plant_mapping_disclosure(
             f"plant(s) {unmapped} are assigned to no plot by mapping "
             f"{name!r} on the delivered dates."
         )
-    return build.delivery_disclosure(verified, list(buckets))
+    return MappingResolution(
+        build, verified, build.delivery_disclosure(verified, list(buckets))
+    )

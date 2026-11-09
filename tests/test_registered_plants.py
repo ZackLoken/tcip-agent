@@ -16,6 +16,7 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tests._mapping_fixtures import (
+    COUNT_CROP,
     geolocated_captures,
     register_plant_registry_for,
     write_plant_csv,
@@ -63,7 +64,6 @@ def _scene(project: Path) -> Scene:
     whole-raster bucket counts them.
     """
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
 
     raster_path = _raster(project)
     _write_geo_raster(raster_path)
@@ -82,7 +82,7 @@ def _scene(project: Path) -> Scene:
     photos.mkdir()
     for root in (photos, bucket.root):
         registered = register_dataset(
-            project, str(root), crop=sorted(registered_crops())[0], actor=None
+            project, str(root), crop=COUNT_CROP, actor=None
         )
         assert "error" not in registered, registered
     geolocated_captures(photos, [DATE], plants)
@@ -91,7 +91,9 @@ def _scene(project: Path) -> Scene:
         photos,
         bucket,
         csvs,
-        register_plant_registry_for(project, csvs, name="reg"),
+        register_plant_registry_for(
+            project, csvs, name="reg", crop=COUNT_CROP
+        ),
     )
 
 
