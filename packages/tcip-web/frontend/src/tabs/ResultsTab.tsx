@@ -59,19 +59,15 @@ function auditGapExportMessage(savedPath: string, detail: string): string {
 /** What a measurement's plant mapping disclosed: its delivered dates and what it could not verify
  *  at delivery time. */
 function MappingDisclosureLines({ disclosure }: { disclosure: PlantMappingDisclosure }) {
-  const { dates_delivered, captures_unverified, plant_csvs_unverified } = disclosure;
+  const { dates_delivered, captures_unverified } = disclosure;
   return (
     <>
       {dates_delivered.length > 0 && (
         <div className="text-tcip-muted">{deliveredDatesLine(disclosure)}</div>
       )}
-      {(captures_unverified.length > 0 || plant_csvs_unverified.length > 0) && (
+      {captures_unverified.length > 0 && (
         <div className="text-tcip-muted">
-          Not verified at delivery time:
-          {captures_unverified.length > 0 && ` ${captures_unverified.join(", ")}`}
-          {captures_unverified.length > 0 && plant_csvs_unverified.length > 0 && ";"}
-          {plant_csvs_unverified.length > 0 &&
-            ` plant CSV(s) ${plant_csvs_unverified.join(", ")} (path not found)`}
+          {`Not verified at delivery time: ${captures_unverified.join(", ")}`}
         </div>
       )}
     </>
