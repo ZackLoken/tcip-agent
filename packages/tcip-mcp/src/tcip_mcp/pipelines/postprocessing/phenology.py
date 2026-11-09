@@ -442,9 +442,8 @@ def per_plant_series(
     from every plant's coverage.
 
     Coverage is measured against the stems the plant mapping names for each (plant, date): a named
-    stem not in ``read_stems`` for its date (no prediction document, an image no longer on disk, a
-    date with no delivered bucket) is a missing observation, counted in ``n_images`` and never in
-    the totals.
+    stem not in ``read_stems`` for its date is an assigned image the delivery did not read: a
+    missing observation, counted in ``n_images`` and ``n_missing`` and never in the totals.
     """
     from tcip_mcp.dataset_layout import capture_order
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -524,7 +523,7 @@ def per_plant_phenology(
     The milestones are measured against ``spec``'s ``positive_state`` and milestones, one row per
     plant in ``plants`` and no other, in its order (see :func:`per_plant_series`). ``read_stems``
     is the images the delivery read; an assigned image outside it is a missing image, so its date
-    is unclassified for its plant and the plant has no milestones.
+    counts in ``n_dates_missing_images`` and carries no ratio, and the plant has no milestones.
 
     Each milestone row carries the milestone dates, coverage-disclosure fields
     (``n_dates_unclassified``, ``n_dates_missing_images``, a date the mapping captured the plant on

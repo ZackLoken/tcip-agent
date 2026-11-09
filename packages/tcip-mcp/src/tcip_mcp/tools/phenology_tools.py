@@ -289,11 +289,11 @@ def deliver_phenology_milestones(
     A phenology milestone is a crossing of the fraction of a plant's detected objects a classifier
     calls the trait's positive class, read under the crossing rule the trait's latest confirmed
     revision states. The CSV carries each milestone date that revision declares and its
-    evidentiary bound, one row per plant in ``plants``, a plant with any incomplete date (an
-    assigned image with no prediction document or no longer on disk makes its date incomplete)
-    carrying none, and the delivery's ``validated``, ``trait_revision`` and
-    ``delivery_event_id``. Every bucket must have been published under an assessment that answers
-    for a ``state_crossing_dates`` delivery of that revision, or the delivery ships only under
+    evidentiary bound, one row per plant in ``plants``, a plant with any incomplete date (one with
+    an assigned image the delivery did not read, as the per-plant door reads) carrying none, and
+    the delivery's ``validated``, ``trait_revision`` and ``delivery_event_id``. Every bucket must
+    have been published under an assessment that answers for a ``state_crossing_dates`` delivery
+    of that revision, or the delivery ships only under
     ``acknowledgment_id``, a breeder's recorded acknowledgment of exactly this result, which this
     door executes and never records. The buckets must name one producer.
 
