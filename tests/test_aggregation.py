@@ -1,8 +1,8 @@
 """Per-plant aggregation and its delivery.
 
-Records group by their ``plant_id``, the assignment rows' ``source``/``distance_m`` pass
-through, the units column comes from ``crops.yml``, each statistic aggregates, and a delivery
-aggregates per-image records under its trait's ``plant_aggregation``.
+Images group by the plant their assignment names, the assignments' ``source``/``distance_m``
+are summarized per plant, the units column comes from ``crops.yml``, each statistic aggregates,
+and a delivery aggregates per-image values under its trait's ``plant_aggregation``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.pipelines.postprocessing.aggregation import (
-    PlantObservation,
     _per_plant,
     deliver_per_plant_aggregate,
 )
@@ -26,7 +25,10 @@ from tcip_mcp.traits import (
 from tests import _trait_fixtures as fx, csv_rows
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from tcip_mcp.delivery import PerPlantDelivered
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +59,7 @@ def _recorded_meaning(tmp_path: Path) -> None:
 
 def _deliver(
     project: Path,
-    records: list[PlantObservation],
+    values: Mapping[str, Sequence[int | float | None]],
     out: Path,
     delivered_phenotype: str,
     *,
@@ -73,7 +75,7 @@ def _deliver(
 
     return deliver_acknowledged(
         project,
-        records,
+        values,
         out,
         delivered_phenotype,
         value_key=value_key,
@@ -85,57 +87,72 @@ def _deliver(
 
 # ── plant identity ──────────────────────
 
-
-def test_records_group_by_their_plant_id() -> None:
-    records = [
-        PlantObservation(plant_id="PLANT_001", value=3),
-        PlantObservation(plant_id="PLANT_001", value=5),
-    ]
-    out = _per_plant(records, plant_aggregation="median")
-    assert len(out) == 1
-    assert out[0]["plant_id"] == "PLANT_001"
-    assert out[0]["n_images"] == 2
+DATES = ["2026-02-11", "2026-02-25"]
 
 
-# ── identity provenance pass-through (build_plant_mapping's honest signals) ──
+def _assignments(project: Path) -> dict[str, list[Assignment]]:
+    """Return a produced mapping's assignments of :data:`DATES` by the plant each names.
 
-
-def _mapped_rows(
-    project: Path, *assigned: tuple[str, float]
-) -> list[PlantObservation]:
-    """Return per-image count rows carrying the assignments of a produced mapping.
-
-    Each row carries one ``MappingBuild.assignments`` entry's source and distance for a mapping
-    built through the platform's own producers (``map_captures``, one capture of each of its two
-    plots), each produced assignment restated with one ``(source, distance_m)`` of ``assigned``
-    and counted toward one plant.
+    The mapping is built through the platform's own producers (``map_captures``, one capture of
+    each of its two plots on each date).
     """
-    from dataclasses import replace
-
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
     from tests._mapping_fixtures import map_captures
     from tests._web_fixtures import named_project
 
-    date = "2026-02-11"
     named_project(project, "Orchard")
-    map_captures(project, project / "ds", [date])
+    map_captures(project, project / "ds", DATES)
     build = load_mapping(project, "valley")
-    assert build is not None and len(build.assignments[date]) == len(assigned)
-    restated = [
-        replace(a, source=source, distance_m=distance)
-        for a, (source, distance) in zip(build.assignments[date], assigned)
+    assert build is not None
+    by_plant: dict[str, list[Assignment]] = {}
+    for date in DATES:
+        for a in build.assignments[date]:
+            assert a.plant_id is not None
+            by_plant.setdefault(a.plant_id, []).append(a)
+    return by_plant
+
+
+def test_images_group_by_the_plant_their_assignment_names(
+    tmp_path: Path,
+) -> None:
+    """Each image counts toward its assignment's plant, one summary per plant, sorted by it."""
+    assigned = _assignments(tmp_path)
+    observed = [(assigned["P2"][0], 4), (assigned["P1"][0], 3)] + [
+        (assigned["P1"][1], 5)
     ]
+
+    out = _per_plant(observed, plant_aggregation="median")
+
+    assert [(s["plant_id"], s["n_images"], s["value"]) for s in out] == [
+        ("P1", 2, 4),
+        ("P2", 1, 4),
+    ]
+
+
+# ── identity provenance (build_plant_mapping's honest signals) ──
+
+
+def _restated(
+    project: Path, *assigned: tuple[str, float]
+) -> list[tuple[Assignment, int]]:
+    """Return one image of ``P1`` per ``(source, distance_m)`` of ``assigned``, valued 1.
+
+    Each is one of ``P1``'s produced assignments (:func:`_assignments`) restated with that
+    source and distance.
+    """
+    from dataclasses import replace
+
+    p1 = _assignments(project)["P1"]
+    assert len(p1) == len(assigned)
     return [
-        PlantObservation(
-            plant_id="P1", value=1, source=a.source, distance_m=a.distance_m
-        )
-        for a in restated
+        (replace(a, source=source, distance_m=distance), 1)
+        for a, (source, distance) in zip(p1, assigned)
     ]
 
 
 def test_plant_id_source_passes_through_when_uniform(tmp_path: Path) -> None:
     out = _per_plant(
-        _mapped_rows(tmp_path, ("sequence", 1.0), ("sequence", 2.0)),
+        _restated(tmp_path, ("sequence", 1.0), ("sequence", 2.0)),
         plant_aggregation="median",
     )
     assert out[0]["plant_id_source"] == "sequence"
@@ -145,7 +162,7 @@ def test_plant_id_source_reports_mixed_when_not_uniform(
     tmp_path: Path,
 ) -> None:
     out = _per_plant(
-        _mapped_rows(tmp_path, ("sequence", 1.0), ("nearest_neighbor", 2.0)),
+        _restated(tmp_path, ("sequence", 1.0), ("nearest_neighbor", 2.0)),
         plant_aggregation="median",
     )
     assert out[0]["plant_id_source"] == "mixed"
@@ -153,16 +170,10 @@ def test_plant_id_source_reports_mixed_when_not_uniform(
 
 def test_plant_id_distance_m_max_tracked(tmp_path: Path) -> None:
     out = _per_plant(
-        _mapped_rows(tmp_path, ("sequence", 1.5), ("sequence", 4.2)),
+        _restated(tmp_path, ("sequence", 1.5), ("sequence", 4.2)),
         plant_aggregation="median",
     )
     assert out[0]["plant_id_distance_m_max"] == pytest.approx(4.2)
-
-
-def test_plant_id_source_absent_when_never_supplied() -> None:
-    records = [PlantObservation(plant_id="P1", value=1)]
-    out = _per_plant(records, plant_aggregation="median")
-    assert "plant_id_source" not in out[0]
 
 
 # ── statistics ─
@@ -172,18 +183,17 @@ def test_plant_id_source_absent_when_never_supplied() -> None:
     "plant_aggregation, value",
     [("median", 6.5), ("mean", 6), ("mode", 9), ("sum", 24)],
 )
-def test_each_statistic_is_its_plants_value_over_the_records_carrying_one(
-    plant_aggregation: str, value: float
+def test_each_statistic_is_its_plants_value_over_the_images_carrying_one(
+    tmp_path: Path, plant_aggregation: str, value: float
 ) -> None:
-    """Each statistic is taken over the records carrying a value, the rest counted as images.
+    """Each statistic is taken over the images carrying a value, the rest counted as images.
 
-    A record whose value is ``None`` is a missing observation: it counts toward the plant's
+    An image whose value is ``None`` is a missing observation: it counts toward the plant's
     observations and never enters the statistic as a zero.
     """
-    records = [
-        PlantObservation(plant_id="bush_1", value=c) for c in (2, 4, 9, 9)
-    ] + [PlantObservation(plant_id="bush_1", value=None)]
-    (out,) = _per_plant(records, plant_aggregation=plant_aggregation)
+    (a, _) = _assignments(tmp_path)["P1"]
+    observed = [(a, v) for v in (2, 4, 9, 9, None)]
+    (out,) = _per_plant(observed, plant_aggregation=plant_aggregation)
     assert out["value"] == value
     assert out["n_images"] == 5
 
@@ -233,15 +243,10 @@ def test_a_per_plant_delivery_names_its_value_key_with_no_default(
 def test_a_per_plant_count_delivery_writes_its_population_one_row_each(
     tmp_path: Path,
 ) -> None:
-    records = [
-        PlantObservation(plant_id=plant, value=count)
-        for plant, count, n in (("PLANT_001", 7, 3), ("PLANT_002", 4, 2))
-        for _ in range(n)
-    ]
     out_path = tmp_path / "out" / "aggregated.csv"
     delivered = _deliver(
         tmp_path,
-        records,
+        {"PLANT_001": [7] * 3, "PLANT_002": [4] * 2},
         out_path,
         "stem_count",
         value_key="count",
@@ -288,7 +293,7 @@ def test_a_delivery_aggregates_under_the_statistic_its_trait_confirms(
     out_path = tmp_path / "out.csv"
     _deliver(
         tmp_path,
-        [PlantObservation(plant_id="P1", value=v) for v in values],
+        {"P1": values},
         out_path,
         "stem_count",
         value_key="count",
@@ -307,7 +312,7 @@ def test_a_dimensional_value_key_labels_its_units_squared_for_an_area(
     out_path = tmp_path / "out.csv"
     _deliver(
         tmp_path,
-        [PlantObservation(plant_id="PLANT_001", value=12.5)],
+        {"PLANT_001": [12.5]},
         out_path,
         "plant_surface_area",
         value_key="area_mm2",
@@ -330,11 +335,10 @@ def test_a_count_delivery_of_a_dimensional_value_refuses_without_a_physical_scal
         value_keys=["area_mm2"],
         measured_subject="bud",
     )
-    records = [PlantObservation(plant_id="PLANT_001", value=12.5)]
     with pytest.raises(ValueError, match="calibrate_physical_scale"):
         _deliver(
             tmp_path,
-            records,
+            {"PLANT_001": [12.5]},
             tmp_path / "out.csv",
             "plant_surface_area",
             value_key="area_mm2",
@@ -363,7 +367,7 @@ def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(
     with pytest.raises(ValueError, match="declared units|refusing"):
         _deliver(
             tmp_path,
-            [PlantObservation(plant_id="P1", value=1.0)],
+            {"P1": [1.0]},
             tmp_path / "out.csv",
             mismatched_trait,
             value_key="area_mm2",
@@ -386,7 +390,7 @@ def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(
     out_path = tmp_path / "out.csv"
     _deliver(
         tmp_path,
-        [PlantObservation(plant_id="P1", value=124.0)],
+        {"P1": [124.0]},
         out_path,
         "bark_thickness",
         value_key="principal_axis_extent_px",
@@ -548,7 +552,7 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path: Path) -> None:
     out_path = tmp_path / "schema.csv"
     _deliver(
         tmp_path,
-        [PlantObservation(plant_id="P1", value=1.0)],
+        {"P1": [1.0]},
         out_path,
         "stem_count",
         value_key="count",

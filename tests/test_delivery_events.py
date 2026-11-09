@@ -137,7 +137,6 @@ def _counted(project: Path) -> Delivered:
 
 def _aggregated(project: Path) -> Delivered:
     """Deliver one plant's per-image counts as a per-plant aggregate, under an acknowledgment."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
     from tests import _trait_fixtures as fx
     from tests._chain_fixtures import deliver_acknowledged
@@ -148,7 +147,7 @@ def _aggregated(project: Path) -> Delivered:
     )
     return deliver_acknowledged(
         project,
-        [PlantObservation(plant_id="P1", value=3)] * 2,
+        {"P1": [3, 3]},
         project / "out" / "plants.csv",
         "stem_count",
         value_key="count",
@@ -320,7 +319,7 @@ def _per_image_counts_call(project: Path) -> tuple[str, dict]:
 
 
 def _per_plant_csv_arguments(project: Path) -> dict:
-    """Return ``deliver_per_plant_csv``'s arguments over one mapped plant's row, unacknowledged.
+    """Return ``deliver_per_plant_csv``'s arguments over one mapped plant's image, unacknowledged.
 
     The scene is ``test_deliver_per_plant_csv``'s; the row states every field the record holds.
     """
@@ -330,14 +329,7 @@ def _per_plant_csv_arguments(project: Path) -> dict:
     fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
     dataset_root, date = door._mapped(project)
     return {
-        "results": [
-            {
-                "plant_id": "P1",
-                "value": 2,
-                "source": "sequence",
-                "distance_m": 0.5,
-            }
-        ],
+        "results": [{"date": date, "stem": "P1", "value": 2}],
         "output_path": str(project / "out" / "plants.csv"),
         "delivered_phenotype": "stem_count",
         "delivery_kind": door.KIND,
@@ -362,12 +354,12 @@ def _acknowledged_per_plant_csv(
     """Return ``deliver_per_plant_csv``'s call over ``arguments``, acknowledged for exactly them."""
     from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.pipelines.postprocessing.aggregation import (
-        PlantObservation,
         deliver_per_plant_aggregate,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_mapping_disclosure,
     )
+    from tests.test_deliver_per_plant_csv import door_results
 
     published = [
         read_bucket(Path(arguments["dataset_root"]), name)
@@ -385,19 +377,15 @@ def _acknowledged_per_plant_csv(
             project,
             lambda: deliver_per_plant_aggregate(
                 project,
-                [
-                    PlantObservation.model_validate(r)
-                    for r in arguments["results"]
-                ],
+                door_results(arguments["results"]),
                 arguments["output_path"],
                 value_key=arguments["value_key"],
                 delivered_phenotype=arguments["delivered_phenotype"],
                 delivery_kind=arguments["delivery_kind"],
                 buckets=published,
                 plants=arguments["plants"],
-                crop=resolved.verified.crop,
+                mapping=resolved,
                 door="deliver_per_plant_csv",
-                plant_mapping=resolved.disclosure,
                 actor=None,
             ),
         ),

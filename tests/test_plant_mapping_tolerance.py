@@ -20,7 +20,6 @@ from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     DerivedRadius,
     MappingBuild,
-    MappingVerification,
     MatchTolerance,
     NoMatchRadiusError,
     NoMatchToleranceError,
@@ -121,14 +120,54 @@ def test_a_dates_radius_is_the_largest_error_its_photographs_report(
 def test_the_served_build_and_its_disclosure_read_the_recorded_radius(
     tmp_path: Path,
 ) -> None:
-    build = _build(tmp_path, [1.2, 2.5, 0.8, 1.0])
+    """The persisted mapping's served view and a delivery's disclosure carry its recorded radius.
 
+    :func:`_build`'s photographs and plants are mapped by ``build_plant_mapping`` in a project
+    and resolved for a delivery of a bucket over them by ``plant_mapping_disclosure``.
+    """
+    from tcip_mcp.buckets import by_recorded_date, read_bucket
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        load_mapping,
+        plant_mapping_disclosure,
+    )
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tests._mapping_fixtures import register_plant_registry_for
+    from tests._web_fixtures import named_project
+    from tests.test_deliver_per_plant_csv import _bucket
+
+    named_project(tmp_path, "Orchard")
+    _build(tmp_path, [1.2, 2.5, 0.8, 1.0])
+    dataset_root = tmp_path / "ds"
+    registered = register_dataset(
+        tmp_path, str(dataset_root), crop=CROP, actor=None
+    )
+    assert "error" not in registered, registered
+    built = build_plant_mapping(
+        tmp_path,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(
+            tmp_path, [tmp_path / "plants.csv"], crop=CROP
+        ),
+        actor=None,
+    )
+    assert "error" not in built, built
+    bucket = _bucket(
+        tmp_path, dataset_root, DATE, {f"photo_{i}": 1 for i in range(4)}
+    )
+
+    build = load_mapping(tmp_path, "valley")
+    assert build is not None
     recorded = build.to_record()["match_radius"]
     assert recorded == {DATE: DerivedRadius(value=2.5).model_dump()}
     assert build.served().model_dump()["match_radius"] == recorded
-    disclosure = build.delivery_disclosure(
-        MappingVerification([], CROP), [DATE]
-    )
+    disclosure = plant_mapping_disclosure(
+        tmp_path,
+        "valley",
+        by_recorded_date([read_bucket(dataset_root, bucket)]),
+        ["P0"],
+    ).disclosure
     assert disclosure.model_dump()["match_radius"] == recorded
 
 

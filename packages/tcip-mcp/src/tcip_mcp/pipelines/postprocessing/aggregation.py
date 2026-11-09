@@ -1,9 +1,9 @@
-"""The per-plant delivery: one value per plant, and per-image records aggregated into one.
+"""The per-plant delivery: one value per plant, and per-image values aggregated into one.
 
 Every per-plant delivery writes its values under what its trait's confirmed revision states
-(:func:`plant_value_meaning`, :func:`deliver_plant_values`). Per-image records are aggregated
-under the statistic that revision names among :data:`PLANT_AGGREGATIONS`
-(:func:`deliver_per_plant_aggregate`).
+(:func:`plant_value_meaning`, :func:`deliver_plant_values`). Per-image values are attributed to
+plants by the delivery's plant mapping and aggregated under the statistic that revision names
+among :data:`PLANT_AGGREGATIONS` (:func:`deliver_per_plant_aggregate`).
 
 ``delivered_phenotype`` is a crop-vocabulary delivered-phenotype name (``stem_count`` is one, as an
 example rather than as the shape), which is what the CSV column and the unit cross-check are about.
@@ -13,20 +13,22 @@ from __future__ import annotations
 
 import logging
 import statistics
-from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
-
-from tcip_annotation.text import Crop, Text
+from tcip_annotation.text import Crop
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.delivery import PerPlantDelivered
     from tcip_mcp.pipelines.delivery_events_schema import PlantMapping
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        Assignment,
+        MappingResolution,
+    )
+    from tcip_mcp.tools.delivery_tools import ImageObservation
     from tcip_mcp.traits import (
         PlantAggregateKind,
         PlantAggregation,
@@ -35,59 +37,46 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-class PlantObservation(BaseModel):
-    """One observation of one plant under the delivery's attribution, a per-plant delivery's row.
-
-    ``plant_id`` is the plant the delivery's attribution assigned the observation to, never one
-    read off a file name; ``value`` is what was observed, ``None`` for an observation that yields
-    no value. ``source`` and ``distance_m`` are the plant assignment's own, when it carries them.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    plant_id: Text
-    value: int | float | None
-    source: str | None = None
-    distance_m: float | None = None
+type Observed = tuple[Assignment, int | float | None]
+"""One image's assignment to a plant and the value measured on it."""
 
 
 def _per_plant(
-    records: list[PlantObservation], *, plant_aggregation: PlantAggregation
+    observed: Sequence[Observed], *, plant_aggregation: PlantAggregation
 ) -> list[dict]:
-    """Return per-plant summaries of per-image ``records``, one per ``plant_id``, sorted by it.
+    """Return per-plant summaries of ``observed`` images, one per plant, sorted by it.
 
-    Each summary holds the plant, its record count as ``n_images``, and as ``value`` the
-    :data:`PLANT_AGGREGATIONS` statistic ``plant_aggregation`` names over the records' values (a
-    ``None`` value is a missing observation; ``None`` when every record of the plant misses one).
-
-    Where records carry an assignment's ``source``/``distance_m``, they are summarized per plant as
-    ``plant_id_source`` (``"mixed"`` where the plant's images disagree) and
-    ``plant_id_distance_m_max``.
+    Each image counts toward the plant its assignment names. Each summary holds the plant, its
+    image count as ``n_images``, and as ``value`` the :data:`PLANT_AGGREGATIONS` statistic
+    ``plant_aggregation`` names over the images' values (a ``None`` value is a missing
+    observation; ``None`` when every image of the plant misses one). The images' assignments are
+    summarized as ``plant_id_source``, their one ``source`` or ``"mixed"`` where they disagree,
+    and ``plant_id_distance_m_max``, the largest ``distance_m`` among them.
     """
-    groups: dict[str, list[PlantObservation]] = defaultdict(list)
-    for r in records:
-        groups[r.plant_id].append(r)
+    groups: dict[str | None, list[Observed]] = {}
+    for a, v in observed:
+        groups.setdefault(a.plant_id, []).append((a, v))
 
     statistic = PLANT_AGGREGATIONS[plant_aggregation]
     results = []
-    for plant_id, items in sorted(groups.items()):
-        values = [r.value for r in items if r.value is not None]
-        summary: dict[str, Any] = {
-            "plant_id": plant_id,
-            "n_images": len(items),
-            "value": statistic(values) if values else None,
-        }
-        sources = {r.source for r in items if r.source is not None}
-        if sources:
-            summary["plant_id_source"] = (
-                sources.pop() if len(sources) == 1 else "mixed"
-            )
-        distances = [r.distance_m for r in items if r.distance_m is not None]
-        if distances:
-            summary["plant_id_distance_m_max"] = max(distances)
-        results.append(summary)
-
+    for plant_id in sorted(groups, key=str):
+        items = groups[plant_id]
+        values = [v for _, v in items if v is not None]
+        sources = {a.source for a, _ in items}
+        distances = [
+            a.distance_m for a, _ in items if a.distance_m is not None
+        ]
+        results.append(
+            {
+                "plant_id": plant_id,
+                "n_images": len(items),
+                "value": statistic(values) if values else None,
+                "plant_id_source": sources.pop()
+                if len(sources) == 1
+                else "mixed",
+                "plant_id_distance_m_max": max(distances, default=""),
+            }
+        )
     return results
 
 
@@ -306,12 +295,73 @@ def deliver_plant_values(
 
 PER_IMAGE_COLUMNS = ("n_images", "plant_id_source", "plant_id_distance_m_max")
 """The cells only a per-image aggregate writes: each plant's image count and the worst of its
-images' plant assignments (:func:`_per_plant`), blank where the records carried none."""
+images' plant assignments (:func:`_per_plant`)."""
+
+
+def _attributed(
+    results: Sequence[ImageObservation],
+    mapping: MappingResolution,
+    plants: Sequence[str],
+) -> list[Observed]:
+    """Return each of ``results`` with the assignment ``mapping`` attributes its image to.
+
+    Each result's image is looked up by its date and stem in the mapping's build
+    (:meth:`~tcip_mcp.pipelines.postprocessing.plant_mapping.MappingBuild.attributed_assignment`,
+    refusing as it does). Refuses (``ValueError``), naming the image, a result whose date is not a
+    delivered date, whose image's plant is not one of ``plants``, whose image the mapping's
+    verification did not read (no document in the delivered bucket, or no longer on disk), or
+    whose image another result names too; and, naming each, a read image of a plant of ``plants``
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.read_images`) no result names.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_images
+
+    delivered = mapping.disclosure.dates_delivered
+    read_stems = mapping.verified.read_stems
+    seen: set[tuple[str, str]] = set()
+    observed: list[Observed] = []
+    for result in results:
+        image = f"image {result.stem!r} of {result.date}"
+        if result.date not in delivered:
+            raise ValueError(
+                f"{image}: {result.date} is not a delivered date ({delivered}); deliver its "
+                "bucket or drop the result."
+            )
+        assignment = mapping.build.attributed_assignment(
+            result.date, result.stem
+        )
+        if assignment.plant_id not in plants:
+            raise ValueError(
+                f"{image} is of plant {assignment.plant_id!r}, which the population "
+                f"{list(plants)} does not name; deliver that plant or drop the result."
+            )
+        if result.stem not in read_stems[result.date]:
+            raise ValueError(
+                f"{image} was not read by the delivery: the delivered bucket holds no "
+                "prediction document for it, or it is no longer on disk; drop the result."
+            )
+        if (result.date, result.stem) in seen:
+            raise ValueError(
+                f"{image} is named by two results; each image is delivered once."
+            )
+        seen.add((result.date, result.stem))
+        observed.append((assignment, result.value))
+    uncovered = sorted(
+        f"{date}/{stem}"
+        for images in read_images(mapping, plants).values()
+        for date, stem in images
+        if (date, stem) not in seen
+    )
+    if uncovered:
+        raise ValueError(
+            f"image(s) {uncovered} of the delivered plants were read by the delivery and no "
+            "result names them: every image the delivery read counts toward its plant."
+        )
+    return observed
 
 
 def deliver_per_plant_aggregate(
     project: Path,
-    records: list[PlantObservation],
+    results: Sequence[ImageObservation],
     output_path: str,
     *,
     value_key: str,
@@ -319,40 +369,40 @@ def deliver_per_plant_aggregate(
     delivery_kind: PlantAggregateKind,
     buckets: Sequence[Bucket],
     plants: list[str],
-    crop: Crop,
+    mapping: MappingResolution,
     door: str,
-    plant_mapping: PlantMapping,
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
     actor: str | None,
 ) -> PerPlantDelivered:
-    """Deliver the per-plant aggregate of per-image ``records`` as a CSV at ``output_path``.
+    """Deliver the per-plant aggregate of per-image ``results`` as a CSV at ``output_path``.
 
-    Each record's value is a ``value_key`` quantity of ``delivered_phenotype`` for ``crop``, the
-    meaning :func:`plant_value_meaning` resolves for ``delivery_kind`` and refuses as it does. The
-    records are aggregated per plant under that revision's ``plant_aggregation``
-    (:func:`_per_plant`); a plant whose every record carries no value refuses (``ValueError``).
-    The aggregates, each plant's :data:`PER_IMAGE_COLUMNS` cells beside them, are delivered for
-    the population ``plants`` over ``buckets`` under ``door`` by ``actor`` with the
-    ``plant_mapping`` disclosure, ``scale_assessment_id`` and ``acknowledgment_id``, as
-    :func:`deliver_plant_values` delivers them; returns what was delivered.
+    Each result's value is a ``value_key`` quantity of ``delivered_phenotype`` for the crop of
+    ``mapping``'s verified registry, the meaning :func:`plant_value_meaning` resolves for
+    ``delivery_kind`` and refuses as it does. Each result counts toward the plant ``mapping``
+    attributes its image to, refusing as :func:`_attributed` does, and the results are aggregated
+    per plant under that revision's ``plant_aggregation`` (:func:`_per_plant`); a plant whose
+    every image carries no value refuses (``ValueError``). The aggregates, each plant's
+    :data:`PER_IMAGE_COLUMNS` cells beside them, are delivered for the population ``plants`` over
+    ``buckets`` under ``door`` by ``actor`` with ``mapping``'s disclosure, ``scale_assessment_id``
+    and ``acknowledgment_id``, as :func:`deliver_plant_values` delivers them; returns what was
+    delivered.
     """
     meaning = plant_value_meaning(
         project,
         delivery_kind=delivery_kind,
         delivered_phenotype=delivered_phenotype,
         value_key=value_key,
-        crop=crop,
+        crop=mapping.verified.crop,
     )
     by_plant = {
         s["plant_id"]: s
         for s in _per_plant(
-            records, plant_aggregation=meaning.revision.entry.plant_aggregation
+            _attributed(results, mapping, plants),
+            plant_aggregation=meaning.revision.entry.plant_aggregation,
         )
     }
-    none_valued = [
-        p for p in plants if p in by_plant and by_plant[p]["value"] is None
-    ]
+    none_valued = [p for p, s in by_plant.items() if s["value"] is None]
     if none_valued:
         raise ValueError(
             f"plant(s) {none_valued} carry no {delivered_phenotype!r} observation: a "
@@ -365,13 +415,13 @@ def deliver_per_plant_aggregate(
         {p: s["value"] for p, s in by_plant.items()},
         output_path,
         door_columns={
-            column: {p: s.get(column, "") for p, s in by_plant.items()}
+            column: {p: s[column] for p, s in by_plant.items()}
             for column in PER_IMAGE_COLUMNS
         },
         buckets=buckets,
         plants=plants,
         door=door,
-        plant_mapping=plant_mapping,
+        plant_mapping=mapping.disclosure,
         scale_assessment_id=scale_assessment_id,
         acknowledgment_id=acknowledgment_id,
         actor=actor,

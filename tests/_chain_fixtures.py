@@ -41,9 +41,12 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.pipelines.execution import Pass
     from tcip_mcp.pipelines.inference.passes import Detection, DetectionPass
-    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MappingResolution,
+    )
     from tcip_mcp.pipelines.schemas import DetectorGeometry
     from tcip_mcp.subject_registry import SubjectRegistry
+    from tcip_mcp.tools.delivery_tools import ImageObservation
     from tcip_mcp.traits import TraitRevision
     from tcip_web.state import OpenProject
 
@@ -260,18 +263,19 @@ def object_at(index: int) -> tuple[int, int, int]:
     return x0, y0, size
 
 
-def plant_captures(plants: Sequence[str]) -> dict[str, tuple[float, float]]:
-    """Return where each of :data:`STEMS` was taken, the captures shared out among ``plants``.
+def plant_captures(
+    images: Mapping[str, int],
+) -> dict[str, tuple[float, float]]:
+    """Return where the first of :data:`STEMS` were taken, ``images[plant]`` at each plant's place.
 
-    Stem ``i`` is taken at the place of plant ``i`` modulo ``len(plants)``
-    (:func:`~tests._mapping_fixtures.plant_positions`).
+    The stems are taken in order, plant by plant in ``images``' order, each at its plant's place
+    (:func:`~tests._mapping_fixtures.plant_positions`); the stems left over carry no position.
     """
     from tests._mapping_fixtures import plant_positions
 
-    places = plant_positions(plants)
-    return {
-        stem: places[plants[i % len(plants)]] for i, stem in enumerate(STEMS)
-    }
+    places = plant_positions(list(images))
+    taken = [plant for plant, n in images.items() for _ in range(n)]
+    return {stem: places[plant] for stem, plant in zip(STEMS, taken)}
 
 
 def synthetic_capture(
@@ -554,15 +558,15 @@ def unassessed_bucket(
     *,
     experiment_id: str,
     bucket_name: str = "plain",
-    plants: Sequence[str] = (),
+    images: Mapping[str, int] | None = None,
     crop: str = COUNT_CROP,
 ) -> Bucket:
     """Return a bucket published under no assessment.
 
-    Ingests, draws, trains and publishes under ``project``. With ``plants``, the captures stand
-    at their places (:func:`plant_captures`) and the project's mapping ``valley`` of them
-    (:func:`~tests._mapping_fixtures.map_plants`, the dataset and its plants at ``crop``) is
-    built after the bucket is published.
+    Ingests, draws, trains and publishes under ``project``. With ``images``, that many captures
+    of each plant it names stand at the plant's place (:func:`plant_captures`) and the project's
+    mapping ``valley`` of them (:func:`~tests._mapping_fixtures.map_plants`, the dataset and its
+    plants at ``crop``) is built after the bucket is published.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
@@ -570,7 +574,7 @@ def unassessed_bucket(
 
     root = project / "ds"
     images_dir = synthetic_capture(
-        root, positions=plant_captures(plants) if plants else None
+        root, positions=plant_captures(images) if images else None
     )
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
@@ -585,8 +589,8 @@ def unassessed_bucket(
         actor=None,
     )
     assert "error" not in published, published
-    if plants:
-        map_plants(project, root, plants, crop=crop)
+    if images:
+        map_plants(project, root, list(images), crop=crop)
     return read_bucket(root, bucket)
 
 
@@ -635,9 +639,29 @@ def digest_of(refused: Exception) -> str:
     return shipping.result_sha256
 
 
+def mapped_results(
+    mapping: MappingResolution,
+    values: Mapping[str, Sequence[int | float | None]],
+) -> list[ImageObservation]:
+    """Return a result per image ``mapping``'s delivery read of each plant ``values`` names.
+
+    Each plant's read images (``plant_mapping.read_images``) take its ``values`` in order; a
+    plant with another number of read images than values fails.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_images
+    from tcip_mcp.tools.delivery_tools import ImageObservation
+
+    read = read_images(mapping, list(values))
+    return [
+        ImageObservation(date=date, stem=stem, value=value)
+        for plant, plant_values in values.items()
+        for (date, stem), value in zip(read[plant], plant_values, strict=True)
+    ]
+
+
 def deliver_acknowledged(
     project: Path,
-    records: list[PlantObservation],
+    values: Mapping[str, Sequence[int | float | None]],
     out: Path,
     delivered_phenotype: str,
     *,
@@ -646,14 +670,15 @@ def deliver_acknowledged(
     buckets: list | None = None,
     **kwargs: str | dict | None,
 ) -> PerPlantDelivered:
-    """Deliver the per-image ``records``' ``value_key`` values per plant, under an acknowledgment.
+    """Deliver each plant's per-image ``values``, ``value_key`` values, under an acknowledgment.
 
-    ``deliver_per_plant_aggregate`` runs for the plants the records carry over ``buckets`` (by
-    default a bucket published under no assessment, :func:`unassessed_bucket`, its captures
-    mapped to those plants at the first crop crops.yml names for ``delivered_phenotype``),
-    shipped unvalidated under the breeder's acknowledgment (:func:`acknowledged`). Its
-    disclosure and crop are ``plant_mapping_disclosure``'s over the project's persisted mapping
-    ``valley``, which ``buckets`` a caller names must already have.
+    ``deliver_per_plant_aggregate`` runs for the plants ``values`` names over ``buckets`` (by
+    default a bucket published under no assessment, :func:`unassessed_bucket`, as many of its
+    captures at each plant's place as the plant has values, mapped at the first crop crops.yml
+    names for ``delivered_phenotype``), over the results :func:`mapped_results` gives each
+    plant's read images, shipped unvalidated under the breeder's acknowledgment
+    (:func:`acknowledged`). Its mapping is ``plant_mapping_disclosure``'s resolution of the
+    project's persisted mapping ``valley``, which ``buckets`` a caller names must already have.
     """
     from tcip_mcp.buckets import by_recorded_date
     from tcip_mcp.pipelines.postprocessing.aggregation import (
@@ -664,7 +689,7 @@ def deliver_acknowledged(
     )
     from tcip_mcp.traits import phenotype_crops
 
-    plants = list(dict.fromkeys(r.plant_id for r in records))
+    plants = list(values)
     delivered = (
         buckets
         if buckets is not None
@@ -672,7 +697,7 @@ def deliver_acknowledged(
             unassessed_bucket(
                 project,
                 experiment_id="exp-acknowledged",
-                plants=plants,
+                images={plant: len(v) for plant, v in values.items()},
                 crop=phenotype_crops(delivered_phenotype)[0],
             )
         ]
@@ -680,20 +705,20 @@ def deliver_acknowledged(
     resolved = plant_mapping_disclosure(
         project, "valley", by_recorded_date(delivered), plants
     )
+    results = mapped_results(resolved, values)
     return acknowledged(
         project,
         lambda ack: deliver_per_plant_aggregate(
             project,
-            records,
+            results,
             str(out),
             value_key=value_key,
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,
             plants=plants,
-            crop=resolved.verified.crop,
+            mapping=resolved,
             door="test_delivery",
-            plant_mapping=resolved.disclosure,
             acknowledgment_id=ack,
             actor=None,
             **kwargs,

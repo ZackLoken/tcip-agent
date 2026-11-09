@@ -20,6 +20,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from enum import StrEnum
+from functools import cached_property
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -212,12 +213,15 @@ class ServedMapping(BaseModel):
 class MappingVerification(NamedTuple):
     """What :func:`verify_mapping_inputs` read of a mapping's inputs.
 
-    It holds the captures it could not re-check, by name, and the ``crop`` of the plant registry
-    it verified.
+    It holds the captures it could not re-check, by name, the ``crop`` of the plant registry it
+    verified, and ``read_stems``: for each date of the mapping, the stems of the captures it read
+    (attributed, carrying a document in that date's delivered bucket, and on disk), empty for a
+    date it did not walk.
     """
 
     captures_unverified: list[str]
     crop: Crop
+    read_stems: dict[str, frozenset[str]]
 
 
 class MappingResolution(NamedTuple):
@@ -376,6 +380,34 @@ class MappingBuild:
         """The dates this build walked, in walk order: those it holds assignments for."""
         return list(self.assignments)
 
+    @cached_property
+    def by_stem(self) -> dict[str, dict[str, Assignment]]:
+        """Each date's assignments by their image's stem."""
+        return {
+            date: {a.stem: a for a in rows}
+            for date, rows in self.assignments.items()
+        }
+
+    def attributed_assignment(self, date: str, stem: str) -> Assignment:
+        """Return the assignment of the image of stem ``stem`` captured on ``date``.
+
+        Refuses (``ValueError``), naming the image, when this build records no image of that stem
+        on that date and when the image's assignment names no plant
+        (:func:`assignment_is_attributed`).
+        """
+        assignment = self.by_stem.get(date, {}).get(stem)
+        if assignment is None:
+            raise ValueError(
+                f"image {stem!r} of {date}: mapping {self.name!r} records no image of that "
+                "stem on that date, so it attributes the image to no plant."
+            )
+        if not assignment_is_attributed(assignment):
+            raise ValueError(
+                f"image {stem!r} of {date}: mapping {self.name!r} assigned it to no plant "
+                f"({assignment.source}), so its value belongs to none."
+            )
+        return assignment
+
     def to_record(self) -> dict:
         """Return the stored document: every field but ``record_sha256``."""
         return _MAPPING_RECORD.dump_python(
@@ -459,6 +491,25 @@ class MappingBuild:
             images_unattributed=self.unattributed(dates_delivered),
             plant_attribution=self.plant_attribution,
         )
+
+
+def read_images(
+    mapping: MappingResolution, plants: Iterable[str]
+) -> dict[str, list[tuple[str, str]]]:
+    """Return the ``(date, stem)`` of each of ``plants``' images ``mapping``'s delivery read.
+
+    An image is read when its date is delivered, the build attributes it to that plant and the
+    verification read it (:attr:`MappingVerification.read_stems`); each plant's images come in
+    date and stem order.
+    """
+    wanted = list(plants)
+    read: dict[str | None, list[tuple[str, str]]] = {p: [] for p in wanted}
+    for date in mapping.disclosure.dates_delivered:
+        for stem in sorted(mapping.verified.read_stems[date]):
+            plant = mapping.build.by_stem[date][stem].plant_id
+            if plant in read:
+                read[plant].append((date, stem))
+    return {plant: read[plant] for plant in wanted}
 
 
 _MAPPING_RECORD = TypeAdapter(MappingBuild)
@@ -1902,15 +1953,16 @@ def verify_mapping_inputs(
         raise MappingDeliveryError(str(exc)) from exc
 
     captures_unverified: list[str] = []
+    read_stems: dict[str, frozenset[str]] = {}
     for date in build.dates:
         rows = build.assignments.get(date, [])
-        recorded_by_stem = {a.stem: a for a in rows}
-        recorded_stems = set(recorded_by_stem)
+        recorded_stems = set(build.by_stem[date])
 
         bucket = buckets.get(date)
         logical = on_disk.get(date)
         if bucket is None or logical is None:
             captures_unverified.append(date)
+            read_stems[date] = frozenset()
             continue
 
         enumerated_stems = set(logical)
@@ -1925,11 +1977,12 @@ def verify_mapping_inputs(
         missing_stems = recorded_stems - enumerated_stems
         present_stems = recorded_stems & enumerated_stems
         read_set = stems_delivery_reads(rows, bucket) & present_stems
+        read_stems[date] = frozenset(read_set)
         unread_stems = present_stems - read_set
         mapped_stems = {
             s
             for s in recorded_stems
-            if assignment_is_attributed(recorded_by_stem[s])
+            if assignment_is_attributed(build.by_stem[date][s])
         }
         full_mapped_coverage = not missing_stems and read_set == mapped_stems
 
@@ -1938,7 +1991,7 @@ def verify_mapping_inputs(
             # An unmapped capture (a raster, a band group) is never read through predictions, so
             # it always lands here unless the whole-date digest below re-checks it instead.
             unverified_names.update(
-                recorded_by_stem[s].image
+                build.by_stem[date][s].image
                 for s in (missing_stems | unread_stems)
             )
 
@@ -1952,7 +2005,7 @@ def verify_mapping_inputs(
         stamps = [s for s in observed if s.stem in read_set]
         was_unreadable = set(build.unreadable.get(date, []))
         for s in stamps:
-            row = recorded_by_stem[s.stem]
+            row = build.by_stem[date][s.stem]
             if s.kind == "photo":
                 if s.name not in was_unreadable and s.readable is False:
                     raise MappingDeliveryError(
@@ -2003,7 +2056,9 @@ def verify_mapping_inputs(
                     "rebuild to cover the images actually on disk"
                 )
 
-    return MappingVerification(captures_unverified, registry["crop"])
+    return MappingVerification(
+        captures_unverified, registry["crop"], read_stems
+    )
 
 
 def ungeoreferenced_capture_message(
