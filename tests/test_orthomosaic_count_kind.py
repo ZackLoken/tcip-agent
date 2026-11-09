@@ -18,6 +18,7 @@ import pytest
 
 from tcip_mcp import traits
 from tcip_mcp.delivery import DELIVERY_COLUMNS
+from tcip_mcp.pipelines.postprocessing.aggregation import PER_IMAGE_COLUMNS
 from tests import _trait_fixtures as fx, csv_rows
 from tests._mapping_fixtures import POSITION_ERROR_M
 
@@ -47,9 +48,6 @@ SHARED_COLUMNS = (
     "plant_attribution",
 )
 """The cells every per-plant delivery writes beside its delivery cells, in their order."""
-
-PER_IMAGE_COLUMNS = ("n_images", "plant_id_source", "plant_id_distance_m_max")
-"""The cells only the per-image aggregate door writes, in their order."""
 
 THREE_DETECTIONS = [
     (8.0, 8.0, 12.0, 12.0),
@@ -460,7 +458,7 @@ def test_the_two_per_plant_doors_write_their_shared_columns_and_provenance_alike
     tool, arguments = delivery_events._acknowledged_per_plant_csv(
         tmp_path,
         {
-            "results": [{"plant_id": "P1", "value": 2}],
+            "results": [{"date": date, "stem": "P1", "value": 2}],
             "output_path": str(tmp_path / "per_image.csv"),
             "delivered_phenotype": "stem_count",
             "delivery_kind": traits.PER_PLANT_COUNT_AGGREGATE,

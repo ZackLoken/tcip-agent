@@ -195,7 +195,6 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     Confirming revision 1, stating a per-image count and a per-plant aggregate, makes both
     deliverable under revision 1.
     """
-    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
     from tests._chain_fixtures import deliver_acknowledged
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
@@ -223,7 +222,7 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     map_plants(tmp_path, tmp_path / "ds", ["p1"], crop=COUNT_CROP)
     deliver_acknowledged(
         tmp_path,
-        [PlantObservation(plant_id="p1", value=5)] * 2,
+        {"p1": [5]},
         tmp_path / "per_plant.csv",
         "stem_count",
         value_key="count",

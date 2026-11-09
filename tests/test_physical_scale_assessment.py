@@ -201,13 +201,17 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         read_delivery_events,
     )
     from tcip_mcp.pipelines.postprocessing.aggregation import (
-        PlantObservation,
         deliver_per_plant_aggregate,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_mapping_disclosure,
     )
-    from tests._chain_fixtures import acknowledged, predicted, published
+    from tests._chain_fixtures import (
+        acknowledged,
+        mapped_results,
+        predicted,
+        published,
+    )
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
         COUNT_CROP,
@@ -252,7 +256,6 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         scope={"subject": SUBJECT},
     )
     map_plants(tmp_path, tmp_path / "ds", ["p1"], crop=COUNT_CROP)
-    records = [PlantObservation(plant_id="p1", value=12.5)]
 
     def delivered(
         out: Path, ack: str | None, over: Bucket, **kw: str | None
@@ -262,16 +265,15 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         )
         return deliver_per_plant_aggregate(
             tmp_path,
-            records,
+            mapped_results(resolved, {"p1": [12.5]}),
             str(out),
             value_key="area_mm2",
             delivered_phenotype="plant_surface_area",
             delivery_kind="per_plant_count_aggregate",
             buckets=[over],
             plants=["p1"],
-            crop=resolved.verified.crop,
+            mapping=resolved,
             door="test_scale",
-            plant_mapping=resolved.disclosure,
             acknowledgment_id=ack,
             actor=None,
             **kw,
