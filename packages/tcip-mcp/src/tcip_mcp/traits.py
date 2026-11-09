@@ -78,22 +78,16 @@ DELIVERY_KINDS = (
 """The delivered artifact shapes. Each kind decides which spec fields an operationalization of it
 rests on, whether it names delivered phenotypes, and whether it names value keys."""
 
-DETECTOR_KINDS = frozenset(
-    {
-        STATE_CROSSING_DATES,
-        PER_IMAGE_COUNT,
-        PER_PLANT_COUNT_AGGREGATE,
-        PER_PLANT_ORTHOMOSAIC_COUNT,
-    }
-)
-"""Kinds measured off a detector's detections of the operationalization's measured subject; the
-other kinds are measured off a scalar head (ordinal or regression)."""
-
 COUNT_KINDS = frozenset(
     {PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE, PER_PLANT_ORTHOMOSAIC_COUNT}
 )
 """Kinds whose delivered number is a count of the measured subject's detections: per image, per
 plant over its images, or per plant on one orthomosaic."""
+
+DETECTOR_KINDS = COUNT_KINDS | {STATE_CROSSING_DATES}
+"""Kinds measured off a detector's detections of the operationalization's measured subject: the
+count kinds and the state crossing; the other kinds are measured off a scalar head (ordinal or
+regression)."""
 
 _COUNT_FIELDS = (
     "count_objective",
