@@ -215,7 +215,7 @@ def deliver_plant_values(
     The values are what ``meaning`` states, each plant attributed at the granularity
     ``plant_mapping.plant_attribution`` names; the CSV is a delivery by ``actor`` of exactly the
     population ``plants`` (:func:`~tcip_mcp.pipelines.postprocessing.phenology.population`'s
-    list), refusing (``ValueError``) values of any other plants, over the published ``buckets``
+    list), ``values`` holding a value for each of its plants, over the published ``buckets``
     the values came from. The buckets, the physical-scale assessment ``scale_assessment_id`` and
     the unit clear :func:`~tcip_mcp.delivery.gate` under the meaning's revision, the recorded
     acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
@@ -234,11 +234,6 @@ def deliver_plant_values(
         gate,
     )
 
-    if sorted(values) != sorted(plants):
-        raise ValueError(
-            f"the records cover plants {sorted(values)} and the population is "
-            f"{sorted(plants)}: a delivery ships exactly its population, one row each."
-        )
     result = Result(
         [
             "plant_id",
@@ -310,7 +305,9 @@ def _attributed(
     refusing as it does). Refuses (``ValueError``), naming the image, a result whose date is not a
     delivered date, whose image's plant is not one of ``plants``, whose image the mapping's
     verification did not read (no document in the delivered bucket, or no longer on disk), or
-    whose image another result names too; and, naming each, a read image of a plant of ``plants``
+    whose image another result names too; then, naming each with its images on the delivered
+    dates, a plant of ``plants`` the delivery read no image of; and, naming each, a read image of a
+    plant of ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.read_images`) no result names.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_images
@@ -345,9 +342,27 @@ def _attributed(
             )
         seen.add((result.date, result.stem))
         observed.append((assignment, result.value))
+    read = read_images(mapping, plants)
+    unread = [plant for plant, images in read.items() if not images]
+    if unread:
+        images = {
+            plant: sorted(
+                f"{date}/{a.stem}"
+                for date in delivered
+                for a in mapping.build.assignments[date]
+                if a.plant_id == plant
+            )
+            for plant in unread
+        }
+        named = ", ".join(f"{p!r} ({', '.join(s)})" for p, s in images.items())
+        raise ValueError(
+            f"the delivery read none of the images of plant(s) {named}: the delivered "
+            "bucket holds no prediction document for them, or they are no longer on disk; "
+            "deliver without the plant or restore its images."
+        )
     uncovered = sorted(
         f"{date}/{stem}"
-        for images in read_images(mapping, plants).values()
+        for images in read.values()
         for date, stem in images
         if (date, stem) not in seen
     )

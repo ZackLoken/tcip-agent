@@ -457,6 +457,10 @@ READ = (
 )
 """A value for each image of :data:`CAPTURES` the mapping attributes, each a distinct power of
 two."""
+NO_READ_IMAGE = "the delivery read none of the images of plant"
+"""The phrase of the refusal of a delivered plant the delivery read no image of."""
+UNCOVERED = "no result names them"
+"""The phrase of the refusal of read images no result names."""
 
 
 def _rows(*images: tuple[str, str, int | None]) -> list[dict]:
@@ -688,15 +692,22 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
             _both,
             _but((FIRST, "b")),
             ("P1", "P2"),
-            "no result names them",
+            UNCOVERED,
             f"'{FIRST}/b'",
         ),
         (
             _p2_unread,
             _rows(*READ[:2]),
             ("P1", "P2"),
-            "a delivery ships exactly its population",
-            "['P1', 'P2']",
+            NO_READ_IMAGE,
+            f"'P2' ({FIRST}/c, {SECOND}/a)",
+        ),
+        (
+            _p2_unread,
+            _rows(READ[0]),
+            ("P1", "P2"),
+            NO_READ_IMAGE,
+            f"'P2' ({FIRST}/c, {SECOND}/a)",
         ),
     ],
     ids=[
@@ -710,6 +721,7 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
         "repeated_image",
         "uncovered_image",
         "plant_with_no_read_image",
+        "plant_with_no_read_image_and_an_uncovered_image",
     ],
 )
 def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_plant_refuses(
@@ -723,8 +735,8 @@ def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_
     """A result the mapping cannot place, or a read image no result covers, refuses by image.
 
     The refusal names the image and its reason, through the server's door, and no delivery
-    event or CSV is written. A delivered plant the delivery read no image of refuses for the
-    population, naming it.
+    event or CSV is written. A delivered plant the delivery read no image of refuses naming it
+    and its images, ahead of the read images no result names.
     """
     from tcip_mcp.delivery import read_delivery_events
 
@@ -742,6 +754,7 @@ def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_
     assert isinstance(refused, dict), refused
     assert phrase in refused.get("error", ""), refused
     assert named in refused["error"], refused
+    assert (UNCOVERED in refused["error"]) == (phrase == UNCOVERED), refused
     assert read_delivery_events(tmp_path) == []
     assert not (tmp_path / "o.csv").exists()
 
