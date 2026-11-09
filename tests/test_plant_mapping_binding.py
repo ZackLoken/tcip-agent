@@ -24,6 +24,7 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tcip_mcp.tools.project_tools import register_dataset
 from tcip_web.routes.audit_gap import AuditGapRefusal
+from tests import csv_rows
 from tests._audit_fixtures import audit_rows, held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import (
@@ -46,6 +47,7 @@ from tests.test_second_trait_acceptance import (
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
+    from tcip_mcp.pipelines.postprocessing.phenology import Projection
     from tcip_web.state import OpenProject
 
 DATES = ["2026-02-11", "2026-02-25"]
@@ -114,11 +116,12 @@ def _deliver(
     buckets: Iterable[str],
     output_csv_path: str,
     by: str = "user:breeder",
+    projection: Projection = "milestones",
 ) -> dict:
     """Run ``deliver_phenology_milestones``'s measurement and delivery through the library.
 
-    The delivery ships under ``by``'s acknowledgment and answers what was delivered as the tool
-    answers it; a refusal answers ``{"error": ...}``.
+    The delivery ships ``projection`` under ``by``'s acknowledgment and answers what was
+    delivered as the tool answers it; a refusal answers ``{"error": ...}``.
     """
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -140,7 +143,7 @@ def _deliver(
             lambda ack: phenology.deliver_phenology(
                 project,
                 measurement,
-                projection="milestones",
+                projection=projection,
                 output_path=Path(output_csv_path),
                 acknowledgment_id=ack,
                 door=DOOR,
@@ -1409,7 +1412,9 @@ def test_an_archived_date_folder_beside_intact_plant_csvs_delivers_disclosing_th
     """A delivered date whose capture folder is gone delivers, the bare date disclosed.
 
     Every registered plant CSV is intact and every date's bucket is delivered; only the first
-    date's folder is removed, so that date is the one entry disclosed as unverified.
+    date's folder is removed, so that date is the one entry disclosed as unverified. Its images
+    were not read, so every plant's row on that date counts each of them as missing and no plant
+    has a milestone.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -1441,6 +1446,30 @@ def test_an_archived_date_folder_beside_intact_plant_csvs_delivers_disclosing_th
 
     events = _events(tmp_path)
     assert events[-1]["plant_mapping"]["captures_unverified"] == [DATES[0]]
+
+    assert all(
+        not row[f"bloom_{fraction}per_date"]
+        for row in csv_rows(out_csv)
+        for fraction in ("05", "50", "95")
+    )
+    curves_csv = tmp_path / "curves.csv"
+    res = _deliver(
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        plants=POPULATION,
+        dataset_root=dataset_root,
+        buckets=preds_by_date.values(),
+        output_csv_path=str(curves_csv),
+        projection="curves",
+    )
+    assert "error" not in res, res
+    removed = [r for r in csv_rows(curves_csv) if r["capture"] == DATES[0]]
+    assert {r["plant_id"] for r in removed} == set(POPULATION)
+    assert all(
+        int(r["n_images"]) > 0 and r["n_missing"] == r["n_images"]
+        for r in removed
+    )
 
 
 def test_one_removed_plant_csv_of_a_registrys_two_refuses_naming_that_csv_alone(

@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import _trait_fixtures as fx, csv_rows
 from tests._mapping_fixtures import CROP, PHOTO_POSITION_ERROR_M, PLOTS
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.postprocessing.phenology import Projection
 
 torch = pytest.importorskip("torch")
 
@@ -29,8 +33,15 @@ DETECTIONS = {
 
 The counts are distinct powers of two, so each set of images has its own sum, and stems ``a``
 and ``c`` stand at a different plot on each date."""
+OFF_DISK = (DATES[0], "b")
+"""The one documented image whose file leaves the disk after the buckets are published."""
 PHENOTYPE = "bloom_per_axil"
 """A currant phenotype the fixture's count trait delivers as the sum of its plant's images."""
+
+
+def _read_images() -> dict[tuple[str, str], tuple[str, int]]:
+    """Return :data:`DETECTIONS` without :data:`OFF_DISK`, the images a delivery reads."""
+    return {key: v for key, v in DETECTIONS.items() if key != OFF_DISK}
 
 
 def _scene(project: Path) -> tuple[Path, list[str]]:
@@ -38,7 +49,8 @@ def _scene(project: Path) -> tuple[Path, list[str]]:
 
     The dataset is registered at :data:`~tests._mapping_fixtures.CROP` with the bloom subject
     registry, mapped by ``build_plant_mapping`` against :data:`PLOTS`, and each date's bucket
-    holds each image's open flowers, a document for every image.
+    holds each image's open flowers, a document for every image. :data:`OFF_DISK`'s file is then
+    removed, so the mapping and its bucket still name it and the disk no longer holds it.
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
@@ -98,6 +110,7 @@ def _scene(project: Path) -> tuple[Path, list[str]]:
         ).name
         for date in DATES
     ]
+    (image_dir(dataset_root, OFF_DISK[0]) / f"{OFF_DISK[1]}.jpg").unlink()
     return dataset_root, buckets
 
 
@@ -125,7 +138,11 @@ def _confirm_traits(project: Path) -> None:
 def _per_plant_csv(
     project: Path, dataset_root: Path, buckets: list[str]
 ) -> Path:
-    """Deliver each image's open flowers through ``deliver_per_plant_csv``; return the CSV."""
+    """Deliver each read image's open flowers through ``deliver_per_plant_csv``; return the CSV.
+
+    The records leave :data:`OFF_DISK` out, since the door refuses a record of an image it did not
+    read.
+    """
     from tcip_mcp.server import binding_for
     from tests._server_calls import called_through_the_server
     from tests.test_delivery_events import _acknowledged_per_plant_csv
@@ -136,7 +153,7 @@ def _per_plant_csv(
         {
             "results": [
                 {"date": date, "stem": stem, "value": n}
-                for (date, stem), (_, n) in DETECTIONS.items()
+                for (date, stem), (_, n) in _read_images().items()
             ],
             "output_path": str(out),
             "delivered_phenotype": PHENOTYPE,
@@ -155,12 +172,17 @@ def _per_plant_csv(
     return out
 
 
-def _curves_csv(project: Path, dataset_root: Path, buckets: list[str]) -> Path:
-    """Measure the bloom trait over the same buckets and deliver its curves; return the CSV."""
+def _phenology_csv(
+    project: Path,
+    dataset_root: Path,
+    buckets: list[str],
+    projection: Projection,
+) -> Path:
+    """Measure the bloom trait over the same buckets and deliver ``projection``; return the CSV."""
     from tcip_mcp.pipelines.postprocessing import phenology
     from tests._chain_fixtures import acknowledged
 
-    out = project / "curves.csv"
+    out = project / f"{projection}.csv"
     measurement = phenology.measure_phenology(
         project,
         trait="currant_bloom",
@@ -174,10 +196,10 @@ def _curves_csv(project: Path, dataset_root: Path, buckets: list[str]) -> Path:
         lambda ack: phenology.deliver_phenology(
             project,
             measurement,
-            projection="curves",
+            projection=projection,
             output_path=out,
             acknowledgment_id=ack,
-            door="test_curves",
+            door=f"test_{projection}",
             actor=None,
         ),
     )
@@ -189,11 +211,13 @@ def test_each_plants_delivered_sum_is_its_curve_rows_total_over_the_same_images(
 ) -> None:
     """Each plant's summed value is the total its curve rows count, over the same images.
 
-    Every mapping date is delivered and every attributed image has a bucket document and is on
-    disk, since the curves walk every mapping date and count an assigned image with no document
-    as missing. Each image carries its own power of two, so a plant's sum names exactly its
-    images: an image of one plant counted toward the other changes both plants' sums. The
-    per-plant ``n_images`` equals the plant's curve rows' images too.
+    Every mapping date is delivered and every attributed image has a bucket document, but
+    :data:`OFF_DISK`'s file is gone, so both routes treat it as unread: the per-plant door takes
+    no record of it and the curves count it as a missing image. Each image carries its own power of
+    two, so a plant's sum names exactly its read images: an image of one plant counted toward the
+    other changes both plants' sums. The per-plant ``n_images`` equals the plant's curve rows'
+    images less their missing ones, and the plant of the unread image has no milestone while the
+    other plant, every image read, has them.
     """
     _confirm_traits(tmp_path)
     dataset_root, buckets = _scene(tmp_path)
@@ -202,7 +226,15 @@ def test_each_plants_delivered_sum_is_its_curve_rows_total_over_the_same_images(
         row["plant_id"]: row
         for row in csv_rows(_per_plant_csv(tmp_path, dataset_root, buckets))
     }
-    curves = csv_rows(_curves_csv(tmp_path, dataset_root, buckets))
+    curves = csv_rows(
+        _phenology_csv(tmp_path, dataset_root, buckets, "curves")
+    )
+    milestones = {
+        row["plant_id"]: row
+        for row in csv_rows(
+            _phenology_csv(tmp_path, dataset_root, buckets, "milestones")
+        )
+    }
 
     totals = {
         plant: sum(int(r["n_total"]) for r in curves if r["plant_id"] == plant)
@@ -210,13 +242,18 @@ def test_each_plants_delivered_sum_is_its_curve_rows_total_over_the_same_images(
     }
     images = {
         plant: sum(
-            int(r["n_images"]) for r in curves if r["plant_id"] == plant
+            int(r["n_images"]) - int(r["n_missing"])
+            for r in curves
+            if r["plant_id"] == plant
         )
         for plant in PLOTS
     }
     assert {p: int(float(r["value"])) for p, r in per_plant.items()} == totals
     assert {p: int(r["n_images"]) for p, r in per_plant.items()} == images
     assert totals == {
-        plant: sum(n for p, n in DETECTIONS.values() if p == plant)
+        plant: sum(n for p, n in _read_images().values() if p == plant)
         for plant in PLOTS
     }
+    unread_plant = DETECTIONS[OFF_DISK][0]
+    for plant, row in milestones.items():
+        assert bool(row["bloom_50per_date"]) is (plant != unread_plant), plant
