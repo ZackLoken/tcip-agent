@@ -459,9 +459,9 @@ def test_an_open_while_the_departing_stats_record_is_held_answers_409_and_opens_
     client: TestClient,
 ) -> None:
     """A busy departure is the store's own sentence at 409, with the open project unchanged."""
-    from tcip_store.sqlite_backend import SqliteBackend
     from tcip_web.state import store
     from tests._audit_fixtures import held_by_another_writer
+    from tests._busy_store_fixtures import waiting
     from tests._web_fixtures import named_project
 
     ws = tmp_path.parent
@@ -475,14 +475,13 @@ def test_an_open_while_the_departing_stats_record_is_held_answers_409_and_opens_
     )
     started = _open_session(client, valley.id)
 
-    backend = tcip_store.bind(SqliteBackend(lock_timeout_s=0.0))
-    try:
-        with held_by_another_writer(annotation_stats_key(str(valley.root))):
-            resp = client.post(
-                "/api/projects/open", json={"id": hill.id, "user": "g"}
-            )
-    finally:
-        backend.close()
+    with (
+        waiting(0.0),
+        held_by_another_writer(annotation_stats_key(str(valley.root))),
+    ):
+        resp = client.post(
+            "/api/projects/open", json={"id": hill.id, "user": "g"}
+        )
 
     assert resp.status_code == 409, resp.text
     assert "was busy: another holder kept its lock" in resp.json()["detail"]
