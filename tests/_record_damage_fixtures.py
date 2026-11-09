@@ -1,15 +1,44 @@
-"""Corrupting a stored record or log entry.
+"""Corrupting a stored record or log entry, or a root's whole database.
 
-Bytes that will not decode are put behind its key in the database.
+Bytes that will not decode are put behind a key in the database, or over the database file.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 import tcip_store as ts
 from tcip_store.file_backend import database_file
 from tcip_store.sqlite_backend import encode_parts
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+NON_DATABASE = b"not a database, only bytes under its name" * 100
+"""Bytes that fail the store's identity check."""
+
+
+@contextmanager
+def unopenable_database(root: str | Path) -> Iterator[Path]:
+    """Put :data:`NON_DATABASE` where ``root``'s database is, yield that path, and remove it after.
+
+    The store's connections on ``root`` are released first and again on leaving, so a read inside
+    the block meets the identity check rather than a held connection. ``root``'s ``.tcip``
+    directory is made when it holds no database yet. After the block no database is there, and the
+    next write builds one.
+    """
+    ts.release_root(root)
+    path = database_file(str(root))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(NON_DATABASE)
+    try:
+        yield path
+    finally:
+        ts.release_root(root)
+        path.unlink()
 
 
 def _connected(key: ts.Key) -> sqlite3.Connection:
@@ -31,6 +60,32 @@ def damage_record(key: ts.Key, data: bytes) -> None:
         conn.close()
 
 
+def damage_log_entry(key: ts.Key, position: int, data: bytes) -> None:
+    """Overwrite the entry at ``position`` in the log at ``key`` with ``data``.
+
+    Positions count from the log's first entry, and a negative one from its last, as a list's
+    do. Asserts the log holds an entry at ``position``.
+    """
+    conn = _connected(key)
+    try:
+        ids = [
+            row[0]
+            for row in conn.execute(
+                "select id from log_entries where store = ? and parts = ? order by id",
+                (key.store, encode_parts(key.parts)),
+            )
+        ]
+        assert -len(ids) <= position < len(ids), (
+            f"{key} holds {len(ids)} entries, none at position {position}"
+        )
+        conn.execute(
+            "update log_entries set entry = ? where id = ?",
+            (data, ids[position]),
+        )
+    finally:
+        conn.close()
+
+
 def damage_last_log_entry(key: ts.Key) -> str:
     """Overwrite the last entry of the log at ``key`` with bytes that will not decode.
 
@@ -38,13 +93,5 @@ def damage_last_log_entry(key: ts.Key) -> str:
     entry.
     """
     past = ts.read_log(key).cursor
-    conn = _connected(key)
-    try:
-        damaged = conn.execute(
-            "update log_entries set entry = ? where id = ?",
-            (b"{not valid json", int(past)),
-        )
-    finally:
-        conn.close()
-    assert damaged.rowcount == 1, f"{key} holds no entry to damage"
+    damage_log_entry(key, -1, b"{not valid json")
     return past

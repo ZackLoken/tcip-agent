@@ -1039,22 +1039,26 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     ``persist_mapping`` wrote.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError, audit_log_key
-    from tcip_store.sqlite_backend import SqliteBackend
+    from tests._busy_store_fixtures import waiting
 
-    ts.bind(SqliteBackend(lock_timeout_s=0.2))
-    _init(tmp_path)
-    dataset_root = _dataset(tmp_path)
-    plant_csv, _ = _write_scene(dataset_root)
-    build = mapping_over(dataset_root, [plant_csv], tmp_path, name="valley")
+    with waiting(0.2):
+        _init(tmp_path)
+        dataset_root = _dataset(tmp_path)
+        plant_csv, _ = _write_scene(dataset_root)
+        build = mapping_over(
+            dataset_root, [plant_csv], tmp_path, name="valley"
+        )
 
-    with (
-        held_by_another_writer(audit_log_key(tmp_path)),
-        pytest.raises(AuditEntryNotWrittenError, match="plant_mapping_built"),
-    ):
-        plant_mapping.persist_mapping(build, tmp_path, actor=None)
+        with (
+            held_by_another_writer(audit_log_key(tmp_path)),
+            pytest.raises(
+                AuditEntryNotWrittenError, match="plant_mapping_built"
+            ),
+        ):
+            plant_mapping.persist_mapping(build, tmp_path, actor=None)
 
-    with pytest.raises(ValueError, match="receipt"):
-        plant_mapping.load_mapping(tmp_path, "valley")
+        with pytest.raises(ValueError, match="receipt"):
+            plant_mapping.load_mapping(tmp_path, "valley")
 
 
 def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
@@ -1063,8 +1067,8 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_mcp.audit import audit_log_key
-    from tcip_store.sqlite_backend import SqliteBackend
     from tcip_web.state import store
+    from tests._busy_store_fixtures import waiting
 
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -1072,26 +1076,25 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(project))
 
-    ts.bind(SqliteBackend(lock_timeout_s=0.2))
-
-    with held_by_another_writer(audit_log_key(tmp_path)):
-        resp = client.post(
-            "/api/results/plant_mapping/build",
-            json={
-                "name": "valley",
-                "dataset_root": str(dataset_root),
-                "plant_registry": registry,
-                "user": "tester",
-            },
-        )
-    assert resp.status_code == 409, resp.text
-    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
-    assert "plant_mapping_built" in refusal.message
-    # The mapping record committed before its receipt; the route holds no body to offer for it.
-    assert refusal.committed is True
-    assert refusal.what is None
-    with pytest.raises(ValueError, match="no plant_mapping_built receipt"):
-        plant_mapping.load_mapping(tmp_path, "valley")
+    with waiting(0.2):
+        with held_by_another_writer(audit_log_key(tmp_path)):
+            resp = client.post(
+                "/api/results/plant_mapping/build",
+                json={
+                    "name": "valley",
+                    "dataset_root": str(dataset_root),
+                    "plant_registry": registry,
+                    "user": "tester",
+                },
+            )
+        assert resp.status_code == 409, resp.text
+        refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+        assert "plant_mapping_built" in refusal.message
+        # The mapping record committed before its receipt; the route holds no body to offer for it.
+        assert refusal.committed is True
+        assert refusal.what is None
+        with pytest.raises(ValueError, match="no plant_mapping_built receipt"):
+            plant_mapping.load_mapping(tmp_path, "valley")
 
 
 def _cite_mapping(

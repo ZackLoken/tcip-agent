@@ -1192,17 +1192,14 @@ def test_loading_a_mapping_whose_receipt_log_is_in_a_database_that_will_not_open
     """
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_store.file_backend import database_file
     from tests._mapping_fixtures import map_captures
+    from tests._record_damage_fixtures import unopenable_database
 
     map_captures(
         opened_project, opened_project / "ds", ["2026-02-11"], name="valley"
     )
-    tcip_store.release_root(opened_project)
-    foreign = database_file(str(opened_project))
-    foreign.write_bytes(b"not a database" * 100)
 
-    try:
+    with unopenable_database(opened_project):
         resp = client.post(
             "/api/results/plant_mapping/load", json={"name": "valley"}
         )
@@ -1216,9 +1213,6 @@ def test_loading_a_mapping_whose_receipt_log_is_in_a_database_that_will_not_open
         )
         with pytest.raises(tcip_store.ReadRefusedError) as refused:
             plant_mapping.load_mapping(opened_project, "valley")
-    finally:
-        tcip_store.release_root(opened_project)
-        foreign.unlink()
 
     assert resp.json()["detail"] == str(refused.value)
 
