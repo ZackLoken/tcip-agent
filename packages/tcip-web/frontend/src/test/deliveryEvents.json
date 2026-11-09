@@ -748,7 +748,7 @@
     "headers": {
       "X-TCIP-Export": "{\"saved_path\":\"/scratch/workspace/nearest/results_export/plant_counts.csv\",\"shipped\":{\"kind\":\"acknowledged\",\"acknowledgment\":{\"acknowledgment_id\":\"<export 2 acknowledgment>\",\"acknowledged_by\":\"user:grower\",\"reason\":\"the assessment is not run yet\",\"result_sha256\":\"<export 2 digest>\",\"recorded_at\":\"2000-01-01T00:00:19+00:00\"}},\"filename\":\"plant_counts.csv\"}"
     },
-    "file": "plant_id,crop,delivered_phenotype,value,units,value_key,n_images,pipeline_version,plant_id_source,plant_attribution,plant_id_distance_m_max,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nplot0,hazelnut,stem_count,1,,count,1,,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\nplot2,hazelnut,stem_count,1,,count,1,,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\n",
+    "file": "plant_id,crop,delivered_phenotype,value,units,value_key,n_images,plant_id_source,plant_attribution,plant_id_distance_m_max,validated,trait,trait_revision,trait_revision_sha256,delivery_event_id\r\nplot0,hazelnut,stem_count,1,,count,1,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\nplot2,hazelnut,stem_count,1,,count,1,,detection,,False,stem,2,8fe99559c066868eec10dffef5c33531498b1a38dd975eae2f204181cfb7b934,<export 2>\r\n",
     "events": {
       "records": [
         {
