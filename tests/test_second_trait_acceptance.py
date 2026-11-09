@@ -5,8 +5,8 @@ an unassessed delivery is refused.
 
 ``currant_bloom`` is authored here, in each test's own project, honestly
 tentative: no domain expert has confirmed it, and it describes no validated measurement. It
-leaves ``majority_milestone``/``majority_label`` empty, and its measurement carries no majority
-date column.
+names no ``majority_fraction`` and leaves ``majority_label`` empty, and its measurement carries no
+majority date column.
 """
 
 from __future__ import annotations
@@ -128,7 +128,7 @@ def test_currant_bloom_is_registered_and_distinct_from_bud_opening(
         "bloom_50per_date",
         "bloom_95per_date",
     )
-    assert t.majority_milestone == ""  # no majority alias, unlike bud_opening
+    assert t.majority_fraction is None  # no majority alias, unlike bud_opening
 
 
 def test_currant_bloom_measurement_carries_its_own_milestone_columns(

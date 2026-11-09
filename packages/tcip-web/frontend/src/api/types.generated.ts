@@ -2171,7 +2171,7 @@ export interface TraitEntry {
   milestone_fractions: number[];
   milestone_on: string;
   crossing_rule: "" | "linear_whole_day";
-  majority_milestone: string;
+  majority_fraction: number | null;
   phenology_prefix: string;
   majority_label: string;
   count_objective: "" | "count_unbiased" | "detection_f1" | "presence";
