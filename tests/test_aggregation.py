@@ -115,16 +115,17 @@ def _assignments(project: Path) -> dict[str, list[Assignment]]:
 def test_images_group_by_the_plant_their_assignment_names(
     tmp_path: Path,
 ) -> None:
-    """Each image counts toward its assignment's plant; a plant outside ``plants`` is not read."""
+    """Each image counts toward its assignment's plant, one summary per plant, sorted by it."""
     assigned = _assignments(tmp_path)
-    observed = [(assigned["P1"][0], 3), (assigned["P1"][1], 5)] + [
-        (assigned["P2"][0], 4)
+    observed = [(assigned["P2"][0], 4), (assigned["P1"][0], 3)] + [
+        (assigned["P1"][1], 5)
     ]
 
-    out = _per_plant(observed, plants=["P1"], plant_aggregation="median")
+    out = _per_plant(observed, plant_aggregation="median")
 
     assert [(s["plant_id"], s["n_images"], s["value"]) for s in out] == [
-        ("P1", 2, 4)
+        ("P1", 2, 4),
+        ("P2", 1, 4),
     ]
 
 
@@ -152,7 +153,6 @@ def _restated(
 def test_plant_id_source_passes_through_when_uniform(tmp_path: Path) -> None:
     out = _per_plant(
         _restated(tmp_path, ("sequence", 1.0), ("sequence", 2.0)),
-        plants=["P1"],
         plant_aggregation="median",
     )
     assert out[0]["plant_id_source"] == "sequence"
@@ -163,7 +163,6 @@ def test_plant_id_source_reports_mixed_when_not_uniform(
 ) -> None:
     out = _per_plant(
         _restated(tmp_path, ("sequence", 1.0), ("nearest_neighbor", 2.0)),
-        plants=["P1"],
         plant_aggregation="median",
     )
     assert out[0]["plant_id_source"] == "mixed"
@@ -172,7 +171,6 @@ def test_plant_id_source_reports_mixed_when_not_uniform(
 def test_plant_id_distance_m_max_tracked(tmp_path: Path) -> None:
     out = _per_plant(
         _restated(tmp_path, ("sequence", 1.5), ("sequence", 4.2)),
-        plants=["P1"],
         plant_aggregation="median",
     )
     assert out[0]["plant_id_distance_m_max"] == pytest.approx(4.2)
@@ -195,9 +193,7 @@ def test_each_statistic_is_its_plants_value_over_the_images_carrying_one(
     """
     (a, _) = _assignments(tmp_path)["P1"]
     observed = [(a, v) for v in (2, 4, 9, 9, None)]
-    (out,) = _per_plant(
-        observed, plants=["P1"], plant_aggregation=plant_aggregation
-    )
+    (out,) = _per_plant(observed, plant_aggregation=plant_aggregation)
     assert out["value"] == value
     assert out["n_images"] == 5
 

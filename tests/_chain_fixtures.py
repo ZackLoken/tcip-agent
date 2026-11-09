@@ -639,34 +639,16 @@ def digest_of(refused: Exception) -> str:
     return shipping.result_sha256
 
 
-def read_images(
-    mapping: MappingResolution, plants: Sequence[str]
-) -> dict[str, list[tuple[str, str]]]:
-    """Return the ``(date, stem)`` of each of ``plants``' images ``mapping``'s delivery read.
-
-    They are the verification's read stems on the delivered dates the mapping attributes to the
-    plant, in date and stem order.
-    """
-    read: dict[str, list[tuple[str, str]]] = {plant: [] for plant in plants}
-    for date in mapping.disclosure.dates_delivered:
-        for a in mapping.build.assignments[date]:
-            if (
-                a.stem in mapping.verified.read_stems[date]
-                and a.plant_id in read
-            ):
-                read[a.plant_id].append((date, a.stem))
-    return {plant: sorted(images) for plant, images in read.items()}
-
-
 def mapped_results(
     mapping: MappingResolution,
     values: Mapping[str, Sequence[int | float | None]],
 ) -> list[ImageObservation]:
     """Return a result per image ``mapping``'s delivery read of each plant ``values`` names.
 
-    Each plant's read images (:func:`read_images`) take its ``values`` in order; a plant with
-    another number of read images than values fails.
+    Each plant's read images (``plant_mapping.read_images``) take its ``values`` in order; a
+    plant with another number of read images than values fails.
     """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_images
     from tcip_mcp.tools.delivery_tools import ImageObservation
 
     read = read_images(mapping, list(values))

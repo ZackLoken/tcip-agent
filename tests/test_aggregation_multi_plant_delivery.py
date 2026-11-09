@@ -117,9 +117,7 @@ def test_each_plants_summary_describes_only_that_plants_images(
     observed = _observed(
         tmp_path, {"PLANT_A": [2, 4, 9], "PLANT_B": [10, 20], "PLANT_C": [7]}
     )
-    out = _by_plant(
-        _per_plant(observed, plants=COHORT, plant_aggregation="median")
-    )
+    out = _by_plant(_per_plant(observed, plant_aggregation="median"))
 
     assert out["PLANT_A"]["value"] == 4
     assert out["PLANT_B"]["value"] == 15.0
@@ -146,9 +144,7 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort(
         (replace(b1, distance_m=0.7), 10),
         (replace(b2, source="nearest_neighbor", distance_m=0.2), 20),
     ]
-    out = _by_plant(
-        _per_plant(observed, plants=COHORT, plant_aggregation="median")
-    )
+    out = _by_plant(_per_plant(observed, plant_aggregation="median"))
 
     assert out["PLANT_A"]["plant_id_source"] == "sequence"
     assert out["PLANT_A"]["plant_id_distance_m_max"] == pytest.approx(0.9)
@@ -214,9 +210,7 @@ def test_each_plants_mean_describes_only_that_plants_images(
     observed = _observed(
         tmp_path, {"PLANT_A": [1.0, 2.0, 9.0], "PLANT_B": [10.0, 11.0, 30.0]}
     )
-    out = _by_plant(
-        _per_plant(observed, plants=COHORT, plant_aggregation="mean")
-    )
+    out = _by_plant(_per_plant(observed, plant_aggregation="mean"))
 
     assert out["PLANT_A"]["value"] == pytest.approx(4.0)
     assert out["PLANT_B"]["value"] == pytest.approx(17.0)
@@ -231,9 +225,7 @@ def test_summed_areas_stay_within_their_own_plant(tmp_path: Path) -> None:
     observed = _observed(
         tmp_path, {"PLANT_A": [100.0, 250.0], "PLANT_B": [40.0]}
     )
-    out = _by_plant(
-        _per_plant(observed, plants=COHORT, plant_aggregation="sum")
-    )
+    out = _by_plant(_per_plant(observed, plant_aggregation="sum"))
 
     assert out["PLANT_A"]["value"] == pytest.approx(350.0)
     assert out["PLANT_A"]["n_images"] == 2
