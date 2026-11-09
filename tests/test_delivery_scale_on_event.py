@@ -28,7 +28,6 @@ from tcip_mcp.delivery import (
     record_acknowledgment,
 )
 from tcip_mcp.pipelines.postprocessing.aggregation import (
-    PlantObservation,
     deliver_per_plant_aggregate,
 )
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -40,6 +39,8 @@ from tests._chain_fixtures import (
     SUBJECT,
     deliver_acknowledged,
     digest_of,
+    mapped_results,
+    read_images,
     unassessed_bucket,
 )
 from tests._mapping_fixtures import COUNT_CROP
@@ -57,6 +58,9 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.delivery_events_schema import (
         DeliveryEventRecord,
         UnansweredScale,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MappingResolution,
     )
 
 TRAIT = "plant_surface_area"
@@ -101,7 +105,9 @@ def _validated_bucket(project: Path) -> Bucket:
 
     _confirm_area(project, SUBJECT)
     root = project / "ds"
-    images_dir = synthetic_capture(root, positions=plant_captures(PLANTS))
+    images_dir = synthetic_capture(
+        root, positions=plant_captures(dict.fromkeys(PLANTS, 1))
+    )
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, "exp-scale-event")
     assessment = assess_checkpoint(
@@ -145,6 +151,17 @@ def _scale(project: Path, extents_mm: list[float] | None = None) -> str:
     return _calibrate(project, selection, csv_path)["assessment_id"]
 
 
+def _areas(mapping: MappingResolution, plants: list[str]) -> list:
+    """Return a 12.5 mm2 result for every image ``mapping``'s delivery reads of ``plants``."""
+    return mapped_results(
+        mapping,
+        {
+            plant: [12.5] * len(images)
+            for plant, images in read_images(mapping, plants).items()
+        },
+    )
+
+
 def _deliver(
     project: Path,
     bucket: Bucket,
@@ -159,16 +176,15 @@ def _deliver(
     )
     return deliver_per_plant_aggregate(
         project,
-        [PlantObservation(plant_id=plant, value=12.5) for plant in plants],
+        _areas(resolved, plants),
         str(project / "area.csv"),
         value_key="area_mm2",
         delivered_phenotype=TRAIT,
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket],
         plants=plants,
-        crop=resolved.verified.crop,
+        mapping=resolved,
         door="test_scale_on_event",
-        plant_mapping=resolved.disclosure,
         scale_assessment_id=scale,
         acknowledgment_id=acknowledgment,
         actor=None,
@@ -204,9 +220,12 @@ def _delivered_acknowledged(
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
     refusal = _refused(project, bucket, scale=scale)
+    resolved = plant_mapping_disclosure(
+        project, "valley", by_recorded_date([bucket]), PLANTS
+    )
     answer = deliver_per_plant_csv(
         project,
-        [PlantObservation(plant_id=plant, value=12.5) for plant in PLANTS],
+        _areas(resolved, PLANTS),
         str(project / "area.csv"),
         TRAIT,
         PER_PLANT_COUNT_AGGREGATE,
@@ -287,7 +306,7 @@ def test_an_unvalidated_bucket_and_an_unanswered_scale_each_keep_their_own_reaso
     """The refusal joins the bucket's reason and the scale's, and the event holds each apart."""
     _confirm_area(tmp_path, SUBJECT)
     bucket = unassessed_bucket(
-        tmp_path, experiment_id="exp-mixed", plants=PLANTS
+        tmp_path, experiment_id="exp-mixed", images=dict.fromkeys(PLANTS, 1)
     )
     scale = _scale(tmp_path, extents_mm=UNPASSING_EXTENTS)
     refusal = _refused(tmp_path, bucket, scale=scale)
@@ -387,7 +406,7 @@ def test_a_delivery_naming_no_scale_assessment_records_none(
 
     deliver_acknowledged(
         tmp_path,
-        [PlantObservation(plant_id="PLANT_A", value=3)],
+        {"PLANT_A": [3]},
         tmp_path / "count.csv",
         "stem_count",
         value_key="count",

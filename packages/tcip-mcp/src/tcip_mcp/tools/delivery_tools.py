@@ -4,18 +4,34 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
+from tcip_annotation.text import Text
 from tcip_mcp.pipelines.postprocessing.aggregation import (
-    PlantObservation,
     deliver_per_plant_aggregate,
 )
 from tcip_mcp.server import tool
 from tcip_mcp.traits import PlantAggregateKind
 
 
+class ImageObservation(BaseModel):
+    """One image's measurement, the image named by its capture date and its stem.
+
+    ``value`` is what was measured on it, ``None`` for an image yielding none. The plant it
+    counts toward is the delivery's plant mapping's assignment of the image, never the caller's.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    date: Text
+    stem: Text
+    value: int | float | None
+
+
 @tool()
 def deliver_per_plant_csv(
     project: Path,
-    results: list[PlantObservation],
+    results: list[ImageObservation],
     output_path: str,
     delivered_phenotype: str,
     delivery_kind: PlantAggregateKind,
@@ -42,16 +58,20 @@ def deliver_per_plant_csv(
     unvalidated delivery ships only under ``acknowledgment_id``, a breeder's recorded
     acknowledgment of exactly this result, which this door executes and never records.
 
-    ``plant_mapping`` is the claim about where the rows' plant identities came from, disclosed
-    through ``plant_mapping.plant_mapping_disclosure``, which refuses an unstored mapping and a
-    delivered plant the mapping assigned on no delivered date; the rows' ``plant_attribution`` is
-    that disclosure's, and their ``crop`` the crop of the plant registry the mapping verified.
+    ``plant_mapping`` is resolved and verified through ``plant_mapping.plant_mapping_disclosure``,
+    which refuses an unstored mapping and a delivered plant the mapping assigned on no delivered
+    date. Each result counts toward the plant that mapping assigned its image, and each row's
+    ``n_images``, ``plant_id_source`` and ``plant_id_distance_m_max`` are its plant's images'
+    assignments'; the rows' ``plant_attribution`` is the disclosure's, and their ``crop`` the crop
+    of the plant registry the mapping verified.
 
     Args:
-        results: Per-image observations, each the plant ``build_plant_mapping`` assigned its
-            image as ``plant_id`` and the image's measurement as ``value`` (``null`` for an image
-            yielding none), with the assignment's ``source`` and ``distance_m`` when it carries
-            them; a row naming any other key, or no plant, is refused.
+        results: Per-image observations, each naming its image by its capture ``date`` and its
+            ``stem`` and carrying the image's measurement as ``value`` (``null`` for an image
+            yielding none); a row naming any other key is refused. Every image the delivery reads
+            of a plant in ``plants`` (attributed by the mapping, with a document in its date's
+            bucket, on disk) needs exactly one result, and a result naming any other image is
+            refused.
         output_path: Where to write the CSV.
         delivered_phenotype: The crop-vocabulary phenotype this CSV ships under.
         delivery_kind: A kind whose per-plant value is the trait's ``plant_aggregation`` over
@@ -61,7 +81,7 @@ def deliver_per_plant_csv(
         buckets: The names of the published buckets the values came from, one per capture date;
             each stands for the date its own record states.
         value_key: The quantity every value is, one the operationalization covers.
-        plant_mapping: The persisted plant mapping the rows' plant ids came from.
+        plant_mapping: The persisted plant mapping that attributes the images to plants.
         scale_assessment_id: The physical-scale assessment a dimensional value rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
 
@@ -88,9 +108,8 @@ def deliver_per_plant_csv(
             delivery_kind=delivery_kind,
             buckets=delivered,
             plants=wanted,
-            crop=resolved.verified.crop,
+            mapping=resolved,
             door="deliver_per_plant_csv",
-            plant_mapping=resolved.disclosure,
             scale_assessment_id=scale_assessment_id,
             acknowledgment_id=acknowledgment_id,
             actor=actor,

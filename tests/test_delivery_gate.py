@@ -451,7 +451,6 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.operationalization import OperationalizationRefusedError
-    from tcip_mcp.pipelines.postprocessing.aggregation import PlantObservation
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
     from tests._chain_fixtures import (
         deliver_acknowledged,
@@ -467,7 +466,6 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     )
 
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
-    records = [PlantObservation(plant_id="p1", value=1.0)]
     write_geo_image(
         _image(tmp_path, "a"),
         *plant_positions(["p1"])["p1"],
@@ -486,7 +484,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
         )
         return deliver_acknowledged(
             tmp_path,
-            records,
+            {"p1": [1.0]},
             tmp_path / f"{name}.csv",
             "stem_count",
             value_key="count",

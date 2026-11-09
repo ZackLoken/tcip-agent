@@ -12,10 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
-from tcip_mcp.pipelines.postprocessing.aggregation import (
-    PlantObservation,
-    _resolve_units,
-)
+from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 from tcip_mcp.traits import (
     PER_PLANT_COUNT_AGGREGATE,
     PER_PLANT_REGRESSION_AGGREGATE,
@@ -45,17 +42,9 @@ def _recorded_meaning(tmp_path: Path) -> None:
     )
 
 
-def _records(*values: tuple[str, float]) -> list[PlantObservation]:
-    """Return one per-image record per ``(plant_id, value)``."""
-    return [
-        PlantObservation(plant_id=plant, value=value)
-        for plant, value in values
-    ]
-
-
 def _deliver(
     project: Path,
-    records: list[PlantObservation],
+    values: dict[str, list[float]],
     out: Path,
     delivered_phenotype: str,
     *,
@@ -70,7 +59,7 @@ def _deliver(
 
     return deliver_acknowledged(
         project,
-        records,
+        values,
         out,
         delivered_phenotype,
         value_key=value_key,
@@ -148,7 +137,7 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(
     out_path = tmp_path / "counts.csv"
     _deliver(
         tmp_path,
-        _records(("PLANT_001", 7), ("PLANT_014", 2)),
+        {"PLANT_001": [7], "PLANT_014": [2]},
         out_path,
         "stem_count",
         value_key="detections_count",
@@ -175,7 +164,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
     out_path = tmp_path / "area.csv"
     _deliver(
         tmp_path,
-        _records(("PLANT_001", 812.5)),
+        {"PLANT_001": [812.5]},
         out_path,
         "plant_surface_area",
         value_key="area_mm2",
@@ -193,7 +182,7 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(
     with pytest.raises(ValueError, match="declared units"):
         _deliver(
             tmp_path,
-            _records(("PLANT_001", 3.4)),
+            {"PLANT_001": [3.4]},
             tmp_path / "mismatch.csv",
             "bark_thickness",
             value_key="thickness_cm",
