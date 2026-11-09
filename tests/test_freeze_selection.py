@@ -547,6 +547,7 @@ def test_freeze_selection_names_the_member_whose_database_will_not_open(
     will not read and names that member's place, the one the first partition sample keys.
     """
     from tcip_mcp.tools.data_tools import freeze_selection
+    from tests._record_damage_fixtures import unopenable_database
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-no-database")
@@ -555,11 +556,8 @@ def test_freeze_selection_names_the_member_whose_database_will_not_open(
         "exp-no-database", project=tmp_path
     ).partition.samples[0]
     assert isinstance(first.ground_truth, ts.Key)
-    ts.release_root(root)
-    database = root / ".tcip" / "store.db"
-    database.write_bytes(b"this is not a database" * 100)
-
-    result = freeze_selection(tmp_path, "exp-no-database", actor=None)
+    with unopenable_database(root) as database:
+        result = freeze_selection(tmp_path, "exp-no-database", actor=None)
 
     error = result["error"]
     assert "will not read" in error and "changed" not in error, error
