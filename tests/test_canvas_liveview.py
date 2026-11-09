@@ -296,21 +296,18 @@ def test_a_push_is_held_off_by_a_holder_of_the_records_lock_and_then_lands(
     refused busy with nothing written; once the holder lets go the same push lands.
     """
     from tcip_store import StoreBusyError
-    from tcip_store.sqlite_backend import SqliteBackend
     from tcip_web.routes.canvas import CanvasStatePayload, push_canvas_state
     from tests._audit_fixtures import held_by_another_writer
+    from tests._busy_store_fixtures import waiting
 
     key = canvas_meta_key(str(opened_project))
     payload = CanvasStatePayload(**_payload(opened.id, A_IMG))
-    backend = tcip_store.bind(SqliteBackend(lock_timeout_s=0.0))
-    try:
+    with waiting(0.0):
         with held_by_another_writer(key), pytest.raises(StoreBusyError):
             push_canvas_state(payload)
         assert _meta(opened_project) is None
         push_canvas_state(payload)
         assert _meta(opened_project).image_path == A_STORED
-    finally:
-        backend.close()
 
 
 def test_heartbeat_for_new_image_invalidates_geometry_by_identity(

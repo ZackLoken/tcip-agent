@@ -20,19 +20,9 @@ from tcip_mcp.pipelines.data.selection import (
     selection_place,
 )
 from tcip_mcp.tools.data_tools import freeze_selection
-from tcip_store.file_backend import database_file
+from tests._record_damage_fixtures import NON_DATABASE, unopenable_database
 from tests.test_freeze_selection import _real_drawn_experiment
 from tests.test_selection_binding import _draw, _two_subject_two_date_dataset
-
-NOT_A_DATABASE = b"not a database, only bytes under its name" * 100
-
-
-def _overwritten(selection_dir: Path) -> Path:
-    """Overwrite the database under ``selection_dir`` with non-database bytes; return its path."""
-    ts.release_root(selection_dir)
-    path = database_file(str(selection_dir))
-    path.write_bytes(NOT_A_DATABASE)
-    return path
 
 
 def test_both_readers_refuse_a_selection_whose_database_will_not_open(
@@ -42,11 +32,11 @@ def test_both_readers_refuse_a_selection_whose_database_will_not_open(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "selection"
     _draw(tmp_path, root, out)
-    _overwritten(out)
 
-    selection, refused = read_selection_checked(out, project=tmp_path)
-    with pytest.raises(ts.ReadRefusedError) as strict:
-        read_selection(out, project=tmp_path)
+    with unopenable_database(out):
+        selection, refused = read_selection_checked(out, project=tmp_path)
+        with pytest.raises(ts.ReadRefusedError) as strict:
+            read_selection(out, project=tmp_path)
 
     assert selection is None and refused is not None
     assert refused.where == selection_place(out)
@@ -92,14 +82,12 @@ def test_freeze_selection_answers_an_unreadable_destination_not_an_existing_sele
     _real_drawn_experiment(tmp_path, root, "exp-src")
     destination = tmp_path / "destination"
     destination.mkdir()
-    ts.release_root(destination)
-    database = database_file(str(destination))
-    database.parent.mkdir(parents=True, exist_ok=True)
-    database.write_bytes(NOT_A_DATABASE)
 
-    refused = freeze_selection(
-        tmp_path, "exp-src", output_path=str(destination), actor=None
-    )
+    with unopenable_database(destination) as database:
+        refused = freeze_selection(
+            tmp_path, "exp-src", output_path=str(destination), actor=None
+        )
+        assert database.read_bytes() == NON_DATABASE
     frozen = freeze_selection(
         tmp_path, "exp-src", output_path=str(tmp_path / "fresh"), actor=None
     )
@@ -113,6 +101,5 @@ def test_freeze_selection_answers_an_unreadable_destination_not_an_existing_sele
         tmp_path, "exp-src", output_path=str(tmp_path / "fresh"), actor=None
     )
 
-    assert database.read_bytes() == NOT_A_DATABASE
     assert "error" not in frozen, frozen
     assert "a selection already exists" in again["error"], again

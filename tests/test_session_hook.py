@@ -279,21 +279,14 @@ def test_a_report_the_backend_refuses_is_told_the_agent_as_the_backend_answered(
     The project's store is overwritten after the launch, so the report's line cannot be written
     and the route answers 409; the hook returns 0 and its output states the store's refusal.
     """
-    import tcip_store
-    from tcip_store.file_backend import database_file
+    from tests._record_damage_fixtures import unopenable_database
 
     monkeypatch.setenv(TERMINAL_SESSION_ENV, started.id)
-    tcip_store.release_root(remembered.root)
-    foreign = database_file(str(remembered.root))
-    foreign.write_bytes(b"not a database" * 100)
 
-    try:
+    with unopenable_database(remembered.root):
         text = _additional_context(
             _hooked(monkeypatch, capsys, _claude_start("conv-x", "startup"))
         )
-    finally:
-        tcip_store.release_root(remembered.root)
-        foreign.unlink()
 
     assert "answered this session's start with HTTP 409:" in text
     assert "could not complete this store's identity check" in text
