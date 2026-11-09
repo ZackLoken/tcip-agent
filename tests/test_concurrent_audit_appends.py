@@ -18,6 +18,7 @@ import tcip_store as ts
 from tcip_mcp.audit import audit_log_key, record_event_or_raise
 from tcip_store.sqlite_backend import SqliteBackend
 from tests._audit_fixtures import audit_rows
+from tests._busy_store_fixtures import waiting
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -34,9 +35,8 @@ def _generous_lock_timeout_s() -> float:
 @pytest.fixture
 def unstarved_backend() -> Iterator[SqliteBackend]:
     """Bind a sqlite backend at four times the default lock timeout, yield it, then close it."""
-    backend = ts.bind(SqliteBackend(lock_timeout_s=_generous_lock_timeout_s()))
-    yield backend
-    backend.close()
+    with waiting(_generous_lock_timeout_s()) as backend:
+        yield backend
 
 
 def test_concurrent_threads_no_torn_or_lost_lines(
