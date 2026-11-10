@@ -8,8 +8,9 @@ document missing a required field is refused naming the field.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import ValidationError
@@ -19,6 +20,8 @@ from tcip_mcp.dataset_layout import image_dir
 from tests._mapping_fixtures import CROP
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.experiments import SweepRecord
     from tcip_mcp.model_registry import VerifiedCheckpoint
@@ -729,3 +732,214 @@ def test_a_dataset_identity_stating_no_id_refuses_at_its_read(
         read_dataset_identity(root)
 
     assert str(path) in str(refused.value), refused.value
+
+
+OMITTED = object()
+"""A dataset id whose key is absent from the record."""
+
+STATES_NO_ID = pytest.mark.parametrize(
+    "stated", [*NO_ID.args[1], OMITTED], ids=[*NO_ID.kwargs["ids"], "omitted"]
+)
+"""The ids of :data:`NO_ID` and the absent key."""
+
+
+def _stating(record: dict[str, Any], field: str, stated: object) -> dict:
+    """Return ``record`` with ``field`` set to ``stated``, or dropped when ``stated`` is omitted."""
+    if stated is OMITTED:
+        return {k: v for k, v in record.items() if k != field}
+    return {**record, field: stated}
+
+
+def _restated(
+    key: ts.Key, within: tuple[str | int, ...], field: str, stated: object
+) -> None:
+    """Rewrite the record stored at ``key``, its ``field`` ``stated`` in the node ``within`` names.
+
+    ``within`` is the path of object keys and list positions from the record to that node.
+    """
+
+    def change(node: JsonValue, path: tuple[str | int, ...]) -> JsonValue:
+        assert isinstance(node, list | dict)
+        if not path:
+            assert isinstance(node, dict)
+            return _stating(node, field, stated)
+        head, rest = path[0], path[1:]
+        if isinstance(node, list):
+            return [
+                change(v, rest) if i == head else v for i, v in enumerate(node)
+            ]
+        assert isinstance(head, str)
+        return {**node, head: change(node[head], rest)}
+
+    ts.replace(key, change(ts.read(key), within))
+
+
+@STATES_NO_ID
+def test_a_mapping_build_stating_no_dataset_refuses_at_its_read(
+    tmp_path: Path, stated: object
+) -> None:
+    """A mapping build stating no dataset id refuses at ``load_mapping``, and the delivery door.
+
+    The build is made by ``build_plant_mapping`` and its record then rewritten through the store
+    by key, a fault injected past its producer. The refusal is the decode's, naming the mapping
+    and the field, not the receipt check the rewrite would also fail; the delivery gate answers
+    that sentence.
+    """
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tests._mapping_fixtures import map_captures
+    from tests._web_fixtures import named_project
+
+    named_project(tmp_path, "Orchard")
+    map_captures(tmp_path, tmp_path / "ds", [DATE], name="valley")
+    key = plant_mapping.plant_mapping_key(tmp_path, "valley")
+    _restated(key, (), "dataset_id", stated)
+
+    with pytest.raises(ts.ReadRefusedError) as refused:
+        plant_mapping.load_mapping(tmp_path, "valley")
+    with pytest.raises(plant_mapping.MappingDeliveryError) as gated:
+        plant_mapping.resolve_delivery_mapping(tmp_path, "valley", {})
+
+    assert str(refused.value).startswith(
+        f"plant mapping 'valley' under {tmp_path}: dataset_id: "
+    ), refused.value
+    assert gated.value.status == 409
+    assert (
+        str(gated.value) == f"could not read mapping 'valley': {refused.value}"
+    )
+
+
+@STATES_NO_ID
+def test_a_delivery_events_mapping_disclosure_stating_no_dataset_refuses_at_its_read(
+    tmp_path: Path, stated: object
+) -> None:
+    """A delivery event whose mapping disclosure states no dataset id refuses at its read.
+
+    The event is recorded by a phenology delivery over a mapping ``build_plant_mapping`` made, and
+    its record then rewritten through the store by key, a fault injected past its producer; the
+    refusal names the event and the field.
+    """
+    from tcip_mcp import delivery
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests._mapping_fixtures import register_plant_registry_for
+    from tests.test_plant_mapping_binding import (
+        POPULATION,
+        _dataset,
+        _deliver,
+        _init,
+        _write_scene,
+    )
+    from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
+
+    _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
+    built = build_plant_mapping(
+        tmp_path,
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
+    )
+    assert "error" not in built, built
+    _seed_currant_bloom_trait(tmp_path)
+    delivered = _deliver(
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        plants=POPULATION,
+        dataset_root=dataset_root,
+        buckets=preds_by_date.values(),
+        output_csv_path=str(tmp_path / "out.csv"),
+    )
+    assert "error" not in delivered, delivered
+    (event,) = delivery.read_delivery_events(tmp_path)
+    key = delivery.delivery_event_key(tmp_path, event.event_id)
+    _restated(key, ("plant_mapping",), "dataset_id", stated)
+
+    with pytest.raises(ts.ReadRefusedError, match=r"dataset_id") as refused:
+        delivery.read_delivery_events(tmp_path)
+
+    assert event.event_id in str(refused.value), refused.value
+
+
+@STATES_NO_ID
+def test_a_dataset_registry_entry_stating_no_dataset_refuses_at_its_read(
+    tmp_path: Path, stated: object
+) -> None:
+    """A dataset registry whose entry states no id refuses at ``read_datasets`` and the check.
+
+    The entry is the one ``register_dataset`` wrote, rewritten through the store by key, a fault
+    injected past its producer; ``check_dataset_identity`` reaches the registry past a readable
+    identity and refuses with the registry's sentence.
+    """
+    from tcip_mcp.tools.project_tools import (
+        check_dataset_identity,
+        dataset_registry_key,
+        read_datasets,
+    )
+    from tests.test_check_dataset_identity_script import _registered
+
+    project, root, _ = _registered(tmp_path)
+    _restated(dataset_registry_key(project), (0,), "id", stated)
+    sentence = rf"^the dataset registry of {re.escape(str(project))}: 0\.id: "
+
+    with pytest.raises(ts.ReadRefusedError, match=sentence):
+        read_datasets(project)
+    with pytest.raises(ts.ReadRefusedError, match=sentence):
+        check_dataset_identity(project, str(root))
+
+
+def test_a_padded_dataset_id_reads_back_stripped(tmp_path: Path) -> None:
+    """A registry entry whose id is padded reads back as the id the identity document states.
+
+    The entry is rewritten through the store by key, a fault injected past its producer; the
+    stripped id is the one the check matches to the identity, so its registered path is found.
+    """
+    from tcip_mcp.tools.project_tools import (
+        check_dataset_identity,
+        dataset_registry_key,
+        read_datasets,
+    )
+    from tests.test_check_dataset_identity_script import _registered
+
+    project, root, registered = _registered(tmp_path)
+    _restated(
+        dataset_registry_key(project), (0,), "id", f"  {registered['id']}\t"
+    )
+
+    assert [e.id for e in read_datasets(project)] == [registered["id"]]
+    (row,) = check_dataset_identity(project, str(root)).registered
+    assert row.state == "in_place"
+
+
+def test_register_dataset_refuses_over_a_registry_entry_stating_no_id(
+    tmp_path: Path,
+) -> None:
+    """A refused identity document is not repaired from a registry entry that states no id.
+
+    The document and the entry are damaged through the store after ``register_dataset`` wrote
+    them; the registration raises the registry's refusal and leaves both as they were.
+    """
+    from tcip_mcp.dataset_layout import dataset_identity_path
+    from tcip_mcp.tools.project_tools import (
+        dataset_registry_key,
+        register_dataset,
+    )
+    from tests.test_a_refused_record_reads_as_its_readers_sentence import (
+        _rewritten,
+    )
+    from tests.test_check_dataset_identity_script import _registered
+
+    project, root, _ = _registered(tmp_path)
+    identity = dataset_identity_path(root)
+    _rewritten(identity, {"crop": 5})
+    key = dataset_registry_key(project)
+    _restated(key, (0,), "id", "")
+    held = identity.read_bytes(), ts.read(key)
+
+    with pytest.raises(
+        ts.ReadRefusedError, match=r"the dataset registry of .*: 0\.id: "
+    ):
+        register_dataset(project, str(root), "chestnut", actor=None)
+
+    assert (identity.read_bytes(), ts.read(key)) == held

@@ -10,6 +10,8 @@ label import leave one audit line of one shape, the one writer's.
 
 from __future__ import annotations
 
+import io
+import json
 import zipfile
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -42,6 +44,7 @@ from tcip_mcp.tools.ingest_tools import (
 )
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import label_image, staged_box
+from tests.test_typed_store_records import STATES_NO_ID, _stating
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -329,6 +332,32 @@ def _refused(second: Path, container: Path, *named: str) -> None:
         assert fault in answer["error"], (fault, answer["error"])
     assert _stored(second) == before
     assert audit_rows(second, LABELS_IMPORTED) == []
+
+
+@STATES_NO_ID
+def test_a_container_whose_nested_dataset_states_no_id_refuses_the_whole_import(
+    tmp_path: Path, exported: tuple[Path, Path], stated: object
+) -> None:
+    """A container ``export_labels`` wrote, its nested dataset id then damaged, refuses the import.
+
+    The container is rewritten through the store's blob interface, a fault injected past its
+    producer; the error names the field and nothing is written.
+    """
+    _first, container = exported
+    held = ts.read_blob_versioned(container)
+    with zipfile.ZipFile(io.BytesIO(held.value)) as member:
+        document = json.loads(member.read(LABELS_MEMBER))
+    document["dataset"] = _stating(document["dataset"], "id", stated)
+    rewritten = io.BytesIO()
+    with zipfile.ZipFile(rewritten, "x") as member:
+        member.writestr(zipfile.ZipInfo(LABELS_MEMBER), json.dumps(document))
+    ts.put_blob(container, rewritten.getvalue(), expect=held.version)
+
+    _refused(
+        _project(tmp_path / "second", tmp_path / "raw"),
+        container,
+        "dataset.id",
+    )
 
 
 def test_an_image_the_new_capture_does_not_hold_refuses_the_whole_import(
