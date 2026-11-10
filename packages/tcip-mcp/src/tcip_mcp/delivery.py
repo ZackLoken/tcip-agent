@@ -492,7 +492,8 @@ def gate(
     one producer or proposing rather than predicting, a state-crossing delivery over a bucket that
     classifies no positive state, a scale assessment named for a value in no unit, and a detector
     delivery in a unit naming none; refuses (``ValueError``) buckets under more than one dataset
-    root (:func:`~tcip_mcp.buckets.shared_root`), and
+    root, a root carrying no identity and a bucket recording another dataset than its root's
+    (:func:`~tcip_mcp.buckets.require_delivered_dataset`), and
     (:class:`~tcip_mcp.operationalization.OperationalizationRefusedError`) a detector delivery
     whose buckets do not count the operationalization's measured subject. A delivery with any
     unvalidated finding ships only under ``acknowledgment_id``, a recorded acknowledgment
@@ -500,7 +501,7 @@ def gate(
     written (:func:`result_digest`); otherwise it refuses with one sentence per finding, carrying
     the result's digest.
     """
-    from tcip_mcp.buckets import shared_root
+    from tcip_mcp.buckets import require_delivered_dataset
     from tcip_mcp.operationalization import bind
     from tcip_mcp.traits import DETECTOR_KINDS, STATE_CROSSING_DATES
 
@@ -509,7 +510,7 @@ def gate(
             "a delivery names no prediction bucket, so nothing states what its "
             "numbers were measured from; name the published buckets it ships."
         )
-    shared_root(buckets)
+    require_delivered_dataset(buckets)
     by_model = {
         b.name: b.producer for b in buckets if b.producer.kind == "checkpoint"
     }
