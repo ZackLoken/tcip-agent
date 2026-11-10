@@ -4,18 +4,19 @@ In a scratch session (``tools/fixture_session.py``), a project created through
 ``tests._web_fixtures.named_project`` and opened through the picker's route holds one capture of
 :data:`IMAGES` images (``tests._producer_fixtures.write_image``), the project its own registered
 dataset (``tests._producer_fixtures.register_dataset_at``), a registered checkpoint
-(``tests._verified_checkpoint_fixtures.project_checkpoint``) and a file that is no checkpoint.
-Each pass is launched through ``POST /api/inference/launch``, built through the route's request
-model, and runs on the route's own worker, which holds at each pause of a
+(``tests._verified_checkpoint_fixtures.project_checkpoint``) and a copy of its bytes at another
+path. Each pass is launched through ``POST /api/inference/launch``, built through the route's
+request model, and runs on the route's own worker, which holds at each pause of a
 ``fixture_session.Gate`` until the scene steps it on; the pass's engine
 (``inference_tools.infer``) is the platform's own for every pass but the one whose bucket the
 launch under :data:`HELD` answers, whose engine reports one image done and ends once canceled.
 
-A pass over the file that is no checkpoint is listed through ``GET /api/inference/jobs`` running
-before its engine starts (``failing_started``) and fails on the platform's own engine, its stream
-ending on the failure (``failing_final``). The held pass is launched (``launched``), listed
-running before its engine reports (``held_started``) and after (``running``) as its stream's
-first frame sends it (``progress``); a second launch naming its bucket is refused
+A pass over the copy, which its launch admits, is listed through ``GET /api/inference/jobs``
+running before its engine starts (``failing_started``); the copy is then overwritten by bytes no
+registry names, and the pass fails on the platform's own engine, its stream ending on the failure
+(``failing_final``). The held pass is launched (``launched``), listed running before its engine
+reports (``held_started``) and after (``running``) as its stream's first frame sends it
+(``progress``); a second launch naming its bucket is refused
 (``bucket_exists``); it is canceled through ``POST .../cancel`` while it still runs (``cancel``)
 and, once it ends, listed (``canceled``) and streamed to its final frame (``final``). A launch
 naming a checkpoint that does not exist is refused (``missing_checkpoint``), and a stream to a job
@@ -63,7 +64,7 @@ HELD = "baseline"
 """The named bucket of the pass that reports one image done and ends once it is canceled."""
 
 FAILING = "broken"
-"""The named bucket of the pass over the file that is no checkpoint."""
+"""The named bucket of the pass whose checkpoint is overwritten after its launch admits it."""
 
 
 def _frames(client: TestClient, job_id: str, count: int) -> list[JsonValue]:
@@ -120,8 +121,8 @@ def produce() -> dict[str, JsonValue]:
         checkpoint = project_checkpoint(
             root, data={"num_channels": 3, "scope": {"subject": SUBJECT}}
         )
-        not_a_checkpoint = root / "model.pt"
-        not_a_checkpoint.write_bytes(b"weights")
+        replaced = root / "model.pt"
+        replaced.write_bytes(Path(checkpoint).read_bytes())
         patch.setattr(inference_tools, "infer", staged)
 
         def launch(bucket_name: str, status: int, path: str) -> JsonValue:
@@ -140,10 +141,11 @@ def produce() -> dict[str, JsonValue]:
             )
 
         failing = inference.InferenceJob.model_validate(
-            launch(FAILING, 200, str(not_a_checkpoint))
+            launch(FAILING, 200, str(replaced))
         ).job_id
         gate.reached()
         served["failing_started"] = answered(client, "list_jobs", 200)
+        replaced.write_bytes(b"weights")
         gate.step()
         ended(inference._registry, failing)
         _, served["failing_final"] = _frames(client, failing, 2)
