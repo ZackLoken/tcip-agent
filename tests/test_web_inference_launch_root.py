@@ -1,9 +1,11 @@
-"""The inference launch answers a dataset root its pass refuses as the answer to the request.
+"""The inference launch answers a dataset root or checkpoint its pass refuses at the request.
 
 A launch over a capture whose root was never registered, whose identity document does not decode,
 or whose directory is no capture answers 400 with the sentence the tool's pass refuses with, and
-starts no job. A missing checkpoint file or capture directory keeps its 404 and comes first. A
-registered root still launches a pass that publishes its bucket.
+starts no job; so does a launch over a checkpoint the open project's registry does not name, the
+root's refusal answering first when both are refused. A missing checkpoint file or capture
+directory keeps its 404 and comes first. A registered root and checkpoint still launch a pass that
+publishes its bucket.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from tests._server_calls import called_through_the_server
 from tests._verified_checkpoint_fixtures import (
     SAMPLE_DETECTOR_PASS,
     produced_checkpoint,
+    register_checkpoint,
 )
 from tests._web_fixtures import bound_to
 from tests.test_a_refused_record_reads_as_its_readers_sentence import (
@@ -67,7 +70,10 @@ def deferred_worker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def checkpoint(tmp_path: Path) -> Path:
-    """Write a checkpoint file a completed run produced into the project; return its path."""
+    """Write a checkpoint a run completed under another root into the project; return its path.
+
+    The project's registry does not name it until a test registers it.
+    """
     return produced_checkpoint(tmp_path / "m.pt", "launch root")
 
 
@@ -103,6 +109,14 @@ def _unregistered_root(tmp_path: Path) -> Path:
     return tmp_path / "field"
 
 
+def _registered_root(tmp_path: Path) -> Path:
+    """Write one image into the capture :data:`DATE` of ``tmp_path / "orchard"``, registered."""
+    root = tmp_path / "orchard"
+    write_image(image_dir(root, DATE) / "a.jpg", (100, 100), (110, 110, 110))
+    register_dataset_at(tmp_path, root, crop=CROP)
+    return root
+
+
 def test_a_launch_over_a_root_never_registered_refuses_naming_it_and_starts_no_job(
     opened_client: TestClient,
     tmp_path: Path,
@@ -111,8 +125,9 @@ def test_a_launch_over_a_root_never_registered_refuses_naming_it_and_starts_no_j
 ) -> None:
     """A launch over a root never registered answers 400 with the root's refusal and no job.
 
-    The answer is the sentence ``require_dataset_identity`` refuses the root with, no job is
-    listed and nothing is written; once the root is registered, the same launch is admitted.
+    The answer is the sentence ``require_dataset_identity`` refuses the root with, over a
+    checkpoint the registry does not name either, no job is listed and nothing is written; once
+    the root and the checkpoint are registered, the same launch is admitted.
     """
     root = _unregistered_root(tmp_path)
     before = left_written(tmp_path, root)
@@ -124,6 +139,7 @@ def test_a_launch_over_a_root_never_registered_refuses_naming_it_and_starts_no_j
     assert _jobs(opened_client) == []
     assert left_written(tmp_path, root) == before
     register_dataset_at(tmp_path, root, crop=CROP)
+    register_checkpoint(tmp_path, str(checkpoint), name="launch-root")
     admitted = _launch(opened_client, root, UNDATED_BUCKET, checkpoint)
     assert admitted.status_code == 200, admitted.text
     assert [j["job_id"] for j in _jobs(opened_client)] == [
@@ -195,9 +211,7 @@ def test_a_launch_over_an_identity_document_that_does_not_decode_refuses_with_it
     only a document that decodes: the stored document's crop is replaced through the store by a
     value the model refuses. The answer carries the sentence the read refuses with.
     """
-    root = tmp_path / "orchard"
-    write_image(image_dir(root, DATE) / "a.jpg", (100, 100), (110, 110, 110))
-    register_dataset_at(tmp_path, root, crop=CROP)
+    root = _registered_root(tmp_path)
     _rewritten(dataset_identity_path(root), {"crop": 5})
     with pytest.raises(ValueError) as read:
         require_dataset_identity(root)
@@ -210,6 +224,68 @@ def test_a_launch_over_an_identity_document_that_does_not_decode_refuses_with_it
     assert refused.json()["detail"] == str(read.value)
     assert _jobs(opened_client) == []
     assert left_written(tmp_path, root) == before
+
+
+def test_a_launch_over_a_checkpoint_the_registry_does_not_name_refuses_and_starts_no_job(
+    opened: OpenProject,
+    opened_client: TestClient,
+    tmp_path: Path,
+    checkpoint: Path,
+    deferred_worker: None,
+) -> None:
+    """A launch over a checkpoint the open project never registered answers 400, no job.
+
+    The answer is the sentence the registry's load refuses the checkpoint with, naming its path,
+    its digest and ``register_model``; no job is listed and nothing is written.
+    """
+    from tcip_mcp.model_registry import (
+        UnregisteredCheckpointError,
+        load_registered_checkpoint,
+    )
+
+    root = _registered_root(tmp_path)
+    with pytest.raises(UnregisteredCheckpointError) as unregistered:
+        load_registered_checkpoint(checkpoint, project=opened.root)
+    before = left_written(tmp_path, root)
+
+    refused = _launch(opened_client, root, DATE, checkpoint)
+
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["detail"] == str(unregistered.value)
+    assert str(checkpoint) in refused.json()["detail"]
+    assert "register_model" in refused.json()["detail"]
+    assert _jobs(opened_client) == []
+    assert left_written(tmp_path, root) == before
+
+
+def test_the_launch_and_the_tool_refuse_an_unregistered_checkpoint_with_one_sentence(
+    opened: OpenProject,
+    opened_client: TestClient,
+    tmp_path: Path,
+    checkpoint: Path,
+    deferred_worker: None,
+) -> None:
+    """The route's detail and the tool's error over one unregistered checkpoint are one sentence.
+
+    The capture is under a registered root, so the checkpoint is what each door refuses.
+    """
+    root = _registered_root(tmp_path)
+
+    through_the_route = _launch(opened_client, root, DATE, checkpoint)
+    through_the_tool = called_through_the_server(
+        "run_inference",
+        {
+            "checkpoint_path": str(checkpoint),
+            "images_dir": str(image_dir(root, DATE)),
+            "bucket": f"run/{DATE}",
+            "stated": STATED,
+        },
+        bound=bound_to(opened),
+    )
+
+    assert through_the_route.status_code == 400, through_the_route.text
+    assert through_the_tool == {"error": through_the_route.json()["detail"]}
+    assert "register_model" in through_the_route.json()["detail"]
 
 
 def _capture_named_images(
@@ -240,6 +316,7 @@ def test_a_capture_named_images_under_a_root_carrying_state_alone_launches(
 ) -> None:
     """A capture the name ``images`` is admitted when its root alone carries state of its own."""
     root = _capture_named_images(tmp_path, registered=("root",))
+    register_checkpoint(tmp_path, str(checkpoint), name="launch-root")
 
     launched = _launch(opened_client, root, "images", checkpoint)
 
