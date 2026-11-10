@@ -2647,6 +2647,7 @@
           "id": {
             "anyOf": [
               {
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -5237,6 +5238,7 @@
             "type": "array"
           },
           "dataset_id": {
+            "minLength": 1,
             "title": "Dataset Id",
             "type": "string"
           },
@@ -6113,6 +6115,7 @@
         "type": "object"
       },
       "dataset_id": {
+        "minLength": 1,
         "title": "Dataset Id",
         "type": "string"
       },
@@ -8882,6 +8885,7 @@
         "description": "One dataset the project's registry names: its identity's ``id`` and its stored ``path``.",
         "properties": {
           "id": {
+            "minLength": 1,
             "title": "Id",
             "type": "string"
           },

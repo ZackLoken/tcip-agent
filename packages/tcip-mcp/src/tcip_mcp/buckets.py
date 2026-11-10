@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 
 import tcip_store
-from tcip_annotation.text import Text
+from tcip_annotation.text import DatasetId
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.execution import ProposalExecution
@@ -93,7 +93,7 @@ class Bucket:
     producer: BucketProducer
     scope: ClassScope
     execution: ProposalExecution
-    dataset_id: Text
+    dataset_id: DatasetId
     date: str | None
     raster_path: str | None
     raster_identity: RasterIdentity | None

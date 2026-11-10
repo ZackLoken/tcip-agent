@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 import tcip_store
+from tcip_annotation.text import DatasetId
 from tcip_mcp.audit import audited
 from tcip_mcp.dataset_layout import DatasetRecord
 from tcip_mcp.project_record import CaptureInvariances
@@ -51,7 +52,7 @@ class DatasetEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    id: str
+    id: DatasetId
     path: str
 
 

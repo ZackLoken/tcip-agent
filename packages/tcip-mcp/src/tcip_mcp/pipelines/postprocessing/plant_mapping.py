@@ -48,7 +48,7 @@ from pydantic import (
 from pyproj import Geod
 
 import tcip_store
-from tcip_annotation.text import Crop
+from tcip_annotation.text import Crop, DatasetId
 from tcip_mcp.audit import now
 from tcip_mcp.project_paths import project_state_dir
 from tcip_store import Key, encode_record
@@ -243,7 +243,7 @@ class PlantMappingDisclosure(BaseModel):
 
     kind: Literal["plant_mapping"] = "plant_mapping"
     name: str
-    dataset_id: str
+    dataset_id: DatasetId
     dataset_root: str
     built_at: AwareDatetime
     record_sha256: str
@@ -354,7 +354,7 @@ class MappingBuild:
 
     name: str
     dataset_root: str
-    dataset_id: str
+    dataset_id: DatasetId
     built_at: AwareDatetime
     dates_requested: list[str] | None
     match_radius: dict[str, MatchRadius]
