@@ -22,9 +22,9 @@ def answered_admission() -> Iterator[None]:
 
     No regular file at the checkpoint's location
     (:class:`~tcip_mcp.model_registry.CheckpointNotFoundError`) answers 404, a refusal
-    (``ValueError``) 400, and any other store error or operating-system error 409
-    (:func:`registry_unreadable`). A busy store and a version conflict propagate to the app's
-    own handlers.
+    (``ValueError``) 400, any other store error 409 (:func:`registry_unreadable`), and an
+    operating-system error 409 as "could not read:" followed by the error's own text. A busy store
+    and a version conflict propagate to the app's own handlers.
     """
     from tcip_mcp.model_registry import CheckpointNotFoundError
     from tcip_store import StoreBusyError, StoreError, VersionConflictError
@@ -37,5 +37,7 @@ def answered_admission() -> Iterator[None]:
         raise HTTPException(400, str(exc)) from exc
     except (StoreBusyError, VersionConflictError):
         raise
-    except (StoreError, OSError) as exc:
+    except StoreError as exc:
         raise registry_unreadable(exc) from exc
+    except OSError as exc:
+        raise HTTPException(409, f"could not read: {exc}") from exc
