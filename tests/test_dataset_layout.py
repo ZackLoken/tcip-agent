@@ -195,11 +195,12 @@ def test_buckets_under_lists_every_published_bucket_and_nothing_else(
 ) -> None:
     """``buckets_under`` lists every published bucket, its name dated or not, and nothing else.
 
-    A published bucket is a record. A prediction document no record names is none.
+    A published bucket is a record. A prediction document no record names is none. Each bucket,
+    its document in the image tree and in no capture, records its root's dataset and no date.
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import buckets_under
-    from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.dataset_layout import bucket_key, require_dataset_identity
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path
@@ -217,3 +218,6 @@ def test_buckets_under_lists_every_published_bucket_and_nothing_else(
         "modelA/2026-03-02",
         "modelB",
     ]
+    assert {(b.dataset_id, b.date) for b in buckets_under(root)} == {
+        (require_dataset_identity(root).id, None)
+    }

@@ -292,7 +292,6 @@ def infer(
     try:
         published = publish(
             project,
-            root,
             bucket,
             pass_documents(p, results),
             producer=p.checkpoint.producer,

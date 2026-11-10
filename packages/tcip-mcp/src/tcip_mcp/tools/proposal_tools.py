@@ -682,7 +682,6 @@ def _stage_document(
     name = "/".join([producer, *address.parts])
     return publish(
         project,
-        Path(address.root),
         name,
         [Document(str(image), data)],
         producer=Proposed(proposed_by=producer),

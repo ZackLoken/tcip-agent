@@ -241,18 +241,35 @@ def test_an_images_dir_that_is_no_capture_refuses_naming_it(
     assert not tcip_store.exists(bucket_key(tmp_path, BUCKET))
 
 
-def test_a_raster_outside_a_capture_is_admitted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A raster under the image tree but in no capture directory is admitted."""
+TILED = Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS)
+"""The stated execution values of a tiled pass over 32 px tiles, as a raster pass runs."""
+
+
+def _mosaic(path: Path) -> Path:
+    """Write a black 64 px raster at ``path``, its directory made, and return it.
+
+    No platform producer places a raster outside a capture, so a test placing one writes it.
+    """
     import numpy as np
     import tifffile
 
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tifffile.imwrite(str(path), np.zeros((64, 64, 3), dtype=np.uint8))
+    return path
+
+
+def test_a_raster_outside_a_capture_publishes_a_bucket_of_its_roots_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raster in the image tree and in no capture publishes a bucket recording its root's dataset.
+
+    The bucket records the id ``tmp_path`` was registered with and no capture date.
+    """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.tools.inference_tools import run_inference
 
-    raster = image_root(tmp_path) / "mosaic.tif"
-    raster.parent.mkdir(parents=True)
-    tifffile.imwrite(str(raster), np.zeros((64, 64, 3), dtype=np.uint8))
+    raster = _mosaic(image_root(tmp_path) / "mosaic.tif")
     _stubbed(monkeypatch)
 
     result = run_inference(
@@ -260,17 +277,68 @@ def test_a_raster_outside_a_capture_is_admitted(
         project_checkpoint(tmp_path),
         raster_path=str(raster),
         bucket=BUCKET,
-        dry_run=True,
-        stated=Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS),
+        stated=TILED,
         actor=None,
     )
 
     assert "error" not in result, result
-    assert result["dataset_root"] == str(tmp_path)
+    bucket = read_bucket(tmp_path, BUCKET)
+    assert (result["dataset_root"], bucket.dataset_id, bucket.date) == (
+        str(tmp_path),
+        require_dataset_identity(tmp_path).id,
+        None,
+    )
 
 
-TILED = Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS)
-"""The stated execution values of a tiled pass over 32 px tiles, as a raster pass runs."""
+@pytest.mark.parametrize(
+    "raster", [False, True], ids=["image_pass", "raster_pass"]
+)
+def test_a_pass_publishes_under_the_root_its_dry_run_states(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raster: bool
+) -> None:
+    """A pass publishes its bucket under the root its dry run states for the same sources.
+
+    The images are a capture named ``images`` of the root ``data``, and the raster lies in the
+    image tree of a root itself named ``images``, each position read two ways and settled by the
+    root carrying its own state. The dry run's root is the door's reading at entry; the answer's
+    and the publication's audit line's are the publication's own.
+    """
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    if raster:
+        root = dataset_registered(
+            tmp_path, tmp_path / "scratch" / "images", crop=CROP
+        )
+        sources = {
+            "raster_path": str(_mosaic(image_root(root) / "mosaic.tif"))
+        }
+    else:
+        root = dataset_registered(tmp_path, tmp_path / "data", crop=CROP)
+        sources = {"images_dir": str(_images(image_dir(root, "images")))}
+    _stubbed(monkeypatch)
+
+    def run(**options: bool) -> dict:
+        return run_inference(
+            tmp_path,
+            project_checkpoint(tmp_path),
+            bucket=BUCKET,
+            stated=TILED if raster else UNTILED,
+            actor=None,
+            **sources,
+            **options,
+        )
+
+    stated = run(dry_run=True)
+    ran = run()
+
+    assert "error" not in ran, ran
+    rows = audit_rows(
+        Path(stated["dataset_root"]), "prediction_bucket_published"
+    )
+    assert [r["arguments"]["dataset_root"] for r in rows] == [
+        stated["dataset_root"]
+    ]
+    assert ran["dataset_root"] == stated["dataset_root"] == str(root)
 
 
 def _unregistered_source(tmp_path: Path, *, raster: bool) -> Path:

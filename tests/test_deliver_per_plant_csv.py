@@ -111,14 +111,12 @@ def _bucket(
     date: str,
     counts: dict[str, int],
     name: str = "manual",
-    *,
-    crop: str | None = COUNT_CROP,
 ) -> str:
     """Publish a bucket named ``<name>/<date>`` under ``project`` and return its name.
 
-    The bucket lies under ``dataset_root``, registered at ``crop`` when it carries no identity
-    (``None`` leaving it as it stands, ``_chain_fixtures.published``), and holds
-    ``counts[stem]`` detections on each image ``images/<date>/<stem>.jpg``.
+    The bucket lies under ``dataset_root``, registered at :data:`COUNT_CROP` when it carries no
+    identity (``_chain_fixtures.published``), and holds ``counts[stem]`` detections on each
+    image ``images/<date>/<stem>.jpg``.
     """
     from tests._chain_fixtures import detected, detection_pass, published
 
@@ -132,7 +130,7 @@ def _bucket(
         for stem, n in counts.items()
     ]
     return published(
-        project, f"{name}/{date}", results, scope=SCOPE, crop=crop
+        project, f"{name}/{date}", results, scope=SCOPE, crop=COUNT_CROP
     ).name
 
 

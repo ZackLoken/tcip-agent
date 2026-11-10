@@ -259,7 +259,7 @@ def _published(project: Path) -> tuple[Bucket, Pass, VerifiedCheckpoint, Path]:
     Returns the bucket read back, the pass it was published under, the checkpoint and the
     image's path.
     """
-    from tcip_mcp.buckets import pass_documents, publish, source_root
+    from tcip_mcp.buckets import pass_documents, publish
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tests._chain_fixtures import RATIONALE, predicted
@@ -279,7 +279,6 @@ def _published(project: Path) -> tuple[Bucket, Pass, VerifiedCheckpoint, Path]:
     ).runnable()
     bucket = publish(
         project,
-        source_root([str(image)]),
         f"m/{DATE}",
         pass_documents(p, [predicted(image, ["bud"])]),
         producer=checkpoint.producer,
@@ -332,7 +331,6 @@ def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
     register_dataset_at(tmp_path, root, crop=CROP)
     publish(
         tmp_path,
-        root,
         f"engine/{DATE}/a",
         [Document(str(image), {"annotations": []})],
         producer=Proposed(proposed_by="engine"),
@@ -560,22 +558,23 @@ def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuse
         )
 
 
-def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_recording_no_dataset(
+def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_of_another_dataset(
     tmp_path: Path,
 ) -> None:
     """A scale assessment reads back as calibrated, covering the one capture its samples span.
 
-    One stored without failures refuses, and so does one carrying a ``passed`` beside its failures
-    or a reference carrying ``captures`` beside its samples.
+    It covers no bucket of that capture's date under a second registered dataset. One stored
+    without failures refuses, and so does one carrying a ``passed`` beside its failures or a
+    reference carrying ``captures`` beside its samples.
     """
     from tcip_mcp.assessment import (
         ASSESSMENT_FILE,
         assessment_dir,
         read_assessment,
     )
-    from tcip_mcp.dataset_layout import read_dataset_identity
+    from tcip_mcp.dataset_layout import require_dataset_identity
     from tests import _trait_fixtures as fx
-    from tests._producer_fixtures import published_document
+    from tests._producer_fixtures import dataset_registered, published_document
     from tests.test_physical_scale_assessment import (
         DATE as SCALE_DATE,
         _author_tolerance,
@@ -598,24 +597,22 @@ def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_recordin
     assert Path(reference.selection_dir) == selection.resolve()
     n_samples = produced["reference"]["n_samples"]
     assert len(reference.samples) == n_samples
-    identity = read_dataset_identity(tmp_path / "ds")
-    assert identity is not None
+    identity, other = (
+        require_dataset_identity(dataset_registered(tmp_path, root, crop=CROP))
+        for root in (tmp_path / "ds", tmp_path / "other")
+    )
     assert reference.dataset_id == identity.id
     other_date = "2026-02-01"
     buckets = [
         published_document(
             tmp_path,
             f"covers-{date}",
-            root / "images" / date / "covered.jpg",
+            image_dir(root, date) / "covered.jpg",
             [],
             8,
             8,
-            crop=crop,
         )
-        for root, crop in (
-            (tmp_path / "ds", CROP),
-            (tmp_path / "unidentified", None),
-        )
+        for root in (tmp_path / "ds", tmp_path / "other")
         for date in (SCALE_DATE, other_date)
     ]
     assert {
@@ -624,8 +621,8 @@ def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_recordin
     } == {
         (identity.id, SCALE_DATE): True,
         (identity.id, other_date): False,
-        (None, SCALE_DATE): False,
-        (None, other_date): False,
+        (other.id, SCALE_DATE): False,
+        (other.id, other_date): False,
     }
 
     path = (

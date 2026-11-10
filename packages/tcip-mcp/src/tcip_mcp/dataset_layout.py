@@ -169,12 +169,6 @@ def image_capture(source: str | Path) -> tuple[Path | None, str | None]:
     return _capture(Path(source).parent) or (None, None)
 
 
-def dataset_id_of(root: Path | None) -> str | None:
-    """Return the id ``root``'s identity record states, ``None`` for no root or no record."""
-    identity = None if root is None else read_dataset_identity(root)
-    return None if identity is None else identity.id
-
-
 def image_root(dataset_root: str | Path) -> Path:
     """Return the whole image-tree path ``<dataset_root>/images/``, every capture under it."""
     return Path(dataset_root, "images")
