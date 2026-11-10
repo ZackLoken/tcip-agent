@@ -35,7 +35,7 @@ def freeze_selection(
     when: ``experiment_id`` names no training run; the split is spatial (region identities, not
     stems); the run's val side is empty; a member's ground truth has moved since the run (it now
     digests differently from the digest the record holds, or is absent); a member's ground truth
-    will not read (the store's refusal); the run's samples lie under no one dataset root
+    will not read (the store's refusal); its train and val samples lie under no one dataset root
     (:func:`~tcip_mcp.dataset_layout.source_root`'s refusal); a selection already exists at the
     output directory; the output directory's store will not read; or the selection its resolved
     ``scope`` composes is one :func:`~tcip_mcp.pipelines.data.selection.write_selection`
@@ -49,7 +49,7 @@ def freeze_selection(
         experiment_id: The finished run to freeze the drawn partition of.
         output_path: Where to write the selection. Defaults to
             ``<dataset_root>/splits/frozen-<experiment_id>`` of the one dataset root the run's
-            samples lie under.
+            train and val samples lie under.
 
     """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
