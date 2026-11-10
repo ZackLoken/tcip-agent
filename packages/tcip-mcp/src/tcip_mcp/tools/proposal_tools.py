@@ -935,7 +935,8 @@ def stage_proposals(
     of the same run refuses (:class:`~tcip_mcp.buckets.BucketExistsError`), and a new run or new
     explicit shapes publish a bucket of their own, so nothing overwrites reviewed predictions or
     orphans their verdicts. The publication's audit line names ``actor``, the person who staged
-    it, or ``None`` for a call no person makes.
+    it, or ``None`` for a call no person makes. An image under a dataset root never registered
+    refuses in either regime before anything is read, naming ``register_dataset``.
 
     A staged annotation's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named;
     the platform validates no subject name.
