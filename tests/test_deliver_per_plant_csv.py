@@ -701,7 +701,7 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
             _but((SECOND, "a")),
             ("P1",),
             OUTSIDE,
-            f"{FIRST}/c (P2)",
+            f"{FIRST}/c (plant 'P2')",
         ),
         (
             _b_undocumented,
@@ -846,7 +846,7 @@ def _named_under(
     ), error
     return {
         phrase: re.findall(
-            rf"{IMAGE_NAME}(?: \(\w+\))?",
+            rf"{IMAGE_NAME}(?: \(plant '\w+'\))?",
             error[start + len(phrase) : step],
         )
         for (phrase, _), start, step in zip(
@@ -901,7 +901,7 @@ def test_one_refusal_names_every_inadmissible_image_under_its_reason(
         UNDELIVERED: [f"{SECOND}/a", "2026-03-02/y"],
         NO_IMAGE: [f"{FIRST}/zz"],
         NO_PLANT: [f"{FIRST}/far"],
-        OUTSIDE: [f"{FIRST}/d (P3)", f"{FIRST}/c (P2)"],
+        OUTSIDE: [f"{FIRST}/d (plant 'P3')", f"{FIRST}/c (plant 'P2')"],
         UNREAD: [f"{FIRST}/b"],
         REPEATED: [f"{FIRST}/a"],
     }
@@ -955,7 +955,11 @@ def test_a_refusal_names_every_unmapped_capture_without_a_cap(
             _b_undocumented,
             _rows(*READ),
             ("P2",),
-            [f"{FIRST}/a (P1)", f"{FIRST}/b (P1)", f"{SECOND}/c (P1)"],
+            [
+                f"{FIRST}/a (plant 'P1')",
+                f"{FIRST}/b (plant 'P1')",
+                f"{SECOND}/c (plant 'P1')",
+            ],
             (OUTSIDE, OUTSIDE_STEP),
             UNREAD,
         ),

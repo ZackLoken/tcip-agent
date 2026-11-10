@@ -478,8 +478,8 @@ class Inadmissible:
     """Why a per-plant delivery does not admit an image, in the words a refusal gives it.
 
     ``clause`` states the reason, ``next_step`` what to do about an image refused for it, and
-    ``detail`` a fact of this image alone (the plant of an image outside the population), empty
-    for a reason that has none.
+    ``detail`` a fact of this image alone (``plant 'P2'`` for an image outside the population),
+    empty for a reason that has none.
     """
 
     clause: str
@@ -538,6 +538,11 @@ UNREAD_CAUSE = (
 for a result whose image an earlier result names, which only a caller reading results can find."""
 
 
+def quoted_plant(plant: str) -> str:
+    """Return ``plant``'s id as a refusal names it, quoted."""
+    return repr(plant)
+
+
 def admission(
     mapping: MappingResolution,
     plants: Container[str],
@@ -560,9 +565,8 @@ def admission(
     if not assignment_is_attributed(assignment):
         return NO_PLANT
     if assignment.plant_id not in plants:
-        return replace(
-            OUTSIDE_POPULATION, detail=cast(str, assignment.plant_id)
-        )
+        plant = quoted_plant(cast(str, assignment.plant_id))
+        return replace(OUTSIDE_POPULATION, detail=f"plant {plant}")
     if stem not in mapping.verified.read_stems[date]:
         return UNREAD
     return assignment
