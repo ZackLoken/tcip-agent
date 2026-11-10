@@ -282,7 +282,7 @@ def test_a_range_test_of_the_chain_detector_is_its_own_listed_run(
     )
 
     root = project / "ds"
-    synthetic_capture(root)
+    synthetic_capture(project, root)
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     ramp = {"ramp_low": 1e-5, "ramp_high": 10.0, "batches": 20}

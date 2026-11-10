@@ -16,7 +16,7 @@ import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx, csv_rows
-from tests._mapping_fixtures import COUNT_CROP, PLOTS, write_plots_csv
+from tests._mapping_fixtures import COUNT_CROP, CROP, PLOTS, write_plots_csv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -116,11 +116,14 @@ def _bucket(
     date: str,
     counts: dict[str, int],
     name: str = "manual",
+    *,
+    crop: str | None = CROP,
 ) -> str:
     """Publish a bucket named ``<name>/<date>`` under ``project`` and return its name.
 
-    The bucket lies under ``dataset_root`` and holds ``counts[stem]`` detections on each image
-    ``images/<date>/<stem>.jpg``.
+    The bucket lies under ``dataset_root``, registered at ``crop`` when it carries no identity
+    (``None`` leaving it as it stands, ``_chain_fixtures.published``), and holds
+    ``counts[stem]`` detections on each image ``images/<date>/<stem>.jpg``.
     """
     from tests._chain_fixtures import detected, detection_pass, published
 
@@ -133,7 +136,9 @@ def _bucket(
         )
         for stem, n in counts.items()
     ]
-    return published(project, f"{name}/{date}", results, scope=SCOPE).name
+    return published(
+        project, f"{name}/{date}", results, scope=SCOPE, crop=crop
+    ).name
 
 
 def door_results(rows: list[dict]) -> list:

@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
+from tests._mapping_fixtures import CROP
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -607,8 +608,12 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
             [],
             8,
             8,
+            crop=crop,
         )
-        for root in (tmp_path / "ds", tmp_path / "unidentified")
+        for root, crop in (
+            (tmp_path / "ds", CROP),
+            (tmp_path / "unidentified", None),
+        )
         for date in (SCALE_DATE, other_date)
     ]
     assert {

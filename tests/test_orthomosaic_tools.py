@@ -200,19 +200,13 @@ def _raster_bucket(
 ) -> Bucket:
     """Publish a whole-raster bucket ``<name>/2026-01-01`` over ``raster_path`` and return it.
 
-    The raster's dataset is registered at :data:`~tests._mapping_fixtures.COUNT_CROP` first, so
-    the bucket records it. The bucket holds one detection per box and is published through the
-    platform's own publication (``_chain_fixtures.published``).
+    The bucket holds one detection per box and is published through the platform's own
+    publication (``_chain_fixtures.published``), the raster's dataset registered at
+    :data:`~tests._mapping_fixtures.COUNT_CROP` first when it carries no identity, so the bucket
+    records it.
     """
-    from tcip_mcp.dataset_layout import image_capture
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._chain_fixtures import detected, detection_pass, published
 
-    dataset_root, _ = image_capture(raster_path)
-    registered = register_dataset(
-        project, str(dataset_root), crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in registered, registered
     height, width = tifffile.imread(str(raster_path)).shape[:2]
     result = detection_pass(
         raster_path,
@@ -226,6 +220,7 @@ def _raster_bucket(
         [result],
         scope=SCOPE,
         raster_path=raster_path,
+        crop=COUNT_CROP,
     )
 
 

@@ -202,8 +202,8 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
         PHOTO_POSITION_ERROR_M,
         map_plants,
         plant_positions,
-        register_dataset_at,
     )
+    from tests._producer_fixtures import register_dataset_at
 
     both = fx.with_operationalization(
         _count_entry(),
@@ -411,6 +411,8 @@ def test_a_proposal_is_admitted_once_and_a_stored_record_decodes_without_the_voc
     fx.propose(tmp_path, _count_entry(statement="a second reading"))
     assert len(reads) == 1
 
+    # Registering the bucket's dataset reads the vocabulary for its crop, so it publishes first.
+    _bucket(tmp_path)
     monkeypatch.setattr(traits, "_crops_traits", lambda: [])
     assert (
         traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest_confirmed
