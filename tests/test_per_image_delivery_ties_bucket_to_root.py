@@ -105,13 +105,13 @@ def test_a_per_image_delivery_of_a_bucket_of_another_dataset_than_its_root_refus
 ) -> None:
     """The tool answers the sentence naming the bucket and both ids, and writes nothing."""
     root, bucket = _published(tmp_path)
-    recorded = bucket_of_another_dataset(root, bucket)
+    injected = bucket_of_another_dataset(root, bucket)
     before = _footprint(tmp_path, root)
 
     answered = _deliver(tmp_path, root, bucket)
 
     assert set(answered) == {"error"}, answered
-    for named in (bucket, recorded, require_dataset_identity(root).id):
+    for named in (bucket, injected, require_dataset_identity(root).id):
         assert named in answered["error"], answered
     assert not (tmp_path / "out" / "counts.csv").exists()
     assert _footprint(tmp_path, root) == before
@@ -184,9 +184,9 @@ def test_the_gate_over_each_bucket_of_another_dataset_than_its_root_refuses_with
         scope=SCOPE,
         crop=COUNT_CROP,
     ).name
-    recorded = bucket_of_another_dataset(root, other)
+    injected = bucket_of_another_dataset(root, other)
     untied = read_bucket(root, other)
-    assert untied.dataset_id == recorded != true.dataset_id
+    assert untied.dataset_id == injected != true.dataset_id
     with pytest.raises(ValueError) as tie:
         require_delivered_dataset([untied])
 
@@ -194,7 +194,7 @@ def test_the_gate_over_each_bucket_of_another_dataset_than_its_root_refuses_with
         with pytest.raises(ValueError) as refused:
             _gated(tmp_path, *buckets)
         assert str(refused.value) == str(tie.value)
-    for named in (untied.name, recorded, true.dataset_id):
+    for named in (untied.name, injected, true.dataset_id):
         assert named in str(tie.value), tie.value
 
 
@@ -250,13 +250,13 @@ def test_a_per_image_export_of_a_bucket_of_another_dataset_than_its_root_refuses
 ) -> None:
     """The route answers 400 with the sentence naming the bucket and both ids; writes nothing."""
     bucket = _route_bucket(tmp_path)
-    recorded = bucket_of_another_dataset(bucket.root, bucket.name)
+    injected = bucket_of_another_dataset(bucket.root, bucket.name)
     before = _footprint(tmp_path, tmp_path)
 
     refusal = _refused_by_the_route(client, tmp_path, bucket)
 
     root_id = require_dataset_identity(tmp_path).id
-    for named in (bucket.name, recorded, root_id):
+    for named in (bucket.name, injected, root_id):
         assert named in refusal.message, refusal
     assert _footprint(tmp_path, tmp_path) == before
 
@@ -298,9 +298,8 @@ def test_the_per_image_the_orthomosaic_and_the_per_plant_doors_answer_one_tie(
     restores the id, and with the image and the raster bucket rewritten to record one other
     dataset, each names its own bucket and the same two ids, the per-image and the per-plant door
     the same bucket, in words that differ from the orthomosaic door's by the bucket's name alone.
-    The count trait's
-    confirmed meaning is seeded for the door about to be called, since each door's meaning is the
-    latest revision's.
+    The count trait's confirmed meaning is seeded for the door about to be called, since each
+    door's meaning is the latest revision's.
     """
     from tcip_mcp.tools.orthomosaic_tools import (
         deliver_orthomosaic_plant_counts,
@@ -359,10 +358,10 @@ def test_the_per_image_the_orthomosaic_and_the_per_plant_doors_answer_one_tie(
     assert set(answers()) == {unregistered_refusal(root)}
 
     assert register_dataset_at(tmp_path, root, crop=COUNT_CROP) == recorded
-    other = bucket_of_another_dataset(root, image_bucket, raster_bucket)
+    injected = bucket_of_another_dataset(root, image_bucket, raster_bucket)
     per_image, orthomosaic, per_plant = answers()
 
-    for named in (recorded, other, image_bucket):
+    for named in (recorded, injected, image_bucket):
         assert named in per_image, per_image
     assert per_plant == per_image
     assert orthomosaic == per_image.replace(image_bucket, raster_bucket)

@@ -52,7 +52,7 @@ def test_a_per_plant_delivery_of_a_bucket_recording_another_dataset_than_its_roo
 
     dataset_root, date = _mapped(tmp_path)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
-    recorded = bucket_of_another_dataset(dataset_root, bucket)
+    injected = bucket_of_another_dataset(dataset_root, bucket)
 
     refused = _deliver(
         tmp_path,
@@ -65,7 +65,7 @@ def test_a_per_plant_delivery_of_a_bucket_recording_another_dataset_than_its_roo
 
     assert "error" in refused, refused
     root_id = require_dataset_identity(dataset_root).id
-    for named in (bucket, recorded, root_id):
+    for named in (bucket, injected, root_id):
         assert named in refused["error"], refused
     assert not (tmp_path / "o.csv").exists()
     _no_delivery_recorded(tmp_path)
@@ -89,12 +89,12 @@ def test_a_phenology_delivery_of_a_bucket_recording_another_dataset_than_its_roo
 
     body = _currant_bloom_body(tmp_path)
     root = Path(body["dataset_root"])
-    recorded = bucket_of_another_dataset(root, *body["buckets"])
+    injected = bucket_of_another_dataset(root, *body["buckets"])
 
     refusals = _phenology_refusals(client, tmp_path, body)
 
     for refusal in refusals:
-        for named in (recorded, require_dataset_identity(root).id):
+        for named in (injected, require_dataset_identity(root).id):
             assert named in refusal, refusal
         assert any(b in refusal for b in body["buckets"]), refusal
     _no_delivery_recorded(tmp_path)
@@ -129,7 +129,7 @@ def test_an_acknowledged_per_plant_delivery_of_a_bucket_recording_another_datase
     bucket = unassessed_bucket(
         tmp_path, experiment_id="exp-untied", images={"p1": 1}
     )
-    recorded = bucket_of_another_dataset(bucket.root, bucket.name)
+    injected = bucket_of_another_dataset(bucket.root, bucket.name)
 
     with pytest.raises(MappingDeliveryError) as refused:
         deliver_acknowledged(
@@ -143,7 +143,7 @@ def test_an_acknowledged_per_plant_delivery_of_a_bucket_recording_another_datase
         )
 
     root_id = require_dataset_identity(bucket.root).id
-    for named in (bucket.name, recorded, root_id):
+    for named in (bucket.name, injected, root_id):
         assert named in str(refused.value), refused.value
     assert not (tmp_path / "o.csv").exists()
     _no_delivery_recorded(tmp_path)
