@@ -5,10 +5,11 @@ published under it. ``register_dataset`` over a root with no ``dataset.json`` re
 they cite, saying so and from what; refuses, naming each id and what cites it, when they cite
 more than one, writing nothing; and mints only for a root nothing cites. A refused document takes
 its id by the same rule, and ``check_dataset_identity`` names the repair the registration makes.
+A bucket record that will not read raises its reader's refusal at both doors.
 
 The steps made by hand are fault injection: removing or damaging a root's ``dataset.json``, a
-change to the project's files outside the platform, and rewriting a published bucket's recorded
-dataset, a record no producer writes.
+change to the project's files outside the platform, and rewriting or damaging a published bucket's
+record, which no producer does.
 """
 
 from __future__ import annotations
@@ -32,12 +33,12 @@ from tcip_mcp.tools.project_tools import (
     register_dataset,
     upsert_dataset,
 )
-from tests._audit_fixtures import audit_rows
 from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import (
     box_annotation,
     bucket_of_another_dataset,
     label_image,
+    left_written,
     published_document,
     register_dataset_at,
     write_image,
@@ -55,6 +56,39 @@ if TYPE_CHECKING:
 
     type Conflict = tuple[Path, Path, dict[str, list[str]]]
     """A project, a root with its identity in place, and each id cited beside what cites it."""
+
+REGISTRY = "this project's registry at this path"
+"""How a refusal names a registry entry at the root's path as what cites an id."""
+
+REMEDY = "to one identity outside the platform"
+"""The words ending the remedy a root cited by more than one id is answered with."""
+
+
+def _bucket_witness(name: str) -> str:
+    """Return how a refusal names the bucket ``name`` under the root as what cites an id."""
+    return f"this root's bucket {name!r}"
+
+
+def _cited(dataset_id: str, witnesses: list[str]) -> str:
+    """Return the clause naming ``dataset_id`` beside each of ``witnesses``, as a refusal does."""
+    return f"id {dataset_id!r} is cited by {', '.join(witnesses)}"
+
+
+def _names_each_citation_and_the_remedy(
+    answer: str, cited: dict[str, list[str]]
+) -> None:
+    """Assert ``answer`` names each id with its own witnesses, and the remedy over every witness.
+
+    The remedy names no registration.
+    """
+    for dataset_id, witnesses in cited.items():
+        assert _cited(dataset_id, witnesses) in answer, answer
+    assert REMEDY in answer, answer
+    remedy = answer.rsplit(", so bring ", 1)[1]
+    for witnesses in cited.values():
+        for witness in witnesses:
+            assert witness in remedy, answer
+    assert "register_dataset" not in remedy, answer
 
 
 def _published(project: Path, root: Path, *names: str) -> list[str]:
@@ -79,14 +113,13 @@ def _register(project: Path, root: Path) -> dict:
 
 
 def _footprint(project: Path, root: Path) -> dict[str, object]:
-    """Return what a registration of ``root`` in ``project`` can write."""
+    """Return what a registration of ``root`` in ``project`` can write, beside ``left_written``."""
     return {
+        **left_written(project, root),
         "identity": tcip_store.read_blob_versioned(
             dataset_identity_path(root), default=None
         ).value,
         "registry": read_datasets(project),
-        "project_audit": audit_rows(project),
-        "root_audit": audit_rows(root),
     }
 
 
@@ -107,7 +140,7 @@ def test_a_root_whose_identity_is_gone_takes_back_the_id_its_registry_entry_hold
     assert "error" not in restored, restored
     assert restored["id"] == registered
     assert str(dataset_identity_path(root)) in restored["repaired"]
-    assert "registry" in restored["repaired"]
+    assert _cited(registered, [REGISTRY]) in restored["repaired"]
     assert read_datasets(tmp_path) == [
         DatasetEntry(id=registered, path=stored_path(root, tmp_path))
     ]
@@ -135,7 +168,7 @@ def test_a_copy_made_without_its_identity_takes_the_id_its_buckets_record(
 
     assert "error" not in restored, restored
     assert restored["id"] == recorded.id
-    assert name in restored["repaired"]
+    assert _cited(recorded.id, [_bucket_witness(name)]) in restored["repaired"]
     assert read_datasets(tmp_path) == [
         DatasetEntry(id=recorded.id, path=stored_path(copy, tmp_path))
     ]
@@ -156,7 +189,10 @@ def _two_buckets_of_two_ids(project: Path) -> Conflict:
     return (
         new_project(project.parent / "other").root,
         root,
-        {identity.id: [first], other: [second]},
+        {
+            identity.id: [_bucket_witness(first)],
+            other: [_bucket_witness(second)],
+        },
     )
 
 
@@ -167,7 +203,11 @@ def _registry_and_bucket_of_two_ids(project: Path) -> Conflict:
     identity = read_dataset_identity(root)
     assert identity is not None
     other = bucket_of_another_dataset(root, name)
-    return project, root, {identity.id: ["registry"], other: [name]}
+    return (
+        project,
+        root,
+        {identity.id: [REGISTRY], other: [_bucket_witness(name)]},
+    )
 
 
 def _two_registry_entries_at_one_path(
@@ -183,7 +223,7 @@ def _two_registry_entries_at_one_path(
     upsert_dataset(
         project, DatasetEntry(id=second, path=stored_path(root, project))
     )
-    return project, root, {first: ["registry"], second: ["registry"]}
+    return project, root, {first: [REGISTRY], second: [REGISTRY]}
 
 
 @pytest.mark.parametrize(
@@ -199,11 +239,11 @@ def _two_registry_entries_at_one_path(
 def test_a_root_whose_identity_is_gone_and_whose_records_cite_two_ids_refuses(
     tmp_path: Path, conflicting: Callable[[Path], Conflict], damaged: bool
 ) -> None:
-    """The refusal names each id and what cites it, and writes nothing.
+    """The refusal names each id beside what cites it, and the remedy over those records.
 
     The document is removed, or damaged so its model refuses it. The refusal writes no identity
-    document, changes no registry and appends no audit line, and it names no registration as the
-    remedy.
+    document, changes no registry and appends no audit line, and its remedy names no
+    registration.
     """
     project, root, cited = conflicting(tmp_path)
     if damaged:
@@ -215,12 +255,90 @@ def test_a_root_whose_identity_is_gone_and_whose_records_cite_two_ids_refuses(
     refused = _register(project, root)
 
     assert set(refused) == {"error"}, refused
-    for dataset_id, witnesses in cited.items():
-        assert repr(dataset_id) in refused["error"], refused
-        for witness in witnesses:
-            assert witness in refused["error"], refused
-    assert "register_dataset" not in refused["error"], refused
+    _names_each_citation_and_the_remedy(refused["error"], cited)
     assert _footprint(project, root) == before
+
+
+@pytest.mark.parametrize(
+    "conflicting",
+    [_two_buckets_of_two_ids, _registry_and_bucket_of_two_ids],
+    ids=["two_buckets", "registry_and_bucket"],
+)
+def test_the_check_of_a_refused_identity_at_a_root_cited_by_two_ids_names_them_and_the_remedy(
+    tmp_path: Path, conflicting: Callable[[Path], Conflict]
+) -> None:
+    """``check_dataset_identity`` answers ``refused``, naming the ids, their records and the remedy.
+
+    The reason is the one the registration refuses with, over a damaged document.
+    """
+    project, root, cited = conflicting(tmp_path)
+    _rewritten(dataset_identity_path(root), {"crop": 5})
+
+    checked = check_dataset_identity(project, str(root))
+
+    assert checked.state == "refused", checked
+    assert checked.reason is not None
+    _names_each_citation_and_the_remedy(checked.reason, cited)
+
+
+def _damaged_bucket(project: Path) -> tuple[Path, str]:
+    """Return a registered root and the name of its one bucket, whose record will not decode."""
+    from tcip_mcp.dataset_layout import bucket_key
+    from tests._record_damage_fixtures import damage_record
+
+    root = project / "ds"
+    (name,) = _published(project, root, "first/2026-01-01")
+    damage_record(bucket_key(root, name), b"{not json")
+    return root, name
+
+
+@pytest.mark.parametrize("damaged", [False, True], ids=["absent", "damaged"])
+def test_a_registration_over_an_unreadable_bucket_raises_its_readers_refusal(
+    tmp_path: Path, damaged: bool
+) -> None:
+    """A bucket record that will not read is refused naming the bucket, and nothing is written.
+
+    The identity document is removed, or damaged so its model refuses it; no document is written
+    and the registry is unchanged.
+    """
+    from tcip_mcp.buckets import NotABucketError
+
+    root, name = _damaged_bucket(tmp_path)
+    if damaged:
+        _rewritten(dataset_identity_path(root), {"crop": 5})
+    else:
+        dataset_identity_path(root).unlink()
+    identity = tcip_store.read_blob_versioned(
+        dataset_identity_path(root), default=None
+    ).value
+    registry = read_datasets(tmp_path)
+
+    with pytest.raises(NotABucketError) as refused:
+        _register(tmp_path, root)
+
+    assert repr(name) in str(refused.value), refused.value
+    assert (
+        tcip_store.read_blob_versioned(
+            dataset_identity_path(root), default=None
+        ).value
+        == identity
+    )
+    assert read_datasets(tmp_path) == registry
+
+
+def test_the_check_of_a_refused_identity_over_an_unreadable_bucket_raises_its_readers_refusal(
+    tmp_path: Path,
+) -> None:
+    """The check over a damaged document raises the bucket reader's refusal, naming the bucket."""
+    from tcip_mcp.buckets import NotABucketError
+
+    root, name = _damaged_bucket(tmp_path)
+    _rewritten(dataset_identity_path(root), {"crop": 5})
+
+    with pytest.raises(NotABucketError) as refused:
+        check_dataset_identity(tmp_path, str(root))
+
+    assert repr(name) in str(refused.value), refused.value
 
 
 def test_a_refused_identity_at_a_root_another_project_registered_is_repaired_from_its_buckets(

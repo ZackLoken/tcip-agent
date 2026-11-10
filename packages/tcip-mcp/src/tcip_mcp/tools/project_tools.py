@@ -115,10 +115,12 @@ def dataset_ids_citing(
     cited: dict[DatasetId, list[str]] = {}
     for entry in read_datasets(project):
         if entry_is_at(project, entry, root):
-            cited.setdefault(entry.id, []).append("the project's registry")
+            cited.setdefault(entry.id, []).append(
+                "this project's registry at this path"
+            )
     for bucket in buckets_under(root):
         cited.setdefault(bucket.dataset_id, []).append(
-            f"bucket {bucket.name!r}"
+            f"this root's bucket {bucket.name!r}"
         )
     return cited
 
@@ -134,8 +136,8 @@ def _cited_by(cited: dict[DatasetId, list[str]]) -> str:
 def _identity_repair(cited: dict[DatasetId, list[str]]) -> str:
     """Return the sentence naming how the identity of a root whose ids are ``cited`` is repaired.
 
-    One id: ``register_dataset`` restores it. More than one: the root's records are brought to
-    one identity outside the platform. None: the document is restored from a backup.
+    One id: ``register_dataset`` restores it. More than one: the records that cite them are
+    brought to one identity outside the platform. None: the document is restored from a backup.
     """
     if len(cited) == 1:
         return (
@@ -143,24 +145,15 @@ def _identity_repair(cited: dict[DatasetId, list[str]]) -> str:
             f"records cite ({_cited_by(cited)})"
         )
     if cited:
+        records = dict.fromkeys(w for ws in cited.values() for w in ws)
         return (
             f"{_cited_by(cited)}: no one identity satisfies them and a fresh id would satisfy "
-            "none, so restore this root's own records to one identity outside the platform"
+            f"none, so bring {', '.join(records)} to one identity outside the platform"
         )
     return (
         "restore the document from a backup; neither the project's registry nor a bucket under "
         "this root cites an id, which register_dataset needs to repair it"
     )
-
-
-def identity_repair_door(project: str | Path, root: Path) -> str:
-    """Return the sentence naming how a refused identity document at ``root`` is repaired.
-
-    The sentence follows the ids that cite ``root`` (:func:`dataset_ids_citing`):
-    ``register_dataset`` restores one, more than one are brought to one outside the platform, and
-    with none the document is restored from a backup.
-    """
-    return _identity_repair(dataset_ids_citing(project, root))
 
 
 def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
@@ -363,7 +356,7 @@ def check_dataset_identity(
             dataset_root=str(root),
             state="refused",
             fingerprint=current,
-            reason=f"{exc}; {identity_repair_door(project, root)}",
+            reason=f"{exc}; {_identity_repair(dataset_ids_citing(project, root))}",
         )
     except (ValueError, OSError) as exc:
         return DatasetIdentityCheck(
