@@ -131,7 +131,7 @@ def _deliver_phenology_milestones(tmp_path: Path) -> dict:
     )
 
 
-def _assess_an_unregistered_checkpoint(tmp_path: Path) -> dict:
+def _assess_over_no_recorded_selection(tmp_path: Path) -> dict:
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
 
     return assess_checkpoint(
@@ -190,7 +190,7 @@ DOORS = [
     _deliver_per_plant_csv,
     _deliver_orthomosaic_plant_counts,
     _deliver_phenology_milestones,
-    _assess_an_unregistered_checkpoint,
+    _assess_over_no_recorded_selection,
     _assess_the_reserved_regions_of_an_unregistered_checkpoint,
     _calibrate_scale_for_no_such_trait,
 ]

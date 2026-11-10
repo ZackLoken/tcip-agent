@@ -363,14 +363,16 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
 
 
 def _assessed_with_no_checkpoint_file(
-    project: Path, selection_dir: Path
+    project: Path, selection_dir: Path, *, confirmed: bool
 ) -> dict:
     """Return ``assess_checkpoint``'s arguments over ``selection_dir`` naming no checkpoint file.
 
-    The count trait is confirmed first (:func:`confirm_count_trait`), so the assessment is for its
-    per-image count under the sample collection pass and count test settings.
+    The assessment is for the count trait's per-image count under the sample collection pass and
+    count test settings; the trait is confirmed first (:func:`confirm_count_trait`) when
+    ``confirmed``, and otherwise left as the project holds it.
     """
-    confirm_count_trait(project)
+    if confirmed:
+        confirm_count_trait(project)
     return {
         "checkpoint_path": str(project / "absent.pt"),
         "trait": fx.COUNT_TRAIT,
@@ -385,15 +387,19 @@ def _assessed_with_no_checkpoint_file(
     }
 
 
+@pytest.mark.parametrize(
+    "confirmed", [True, False], ids=["trait_confirmed", "trait_unconfirmed"]
+)
 def test_an_assessment_under_a_root_never_registered_refuses_before_its_checkpoint_is_read(
-    tmp_path: Path, bound: BoundProject
+    tmp_path: Path, bound: BoundProject, confirmed: bool
 ) -> None:
-    """An assessment over a selection of a root never registered refuses before its checkpoint.
+    """An assessment over a root never registered refuses before its trait or checkpoint is read.
 
-    The selection is drawn over a capture ingested and never registered, and the checkpoint path
-    names no file. Called through the server, the answer is the one sentence
-    ``require_dataset_identity`` refuses the root with, and nothing is recorded or logged;
-    registered, the same call meets the checkpoint's own refusal.
+    The selection is drawn over a capture ingested and never registered, the checkpoint path
+    names no file, and the trait is confirmed or has no revision. Called through the server, the
+    answer is the one sentence ``require_dataset_identity`` refuses the root with, and nothing is
+    recorded or logged; registered, the same call meets the checkpoint's own refusal, or the
+    trait's when it has no revision.
     """
     from tests._mapping_fixtures import COUNT_CROP
     from tests._producer_fixtures import (
@@ -407,7 +413,9 @@ def test_an_assessment_under_a_root_never_registered_refuses_before_its_checkpoi
     synthetic_capture(tmp_path, root, crop=None)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
-    arguments = _assessed_with_no_checkpoint_file(tmp_path, selection_dir)
+    arguments = _assessed_with_no_checkpoint_file(
+        tmp_path, selection_dir, confirmed=confirmed
+    )
     before = left_written(tmp_path, root)
 
     refused = called_through_the_server(
@@ -421,15 +429,20 @@ def test_an_assessment_under_a_root_never_registered_refuses_before_its_checkpoi
         "assess_checkpoint", arguments, bound=bound
     )
     assert isinstance(answer, dict), answer
-    assert arguments["checkpoint_path"] in answer["error"], answer
+    met = arguments["checkpoint_path"] if confirmed else fx.COUNT_TRAIT
+    assert met in answer["error"], answer
 
 
+@pytest.mark.parametrize(
+    "confirmed", [True, False], ids=["trait_confirmed", "trait_unconfirmed"]
+)
 def test_an_assessment_reads_its_selection_before_its_checkpoint(
-    tmp_path: Path, bound: BoundProject
+    tmp_path: Path, bound: BoundProject, confirmed: bool
 ) -> None:
-    """An assessment naming no recorded selection and no checkpoint file meets the selection first.
+    """An assessment naming no recorded selection meets it before its trait or checkpoint.
 
-    Called through the server, the answer is the selection's refusal, naming its directory.
+    The checkpoint path names no file, and the trait is confirmed or has no revision. Called
+    through the server, the answer is the selection's refusal, naming its directory.
     """
     from tcip_mcp.pipelines.data.selection import selection_place
     from tests._server_calls import called_through_the_server
@@ -438,7 +451,9 @@ def test_an_assessment_reads_its_selection_before_its_checkpoint(
 
     refused = called_through_the_server(
         "assess_checkpoint",
-        _assessed_with_no_checkpoint_file(tmp_path, selection_dir),
+        _assessed_with_no_checkpoint_file(
+            tmp_path, selection_dir, confirmed=confirmed
+        ),
         bound=bound,
     )
 
@@ -515,7 +530,9 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_either_door(
     selection_dir = tmp_path / "relocated"
     sources = _relocated(tmp_path, drawn, place, selection_dir)
     if door == "assess_checkpoint":
-        arguments = _assessed_with_no_checkpoint_file(tmp_path, selection_dir)
+        arguments = _assessed_with_no_checkpoint_file(
+            tmp_path, selection_dir, confirmed=True
+        )
     else:
         fx.seed_delivery_traits(tmp_path)
         _author_tolerance(tmp_path)
@@ -549,7 +566,9 @@ def test_an_assessments_reference_records_the_id_its_root_is_registered_under(
     root, _images, selection_dir, checkpoint = trained_detector(
         tmp_path, experiment_id="exp-reference-id"
     )
-    arguments = _assessed_with_no_checkpoint_file(tmp_path, selection_dir)
+    arguments = _assessed_with_no_checkpoint_file(
+        tmp_path, selection_dir, confirmed=False
+    )
 
     assessed = called_through_the_server(
         "assess_checkpoint",
