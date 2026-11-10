@@ -462,6 +462,40 @@ def test_a_pass_under_a_root_never_registered_refuses_naming_it_and_writes_nothi
     assert (left_written(tmp_path, root) != registered) is writes
 
 
+def test_a_raster_pass_over_a_raster_under_no_image_tree_refuses_naming_it(
+    tmp_path: Path, bound: BoundProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raster pass over a raster moved out of every image tree refuses before any model runs.
+
+    An ingested raster is moved by hand to a directory no dataset root's image tree holds.
+    Called through the server, the answer is the no-image-tree sentence for the raster, naming
+    it; the predictor is never called.
+    """
+    import shutil
+
+    from tests._producer_fixtures import unrooted_refusal
+
+    loose = tmp_path / "loose" / "mosaic.tif"
+    loose.parent.mkdir()
+    shutil.move(_unregistered_source(tmp_path, raster=True), loose)
+    stub = _stubbed(monkeypatch)
+
+    refused = called_through_the_server(
+        "run_inference",
+        {
+            "checkpoint_path": project_checkpoint(tmp_path),
+            "raster_path": str(loose),
+            "bucket": BUCKET,
+            "stated": TILED.model_dump(mode="json", exclude_unset=True),
+        },
+        bound=bound,
+    )
+
+    assert refused == {"error": unrooted_refusal(loose, "the raster")}, refused
+    assert "bucket" not in refused["error"], refused
+    assert stub.calls == 0
+
+
 def test_a_pass_under_a_root_never_registered_refuses_before_its_checkpoint_is_read(
     tmp_path: Path, bound: BoundProject
 ) -> None:

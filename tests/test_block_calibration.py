@@ -388,6 +388,69 @@ def test_a_mosaic_of_a_root_never_registered_refuses_before_its_reference_is_rea
     assert "not marked complete" in answer["error"], answer
 
 
+def test_a_runs_mosaic_under_no_image_tree_refuses_naming_it(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """A run whose recorded mosaic lies under no image tree refuses before its regions are read.
+
+    The run trained over a registered mosaic; its launch record's mosaic sample is then re-pointed
+    at a copy of the mosaic outside any image tree, a fault injected past its writer. Called
+    through the server, the answer is the no-image-tree sentence for the run's mosaic, naming
+    the copy.
+    """
+    import shutil
+
+    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
+    from tcip_store import encode_record
+    from tests._producer_fixtures import unrooted_refusal
+    from tests._server_calls import called_through_the_server
+    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
+
+    exp = _build_experiment(tmp_path)
+    loose = tmp_path / "loose" / exp["raster_path"].name
+    loose.parent.mkdir()
+    shutil.copyfile(exp["raster_path"], loose)
+    run_file = (
+        experiment_dir(exp["experiment_id"], project=tmp_path) / RUN_FILE
+    )
+    run = read_record(run_file)
+    assert isinstance(run, dict)
+    resolved = run["resolved"]
+    assert isinstance(resolved, dict)
+    partition = resolved["partition"]
+    assert isinstance(partition, dict)
+    samples = partition["samples"]
+    assert isinstance(samples, list)
+    (mosaic,) = samples
+    assert isinstance(mosaic, dict)
+    mosaic["source"] = str(loose)
+    run_file.write_bytes(encode_record(run))
+
+    refused = called_through_the_server(
+        "assess_reserved_regions",
+        {
+            "checkpoint_path": exp["checkpoint_path"],
+            "trait": fx.COUNT_TRAIT,
+            "delivery_kind": "per_image_count",
+            "k_cal": 3,
+            "k_test": 3,
+            "equivalence_z": EQUIVALENCE_Z,
+            "dispersion_quantile": DISPERSION_QUANTILE,
+            "rationale": RATIONALE,
+            "stated": collection_pass(
+                postprocess="nms", cross_tile_nms=SAMPLE_CROSS_TILE_NMS
+            ).model_dump(mode="json", exclude_unset=True),
+            "device": "cpu",
+        },
+        bound=bound,
+    )
+
+    assert refused == {"error": unrooted_refusal(loose, "the run's mosaic")}, (
+        refused
+    )
+    assert "bucket" not in refused["error"], refused
+
+
 def test_a_stated_tile_edge_other_than_the_splits_refuses_naming_both(
     tmp_path: Path,
 ) -> None:

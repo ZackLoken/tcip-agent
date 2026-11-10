@@ -209,6 +209,25 @@ def unregistered_refusal(root: Path) -> str:
     return str(refused.value)
 
 
+def unrooted_refusal(source: str | Path, what: str) -> str:
+    """Return the sentence a source under no dataset image tree is refused with, for ``what``."""
+    return (
+        f"{source} lies under no dataset image tree, and one dataset root is "
+        f"required for {what}."
+    )
+
+
+def two_roots_refusal(roots: Iterable[Path], what: str) -> str:
+    """Return the sentence ``what``, lying under each of ``roots``, is refused with.
+
+    The roots are named in their one canonical spelling (``tcip_store.canonical_path``), sorted.
+    """
+    import tcip_store
+
+    named = sorted(tcip_store.canonical_path(root) for root in roots)
+    return f"{what} lie under {named} dataset root(s), and they belong to one."
+
+
 def published_document(
     project: Path,
     name: str,
@@ -227,11 +246,16 @@ def published_document(
     identity (:func:`dataset_registered`). Returns the bucket.
     """
     from tcip_annotation.json_io import document_payload
-    from tcip_mcp.buckets import Document, Proposed, publish, source_root
+    from tcip_mcp.buckets import Document, Proposed, publish
+    from tcip_mcp.dataset_layout import source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
 
-    dataset_registered(project, source_root([image]), crop=crop)
+    dataset_registered(
+        project,
+        source_root([image], what="a bucket's source images"),
+        crop=crop,
+    )
     return publish(
         project,
         name,

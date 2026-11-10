@@ -429,6 +429,30 @@ def test_a_raster_under_one_root_beside_a_document_under_another_refuses(
     assert [left_written(tmp_path, root) for root in (first, second)] == before
 
 
+def test_a_publication_and_a_scoring_over_an_image_under_no_image_tree_refuse_naming_it(
+    tmp_path: Path,
+) -> None:
+    """A publication and a scoring over an image in no dataset image tree each refuse naming it.
+
+    Each answers the no-image-tree sentence for a bucket's source images: ``publish`` raises it
+    and ``score_predictions`` answers it as its error.
+    """
+    from tcip_mcp.tools.annotation_tools import score_predictions
+    from tests._producer_fixtures import unrooted_refusal
+
+    loose = write_image(tmp_path / "loose" / "a.png", (SIZE, SIZE))
+
+    with pytest.raises(ValueError) as refused:
+        _proposals(tmp_path, [loose])
+    scored = score_predictions(
+        tmp_path, str(loose), "p", iou_threshold=0.5, conf_threshold=0.25
+    )
+
+    sentence = unrooted_refusal(loose, "a bucket's source images")
+    assert str(refused.value) == sentence, refused.value
+    assert scored == {"error": sentence}, scored
+
+
 def test_a_publication_writes_each_document_under_its_own_stems_key(
     tmp_path: Path,
 ) -> None:

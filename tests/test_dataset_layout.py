@@ -136,12 +136,12 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
     both, and a path under no image tree answers none.
     """
     from tcip_mcp.audit import dataset_scope_of
-    from tcip_mcp.buckets import source_root
     from tcip_mcp.dataset_layout import (
         dataset_root_of,
         image_capture,
         image_path,
         parse_capture_dir,
+        source_root,
     )
     from tcip_mcp.traits import registered_crops
 
@@ -156,7 +156,7 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
         register_dataset_at(tmp_path, root, crop=crop)
         assert image_capture(image) == (root, capture)
         assert parse_capture_dir(image_dir(root, capture)) == (root, capture)
-        assert source_root([image]) == root
+        assert source_root([image], what="an image") == root
         for directory in (image_dir(root, capture), image_root(root)):
             assert dataset_root_of(directory) == root
             assert dataset_scope_of(directory) == root
@@ -167,7 +167,7 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
     raster.parent.mkdir(parents=True)
     raster.write_bytes(b"II*\x00")
     register_dataset_at(tmp_path, named, crop=crop)
-    assert source_root([raster]) == named
+    assert source_root([raster], what="a raster") == named
     assert image_capture(raster) == (None, None)
     assert dataset_scope_of(raster) == named
     assert dataset_root_of(image_root(named)) == named
