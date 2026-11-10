@@ -53,6 +53,7 @@ from pydantic import (
     model_validator,
 )
 
+from tcip_annotation.text import DatasetId
 from tcip_mcp.agent_identity import AgentIdentity
 from tcip_mcp.audit import now
 from tcip_mcp.model_registry import Listed, metric_keys
@@ -283,7 +284,7 @@ class DatasetIdentity(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    id: str | None
+    id: DatasetId | None
     fingerprint: str | None
 
 
@@ -1668,7 +1669,7 @@ class ComparedRun(BaseModel):
     registry: list[Listed]
     split: SplitColumn
     subject: str | None
-    dataset_id: str | None
+    dataset_id: DatasetId | None
     dataset_fingerprint: str | None
 
 

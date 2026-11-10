@@ -28,7 +28,7 @@ from pydantic import (
     TypeAdapter,
 )
 
-from tcip_annotation.text import Text
+from tcip_annotation.text import DatasetId
 from tcip_mcp.assessment_evidence import (
     INSUFFICIENCY_FAILURES,
     REFERENCE_FLOOR,
@@ -178,7 +178,7 @@ class SelectionReference(_Reference):
     """
 
     selection_dir: str
-    dataset_id: Text
+    dataset_id: DatasetId
     kind: Literal["selection"] = "selection"
 
     def covers(self, bucket: Bucket) -> bool:
