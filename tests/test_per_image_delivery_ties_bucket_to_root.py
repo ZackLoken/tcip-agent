@@ -3,7 +3,8 @@
 The per-image count door refuses a root carrying no identity naming the root and
 ``register_dataset``, and a bucket recording another dataset than its root's naming the bucket and
 both ids, through the tool and the route, writing no CSV and no delivery event. The orthomosaic and
-per-plant doors answer the same two refusals in the same words.
+per-plant doors answer the same two refusals in the same words, and the gate every delivery passes
+refuses both, with the tie's own sentences, when a bucket reaches it untied.
 
 The one step made by hand is fault injection: after a bucket is published under a registered root,
 the root's ``dataset.json`` is removed, which only a change to the project's files outside the
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.buckets import read_bucket
-from tcip_mcp.dataset_layout import dataset_identity_path
+from tcip_mcp.dataset_layout import dataset_identity_path, image_dir
 from tcip_mcp.delivery import (
     DeliveryRefusal,
     Unacknowledgeable,
@@ -134,6 +135,70 @@ def test_a_raster_bucket_under_a_root_with_no_identity_still_answers_the_raster_
     answered = _deliver(tmp_path, bucket.root, bucket.name)
 
     assert "deliver_orthomosaic_plant_counts" in answered["error"], answered
+
+
+# ── the gate ─────────────────────────────────────────────────────────────
+
+
+def _gated(project: Path, *buckets: Bucket) -> None:
+    """Hand ``buckets`` to the gate of a per-image count delivery, as a door that made no tie."""
+    from tcip_mcp.delivery import Result, gate
+    from tcip_mcp.traits import PER_IMAGE_COUNT
+
+    gate(
+        project,
+        list(buckets),
+        delivery_kind=PER_IMAGE_COUNT,
+        revision=fx.count_revision(project),
+        result=Result((), (), population=()),
+    )
+
+
+def test_the_gate_over_a_root_with_no_identity_refuses_with_the_ties_sentence(
+    tmp_path: Path,
+) -> None:
+    """A bucket handed straight to the gate under a root with no identity refuses at the gate."""
+    root, name = _published(tmp_path)
+    bucket = read_bucket(root, name)
+    _identity_removed(root)
+
+    with pytest.raises(ValueError) as refused:
+        _gated(tmp_path, bucket)
+
+    assert str(refused.value) == unregistered_refusal(root)
+
+
+def test_the_gate_over_each_bucket_of_another_dataset_than_its_root_refuses_with_the_ties_sentence(
+    tmp_path: Path,
+) -> None:
+    """The gate refuses the old bucket under the re-registered root, whichever comes first."""
+    from tcip_mcp.buckets import require_delivered_dataset
+    from tests._chain_fixtures import predicted, published
+    from tests._mapping_fixtures import COUNT_CROP
+    from tests.test_deliver_per_image_counts_bucket_regime import SCOPE
+
+    root, name = _published(tmp_path)
+    old = read_bucket(root, name)
+    _identity_removed(root)
+    minted = _registered_again(tmp_path, root)
+    image = image_dir(root, "2026-01-01") / "a.png"
+    new = published(
+        tmp_path,
+        "again/2026-01-01",
+        [predicted(image, [SCOPE["subject"]] * 2)],
+        scope=SCOPE,
+        crop=COUNT_CROP,
+    )
+    assert new.dataset_id == minted != old.dataset_id
+    with pytest.raises(ValueError) as tie:
+        require_delivered_dataset([old])
+
+    for buckets in ((new, old), (old, new)):
+        with pytest.raises(ValueError) as refused:
+            _gated(tmp_path, *buckets)
+        assert str(refused.value) == str(tie.value)
+    for named in (old.name, old.dataset_id, minted):
+        assert named in str(tie.value), tie.value
 
 
 # ── the route ────────────────────────────────────────────────────────────
