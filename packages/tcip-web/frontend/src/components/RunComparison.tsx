@@ -79,11 +79,11 @@ function fingerprintNote({ experiments }: Comparison): string {
   const unread = experiments.filter((e) => e.kind === "uncompared");
   if (unread.length) return `not comparable: ${unread.map(entryId).join(", ")} could not be read`;
   const read = readRuns(experiments);
-  const unset = read.filter((e) => e.dataset_fingerprint === null);
+  const unset = read.filter((e) => e.dataset.fingerprint === null);
   if (unset.length) {
     return `not comparable: ${unset.map(entryId).join(", ")} carry no fingerprint`;
   }
-  return new Set(read.map((e) => e.dataset_fingerprint)).size === 1
+  return new Set(read.map((e) => e.dataset.fingerprint)).size === 1
     ? "same source images"
     : "not the same source images";
 }

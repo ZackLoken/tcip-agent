@@ -95,8 +95,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       },
       {
         "kind": "compared",
@@ -141,8 +140,7 @@
         ],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n2>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n2>" }
       }
     ],
     "directions": { "val_map50": "higher" }
@@ -173,8 +171,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       },
       {
         "kind": "compared",
@@ -200,8 +197,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       }
     ],
     "directions": {}
@@ -232,8 +228,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       }
     ],
     "directions": {}
@@ -264,8 +259,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       },
       {
         "kind": "uncompared",
@@ -301,8 +295,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       },
       {
         "kind": "compared",
@@ -328,8 +321,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": null,
-        "dataset_id": null,
-        "dataset_fingerprint": null
+        "dataset": { "id": null, "fingerprint": null }
       }
     ],
     "directions": {}
@@ -360,8 +352,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       },
       {
         "kind": "compared",
@@ -408,8 +399,7 @@
         ],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n4>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n4>" }
       }
     ],
     "directions": { "val_map50": "higher", "val_map99": "unstated" }
@@ -459,8 +449,7 @@
         ],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n6>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n6>" }
       },
       {
         "kind": "compared",
@@ -486,8 +475,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       }
     ],
     "directions": {}
@@ -536,8 +524,7 @@
         ],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n8>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n8>" }
       },
       {
         "kind": "compared",
@@ -582,8 +569,7 @@
         ],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n2>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n2>" }
       }
     ],
     "directions": { "val_map50": "higher", "val_map99": "unstated" }
@@ -2125,8 +2111,7 @@
           "redraw": false
         },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       },
       {
         "kind": "compared",
@@ -2152,8 +2137,7 @@
         "registry": [],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n0>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n0>" }
       }
     ],
     "directions": {}
@@ -2359,8 +2343,7 @@
         ],
         "split": { "case": "drawn", "seed": 0 },
         "subject": null,
-        "dataset_id": null,
-        "dataset_fingerprint": null
+        "dataset": { "id": null, "fingerprint": null }
       },
       {
         "kind": "compared",
@@ -2405,8 +2388,7 @@
         ],
         "split": { "case": "drawn", "seed": 0 },
         "subject": "bud",
-        "dataset_id": null,
-        "dataset_fingerprint": "<dataset_fingerprint n6>"
+        "dataset": { "id": null, "fingerprint": "<fingerprint n6>" }
       }
     ],
     "directions": {
