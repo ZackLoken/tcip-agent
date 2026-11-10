@@ -95,7 +95,7 @@ def _validated_bucket(project: Path) -> Bucket:
         synthetic_capture,
         train_on,
     )
-    from tests._mapping_fixtures import map_plants
+    from tests._mapping_fixtures import map_plants, register_dataset_at
     from tests._training_values import (
         DISPERSION_QUANTILE,
         EQUIVALENCE_Z,
@@ -108,6 +108,7 @@ def _validated_bucket(project: Path) -> Bucket:
     images_dir = synthetic_capture(
         root, positions=plant_captures(dict.fromkeys(PLANTS, 1))
     )
+    register_dataset_at(project, root, crop=COUNT_CROP)
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, "exp-scale-event")
     assessment = assess_checkpoint(
