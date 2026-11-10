@@ -12,3 +12,7 @@ Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Crop = Text
 """A crop's name as a record holds it, refused empty as :data:`Text` is; which names exist is
 crops.yml's, checked where a record is registered."""
+
+DatasetId = Text
+"""A dataset's minted id as a record holds it, refused empty as :data:`Text` is and read back
+stripped."""
