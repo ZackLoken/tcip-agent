@@ -41,6 +41,7 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_DETECTOR_PASS,
     project_checkpoint,
 )
+from tests.test_typed_store_records import NO_ID  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -248,7 +249,8 @@ TILED = Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS)
 def _mosaic(path: Path) -> Path:
     """Write a black 64 px raster at ``path``, its directory made, and return it.
 
-    No platform producer places a raster outside a capture, so a test placing one writes it.
+    It is the one raster this file writes by hand: an ingest's source, or one outside a capture,
+    where no platform producer places a raster.
     """
     import numpy as np
     import tifffile
@@ -290,9 +292,7 @@ def test_a_raster_outside_a_capture_publishes_a_bucket_of_its_roots_dataset(
     )
 
 
-@pytest.mark.parametrize(
-    "stated", [None, "", "   "], ids=["null", "empty", "whitespace"]
-)
+@NO_ID
 def test_a_bucket_record_stating_no_dataset_refuses_at_its_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stated: str | None
 ) -> None:
@@ -385,15 +385,9 @@ def _unregistered_source(tmp_path: Path, *, raster: bool) -> Path:
     The source is a black 64 px raster ``mosaic.tif`` when ``raster``, else a 100 px gray
     ``img.png`` (:func:`~tests._producer_fixtures.gray_frame`); returns its ingested path.
     """
-    import numpy as np
-    import tifffile
-
     raw = tmp_path / "raw"
     if raster:
-        raw.mkdir()
-        tifffile.imwrite(
-            str(raw / "mosaic.tif"), np.zeros((64, 64, 3), dtype=np.uint8)
-        )
+        _mosaic(raw / "mosaic.tif")
     else:
         gray_frame(raw, 100)
     (name,) = (p.name for p in raw.iterdir())
