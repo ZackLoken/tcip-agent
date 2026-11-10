@@ -43,8 +43,11 @@ def _bucket(
 ) -> str:
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
+    from tests._mapping_fixtures import COUNT_CROP
 
-    return published(project, f"{name}/2026-01-01", results, scope=SCOPE).name
+    return published(
+        project, f"{name}/2026-01-01", results, scope=SCOPE, crop=COUNT_CROP
+    ).name
 
 
 def _deliver(

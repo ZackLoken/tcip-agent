@@ -16,7 +16,7 @@ import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx, csv_rows
-from tests._mapping_fixtures import COUNT_CROP, CROP, PLOTS, write_plots_csv
+from tests._mapping_fixtures import COUNT_CROP, PLOTS, write_plots_csv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -112,7 +112,7 @@ def _bucket(
     counts: dict[str, int],
     name: str = "manual",
     *,
-    crop: str | None = CROP,
+    crop: str | None = COUNT_CROP,
 ) -> str:
     """Publish a bucket named ``<name>/<date>`` under ``project`` and return its name.
 

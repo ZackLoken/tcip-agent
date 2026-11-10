@@ -602,11 +602,13 @@ def _unassessed_count_bucket(
 ) -> Bucket:
     """Publish and return an unassessed bucket of two frames with three detections each.
 
-    The bucket is ``live/counts`` of the project's own images, in a project whose count trait is
-    confirmed.
+    The bucket is ``live/counts`` of the project's own images, the project registered as its
+    own dataset at :data:`~tests._mapping_fixtures.COUNT_CROP`, in a project whose count trait
+    is confirmed.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
+    from tests._mapping_fixtures import COUNT_CROP
 
     fx.seed_delivery_traits(project)
     fx.seed_confirmed_count(project, measured_subject=fx.COUNT_SUBJECT)
@@ -619,6 +621,7 @@ def _unassessed_count_bucket(
             for i in range(2)
         ],
         scope=scope,
+        crop=COUNT_CROP,
     )
     open_new_project(project)
     return bucket

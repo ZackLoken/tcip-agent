@@ -32,6 +32,7 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
         deliver_per_image_counts_csv,
     )
     from tests._chain_fixtures import acknowledged, predicted, published
+    from tests._mapping_fixtures import COUNT_CROP
     from tests._producer_fixtures import registry_of
 
     posture = cr.Attribute("posture", "categorical", ("upright", "lodged"))
@@ -43,6 +44,7 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
         [predicted(image, ["upright", "lodged"], (posture,))],
         scope={"subject": SUBJECT},
         registry=registry,
+        crop=COUNT_CROP,
     )
     out = tmp_path / "counts.csv"
 
