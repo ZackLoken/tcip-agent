@@ -157,6 +157,54 @@ def dataset_registered(
     return dataset_root
 
 
+def ingested_unregistered(root: Path, raw: Path) -> Path:
+    """Ingest the images under ``raw`` into ``root`` through ``ingest_images``, registering nothing.
+
+    Each image is to state no capture date, so every one lands in the undated capture, whose
+    directory is returned.
+    """
+    from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
+
+    ingested = ingest_images(root, source=str(raw), actor=None)
+    assert isinstance(ingested, IngestManifest) and ingested.copied, ingested
+    return image_dir(root, UNDATED_BUCKET)
+
+
+def left_written(project: Path, root: Path) -> dict[str, list]:
+    """Return what a door can write for ``project`` over the dataset root ``root``.
+
+    That is the audit rows of each, the buckets published and the proposal runs staged under
+    ``root``, and the raster-pass progress records and assessment directories under ``project``.
+    """
+    import tcip_store as ts
+    from tcip_mcp.assessment import ASSESSMENTS_DIR
+    from tcip_mcp.buckets import buckets_under
+    from tcip_mcp.tools.inference_tools import RASTER_PASS_PROGRESS_STORE
+    from tcip_mcp.tools.proposal_tools import PROPOSAL_STAGING_STORE
+    from tests._audit_fixtures import audit_rows
+
+    assessments = Path(project, ASSESSMENTS_DIR)
+    return {
+        "project_audit": audit_rows(project),
+        "root_audit": audit_rows(root),
+        "buckets": [b.name for b in buckets_under(root)],
+        "staged": ts.keys(PROPOSAL_STAGING_STORE, str(root)),
+        "progress": ts.keys(RASTER_PASS_PROGRESS_STORE, str(project)),
+        "assessments": sorted(p.name for p in assessments.glob("*")),
+    }
+
+
+def unregistered_refusal(root: Path) -> str:
+    """Return the sentence ``dataset_layout.require_dataset_identity`` refuses ``root`` with."""
+    import pytest
+
+    from tcip_mcp.dataset_layout import require_dataset_identity
+
+    with pytest.raises(ValueError, match="register_dataset") as refused:
+        require_dataset_identity(root)
+    return str(refused.value)
+
+
 def published_document(
     project: Path,
     name: str,
