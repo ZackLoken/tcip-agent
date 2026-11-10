@@ -284,7 +284,7 @@ def synthetic_capture(
     *,
     date: str = DATE,
     positions: Mapping[str, tuple[float, float]] | None = None,
-    crop: str = COUNT_CROP,
+    crop: str | None = COUNT_CROP,
 ) -> Path:
     """Ingest one capture date of painted frames into ``root`` through ``ingest_images``.
 
@@ -293,8 +293,8 @@ def synthetic_capture(
     names carries that ``(lat, lon)`` in its EXIF, reporting
     :data:`~tests._mapping_fixtures.PHOTO_POSITION_ERROR_M`. ``root`` is then registered in
     ``project`` at ``crop`` when it carries no identity
-    (:func:`~tests._producer_fixtures.dataset_registered`). Returns the capture's image
-    directory.
+    (:func:`~tests._producer_fixtures.dataset_registered`), and left as ingested when ``crop`` is
+    ``None``. Returns the capture's image directory.
     """
     from datetime import datetime
 
@@ -346,7 +346,8 @@ def synthetic_capture(
             IMG,
             IMG,
         )
-    dataset_registered(project, root, crop=crop)
+    if crop is not None:
+        dataset_registered(project, root, crop=crop)
     return images_dir
 
 

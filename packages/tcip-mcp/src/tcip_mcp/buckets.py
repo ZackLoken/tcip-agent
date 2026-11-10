@@ -322,6 +322,17 @@ def source_root(sources: Iterable[str | Path]) -> Path:
     return _one_root(map(root_of, sources), "a bucket's source images")
 
 
+def source_dataset_identity(sources: Iterable[str | Path]) -> DatasetRecord:
+    """Return the identity record of the dataset root :func:`source_root` answers for ``sources``.
+
+    Refuses (``ValueError``) what :func:`source_root` refuses, and a root never registered
+    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming ``register_dataset``).
+    """
+    from tcip_mcp.dataset_layout import require_dataset_identity
+
+    return require_dataset_identity(source_root(sources))
+
+
 def publish(
     project: Path,
     root: Path,

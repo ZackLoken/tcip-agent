@@ -456,18 +456,17 @@ def _selection_reference(
     samples: list[Sample],
     digest_of: dict[str, str],
     retained: list[RetainedFile],
+    dataset_id: str,
 ) -> SelectionReference:
     """Return what an assessment measured of the selection at ``selection_dir``.
 
-    It holds the identity id the one dataset root of its samples records as it is measured
-    (:func:`~tcip_mcp.dataset_layout.dataset_id_of` the root of its first sample), every retained
-    file, and each sample beside its source digest (:func:`_reference_samples`).
+    It holds ``dataset_id``, the identity id of its samples' dataset root as
+    :func:`_reference_sides` read it, every retained file, and each sample beside its source
+    digest (:func:`_reference_samples`).
     """
-    from tcip_mcp.dataset_layout import dataset_id_of, image_capture
-
     return SelectionReference(
         selection_dir=selection_dir,
-        dataset_id=dataset_id_of(image_capture(samples[0].source)[0]),
+        dataset_id=dataset_id,
         ground_truth=retained,
         samples=_reference_samples(samples, digest_of),
     )
@@ -475,11 +474,16 @@ def _selection_reference(
 
 def _reference_sides(
     project: Path, selection_dir: str
-) -> tuple[Selection, list[Sample], list[Sample]]:
-    """Return the selection at ``selection_dir`` and its calibration and holdout sides.
+) -> tuple[Selection, list[Sample], list[Sample], str]:
+    """Return the selection at ``selection_dir``, its calibration and holdout sides and dataset id.
 
-    A selection holding either side empty refuses (:class:`AssessmentRefusedError`).
+    The id is the identity id of the one dataset root every sample of the selection lies under
+    (:func:`~tcip_mcp.buckets.source_dataset_identity`). A selection holding either side empty
+    refuses (:class:`AssessmentRefusedError`); samples under no dataset image tree or under two
+    roots, and a root never registered, refuse (``ValueError``), the last naming
+    ``register_dataset``.
     """
+    from tcip_mcp.buckets import source_dataset_identity
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
         read_selection,
@@ -499,7 +503,8 @@ def _reference_sides(
             "assessment fits on the calibration side and checks on the "
             "holdout side. Draw a selection with both (draw_splits)."
         )
-    return selection, cal, hold
+    identity = source_dataset_identity(s.source for s in selection.samples)
+    return selection, cal, hold, identity.id
 
 
 def _refuse_short_reference(counts: dict[str, Iterable[int]]) -> None:
@@ -684,17 +689,22 @@ def assess(
     and ``dispersion_quantile`` (:func:`~tcip_mcp.pipelines.operating_point.count_criterion`); the
     record carries ``rationale``, why the assessment states them.
 
-    Refuses before any inference when the selection holds no calibration or no holdout side, when
-    the checkpoint's head does not produce what the kind measures, and when a state-crossing
-    checkpoint classifies no positive state (:class:`AssessmentRefusedError`); and before any
-    inference over it, a reference the admission would not admit or only the model stands behind
-    (:func:`_admit_reference`), and, for a detector's kind, a reference side holding fewer
-    ground-truth-bearing images than :data:`REFERENCE_FLOOR` (:func:`_refuse_short_reference`),
-    before any run directory opens.
+    Refuses before the revision is read or the checkpoint loads what :func:`_reference_sides`
+    refuses: an unreadable selection, one holding no calibration or no holdout side, and one
+    whose samples lie under no one dataset root or under a root never registered. Then refuses
+    before any inference when the checkpoint's head does not produce what the kind measures, and
+    when a state-crossing checkpoint classifies no positive state
+    (:class:`AssessmentRefusedError`); and before any inference over it, a reference the
+    admission would not admit or only the model stands behind (:func:`_admit_reference`), and,
+    for a detector's kind, a reference side holding fewer ground-truth-bearing images than
+    :data:`REFERENCE_FLOOR` (:func:`_refuse_short_reference`), before any run directory opens.
     """
     from tcip_mcp.pipelines.data.selection import source_digests
 
     selection_dir = str(located(selection_dir, project))
+    _selection, cal, hold, dataset_id = _reference_sides(
+        project, selection_dir
+    )
     revision, prep = _prepared(
         project,
         checkpoint_path=checkpoint_path,
@@ -704,7 +714,6 @@ def assess(
         device=device,
         tile_batch_size=tile_batch_size,
     )
-    _selection, cal, hold = _reference_sides(project, selection_dir)
     state = revision.entry.positive_state
     positive = (
         prep.scope.state_ids(state)
@@ -775,7 +784,7 @@ def assess(
             execution=p.execution,
             rationale=rationale,
             reference=_selection_reference(
-                str(selection_dir), cal + hold, digest_of, retained
+                str(selection_dir), cal + hold, digest_of, retained, dataset_id
             ),
             disjointness=disjointness,
             criterion=criterion,
@@ -1122,10 +1131,14 @@ def assess_reserved_regions(
     (:class:`AssessmentRefusedError`) a delivery that is not a count, a checkpoint no run of this
     project produced, a run with no reserved regions, regions not attested complete, too few
     bands carrying ground truth, a band not held out from the run's training regions, a mosaic
-    that changed since the split, and a mosaic label document only the model stands behind.
+    that changed since the split, and a mosaic label document only the model stands behind. A
+    mosaic whose dataset root was never registered refuses (``ValueError``) once the checkpoint
+    names it and before its reference is read
+    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`).
     """
     import numpy as np
 
+    from tcip_mcp.buckets import source_dataset_identity
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, object_region
@@ -1165,6 +1178,7 @@ def assess_reserved_regions(
             "calibration and holdout region (train it with data.split.calibration_ratio set)."
         )
     (mosaic,) = resolved.partition.samples
+    source_dataset_identity([mosaic.source])
     stem = mosaic.member
     lattice = cast("TilingSpec", resolved.data.tiling)
     tile_size, overlap = (
@@ -1495,9 +1509,10 @@ def assess_physical_scale(
     scale of the calibration side; it passes when the holdout's own relative dispersion and the
     scale's relative deviation from the holdout mean are both within ``scale_tolerance_frac``.
     Refuses an unauthored tolerance, a unit that is not a linear length unit crops.yml declares, a
-    selection without both reference sides, a reference the admission would not admit or only the
-    model stands behind, a reference image with no row in the CSV, a non-positive extent, and a
-    reference annotation that is not exactly one polygon.
+    selection without both reference sides or whose samples lie under no one dataset root or a
+    root never registered (:func:`_reference_sides`), a reference the admission would not admit
+    or only the model stands behind, a reference image with no row in the CSV, a non-positive
+    extent, and a reference annotation that is not exactly one polygon.
     """
     import math
     import statistics
@@ -1520,7 +1535,7 @@ def assess_physical_scale(
             f"linear length unit crops.yml declares "
             f"({sorted(crops_length_units())})."
         )
-    selection, cal, hold = _reference_sides(project, selection_dir)
+    selection, cal, hold, dataset_id = _reference_sides(project, selection_dir)
     admitted = _admit_reference(cal + hold, selection.scope)
     cal, hold = admitted[: len(cal)], admitted[len(cal) :]
     reads = _reference_reads(cal + hold, (reference_csv,))
@@ -1604,7 +1619,7 @@ def assess_physical_scale(
         partial(
             ScaleAssessment,
             reference=_selection_reference(
-                str(selection_dir), cal + hold, digest_of, retained
+                str(selection_dir), cal + hold, digest_of, retained, dataset_id
             ),
             disjointness=disjointness,
             criterion=AssessmentEvidence(scale=evidence),

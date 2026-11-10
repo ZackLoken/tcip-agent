@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_mcp.pipelines.raster_source import RasterSource
     from tcip_mcp.pipelines.training.evaluation import EvaluationRecord
+    from tcip_mcp.workspace import BoundProject
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -145,12 +146,14 @@ def _build_experiment(
     calibration_ratio: float = 0.15,
     experiment_id: str = "exp_block",
     plant_csv_paths: list[str] | None = None,
+    registered: bool = True,
 ) -> dict:
     """Write and label a mosaic, run :func:`_completed_over` over it, and return what it left.
 
     The mosaic is ``_write_mosaic``'s, georeferenced when ``plant_csv_paths`` is given, labeled
     with a row of 15 by 30 ``bud`` boxes, its dataset ``ds`` registered at
-    :data:`~tests._mapping_fixtures.COUNT_CROP`. The run's data section tiles at ``TILE`` with
+    :data:`~tests._mapping_fixtures.COUNT_CROP` unless ``registered`` is false. The run's data
+    section tiles at ``TILE`` with
     overlap 0.2 and draws a tile-prefix split at seed 1 with validation ratio 0.2, holdout ratio
     0.15 and ``calibration_ratio``, stating ``plant_csv_paths`` when given.
     """
@@ -166,7 +169,8 @@ def _build_experiment(
         for x in range(10, WIDTH - 20, BOX_STEP)
     ]
     label_image(raster_path, boxes, WIDTH, HEIGHT)
-    register_dataset_at(tmp_path, root, crop=COUNT_CROP)
+    if registered:
+        register_dataset_at(tmp_path, root, crop=COUNT_CROP)
 
     data_cfg = {
         "images_dir": str(images_dir),
@@ -336,6 +340,52 @@ def test_completeness_is_checked_before_feasibility(tmp_path: Path) -> None:
         _assess(exp, k_cal=40, k_test=40)
     assert "not marked complete" in str(exc_info.value)
     assert "ground-truth-bearing" not in str(exc_info.value)
+
+
+def test_a_mosaic_of_a_root_never_registered_refuses_before_its_reference_is_read(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """A mosaic whose dataset root was never registered refuses before its regions are read.
+
+    The run trained over a mosaic of a root never registered, its reserved regions unattested.
+    Called through the server, the answer is the one sentence ``require_dataset_identity``
+    refuses the root with, and nothing is recorded or logged; registered, the same call meets
+    the regions' completeness refusal.
+    """
+    from tests._producer_fixtures import left_written, unregistered_refusal
+    from tests._server_calls import called_through_the_server
+    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
+
+    exp = _build_experiment(tmp_path, registered=False)
+    root = exp["root"]
+    arguments = {
+        "checkpoint_path": exp["checkpoint_path"],
+        "trait": fx.COUNT_TRAIT,
+        "delivery_kind": "per_image_count",
+        "k_cal": 3,
+        "k_test": 3,
+        "equivalence_z": EQUIVALENCE_Z,
+        "dispersion_quantile": DISPERSION_QUANTILE,
+        "rationale": RATIONALE,
+        "stated": collection_pass(
+            postprocess="nms", cross_tile_nms=SAMPLE_CROSS_TILE_NMS
+        ).model_dump(mode="json", exclude_unset=True),
+        "device": "cpu",
+    }
+    before = left_written(tmp_path, root)
+
+    refused = called_through_the_server(
+        "assess_reserved_regions", arguments, bound=bound
+    )
+
+    assert refused == {"error": unregistered_refusal(root)}, refused
+    assert left_written(tmp_path, root) == before
+    register_dataset_at(tmp_path, root, crop=COUNT_CROP)
+    answer = called_through_the_server(
+        "assess_reserved_regions", arguments, bound=bound
+    )
+    assert isinstance(answer, dict), answer
+    assert "not marked complete" in answer["error"], answer
 
 
 def test_a_stated_tile_edge_other_than_the_splits_refuses_naming_both(

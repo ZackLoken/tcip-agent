@@ -16,6 +16,8 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PIL import ImageDraw
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution, MaskCut, Pass
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.traits import TraitEntry
+    from tcip_mcp.workspace import BoundProject
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -357,6 +360,209 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     for root in (tmp_path / "ds", other):
         assert str(root) in str(refused.value), refused.value
     assert read_selection(selection_dir, project=tmp_path) == drawn
+
+
+def _assessed_with_no_checkpoint_file(
+    project: Path, selection_dir: Path
+) -> dict:
+    """Return ``assess_checkpoint``'s arguments over ``selection_dir`` naming no checkpoint file.
+
+    The count trait is confirmed first (:func:`confirm_count_trait`), so the assessment is for its
+    per-image count under the sample collection pass and count test settings.
+    """
+    confirm_count_trait(project)
+    return {
+        "checkpoint_path": str(project / "absent.pt"),
+        "trait": fx.COUNT_TRAIT,
+        "delivery_kind": "per_image_count",
+        "selection_dir": str(selection_dir),
+        "equivalence_z": EQUIVALENCE_Z,
+        "dispersion_quantile": DISPERSION_QUANTILE,
+        "rationale": RATIONALE,
+        "stated": collection_pass().model_dump(
+            mode="json", exclude_unset=True
+        ),
+    }
+
+
+def test_an_assessment_under_a_root_never_registered_refuses_before_its_checkpoint_is_read(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """An assessment over a selection of a root never registered refuses before its checkpoint.
+
+    The selection is drawn over a capture ingested and never registered, and the checkpoint path
+    names no file. Called through the server, the answer is the one sentence
+    ``require_dataset_identity`` refuses the root with, and nothing is recorded or logged;
+    registered, the same call meets the checkpoint's own refusal.
+    """
+    from tests._mapping_fixtures import COUNT_CROP
+    from tests._producer_fixtures import (
+        left_written,
+        register_dataset_at,
+        unregistered_refusal,
+    )
+    from tests._server_calls import called_through_the_server
+
+    root = tmp_path / "ds"
+    synthetic_capture(tmp_path, root, crop=None)
+    selection_dir = tmp_path / "selection"
+    draw_reference_selection(tmp_path, root, selection_dir)
+    arguments = _assessed_with_no_checkpoint_file(tmp_path, selection_dir)
+    before = left_written(tmp_path, root)
+
+    refused = called_through_the_server(
+        "assess_checkpoint", arguments, bound=bound
+    )
+
+    assert refused == {"error": unregistered_refusal(root)}, refused
+    assert left_written(tmp_path, root) == before
+    register_dataset_at(tmp_path, root, crop=COUNT_CROP)
+    answer = called_through_the_server(
+        "assess_checkpoint", arguments, bound=bound
+    )
+    assert isinstance(answer, dict), answer
+    assert arguments["checkpoint_path"] in answer["error"], answer
+
+
+def test_an_assessment_reads_its_selection_before_its_checkpoint(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """An assessment naming no recorded selection and no checkpoint file meets the selection first.
+
+    Called through the server, the answer is the selection's refusal, naming its directory.
+    """
+    from tcip_mcp.pipelines.data.selection import selection_place
+    from tests._server_calls import called_through_the_server
+
+    selection_dir = tmp_path / "selection"
+
+    refused = called_through_the_server(
+        "assess_checkpoint",
+        _assessed_with_no_checkpoint_file(tmp_path, selection_dir),
+        bound=bound,
+    )
+
+    assert isinstance(refused, dict), refused
+    assert selection_place(selection_dir) in refused["error"], refused
+    assert "no selection recorded there" in refused["error"], refused
+
+
+def _relocated(
+    project: Path,
+    selection_dir: Path,
+    place: Callable[[int, str], Path],
+    out: Path,
+) -> list[str]:
+    """Write at ``out`` the selection at ``selection_dir``, each sample's image copied elsewhere.
+
+    Sample ``i``'s image is copied to ``project / place(i, its file name)`` and the sample names
+    that copy as its source, every other field the drawn selection's own; the selection is
+    written through ``write_selection``. Returns the sources it reads back with, in sample order.
+    """
+    from dataclasses import replace
+
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        write_selection,
+    )
+
+    drawn = read_selection(selection_dir, project=project)
+    samples = []
+    for i, sample in enumerate(drawn.samples):
+        copy = project / place(i, Path(sample.source).name)
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(sample.source, copy)
+        samples.append(replace(sample, source=str(copy)))
+    write_selection(
+        out, replace(drawn, samples=tuple(samples)), project=project
+    )
+    return [s.source for s in read_selection(out, project=project).samples]
+
+
+@pytest.mark.parametrize(
+    "place",
+    [
+        lambda i, name: Path("loose", name),
+        lambda i, name: Path("a" if i == 0 else "b", "images", name),
+    ],
+    ids=["under_no_image_tree", "under_two_image_trees"],
+)
+@pytest.mark.parametrize(
+    "door", ["assess_checkpoint", "calibrate_physical_scale"]
+)
+def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_either_door(
+    tmp_path: Path,
+    bound: BoundProject,
+    door: str,
+    place: Callable[[int, str], Path],
+) -> None:
+    """A selection whose samples lie under no image tree, or under two, refuses at either door.
+
+    Each sample of a drawn reference names a copy of its image outside any capture: in no image
+    tree, or the first sample under one root's image tree and every other under a second's.
+    ``write_selection`` writes that selection, and called through the server each assessment door
+    answers the refusal ``buckets.source_root`` gives over every one of its samples.
+    """
+    from tcip_mcp.buckets import source_root
+    from tests._server_calls import called_through_the_server
+    from tests.test_physical_scale_assessment import (
+        SUBJECT as BAR,
+        _author_tolerance,
+        _reference,
+    )
+
+    drawn, csv_path = _reference(tmp_path)
+    selection_dir = tmp_path / "relocated"
+    sources = _relocated(tmp_path, drawn, place, selection_dir)
+    if door == "assess_checkpoint":
+        arguments = _assessed_with_no_checkpoint_file(tmp_path, selection_dir)
+    else:
+        fx.seed_delivery_traits(tmp_path)
+        _author_tolerance(tmp_path)
+        arguments = {
+            "trait": "plant_surface_area",
+            "selection_dir": str(selection_dir),
+            "reference_csv": str(csv_path),
+            "unit": "mm",
+            "reference_subject": BAR,
+        }
+    with pytest.raises(ValueError) as unrooted:
+        source_root(sources)
+
+    refused = called_through_the_server(door, arguments, bound=bound)
+
+    assert refused == {"error": str(unrooted.value)}, refused
+
+
+def test_an_assessments_reference_records_the_id_its_root_is_registered_under(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """An assessment's reference records the id ``read_dataset_identity`` reads of its root.
+
+    The assessment is ``assess_checkpoint``'s, called through the server over a trained detector's
+    reference selection.
+    """
+    from tcip_mcp.dataset_layout import read_dataset_identity
+    from tests._chain_fixtures import trained_detector
+    from tests._server_calls import called_through_the_server
+
+    root, _images, selection_dir, checkpoint = trained_detector(
+        tmp_path, experiment_id="exp-reference-id"
+    )
+    arguments = _assessed_with_no_checkpoint_file(tmp_path, selection_dir)
+
+    assessed = called_through_the_server(
+        "assess_checkpoint",
+        {**arguments, "checkpoint_path": checkpoint},
+        bound=bound,
+    )
+
+    identity = read_dataset_identity(root)
+    assert identity is not None
+    assert isinstance(assessed, dict) and "error" not in assessed, assessed
+    reference = assessed["reference"]
+    assert isinstance(reference, dict), reference
+    assert reference["dataset_id"] == identity.id
 
 
 def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region() -> (
