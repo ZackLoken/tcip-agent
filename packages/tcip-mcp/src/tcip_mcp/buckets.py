@@ -210,32 +210,22 @@ def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:
     return dated
 
 
-def shared_root(buckets: Iterable[Bucket]) -> Path:
-    """Return the one dataset root every bucket of ``buckets`` is published under.
-
-    Buckets under more than one root, or no bucket, refuse (``ValueError``) naming them.
-    """
-    from tcip_mcp.dataset_layout import _one_root
-
-    return _one_root((b.root for b in buckets), "a delivery's buckets")
-
-
 def require_delivered_dataset(
     buckets: Iterable[Bucket],
 ) -> tuple[Path, DatasetRecord]:
     """Require every bucket of ``buckets`` to record the dataset its root is.
 
-    Returns the one root the buckets are published under (:func:`shared_root`) and that root's
-    identity record. Buckets under more than one root or none, a root carrying no identity
+    Returns the one root the buckets are published under and that root's identity record.
+    Buckets under more than one root or none, a root carrying no identity
     (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming ``register_dataset``) and
     a bucket recording another dataset than its root's identity names all refuse
     (``ValueError``); the last names the bucket, its root, the id it records and the id of its
     root.
     """
-    from tcip_mcp.dataset_layout import require_dataset_identity
+    from tcip_mcp.dataset_layout import _one_root, require_dataset_identity
 
     delivered = list(buckets)
-    root = shared_root(delivered)
+    root = _one_root((b.root for b in delivered), "a delivery's buckets")
     identity = require_dataset_identity(root)
     for bucket in delivered:
         if bucket.dataset_id != identity.id:
