@@ -263,10 +263,11 @@ def _published(project: Path) -> tuple[Bucket, Pass, VerifiedCheckpoint, Path]:
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tests._chain_fixtures import RATIONALE, predicted
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import register_dataset_at, write_image
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     image = write_image(image_dir(project / "ds", DATE) / "a.png", (64, 64))
+    register_dataset_at(project, project / "ds", crop=CROP)
     checkpoint = load_registered_checkpoint(
         _run_checkpoint(
             project, data={"num_channels": 3, "scope": {"subject": "bud"}}
@@ -324,10 +325,11 @@ def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
     )
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import register_dataset_at, write_image
 
     image = write_image(image_dir(tmp_path / "ds", DATE) / "a.png", (64, 64))
     root = source_root([str(image)])
+    register_dataset_at(tmp_path, root, crop=CROP)
     publish(
         tmp_path,
         root,

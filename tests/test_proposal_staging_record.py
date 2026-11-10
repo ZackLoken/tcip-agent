@@ -18,7 +18,9 @@ import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import (
+    dataset_registered,
     install_stub_proposer,
     kept,
     write_image,
@@ -28,6 +30,12 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import RasterSource
     from tcip_mcp.tools.vision_tools import DisplayRead
     from tcip_store import Key
+
+
+@pytest.fixture(autouse=True)
+def _registered(tmp_path: Path) -> None:
+    """Register ``tmp_path``, the dataset root every image here is written under, in itself."""
+    dataset_registered(tmp_path, tmp_path, crop=CROP)
 
 
 def _candidate(candidate_id: int, x0: float) -> dict:

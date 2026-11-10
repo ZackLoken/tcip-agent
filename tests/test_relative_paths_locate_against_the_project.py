@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
 from tests._training_values import (
     COMBINED_SCORER,
     IOU_THRESHOLD,
@@ -217,6 +219,7 @@ def _stage_proposals(project: Path) -> dict:
         "w": 0.25,
         "h": 0.25,
     }
+    register_dataset_at(project, project, crop=CROP)
     result = stage_proposals(
         project, IMAGE, boxes=[box], model_name="stub", actor=None
     )
@@ -333,6 +336,7 @@ def _published(project: Path) -> None:
     from tcip_mcp.tools.inference_tools import run_inference
 
     _labeled(project)
+    register_dataset_at(project, project, crop=CROP)
     result = run_inference(
         project,
         str((project / _registered(project)).resolve()),
@@ -347,6 +351,7 @@ def _published(project: Path) -> None:
 def _run_inference(project: Path) -> Path:
     from tcip_mcp.tools.inference_tools import run_inference
 
+    register_dataset_at(project, project, crop=CROP)
     result = run_inference(
         project,
         _registered(project),

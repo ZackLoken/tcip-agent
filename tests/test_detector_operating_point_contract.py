@@ -405,13 +405,19 @@ def _checkpoint(tmp_path: Path, builder: str) -> str:
 def _assessed(tmp_path: Path, builder: str) -> dict:
     """Assess ``builder``'s checkpoint over a drawn selection and return its record or error.
 
-    The images are each their own size, each labeled at its central box spanning half its edge.
+    The images are each their own size, each labeled at its central box spanning half its edge,
+    in the dataset ``ds`` registered at :data:`~tests._mapping_fixtures.COUNT_CROP`.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._chain_fixtures import assess, confirm_count_trait
-    from tests._producer_fixtures import label_image, write_image
+    from tests._mapping_fixtures import COUNT_CROP
+    from tests._producer_fixtures import (
+        label_image,
+        register_dataset_at,
+        write_image,
+    )
 
     root = tmp_path / "ds"
     images_dir = image_dir(root, "2-11-26")
@@ -426,6 +432,7 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
             size,
             size,
         )
+    register_dataset_at(tmp_path, root, crop=COUNT_CROP)
     selection_dir = tmp_path / "selection"
     drawn = draw_splits(
         tmp_path,

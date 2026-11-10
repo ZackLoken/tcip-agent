@@ -23,6 +23,7 @@ from tests._mapping_fixtures import (
     register_plant_registry_for,
     write_plant_csv,
 )
+from tests._producer_fixtures import register_dataset_at
 from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
 
 if TYPE_CHECKING:
@@ -294,6 +295,7 @@ def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ra
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
     result = run_inference(
@@ -338,6 +340,7 @@ def test_a_second_raster_export_into_a_published_bucket_refuses_and_leaves_it_wh
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
     first = run_inference(
         tmp_path,
@@ -371,6 +374,7 @@ def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
 
     no_checkpoint = run_inference(
         tmp_path,
@@ -406,6 +410,7 @@ def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
 
     refused = run_inference(
         tmp_path,
@@ -432,6 +437,7 @@ def test_an_unassessed_raster_bucket_refuses_at_the_door_that_takes_no_acknowled
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     registry = _plant_registry(
         tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
@@ -464,6 +470,7 @@ def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(
         tmp_path,
         raster_path,
@@ -511,6 +518,7 @@ def test_a_delivery_reads_the_rasters_georeferencing_once(
     """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     registry = _plant_registry(
         tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
@@ -544,6 +552,7 @@ def test_a_delivery_reads_the_confirmed_revision_once_per_act(
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     registry = _plant_registry(
         tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
@@ -568,6 +577,7 @@ def test_a_delivery_reads_the_confirmed_revision_once_per_act(
 def test_a_far_detection_is_counted_to_no_plant(tmp_path: Path) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(
         tmp_path,
         raster_path,
@@ -662,6 +672,7 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(
         tmp_path,
         raster_path,
@@ -710,6 +721,7 @@ def test_a_registered_plant_csv_that_changed_since_registration_refuses_by_name(
 ) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
     registry = _plant_registry(tmp_path, plant_csv)
@@ -737,6 +749,7 @@ def test_a_registered_plant_csv_that_changed_since_registration_refuses_by_name(
 def test_an_unchanged_registry_csv_delivers(tmp_path: Path) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     registry = _plant_registry(
         tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
@@ -806,6 +819,7 @@ def test_a_registry_naming_a_plant_twice_or_not_at_all_refuses(
 ) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     registry = _plant_registry(
         tmp_path, _plants_csv_at(tmp_path, raster_path, rows)

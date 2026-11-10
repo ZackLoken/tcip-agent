@@ -155,7 +155,8 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
         BESPOKE_REGRESSOR,
         FRAME_STATISTICS,
     )
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at, write_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(
@@ -169,6 +170,7 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
     )
     images = image_dir(tmp_path / "ds", "2026-01-01")
     write_image(images / "a.png", (32, 32), (90, 90, 90))
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=CROP)
     p = prepare(checkpoint, Stated(), images_dir=str(images)).runnable()
 
     bucket = publish(

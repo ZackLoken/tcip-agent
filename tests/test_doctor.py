@@ -620,13 +620,16 @@ def _published_bucket(
 ) -> list[Path]:
     """Publish the bucket ``name`` by ``producer`` over a new image of each of ``stems``.
 
-    The images are written into the capture ``images_dir`` of ``root``; the bucket holds one
-    ``bud`` box per image, its documents encoded as the proposal door encodes them. Returns the
-    images.
+    The images are written into the capture ``images_dir`` of ``root``, their dataset registered
+    in ``root`` at :data:`~tests._mapping_fixtures.CROP` when it carries no identity; the bucket
+    holds one ``bud`` box per image, its documents encoded as the proposal door encodes them.
+    Returns the images.
     """
     from tcip_mcp.buckets import Document, publish, source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import dataset_registered
 
     images = [write_image(images_dir / f"{s}.JPG", (32, 32)) for s in stems]
     box = Annotation(
@@ -634,7 +637,7 @@ def _published_bucket(
     )
     publish(
         root,
-        source_root(images),
+        dataset_registered(root, source_root(images), crop=CROP),
         name,
         [
             Document(str(i), json_io.document_payload([box], 32, 32))

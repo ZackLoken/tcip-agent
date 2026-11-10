@@ -582,12 +582,15 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     from tcip_annotation.flags import FlagRequest
     from tcip_mcp.tools.ingest_tools import state_capture_date
     from tcip_mcp.tools.proposal_tools import propose_annotations
+    from tests._mapping_fixtures import CROP
     from tests._producer_fixtures import (
         install_stub_proposer,
+        register_dataset_at,
         saved_annotations,
     )
 
     image = _undated_labeled(project, tmp_path)
+    register_dataset_at(project, project, crop=CROP)
     dataset_layout.save_label_document(
         project,
         dataset_layout.label_key_of(image),
@@ -908,8 +911,11 @@ def test_a_stated_date_refuses_an_image_a_published_bucket_names(
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
     from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at
 
     image = _undated_labeled(project, tmp_path)
+    register_dataset_at(project, project, crop=CROP)
     publish(
         project,
         project,

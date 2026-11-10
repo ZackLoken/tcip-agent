@@ -615,9 +615,11 @@ def test_an_engines_parameter_refusal_reaches_the_door_as_its_error(
 ) -> None:
     """``propose_annotations`` answers an engine's parameter refusal as an error naming it."""
     from tcip_mcp.tools.proposal_tools import propose_annotations
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at, write_image
 
     image = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "a.png")
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
 
     result = propose_annotations(
         tmp_path,
@@ -738,13 +740,15 @@ def test_a_ringless_candidate_renders_and_stages_as_its_box(
         propose_annotations,
         stage_proposals,
     )
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at, write_image
 
     image = write_image(
         image_dir(tmp_path, UNDATED_BUCKET) / "boxed.png",
         (96, 96),
         (40, 40, 40),
     )
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
 
     proposed = propose_annotations(
         tmp_path, image_path=str(image), engine=boxed_engine, actor=None
@@ -782,7 +786,8 @@ def test_a_proposals_execution_record_reaches_its_staging_and_its_bucket(
         propose_annotations,
         stage_proposals,
     )
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at, write_image
 
     execution = proposal_execution(
         tile_size=800,
@@ -811,6 +816,7 @@ def test_a_proposals_execution_record_reaches_its_staging_and_its_bucket(
     image = write_image(
         image_dir(tmp_path, UNDATED_BUCKET) / "recorded.png", (96, 96)
     )
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
 
     proposed = propose_annotations(
         tmp_path, image_path=str(image), engine="recorded", actor=None
