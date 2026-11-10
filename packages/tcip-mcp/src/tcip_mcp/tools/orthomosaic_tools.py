@@ -61,7 +61,8 @@ def orthomosaic_plant_counts(
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`), whose ``crop`` every
     row carries.
 
-    The bucket must record the dataset its root's identity names, and that dataset must be of the
+    The bucket must record the dataset its root is
+    (:func:`~tcip_mcp.buckets.require_delivered_dataset`), and that dataset must be of the
     registry's crop
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_agreeing_crops`).
     The raster is the one the bucket's record names; it must still be the raster its recorded
@@ -93,8 +94,7 @@ def orthomosaic_plant_counts(
         read_label_document,
     )
     from tcip_annotation.state import bbox_of
-    from tcip_mcp.buckets import read_bucket, require_bucket_of_dataset
-    from tcip_mcp.dataset_layout import require_dataset_identity
+    from tcip_mcp.buckets import read_bucket, require_delivered_dataset
     from tcip_mcp.delivery import OrthomosaicDelivered
     from tcip_mcp.pipelines.delivery_events_schema import (
         PlantRegistryDisclosure,
@@ -146,11 +146,10 @@ def orthomosaic_plant_counts(
             f"bucket {bucket!r} is a bucket of per-image predictions, not of one "
             "raster: deliver its counts through deliver_per_image_counts."
         )
-    identity = require_dataset_identity(found.root)
-    require_bucket_of_dataset(found, identity)
+    root, identity = require_delivered_dataset([found])
     require_agreeing_crops(
         identity,
-        found.root,
+        root,
         registry_name=registry_record["name"],
         registry_crop=registry_record["crop"],
     )

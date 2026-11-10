@@ -173,9 +173,14 @@ def deliver_per_image_counts_csv(
     ``acknowledgment_id`` shipping it unvalidated when the gate does not validate it. Each row is
     one document in stem order: ``image`` (its source file name), ``detection_count``,
     ``avg_confidence`` and the delivery's own cells, written with the delivery's one event under
-    ``door`` (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
+    ``door`` (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered. A bucket not
+    recording the dataset its root is refuses (:func:`~tcip_mcp.buckets.require_delivered_dataset`).
     """
-    from tcip_mcp.buckets import detection_rows, read_bucket
+    from tcip_mcp.buckets import (
+        detection_rows,
+        read_bucket,
+        require_delivered_dataset,
+    )
     from tcip_mcp.delivery import (
         DELIVERY_COLUMNS,
         PerImageCountsDelivered,
@@ -196,6 +201,7 @@ def deliver_per_image_counts_csv(
             "not a per-image count. Deliver per-plant counts from it through "
             "deliver_orthomosaic_plant_counts."
         )
+    require_delivered_dataset([bucket])
     rows = detection_rows(bucket)
     result = Result(
         ["image", "detection_count", "avg_confidence", *DELIVERY_COLUMNS],
