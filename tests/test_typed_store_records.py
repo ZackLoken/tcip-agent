@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
@@ -20,6 +20,8 @@ from tcip_mcp.dataset_layout import image_dir
 from tests._mapping_fixtures import CROP
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import JsonValue
 
     from tcip_mcp.buckets import Bucket
@@ -658,10 +660,14 @@ def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_of_anoth
         assert refused.value.served.where == str(path)
 
 
-NO_ID = pytest.mark.parametrize(
-    "stated", [None, "", "   "], ids=["null", "empty", "whitespace"]
+NO_IDS = (
+    pytest.param(None, id="null"),
+    pytest.param("", id="empty"),
+    pytest.param("   ", id="whitespace"),
 )
-"""A dataset id that states no dataset: null, empty, or only whitespace."""
+"""The dataset ids that state no dataset: null, empty, or only whitespace."""
+
+NO_ID = pytest.mark.parametrize("stated", NO_IDS)
 
 
 @NO_ID
@@ -738,40 +744,35 @@ OMITTED = object()
 """A dataset id whose key is absent from the record."""
 
 STATES_NO_ID = pytest.mark.parametrize(
-    "stated", [*NO_ID.args[1], OMITTED], ids=[*NO_ID.kwargs["ids"], "omitted"]
+    "stated", [*NO_IDS, pytest.param(OMITTED, id="omitted")]
 )
-"""The ids of :data:`NO_ID` and the absent key."""
+"""The ids of :data:`NO_IDS` and the absent key."""
 
 
-def _stating(record: dict[str, Any], field: str, stated: object) -> dict:
-    """Return ``record`` with ``field`` set to ``stated``, or dropped when ``stated`` is omitted."""
+def _stating(record: JsonValue, field: str, stated: object) -> dict:
+    """Return the object ``record`` with ``field`` set to ``stated``, or dropped when omitted."""
+    assert isinstance(record, dict)
     if stated is OMITTED:
         return {k: v for k, v in record.items() if k != field}
     return {**record, field: stated}
 
 
-def _restated(
-    key: ts.Key, within: tuple[str | int, ...], field: str, stated: object
+def _rewritten_by_key(
+    key: ts.Key, change: Callable[[JsonValue], JsonValue]
 ) -> None:
-    """Rewrite the record stored at ``key``, its ``field`` ``stated`` in the node ``within`` names.
+    """Replace the record stored at ``key`` with ``change`` applied to what it holds."""
+    ts.replace(key, change(ts.read(key)))
 
-    ``within`` is the path of object keys and list positions from the record to that node.
-    """
 
-    def change(node: JsonValue, path: tuple[str | int, ...]) -> JsonValue:
-        assert isinstance(node, list | dict)
-        if not path:
-            assert isinstance(node, dict)
-            return _stating(node, field, stated)
-        head, rest = path[0], path[1:]
-        if isinstance(node, list):
-            return [
-                change(v, rest) if i == head else v for i, v in enumerate(node)
-            ]
-        assert isinstance(head, str)
-        return {**node, head: change(node[head], rest)}
+def _registry_stating(project: Path, stated: object) -> None:
+    """Rewrite the id of the one entry of ``project``'s dataset registry by key."""
+    from tcip_mcp.tools.project_tools import dataset_registry_key
 
-    ts.replace(key, change(ts.read(key), within))
+    def entries(record: JsonValue) -> JsonValue:
+        assert isinstance(record, list)
+        return [_stating(entry, "id", stated) for entry in record]
+
+    _rewritten_by_key(dataset_registry_key(project), entries)
 
 
 @STATES_NO_ID
@@ -792,7 +793,7 @@ def test_a_mapping_build_stating_no_dataset_refuses_at_its_read(
     named_project(tmp_path, "Orchard")
     map_captures(tmp_path, tmp_path / "ds", [DATE], name="valley")
     key = plant_mapping.plant_mapping_key(tmp_path, "valley")
-    _restated(key, (), "dataset_id", stated)
+    _rewritten_by_key(key, lambda r: _stating(r, "dataset_id", stated))
 
     with pytest.raises(ts.ReadRefusedError) as refused:
         plant_mapping.load_mapping(tmp_path, "valley")
@@ -814,52 +815,33 @@ def test_a_delivery_events_mapping_disclosure_stating_no_dataset_refuses_at_its_
 ) -> None:
     """A delivery event whose mapping disclosure states no dataset id refuses at its read.
 
-    The event is recorded by a phenology delivery over a mapping ``build_plant_mapping`` made, and
+    The event is recorded by a mapped phenology delivery (``test_delivery_events._measured``) and
     its record then rewritten through the store by key, a fault injected past its producer; the
     refusal names the event and the field.
     """
     from tcip_mcp import delivery
-    from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tests._mapping_fixtures import register_plant_registry_for
-    from tests.test_plant_mapping_binding import (
-        POPULATION,
-        _dataset,
-        _deliver,
-        _init,
-        _write_scene,
-    )
-    from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
+    from tests.test_delivery_events import _measured
 
-    _init(tmp_path)
-    dataset_root = _dataset(tmp_path)
-    plant_csv, preds_by_date = _write_scene(dataset_root)
-    built = build_plant_mapping(
-        tmp_path,
-        name="valley",
-        dataset_root=str(dataset_root),
-        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
-        actor=None,
-    )
-    assert "error" not in built, built
-    _seed_currant_bloom_trait(tmp_path)
-    delivered = _deliver(
-        tmp_path,
-        trait="currant_bloom",
-        mapping_name="valley",
-        plants=POPULATION,
-        dataset_root=dataset_root,
-        buckets=preds_by_date.values(),
-        output_csv_path=str(tmp_path / "out.csv"),
-    )
-    assert "error" not in delivered, delivered
+    _measured(tmp_path)
     (event,) = delivery.read_delivery_events(tmp_path)
     key = delivery.delivery_event_key(tmp_path, event.event_id)
-    _restated(key, ("plant_mapping",), "dataset_id", stated)
 
-    with pytest.raises(ts.ReadRefusedError, match=r"dataset_id") as refused:
+    def disclosure(record: JsonValue) -> JsonValue:
+        assert isinstance(record, dict)
+        return {
+            **record,
+            "plant_mapping": _stating(
+                record["plant_mapping"], "dataset_id", stated
+            ),
+        }
+
+    _rewritten_by_key(key, disclosure)
+
+    with pytest.raises(
+        ts.ReadRefusedError,
+        match=rf"^delivery event {event.event_id}: plant_mapping\.\S*dataset_id: ",
+    ):
         delivery.read_delivery_events(tmp_path)
-
-    assert event.event_id in str(refused.value), refused.value
 
 
 @STATES_NO_ID
@@ -874,13 +856,12 @@ def test_a_dataset_registry_entry_stating_no_dataset_refuses_at_its_read(
     """
     from tcip_mcp.tools.project_tools import (
         check_dataset_identity,
-        dataset_registry_key,
         read_datasets,
     )
     from tests.test_check_dataset_identity_script import _registered
 
     project, root, _ = _registered(tmp_path)
-    _restated(dataset_registry_key(project), (0,), "id", stated)
+    _registry_stating(project, stated)
     sentence = rf"^the dataset registry of {re.escape(str(project))}: 0\.id: "
 
     with pytest.raises(ts.ReadRefusedError, match=sentence):
@@ -897,15 +878,12 @@ def test_a_padded_dataset_id_reads_back_stripped(tmp_path: Path) -> None:
     """
     from tcip_mcp.tools.project_tools import (
         check_dataset_identity,
-        dataset_registry_key,
         read_datasets,
     )
     from tests.test_check_dataset_identity_script import _registered
 
     project, root, registered = _registered(tmp_path)
-    _restated(
-        dataset_registry_key(project), (0,), "id", f"  {registered['id']}\t"
-    )
+    _registry_stating(project, f"  {registered['id']}\t")
 
     assert [e.id for e in read_datasets(project)] == [registered["id"]]
     (row,) = check_dataset_identity(project, str(root)).registered
@@ -933,8 +911,8 @@ def test_register_dataset_refuses_over_a_registry_entry_stating_no_id(
     project, root, _ = _registered(tmp_path)
     identity = dataset_identity_path(root)
     _rewritten(identity, {"crop": 5})
+    _registry_stating(project, "")
     key = dataset_registry_key(project)
-    _restated(key, (0,), "id", "")
     held = identity.read_bytes(), ts.read(key)
 
     with pytest.raises(
