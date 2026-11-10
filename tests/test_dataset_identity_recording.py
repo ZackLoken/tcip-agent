@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
+import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.experiments import compare_experiments
 from tests._chain_fixtures import (
@@ -20,6 +21,7 @@ from tests._chain_fixtures import (
 )
 from tests._training_values import drawn_split
 from tests._verified_checkpoint_fixtures import opened_run
+from tests.test_typed_store_records import STATES_NO_ID, _stating
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -264,3 +266,74 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
         registered["id"],
         registered["fingerprint"],
     )
+
+
+def test_a_comparison_serves_the_id_a_run_recorded_and_none_for_an_unregistered_root(
+    tmp_path: Path,
+) -> None:
+    """A run over an unregistered root records no id, one over a registered root records its id.
+
+    Both runs are opened by the launcher's producers; the comparison serves each run's recorded
+    id, an unregistered root's run still carrying its fingerprint.
+    """
+    from tcip_mcp.experiments import read_run
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    unregistered = _make_dataset(tmp_path / "first")
+    registered_images = _make_dataset(tmp_path / "second")
+    registered = register_dataset(
+        tmp_path / "second",
+        str(tmp_path / "second"),
+        crop="currant",
+        actor=None,
+    )
+    a = opened_run(
+        tmp_path, _config(tmp_path, unregistered), experiment_id="a"
+    )
+    b = opened_run(
+        tmp_path, _config(tmp_path, registered_images), experiment_id="b"
+    )
+
+    assert read_run(a).dataset.id is None
+    assert read_run(a).dataset.fingerprint is not None
+    assert read_run(b).dataset.id == registered["id"]
+    rows = compare_experiments(["a", "b"], project=tmp_path).experiments
+    assert [row.dataset_id for row in rows if row.kind == "compared"] == [
+        None,
+        registered["id"],
+    ]
+
+
+@STATES_NO_ID
+def test_a_run_record_stating_no_dataset_id_reads_only_as_null(
+    tmp_path: Path, stated: object
+) -> None:
+    """A run record whose dataset id is empty, only whitespace or absent refuses; null reads.
+
+    The run is opened over a registered root by the launcher's producers and its ``run.json``
+    then rewritten through the store's blob interface, a fault injected past its producer.
+    """
+    import json
+
+    from tcip_mcp.experiments import RUN_FILE, read_run
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tests.test_a_refused_record_reads_as_its_readers_sentence import (
+        _rewritten,
+    )
+
+    images_dir = _make_dataset(tmp_path)
+    register_dataset(tmp_path, str(tmp_path), crop="currant", actor=None)
+    run_dir = opened_run(
+        tmp_path, _config(tmp_path, images_dir), experiment_id="a"
+    )
+    path = run_dir / RUN_FILE
+    dataset = json.loads(path.read_text(encoding="utf-8"))["dataset"]
+    _rewritten(path, {"dataset": _stating(dataset, "id", stated)})
+
+    if stated is None:
+        assert read_run(run_dir).dataset.id is None
+        return
+    with pytest.raises(ts.ReadRefusedError, match=r"dataset\.id: ") as refused:
+        read_run(run_dir)
+
+    assert str(path) in str(refused.value), refused.value
