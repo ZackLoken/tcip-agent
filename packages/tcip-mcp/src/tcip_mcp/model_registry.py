@@ -451,7 +451,7 @@ class VerifiedCheckpoint:
 
 
 class CheckpointNotFoundError(FileNotFoundError):
-    """No file is at the location a checkpoint was named by."""
+    """No regular file is at the location a checkpoint was named by."""
 
 
 class UnregisteredCheckpointError(ValueError):
@@ -540,15 +540,22 @@ def registered_bytes(
     The file is read once and its digest matched against ``project``'s
     :func:`registered_entries`; nothing is unpickled.
 
-    Raises :class:`CheckpointNotFoundError` when no regular file is at the location (nothing, or
-    a directory), :class:`UnregisteredCheckpointError` naming the path, the digest and the root
-    searched when no entry names that digest, and each refusal :func:`registered_entries` raises.
+    Raises :class:`CheckpointNotFoundError` when no regular file is at the location (nothing, a
+    directory, or a path beneath a regular file), :class:`UnregisteredCheckpointError` naming the
+    path, the digest and the root searched when no entry names that digest, and each refusal
+    :func:`registered_entries` raises.
     An operating-system error inspecting or reading the file propagates as itself.
     """
     ckpt = Path(checkpoint_path)
     root = str(project)
     try:
-        data = ckpt.read_bytes() if S_ISREG(ckpt.stat().st_mode) else None
+        mode: int | None = ckpt.stat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        mode = None
+    try:
+        data = (
+            ckpt.read_bytes() if mode is not None and S_ISREG(mode) else None
+        )
     except FileNotFoundError:
         data = None
     if data is None:

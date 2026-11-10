@@ -1,10 +1,10 @@
 """Each launch answers every failure of its checkpoint's admission at the request, starting no job.
 
 The inference launch and the review-queue launch admit a checkpoint through the registry's own
-read (``registered_bytes``). A checkpoint path that is a directory answers 404 with that read's
-sentence; a run record that will not read answers 400 with the refused read's sentence; a registry
-index that will not decode, and a checkpoint the process may not read, answer 409 as an unreadable
-registry with the error's own sentence.
+read (``registered_bytes``). A checkpoint path that is a directory, or that lies beneath a regular
+file, answers 404 with that read's sentence; a run record that will not read answers 400 with the
+refused read's sentence; a registry index that will not decode, and a checkpoint the process may
+not read, answer 409 as an unreadable registry with the error's own sentence.
 """
 
 from __future__ import annotations
@@ -118,6 +118,34 @@ def test_a_checkpoint_path_that_is_a_directory_answers_404_with_the_registry_s_s
     before = jobs()
 
     answer = launch(directory)
+
+    assert answer.status_code == 404, answer.text
+    assert answer.json()["detail"] == str(missing.value)
+    assert jobs() == before
+
+
+@pytest.mark.parametrize("door", DOORS)
+def test_a_checkpoint_path_beneath_a_regular_file_answers_404_with_the_registry_s_sentence(
+    opened_client: TestClient, tmp_path: Path, door: str
+) -> None:
+    """A checkpoint named beneath a regular file answers 404 with ``registered_bytes``'s sentence.
+
+    The regular file is a checkpoint a run completed, so nothing can be at a path beneath it.
+    """
+    from tcip_mcp.model_registry import (
+        CheckpointNotFoundError,
+        registered_bytes,
+    )
+
+    launch, jobs = _door(door, opened_client, tmp_path)
+    beneath = (
+        produced_checkpoint(tmp_path / "m.pt", "launch root") / "weights.pt"
+    )
+    with pytest.raises(CheckpointNotFoundError) as missing:
+        registered_bytes(beneath, project=tmp_path)
+    before = jobs()
+
+    answer = launch(beneath)
 
     assert answer.status_code == 404, answer.text
     assert answer.json()["detail"] == str(missing.value)
