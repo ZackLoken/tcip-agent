@@ -372,7 +372,7 @@
   },
   "missing_checkpoint": {
     "status": 404,
-    "body": { "detail": "checkpoint not found: /scratch/workspace/inference/absent.pt" }
+    "body": { "detail": "Checkpoint not found: /scratch/workspace/inference/absent.pt" }
   },
   "unknown_job": { "type": "missing", "error": "job not found" }
 }

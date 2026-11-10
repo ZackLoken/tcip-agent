@@ -1228,7 +1228,20 @@ def test_the_plant_mapping_list_refuses_while_no_project_is_open(
 def test_inference_launch_missing_checkpoint(
     client: TestClient, opened_project: Path
 ) -> None:
+    """A launch over a capture of a registered root naming no checkpoint file answers 404.
+
+    The answer is the sentence the registry's read refuses the missing file with.
+    """
+    from tcip_mcp.model_registry import (
+        CheckpointNotFoundError,
+        registered_bytes,
+    )
+    from tests._producer_fixtures import write_image
+
+    write_image(image_dir(opened_project, "2026-02-11") / "a.jpg")
     register_dataset_at(opened_project, opened_project, crop=CROP)
+    with pytest.raises(CheckpointNotFoundError) as missing:
+        registered_bytes(opened_project / "no.pt", project=opened_project)
     resp = client.post(
         "/api/inference/launch",
         json={
@@ -1240,7 +1253,8 @@ def test_inference_launch_missing_checkpoint(
             "stated": {},
         },
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == str(missing.value)
 
 
 def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(

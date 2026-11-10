@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
+from stat import S_ISREG
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
@@ -450,7 +451,7 @@ class VerifiedCheckpoint:
 
 
 class CheckpointNotFoundError(FileNotFoundError):
-    """No file is at the location a checkpoint was named by."""
+    """No regular file is at the location a checkpoint was named by."""
 
 
 class UnregisteredCheckpointError(ValueError):
@@ -539,16 +540,26 @@ def registered_bytes(
     The file is read once and its digest matched against ``project``'s
     :func:`registered_entries`; nothing is unpickled.
 
-    Raises :class:`UnregisteredCheckpointError` naming the path, the digest and the root searched
-    when no entry names that digest, :class:`CheckpointNotFoundError` when no file is at the
-    location, and each refusal :func:`registered_entries` raises.
+    Raises :class:`CheckpointNotFoundError` when no regular file is at the location (nothing, a
+    directory, or a path beneath a regular file), :class:`UnregisteredCheckpointError` naming the
+    path, the digest and the root searched when no entry names that digest, and each refusal
+    :func:`registered_entries` raises.
+    An operating-system error inspecting or reading the file propagates as itself.
     """
     ckpt = Path(checkpoint_path)
     root = str(project)
     try:
-        data = ckpt.read_bytes()
-    except FileNotFoundError as exc:
-        raise CheckpointNotFoundError(f"Checkpoint not found: {ckpt}") from exc
+        mode: int | None = ckpt.stat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        mode = None
+    try:
+        data = (
+            ckpt.read_bytes() if mode is not None and S_ISREG(mode) else None
+        )
+    except FileNotFoundError:
+        data = None
+    if data is None:
+        raise CheckpointNotFoundError(f"Checkpoint not found: {ckpt}")
     digest = _sha256_of_bytes(data)
     entry = next(
         (e for e in registered_entries(root) if e.sha256 == digest), None
@@ -558,22 +569,38 @@ def registered_bytes(
     return data, entry
 
 
+def unpickled_checkpoint(
+    data: bytes, entry: RegistryEntry, *, checkpoint_path: Path, project: Path
+) -> VerifiedCheckpoint:
+    """Return the checkpoint ``data``, the bytes ``entry`` registers in ``project``, verified.
+
+    ``data`` is what :func:`registered_bytes` read at ``checkpoint_path``. It is unpickled through
+    :func:`_load_verified_payload`, raising each refusal that function raises.
+    """
+    payload = _load_verified_payload(
+        data, source=f"{checkpoint_path} (sha256 {entry.sha256})"
+    )
+    return VerifiedCheckpoint(
+        path=str(checkpoint_path),
+        payload=payload,
+        entry=entry,
+        project=Path(project),
+    )
+
+
 def load_registered_checkpoint(
     checkpoint_path: Path, *, project: Path
 ) -> VerifiedCheckpoint:
     """Return the checkpoint at the established location ``checkpoint_path``, verified.
 
-    It is unpickled from the bytes :func:`registered_bytes` admitted for ``project``, the same
-    bytes its digest is taken over, and raises each refusal that function and
-    :func:`_load_verified_payload` raise.
+    It is :func:`unpickled_checkpoint` over the bytes :func:`registered_bytes` admitted for
+    ``project``, the same bytes its digest is taken over, and raises each refusal of either.
     """
     ckpt = Path(checkpoint_path)
-    data, entry = registered_bytes(ckpt, project=project)
-    payload = _load_verified_payload(
-        data, source=f"{ckpt} (sha256 {entry.sha256})"
-    )
-    return VerifiedCheckpoint(
-        path=str(ckpt), payload=payload, entry=entry, project=Path(project)
+    return unpickled_checkpoint(
+        *registered_bytes(ckpt, project=project),
+        checkpoint_path=ckpt,
+        project=project,
     )
 
 
