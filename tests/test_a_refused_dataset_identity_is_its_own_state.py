@@ -3,7 +3,7 @@
 The identity is damaged through the store's own writer after ``register_dataset`` wrote it. The
 check answers ``refused`` for the root and for a registered path, ``unregistered`` and ``gone``
 staying the absent document; ``register_dataset`` repairs the document at a root the project's
-registry holds, from the registry's id, and refuses at one it does not; ``launch_training`` over
+registry holds, from the registry's id, and refuses at one nothing cites; ``launch_training`` over
 a refused identity answers the error naming the document.
 """
 

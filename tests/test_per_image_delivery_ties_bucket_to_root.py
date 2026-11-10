@@ -6,9 +6,10 @@ both ids, through the tool and the route, writing no CSV and no delivery event. 
 per-plant doors answer the same two refusals in the same words, and the gate every delivery passes
 refuses both, with the tie's own sentences, when a bucket reaches it untied.
 
-The one step made by hand is fault injection: after a bucket is published under a registered root,
+The steps made by hand are fault injection: after a bucket is published under a registered root,
 the root's ``dataset.json`` is removed, which only a change to the project's files outside the
-platform does. The root registered again then mints a new id.
+platform does, or the bucket's stored record is rewritten to record another dataset, which no
+producer does.
 """
 
 from __future__ import annotations
@@ -19,7 +20,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.buckets import read_bucket
-from tcip_mcp.dataset_layout import dataset_identity_path, image_dir
+from tcip_mcp.dataset_layout import (
+    dataset_identity_path,
+    require_dataset_identity,
+)
 from tcip_mcp.delivery import (
     DeliveryRefusal,
     Unacknowledgeable,
@@ -29,6 +33,7 @@ from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
 from tests._mapping_fixtures import COUNT_CROP
 from tests._producer_fixtures import (
+    bucket_of_another_dataset,
     left_written,
     register_dataset_at,
     unregistered_refusal,
@@ -55,11 +60,6 @@ def _footprint(project: Path, root: Path) -> dict[str, list]:
 def _identity_removed(root: Path) -> None:
     """Remove the identity document of the registered ``root``, as a change outside the platform."""
     dataset_identity_path(root).unlink()
-
-
-def _registered_again(project: Path, root: Path) -> str:
-    """Register ``root`` again, which mints it a new id; return that id."""
-    return register_dataset_at(project, root, crop=COUNT_CROP)
 
 
 # ── the tool ─────────────────────────────────────────────────────────────
@@ -105,16 +105,13 @@ def test_a_per_image_delivery_of_a_bucket_of_another_dataset_than_its_root_refus
 ) -> None:
     """The tool answers the sentence naming the bucket and both ids, and writes nothing."""
     root, bucket = _published(tmp_path)
-    recorded = read_bucket(root, bucket).dataset_id
-    _identity_removed(root)
-    minted = _registered_again(tmp_path, root)
-    assert minted != recorded
+    recorded = bucket_of_another_dataset(root, bucket)
     before = _footprint(tmp_path, root)
 
     answered = _deliver(tmp_path, root, bucket)
 
     assert set(answered) == {"error"}, answered
-    for named in (bucket, recorded, minted):
+    for named in (bucket, recorded, require_dataset_identity(root).id):
         assert named in answered["error"], answered
     assert not (tmp_path / "out" / "counts.csv").exists()
     assert _footprint(tmp_path, root) == before
@@ -171,33 +168,33 @@ def test_the_gate_over_a_root_with_no_identity_refuses_with_the_ties_sentence(
 def test_the_gate_over_each_bucket_of_another_dataset_than_its_root_refuses_with_the_ties_sentence(
     tmp_path: Path,
 ) -> None:
-    """The gate refuses the old bucket under the re-registered root, whichever comes first."""
+    """The gate refuses the bucket recording another dataset beside a true one, in either order."""
     from tcip_mcp.buckets import require_delivered_dataset
+    from tcip_mcp.dataset_layout import image_dir
     from tests._chain_fixtures import predicted, published
-    from tests._mapping_fixtures import COUNT_CROP
     from tests.test_deliver_per_image_counts_bucket_regime import SCOPE
 
     root, name = _published(tmp_path)
-    old = read_bucket(root, name)
-    _identity_removed(root)
-    minted = _registered_again(tmp_path, root)
+    true = read_bucket(root, name)
     image = image_dir(root, "2026-01-01") / "a.png"
-    new = published(
+    other = published(
         tmp_path,
-        "again/2026-01-01",
+        "other/2026-01-01",
         [predicted(image, [SCOPE["subject"]] * 2)],
         scope=SCOPE,
         crop=COUNT_CROP,
-    )
-    assert new.dataset_id == minted != old.dataset_id
+    ).name
+    recorded = bucket_of_another_dataset(root, other)
+    untied = read_bucket(root, other)
+    assert untied.dataset_id == recorded != true.dataset_id
     with pytest.raises(ValueError) as tie:
-        require_delivered_dataset([old])
+        require_delivered_dataset([untied])
 
-    for buckets in ((new, old), (old, new)):
+    for buckets in ((true, untied), (untied, true)):
         with pytest.raises(ValueError) as refused:
             _gated(tmp_path, *buckets)
         assert str(refused.value) == str(tie.value)
-    for named in (old.name, old.dataset_id, minted):
+    for named in (untied.name, recorded, true.dataset_id):
         assert named in str(tie.value), tie.value
 
 
@@ -253,15 +250,13 @@ def test_a_per_image_export_of_a_bucket_of_another_dataset_than_its_root_refuses
 ) -> None:
     """The route answers 400 with the sentence naming the bucket and both ids; writes nothing."""
     bucket = _route_bucket(tmp_path)
-    recorded = read_bucket(bucket.root, bucket.name).dataset_id
-    _identity_removed(tmp_path)
-    minted = _registered_again(tmp_path, tmp_path)
-    assert minted != recorded
+    recorded = bucket_of_another_dataset(bucket.root, bucket.name)
     before = _footprint(tmp_path, tmp_path)
 
     refusal = _refused_by_the_route(client, tmp_path, bucket)
 
-    for named in (bucket.name, recorded, minted):
+    root_id = require_dataset_identity(tmp_path).id
+    for named in (bucket.name, recorded, root_id):
         assert named in refusal.message, refusal
     assert _footprint(tmp_path, tmp_path) == before
 
@@ -299,9 +294,11 @@ def test_the_per_image_the_orthomosaic_and_the_per_plant_doors_answer_one_tie(
 ) -> None:
     """One root holding an image bucket, a raster bucket and a mapping gives each door one sentence.
 
-    With the identity removed the three doors answer the same sentence. Registered again, each names
-    its own bucket and the same two ids, the per-image and the per-plant door the same bucket, in
-    words that differ from the orthomosaic door's by the bucket's name alone. The count trait's
+    With the identity removed the three doors answer the same sentence. Registered again, which
+    restores the id, and with the image and the raster bucket rewritten to record one other
+    dataset, each names its own bucket and the same two ids, the per-image and the per-plant door
+    the same bucket, in words that differ from the orthomosaic door's by the bucket's name alone.
+    The count trait's
     confirmed meaning is seeded for the door about to be called, since each door's meaning is the
     latest revision's.
     """
@@ -361,11 +358,11 @@ def test_the_per_image_the_orthomosaic_and_the_per_plant_doors_answer_one_tie(
 
     assert set(answers()) == {unregistered_refusal(root)}
 
-    minted = _registered_again(tmp_path, root)
+    assert register_dataset_at(tmp_path, root, crop=COUNT_CROP) == recorded
+    other = bucket_of_another_dataset(root, image_bucket, raster_bucket)
     per_image, orthomosaic, per_plant = answers()
 
-    assert minted != recorded
-    for named in (recorded, minted, image_bucket):
+    for named in (recorded, other, image_bucket):
         assert named in per_image, per_image
     assert per_plant == per_image
     assert orthomosaic == per_image.replace(image_bucket, raster_bucket)

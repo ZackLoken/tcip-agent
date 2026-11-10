@@ -22,7 +22,6 @@ from tests._mapping_fixtures import (
     COUNT_CROP,
     CROP,
     register_plant_registry_for,
-    registered_copy,
 )
 from tests._producer_fixtures import register_dataset_at
 
@@ -282,22 +281,22 @@ def test_an_orthomosaic_count_over_a_registry_of_another_crop_than_its_dataset_r
 def test_an_orthomosaic_count_over_a_bucket_recording_another_dataset_than_its_root_refuses(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A bucket under a root whose identity is another dataset's refuses, naming both ids.
+    """A bucket recording another dataset than its root's identity refuses, naming both ids.
 
-    The dataset ``ds`` is copied with its store but without its identity document and the copy
-    registered, which mints it its own id; the copy's bucket still records the original's.
+    The bucket's stored record is rewritten through the store to record another dataset, as fault
+    injection.
     """
+    from tcip_mcp.dataset_layout import require_dataset_identity
+    from tests._producer_fixtures import bucket_of_another_dataset
+
     bucket = _orthomosaic_scene(tmp_path)
-    copy, minted = registered_copy(
-        tmp_path, bucket.root, "ds-copy", crop=COUNT_CROP
-    )
-    assert minted != bucket.dataset_id
+    recorded = bucket_of_another_dataset(bucket.root, bucket.name)
 
     for refusal in _orthomosaic_refusals(
-        client, tmp_path, copy, bucket.name, _grid_registry(tmp_path)
+        client, tmp_path, bucket.root, bucket.name, _grid_registry(tmp_path)
     ):
-        assert bucket.dataset_id in refusal, refusal
-        assert minted in refusal, refusal
+        assert recorded in refusal, refusal
+        assert require_dataset_identity(bucket.root).id in refusal, refusal
 
 
 # ── a revision delivering a phenotype the registry's crop does not carry ──
