@@ -218,19 +218,31 @@ def shared_root(buckets: Iterable[Bucket]) -> Path:
     return _one_root((b.root for b in buckets), "a delivery's buckets")
 
 
-def require_bucket_of_dataset(bucket: Bucket, identity: DatasetRecord) -> None:
-    """Require ``bucket`` to record the dataset ``identity`` is the identity of.
+def require_delivered_dataset(
+    buckets: Iterable[Bucket],
+) -> tuple[Path, DatasetRecord]:
+    """Require every bucket of ``buckets`` to record the dataset its root is.
 
-    ``identity`` is its root's identity record. A bucket recording another dataset than
-    ``identity``'s refuses (``ValueError``) naming the bucket, its root, the id it records and the
-    id of its root.
+    Returns the one root the buckets are published under (:func:`shared_root`) and that root's
+    identity record. Buckets under more than one root or none, a root carrying no identity
+    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming ``register_dataset``) and
+    a bucket recording another dataset than its root's identity names all refuse
+    (``ValueError``); the last names the bucket, its root, the id it records and the id of its
+    root.
     """
-    if bucket.dataset_id != identity.id:
-        raise ValueError(
-            f"bucket {bucket.name!r} records dataset {bucket.dataset_id!r}, and its root "
-            f"{bucket.root} is dataset {identity.id!r}: deliver it under the root of the dataset "
-            "it records."
-        )
+    from tcip_mcp.dataset_layout import require_dataset_identity
+
+    delivered = list(buckets)
+    root = shared_root(delivered)
+    identity = require_dataset_identity(root)
+    for bucket in delivered:
+        if bucket.dataset_id != identity.id:
+            raise ValueError(
+                f"bucket {bucket.name!r} records dataset {bucket.dataset_id!r}, and its root "
+                f"{bucket.root} is dataset {identity.id!r}: deliver it under the root of the "
+                "dataset it records."
+            )
+    return root, identity
 
 
 def buckets_by_date(

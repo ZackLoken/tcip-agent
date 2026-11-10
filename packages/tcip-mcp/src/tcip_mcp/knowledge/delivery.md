@@ -84,7 +84,9 @@ delivery tool takes the recorded act by its `acknowledgment_id` and executes it.
 
 `deliver_per_image_counts` produces a different, per-image CSV, not the per-plant schema above:
 one row per document of the bucket, the `image` cell the source file name the bucket's record names
-for it. A mosaic bucket refuses there, naming the per-plant door.
+for it. A mosaic bucket refuses there, naming the per-plant door. The bucket must record the
+dataset its root is: a root carrying no identity refuses, naming `register_dataset`, and a bucket
+recording another dataset refuses, naming it.
 
 ### Per-Image CSV Schema
 
