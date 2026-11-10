@@ -320,14 +320,14 @@ def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
         Proposed,
         publish,
         read_bucket,
-        source_root,
     )
+    from tcip_mcp.dataset_layout import source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
     from tests._producer_fixtures import register_dataset_at, write_image
 
     image = write_image(image_dir(tmp_path / "ds", DATE) / "a.png", (64, 64))
-    root = source_root([str(image)])
+    root = source_root([str(image)], what="a bucket's source images")
     register_dataset_at(tmp_path, root, crop=CROP)
     publish(
         tmp_path,

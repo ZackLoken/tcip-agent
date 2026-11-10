@@ -47,6 +47,10 @@ from tests._chain_fixtures import (  # noqa: E402
     train_on,
 )
 from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    two_roots_refusal,
+    unrooted_refusal,
+)
 from tests._training_values import (  # noqa: E402
     COUNT_TEST,
     DISPERSION_QUANTILE,
@@ -292,20 +296,26 @@ def test_a_foreign_checkpoint_fails_its_assessment_on_unknown_training_membershi
     ), disjointness
 
 
+NEXT_STEP = "Draw it over one with draw_splits."
+"""The step a selection's refusal of its samples' root names after the root reading's sentence."""
+
+
 def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     tmp_path: Path,
 ) -> None:
     """A selection whose samples lie under two dataset roots refuses at its write, naming both.
 
     A reference drawn over one dataset is joined, through the admission's own sample producer, by
-    holdout frames of a second dataset; writing that selection refuses naming both roots and
-    draw_splits, and the drawn selection stays as it was written.
+    holdout frames of a second dataset; writing that selection refuses with the one root
+    reading's sentence for its samples, both roots in their canonical spelling, followed by the
+    draw_splits step, and the drawn selection stays as it was written.
     """
     from tcip_mcp.pipelines.data.label_queries import admit
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
         Selection,
         read_selection,
+        selection_place,
         write_selection,
     )
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
@@ -354,12 +364,87 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
         dataset_fingerprint=drawn.dataset_fingerprint,
     )
 
-    with pytest.raises(ValueError, match="draw_splits") as refused:
+    with pytest.raises(ValueError) as refused:
         write_selection(selection_dir, spanning, project=tmp_path)
 
-    for root in (tmp_path / "ds", other):
-        assert str(root) in str(refused.value), refused.value
+    assert str(refused.value) == (
+        f"{selection_place(selection_dir)}: "
+        f"{two_roots_refusal([tmp_path / 'ds', other], 'its samples')} {NEXT_STEP}"
+    ), refused.value
+    assert "bucket" not in str(refused.value), refused.value
     assert read_selection(selection_dir, project=tmp_path) == drawn
+
+
+def test_a_selection_with_a_sample_under_no_image_tree_refuses_at_its_write(
+    tmp_path: Path,
+) -> None:
+    """A selection holding a sample under no dataset image tree refuses at its write.
+
+    A drawn reference's first sample is re-pointed at a copy of its image outside any image tree;
+    writing that selection refuses with the no-image-tree sentence for its samples, naming the
+    copy, followed by the draw_splits step, and nothing is written at the new place.
+    """
+    from dataclasses import replace
+
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        selection_place,
+        write_selection,
+    )
+    from tests.test_physical_scale_assessment import _reference
+
+    selection_dir, _csv_path = _reference(tmp_path)
+    drawn = read_selection(selection_dir, project=tmp_path)
+    first, *rest = drawn.samples
+    loose = tmp_path / "loose" / Path(first.source).name
+    loose.parent.mkdir()
+    shutil.copyfile(first.source, loose)
+    out = tmp_path / "rewritten"
+
+    with pytest.raises(ValueError) as refused:
+        write_selection(
+            out,
+            replace(drawn, samples=(replace(first, source=str(loose)), *rest)),
+            project=tmp_path,
+        )
+
+    assert str(refused.value) == (
+        f"{selection_place(out)}: {unrooted_refusal(loose, 'its samples')} {NEXT_STEP}"
+    ), refused.value
+    assert "bucket" not in str(refused.value), refused.value
+    assert not out.exists()
+
+
+def test_a_selection_of_a_capture_and_its_roots_image_tree_writes_and_reads_back(
+    tmp_path: Path,
+) -> None:
+    """A selection of one capture's samples and one directly in its root's image tree is one root's.
+
+    A drawn reference's first sample is re-pointed at a copy of its image directly under the same
+    root's ``images``; the selection writes and reads back as written.
+    """
+    from dataclasses import replace
+
+    from tcip_mcp.dataset_layout import image_root
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        write_selection,
+    )
+    from tests.test_physical_scale_assessment import _reference
+
+    selection_dir, _csv_path = _reference(tmp_path)
+    drawn = read_selection(selection_dir, project=tmp_path)
+    first, *rest = drawn.samples
+    in_tree = image_root(tmp_path / "ds") / Path(first.source).name
+    shutil.copyfile(first.source, in_tree)
+    mixed = replace(
+        drawn, samples=(replace(first, source=str(in_tree)), *rest)
+    )
+    out = tmp_path / "mixed"
+
+    write_selection(out, mixed, project=tmp_path)
+
+    assert read_selection(out, project=tmp_path) == mixed
 
 
 def _assessed_with_no_checkpoint_file(
@@ -467,88 +552,161 @@ def _relocated(
     selection_dir: Path,
     place: Callable[[int, str], Path],
     out: Path,
-) -> list[str]:
-    """Write at ``out`` the selection at ``selection_dir``, each sample's image copied elsewhere.
+) -> list[Path]:
+    """Store at ``out`` the selection at ``selection_dir``, each sample's image copied elsewhere.
 
     Sample ``i``'s image is copied to ``project / place(i, its file name)`` and the sample names
-    that copy as its source, every other field the drawn selection's own; the selection is
-    written through ``write_selection``. Returns the sources it reads back with, in sample order.
+    that copy as its source, every other field the drawn selection's own. The document is the
+    one ``stored_selection_document`` stores, written through the store past ``write_selection``,
+    a fault injected past the selection's writer. Returns the copies, in sample order.
     """
     from dataclasses import replace
 
+    import tcip_store
     from tcip_mcp.pipelines.data.selection import (
         read_selection,
-        write_selection,
+        selection_key,
+        stored_selection_document,
     )
 
     drawn = read_selection(selection_dir, project=project)
-    samples = []
+    copies = []
     for i, sample in enumerate(drawn.samples):
         copy = project / place(i, Path(sample.source).name)
         copy.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(sample.source, copy)
-        samples.append(replace(sample, source=str(copy)))
-    write_selection(
-        out, replace(drawn, samples=tuple(samples)), project=project
+        copies.append(copy)
+    relocated = tuple(
+        replace(s, source=str(c))
+        for s, c in zip(drawn.samples, copies, strict=True)
     )
-    return [s.source for s in read_selection(out, project=project).samples]
+    tcip_store.replace(
+        selection_key(out),
+        stored_selection_document(replace(drawn, samples=relocated), project),
+    )
+    return copies
 
 
 @pytest.mark.parametrize(
-    "place",
+    ("place", "sentence"),
     [
-        lambda i, name: Path("loose", name),
-        lambda i, name: Path("a" if i == 0 else "b", "images", name),
+        (
+            lambda i, name: Path("loose", f"{i}-{name}"),
+            lambda copies: unrooted_refusal(copies[0], "its samples"),
+        ),
+        (
+            lambda i, name: Path(
+                "a" if i == 0 else "b", "images", f"{i}-{name}"
+            ),
+            lambda copies: two_roots_refusal(
+                {c.parent.parent for c in copies}, "its samples"
+            ),
+        ),
     ],
     ids=["under_no_image_tree", "under_two_image_trees"],
 )
 @pytest.mark.parametrize(
-    "door", ["assess_checkpoint", "calibrate_physical_scale"]
+    "door",
+    [
+        "assess_checkpoint",
+        "calibrate_physical_scale",
+        "bound_launch",
+        "doctor",
+    ],
 )
-def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_either_door(
+def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
     tmp_path: Path,
     bound: BoundProject,
     door: str,
     place: Callable[[int, str], Path],
+    sentence: Callable[[list[Path]], str],
 ) -> None:
-    """A selection whose samples lie under no image tree, or under two, refuses at either door.
+    """A stored selection whose samples lie under no image tree, or under two, refuses at its reads.
 
-    Each sample of a drawn reference names a copy of its image outside any capture: in no image
-    tree, or the first sample under one root's image tree and every other under a second's.
-    ``write_selection`` writes that selection, and called through the server each assessment door
-    answers the refusal ``buckets.source_root`` gives over every one of its samples.
+    Each sample of a drawn selection names its own copy of its image outside any capture: in no
+    image tree, or the first sample under one root's image tree and every other under a second's,
+    stored past the selection's writer (:func:`_relocated`). Each reader answers the selection's
+    own refusal: its place, the one root reading's sentence for its samples and the draw_splits
+    step. Each reader is a tool called through a client: the two assessment doors answer it as
+    their error, ``preflight_config`` over a config bound to the selection (made over a detection
+    selection before it is moved) answers it among its ``issues`` and not ``valid``, and
+    ``diagnose_project`` answers it as an error finding over the project's ``splits``.
     """
-    from tcip_mcp.buckets import source_root
+    from tcip_mcp.pipelines.data.selection import selection_place
+    from tests._chain_fixtures import training_config
     from tests._server_calls import called_through_the_server
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+    from tests.test_doctor import _answered
     from tests.test_physical_scale_assessment import (
         SUBJECT as BAR,
         _author_tolerance,
         _reference,
     )
+    from tests.test_selection_binding import (
+        _draw,
+        _two_subject_two_date_dataset,
+    )
 
-    drawn, csv_path = _reference(tmp_path)
-    selection_dir = tmp_path / "relocated"
-    sources = _relocated(tmp_path, drawn, place, selection_dir)
-    if door == "assess_checkpoint":
-        arguments = _assessed_with_no_checkpoint_file(
-            tmp_path, selection_dir, confirmed=True
+    if door == "bound_launch":
+        drawn = tmp_path / "drawn"
+        _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "ds"), drawn)
+        launch = training_config(
+            tmp_path,
+            unbuilt_source("detection"),
+            {"split": {"selection_dir": str(drawn)}},
         )
     else:
+        drawn, csv_path = _reference(tmp_path)
+    selection_dir = tmp_path / "splits" / "relocated"
+    copies = _relocated(tmp_path, drawn, place, selection_dir)
+    if door == "assess_checkpoint":
+        served = called_through_the_server(
+            door,
+            _assessed_with_no_checkpoint_file(
+                tmp_path, selection_dir, confirmed=True
+            ),
+            bound=bound,
+        )
+        assert isinstance(served, dict), served
+        answer = served["error"]
+    elif door == "calibrate_physical_scale":
         fx.seed_delivery_traits(tmp_path)
         _author_tolerance(tmp_path)
-        arguments = {
-            "trait": "plant_surface_area",
-            "selection_dir": str(selection_dir),
-            "reference_csv": str(csv_path),
-            "unit": "mm",
-            "reference_subject": BAR,
-        }
-    with pytest.raises(ValueError) as unrooted:
-        source_root(sources)
-
-    refused = called_through_the_server(door, arguments, bound=bound)
-
-    assert refused == {"error": str(unrooted.value)}, refused
+        served = called_through_the_server(
+            door,
+            {
+                "trait": "plant_surface_area",
+                "selection_dir": str(selection_dir),
+                "reference_csv": str(csv_path),
+                "unit": "mm",
+                "reference_subject": BAR,
+            },
+            bound=bound,
+        )
+        assert isinstance(served, dict), served
+        answer = served["error"]
+    expected = (
+        f"{selection_place(selection_dir)}: {sentence(copies)} {NEXT_STEP}"
+    )
+    if door == "bound_launch":
+        launch["data"]["split"]["selection_dir"] = str(selection_dir)
+        served = called_through_the_server(
+            "preflight_config", {"config": launch}, bound=bound
+        )
+        assert isinstance(served, dict), served
+        assert served["valid"] is False, served
+        issues = served["issues"]
+        assert isinstance(issues, list) and expected in issues, served
+        answer = expected
+    elif door == "doctor":
+        found = _answered(bound)
+        finding = f"selection will not read: {expected}"
+        assert ("error", finding) in found, found
+        answer = finding
+    else:
+        assert answer == expected, answer
+    assert isinstance(answer, str), answer
+    assert "bucket" not in answer, answer
 
 
 def test_an_assessments_reference_records_the_id_its_root_is_registered_under(

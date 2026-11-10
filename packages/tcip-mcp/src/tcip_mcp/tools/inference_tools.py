@@ -73,23 +73,25 @@ def registered_pass_root(
 ) -> Path:
     """Return the registered dataset root a pass over ``images_dir`` or ``raster_path`` reads.
 
-    The root of a raster is :func:`~tcip_mcp.buckets.source_root` of it and the root of a capture
-    directory is :func:`~tcip_mcp.dataset_layout.parse_capture_dir`'s; exactly one of the two is
-    stated. A directory that is no capture or is readable two ways, a root never registered and
-    an identity document that does not decode each raise ``ValueError`` naming the cause
+    The root of a raster is :func:`~tcip_mcp.dataset_layout.registered_source_root`'s for it and
+    the root of a capture directory is :func:`~tcip_mcp.dataset_layout.parse_capture_dir`'s;
+    exactly one of the two is stated. A raster under no dataset image tree, a directory that is
+    no capture or is readable two ways, a root never registered and an identity document that
+    does not decode each raise ``ValueError`` naming the cause
     (:func:`~tcip_mcp.dataset_layout.require_dataset_identity` for the last two).
     """
-    from tcip_mcp.buckets import source_root
     from tcip_mcp.dataset_layout import (
         parse_capture_dir,
+        registered_source_root,
         require_dataset_identity,
     )
 
-    root = (
-        source_root([raster_path])
-        if raster_path is not None
-        else parse_capture_dir(cast(str, images_dir))[0]
-    )
+    if raster_path is not None:
+        root, _identity = registered_source_root(
+            [raster_path], what="the raster"
+        )
+        return root
+    root = parse_capture_dir(cast(str, images_dir))[0]
     require_dataset_identity(root)
     return root
 

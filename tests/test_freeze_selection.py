@@ -19,6 +19,7 @@ import tcip_store as ts  # noqa: E402
 from tcip_mcp.dataset_layout import (  # noqa: E402
     capture_label_keys,
     image_dir,
+    image_root,
     label_key,
     parse_capture_dir,
     parse_image_path,
@@ -39,7 +40,11 @@ from tests._chain_fixtures import (  # noqa: E402
     training_config,
 )
 from tests._mapping_fixtures import CROP  # noqa: E402
-from tests._producer_fixtures import register_dataset_at  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    register_dataset_at,
+    two_roots_refusal,
+    unrooted_refusal,
+)
 from tests._training_values import (  # noqa: E402
     RATIONALE,
     drawn_split,
@@ -637,3 +642,86 @@ def test_freeze_selection_refuses_when_a_selection_already_exists_at_the_output(
         tmp_path, "exp-second", output_path=first["selection_dir"], actor=None
     )
     assert "error" in second and "already exists" in second["error"]
+
+
+@pytest.mark.parametrize(
+    ("moved_to", "sentence"),
+    [
+        (
+            lambda project: project / "loose",
+            lambda root, copy: unrooted_refusal(copy, "this run's samples"),
+        ),
+        (
+            lambda project: image_root(project / "other"),
+            lambda root, copy: two_roots_refusal(
+                [root, copy.parent.parent], "this run's samples"
+            ),
+        ),
+    ],
+    ids=["under_no_image_tree", "under_two_roots"],
+)
+def test_freeze_selection_answers_the_root_reading_of_its_runs_samples(
+    tmp_path: Path,
+    moved_to: Callable[[Path], Path],
+    sentence: Callable[[Path, Path], str],
+) -> None:
+    """freeze_selection answers the one root reading's refusal of its run's samples as its error.
+
+    A drawn run's first train or val sample is re-pointed, in the run's launch record (a fault
+    injected past its writer), at a copy of its image under no image tree, or directly in a
+    second root's image tree; its ground truth stays where the run read it. The freeze's error is
+    the refusal of the run's samples, and it names no bucket.
+    """
+    import shutil
+
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(tmp_path, root, "exp-moved-source")
+    samples = run_resolution(
+        "exp-moved-source", project=tmp_path
+    ).partition.samples
+    at, first = next(
+        (i, s) for i, s in enumerate(samples) if s.side in ("train", "val")
+    )
+    copy = moved_to(tmp_path) / Path(first.source).name
+    copy.parent.mkdir(parents=True)
+    shutil.copyfile(first.source, copy)
+
+    def moved(resolved: dict) -> None:
+        resolved["partition"]["samples"][at]["source"] = str(copy)
+
+    _damage_resolved(tmp_path, "exp-moved-source", moved)
+
+    result = freeze_selection(tmp_path, "exp-moved-source", actor=None)
+
+    assert result == {"error": sentence(root, copy)}, result
+    assert "bucket" not in result["error"], result
+
+
+def test_a_frozen_selection_records_the_fingerprint_its_bound_draw_recorded(
+    tmp_path: Path,
+) -> None:
+    """The fingerprint a bound run's frozen selection records is the one its draw recorded.
+
+    ``draw_splits`` writes a selection over the dataset root, a run binds to it, and
+    ``freeze_selection`` freezes that run; each selection's own recorded fingerprint is read back
+    and the two are compared.
+    """
+    from tcip_mcp.tools.data_tools import freeze_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _bound_run(root, tmp_path, "exp-agreeing")
+    frozen = freeze_selection(
+        tmp_path,
+        "exp-agreeing",
+        output_path=str(tmp_path / "frozen"),
+        actor=None,
+    )
+    assert "error" not in frozen, frozen
+
+    drawn = read_selection(tmp_path / "src-exp-agreeing", project=tmp_path)
+    recorded = read_selection(frozen["selection_dir"], project=tmp_path)
+
+    assert drawn.dataset_fingerprint is not None
+    assert recorded.dataset_fingerprint == drawn.dataset_fingerprint

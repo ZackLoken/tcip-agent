@@ -625,7 +625,8 @@ def _published_bucket(
     holds one ``bud`` box per image, its documents encoded as the proposal door encodes them.
     Returns the images.
     """
-    from tcip_mcp.buckets import Document, publish, source_root
+    from tcip_mcp.buckets import Document, publish
+    from tcip_mcp.dataset_layout import source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
     from tests._mapping_fixtures import CROP
@@ -635,7 +636,9 @@ def _published_bucket(
     box = Annotation(
         subject="bud", geometry=BBox(1, 1, 9, 9), score=0.9, created_by="agent"
     )
-    dataset_registered(root, source_root(images), crop=CROP)
+    dataset_registered(
+        root, source_root(images, what="a bucket's source images"), crop=CROP
+    )
     publish(
         root,
         name,
