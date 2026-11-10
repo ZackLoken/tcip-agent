@@ -711,20 +711,35 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     """An assessed count bucket delivers validated and discards a posted acknowledgment.
 
     A validated delivery's event carries no acknowledgment, even when one was posted beside
-    it. An export whose buckets' root is not a dataset registered to the project is refused.
+    it. An export whose bucket's root is not a dataset registered to the project is refused:
+    the bucket of that name published under a second root left unregistered.
     """
     pytest.importorskip("torch")
-    from dataclasses import replace
-
     from tcip_mcp.buckets import read_bucket
-    from tests._chain_fixtures import run_the_chain
+    from tests._chain_fixtures import (
+        DATE,
+        SUBJECT,
+        predicted,
+        published,
+        run_the_chain,
+    )
 
     chain = run_the_chain(tmp_path, experiment_id="exp-web-count")
     open_new_project(tmp_path)
     bucket = read_bucket(chain.root, chain.bucket)
-    unregistered = _export_count(
-        client, _per_image(replace(bucket, root=tmp_path / "unregistered"))
+    elsewhere = published(
+        tmp_path,
+        chain.bucket,
+        [
+            predicted(
+                image_dir(tmp_path / "unregistered", DATE) / "a.png",
+                [SUBJECT],
+            )
+        ],
+        scope={"subject": SUBJECT},
+        crop=None,
     )
+    unregistered = _export_count(client, _per_image(elsewhere))
 
     bare = _export_count(client, _per_image(bucket))
     posted = _export_count(
@@ -740,6 +755,7 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     )
 
     assert unregistered.status_code == 403, unregistered.text[:300]
+    assert "does not belong to project" in unregistered.json()["detail"]
     assert bare.status_code == 200, bare.text[:300]
     reported = CountExport.model_validate_json(bare.headers[EXPORT_HEADER])
     assert reported.shipped == ShippedValidated()
