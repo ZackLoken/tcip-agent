@@ -134,11 +134,12 @@ def write_canonical_dataset_raster(
 ) -> Path:
     """Run :func:`write_geotiff` at ``<dataset_root>/images/<date>/<stem>.tif``.
 
-    The shape passed is ``(height, width, channels)``. ``dataset_root`` is then registered
-    (``register_dataset``) under ``crop``. Returns the raster's path.
+    The shape passed is ``(height, width, channels)``. ``dataset_root`` is then registered in
+    itself under ``crop`` (:func:`~tests._producer_fixtures.register_dataset_at`). Returns the
+    raster's path.
     """
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.project_tools import register_dataset
+    from tests._producer_fixtures import register_dataset_at
 
     raster_path = image_dir(dataset_root, date) / f"{stem}.tif"
     raster_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,8 +149,5 @@ def write_canonical_dataset_raster(
         height=height,
         shape=(height, width, channels),
     )
-    result = register_dataset(
-        dataset_root, str(dataset_root), crop=crop, actor=None
-    )
-    assert "error" not in result, result
+    register_dataset_at(dataset_root, dataset_root, crop=crop)
     return raster_path

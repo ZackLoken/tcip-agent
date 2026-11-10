@@ -42,7 +42,7 @@ def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(
 ) -> None:
     """Each calibration sample of a drawn selection records its ground truth's digest."""
     root = tmp_path / "ds"
-    synthetic_capture(root)
+    synthetic_capture(tmp_path, root)
     selection = draw_reference_selection(
         tmp_path, root, tmp_path / "selection"
     )
@@ -65,7 +65,7 @@ def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
     root = tmp_path / "ds"
-    synthetic_capture(root)
+    synthetic_capture(tmp_path, root)
     selection = draw_reference_selection(
         tmp_path, root, tmp_path / "selection"
     )
@@ -88,7 +88,7 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
     from tcip_mcp.pipelines.execution import prepare
 
     root = tmp_path / "ds"
-    images_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(tmp_path, root)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
 
@@ -127,7 +127,7 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(
     from tests._chain_fixtures import assess, confirm_count_trait
 
     root = tmp_path / "ds"
-    synthetic_capture(root)
+    synthetic_capture(tmp_path, root)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
     checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-moved")
@@ -172,7 +172,7 @@ def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass
     from tests._chain_fixtures import assess, confirm_count_trait
 
     root = tmp_path / "ds"
-    synthetic_capture(root)
+    synthetic_capture(tmp_path, root)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
     checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-density")

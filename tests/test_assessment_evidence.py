@@ -152,6 +152,8 @@ def test_a_regression_assessment_records_its_scalar_evidence_alone_and_pairs_by_
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.traits import PER_PLANT_REGRESSION_AGGREGATE
     from tests import _trait_fixtures as fx
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at
     from tests._verified_checkpoint_fixtures import worker_run
     from tests.tiny_trainer_fixtures import (
         regressor_config,
@@ -170,6 +172,7 @@ def test_a_regression_assessment_records_its_scalar_evidence_alone_and_pairs_by_
     images_dir, table = write_regression_dataset(
         root, intensities, [2.0 * v for v in intensities]
     )
+    register_dataset_at(tmp_path, root, crop=CROP)
     selection = tmp_path / "selection"
     drawn = draw_splits(
         tmp_path,

@@ -27,14 +27,17 @@ def _checkpoint(project: Path, **kwargs: object) -> Path:
 def _one_image(project: Path, *stems: str) -> Path:
     """Write a black 100x100 ``<stem>.jpg`` per stem (``img`` by default) in the undated capture.
 
-    Returns the capture's directory.
+    ``project`` is the dataset root, registered in itself at
+    :data:`~tests._mapping_fixtures.CROP`. Returns the capture's directory.
     """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import dataset_registered, write_image
 
     images_dir = image_dir(project, UNDATED_BUCKET)
     for stem in stems or ("img",):
         write_image(images_dir / f"{stem}.jpg", (100, 100))
+    dataset_registered(project, project, crop=CROP)
     return images_dir
 
 

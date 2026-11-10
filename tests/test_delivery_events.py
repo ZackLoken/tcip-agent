@@ -37,16 +37,19 @@ if TYPE_CHECKING:
 def _bucket(project: Path) -> Bucket:
     """Publish an unassessed bucket of one document detecting nothing and return it.
 
-    The bucket counts the count trait's measured subject.
+    The bucket counts the count trait's measured subject, its dataset registered at
+    :data:`~tests._mapping_fixtures.COUNT_CROP`.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
+    from tests._mapping_fixtures import COUNT_CROP
 
     return published(
         project,
         "m/2026-01-01",
         [predicted(image_dir(project / "ds", "2026-01-01") / "a.png", [])],
         scope={"subject": COUNT_SUBJECT},
+        crop=COUNT_CROP,
     )
 
 

@@ -23,9 +23,11 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
+from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import (
     image_label_key,
     label_image,
+    register_dataset_at,
     registry_of,
     staged_box,
     write_image,
@@ -1131,6 +1133,7 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     label_image(
         image,
         project=tmp_path,
@@ -1286,6 +1289,7 @@ def test_propose_annotations_refuses_an_unnamed_proposer_and_runs_a_dotted_one(
 
     register_proposal_engine("registered_here", DottedProposer())
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
 
     refused = propose_annotations(tmp_path, str(image), engine="", actor=None)
     assert "registered_here" in refused["error"]

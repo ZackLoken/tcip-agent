@@ -16,7 +16,12 @@ import tcip_mcp.audit as audit_module
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir, image_root
 from tests._audit_fixtures import audit_rows
-from tests._producer_fixtures import WrittenDataset, write_image
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import (
+    WrittenDataset,
+    register_dataset_at,
+    write_image,
+)
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -95,6 +100,7 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
+    register_dataset_at(project, dataset_root.root, crop=CROP)
     result = propose_annotations(
         project,
         image_path=str(dataset_root.images[0]),

@@ -50,8 +50,12 @@ from tests._chain_fixtures import (  # noqa: E402
     detection_pass,
     training_config,
 )
-from tests._mapping_fixtures import write_plant_csv  # noqa: E402
-from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
+from tests._mapping_fixtures import COUNT_CROP, write_plant_csv  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    image_label_key,
+    label_image,
+    register_dataset_at,
+)
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
@@ -145,9 +149,10 @@ def _build_experiment(
     """Write and label a mosaic, run :func:`_completed_over` over it, and return what it left.
 
     The mosaic is ``_write_mosaic``'s, georeferenced when ``plant_csv_paths`` is given, labeled
-    with a row of 15 by 30 ``bud`` boxes. The run's data section tiles at ``TILE`` with overlap
-    0.2 and draws a tile-prefix split at seed 1 with validation ratio 0.2, holdout ratio 0.15 and
-    ``calibration_ratio``, stating ``plant_csv_paths`` when given.
+    with a row of 15 by 30 ``bud`` boxes, its dataset ``ds`` registered at
+    :data:`~tests._mapping_fixtures.COUNT_CROP`. The run's data section tiles at ``TILE`` with
+    overlap 0.2 and draws a tile-prefix split at seed 1 with validation ratio 0.2, holdout ratio
+    0.15 and ``calibration_ratio``, stating ``plant_csv_paths`` when given.
     """
     root = tmp_path / "ds"
     images_dir = image_dir(root, UNDATED_BUCKET)
@@ -161,6 +166,7 @@ def _build_experiment(
         for x in range(10, WIDTH - 20, BOX_STEP)
     ]
     label_image(raster_path, boxes, WIDTH, HEIGHT)
+    register_dataset_at(tmp_path, root, crop=COUNT_CROP)
 
     data_cfg = {
         "images_dir": str(images_dir),
@@ -1202,8 +1208,9 @@ def _build_attribute_scoped_experiment(
 ) -> dict:
     """Run an experiment whose subject declares a categorical attribute, then reorder it.
 
-    The dataset's registry is reordered after the run resolved and recorded its own attributes,
-    and both reserved regions are attested complete. Returns what the experiment left.
+    The dataset, registered at :data:`~tests._mapping_fixtures.COUNT_CROP` before the run, has its
+    registry reordered after the run resolved and recorded its own attributes, and both reserved
+    regions are attested complete. Returns what the experiment left.
     """
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.subject_registry import Attribute
@@ -1228,6 +1235,7 @@ def _build_attribute_scoped_experiment(
         for x in range(10, WIDTH - 20, BOX_STEP)
     ]
     label_image(images_dir / f"{stem}.tif", boxes, WIDTH, HEIGHT)
+    register_dataset_at(tmp_path, root, crop=COUNT_CROP)
 
     data_cfg = {
         "images_dir": str(images_dir),

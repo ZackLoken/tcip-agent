@@ -32,6 +32,8 @@ from tcip_web.routes.results import (
 )
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
 
 if TYPE_CHECKING:
@@ -600,11 +602,13 @@ def _unassessed_count_bucket(
 ) -> Bucket:
     """Publish and return an unassessed bucket of two frames with three detections each.
 
-    The bucket is ``live/counts`` of the project's own images, in a project whose count trait is
-    confirmed.
+    The bucket is ``live/counts`` of the project's own images, the project registered as its
+    own dataset at :data:`~tests._mapping_fixtures.COUNT_CROP`, in a project whose count trait
+    is confirmed.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
+    from tests._mapping_fixtures import COUNT_CROP
 
     fx.seed_delivery_traits(project)
     fx.seed_confirmed_count(project, measured_subject=fx.COUNT_SUBJECT)
@@ -617,6 +621,7 @@ def _unassessed_count_bucket(
             for i in range(2)
         ],
         scope=scope,
+        crop=COUNT_CROP,
     )
     open_new_project(project)
     return bucket
@@ -706,25 +711,21 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     """An assessed count bucket delivers validated and discards a posted acknowledgment.
 
     A validated delivery's event carries no acknowledgment, even when one was posted beside
-    it. An export whose buckets' root is not a dataset registered to the project is refused.
+    it. An export naming a dataset root that exists but is not a dataset registered to the
+    project is refused before any bucket is read.
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
     from tests._chain_fixtures import run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-web-count")
     open_new_project(tmp_path)
     bucket = read_bucket(chain.root, chain.bucket)
-    unregistered = _export_count(client, _per_image(bucket))
-    registered = register_dataset(
-        tmp_path,
-        str(chain.root),
-        crop=sorted(registered_crops())[0],
-        actor=None,
-    )
-    assert "error" not in registered, registered
+    elsewhere = tmp_path / "unregistered"
+    elsewhere.mkdir()
+    refused = _per_image(bucket)
+    refused["delivery"]["dataset_root"] = str(elsewhere)
+    unregistered = _export_count(client, refused)
 
     bare = _export_count(client, _per_image(bucket))
     posted = _export_count(
@@ -740,6 +741,7 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     )
 
     assert unregistered.status_code == 403, unregistered.text[:300]
+    assert "does not belong to project" in unregistered.json()["detail"]
     assert bare.status_code == 200, bare.text[:300]
     reported = CountExport.model_validate_json(bare.headers[EXPORT_HEADER])
     assert reported.shipped == ShippedValidated()
@@ -1226,6 +1228,7 @@ def test_the_plant_mapping_list_refuses_while_no_project_is_open(
 def test_inference_launch_missing_checkpoint(
     client: TestClient, opened_project: Path
 ) -> None:
+    register_dataset_at(opened_project, opened_project, crop=CROP)
     resp = client.post(
         "/api/inference/launch",
         json={
@@ -1268,6 +1271,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     assert isinstance(
         ingest_images(opened_project, str(source), actor=None), IngestManifest
     )
+    register_dataset_at(opened_project, opened_project, crop=CROP)
     ckpt = produced_checkpoint(
         opened_project / "m.pt", "cancel fixture weights"
     )

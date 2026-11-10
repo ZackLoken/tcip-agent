@@ -707,10 +707,13 @@ class TestInferenceToolOutputSchema:
         from tcip_mcp.pipelines.execution import Stated
         from tcip_mcp.tools.inference_tools import run_inference
         from tests._chain_fixtures import BLOB_BUILDER
+        from tests._mapping_fixtures import CROP
+        from tests._producer_fixtures import register_dataset_at
         from tests._verified_checkpoint_fixtures import registered_checkpoint
 
         ckpt = registered_checkpoint(tmp_path, model_source=dict(BLOB_BUILDER))
         image_dir(tmp_path, UNDATED_BUCKET).mkdir(parents=True)
+        register_dataset_at(tmp_path, tmp_path, crop=CROP)
         res = run_inference(
             tmp_path,
             ckpt,

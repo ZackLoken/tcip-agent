@@ -25,13 +25,15 @@ def test_a_canceled_inference_job_reads_as_canceled(
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.jobstore import Canceled
     from tcip_web.routes import inference
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at, write_image
     from tests._training_values import RATIONALE
     from tests._verified_checkpoint_fixtures import registered_checkpoint
     from tests._web_fixtures import inference_job
 
     images_dir = image_dir(tmp_path, "2026-01-01")
     write_image(images_dir / "img.jpg", (16, 16))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     ckpt = registered_checkpoint(tmp_path)
 
     job = inference_job(

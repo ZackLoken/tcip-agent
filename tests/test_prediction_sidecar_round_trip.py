@@ -23,17 +23,22 @@ def _publish(
     monkeypatch: pytest.MonkeyPatch,
     **stated: bool | int | float | str | MaskCut | None,
 ) -> dict:
-    """Run ``run_inference`` over one dated capture of the dataset ``dataset``, stubbed."""
+    """Run ``run_inference`` over one dated capture of the dataset ``dataset``, stubbed.
+
+    The dataset is registered in ``tmp_path`` at :data:`~tests._mapping_fixtures.CROP` first.
+    """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._chain_fixtures import detected
+    from tests._mapping_fixtures import CROP
     from tests._predictor_fixtures import BOX, StubPredictor, install
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import register_dataset_at, write_image
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
     images_dir = image_dir(tmp_path / "dataset", "2026-03-01")
     write_image(images_dir / "capture_a.png", (160, 120), (70, 90, 110))
+    register_dataset_at(tmp_path, tmp_path / "dataset", crop=CROP)
     install(
         monkeypatch,
         StubPredictor(

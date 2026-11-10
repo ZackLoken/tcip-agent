@@ -18,7 +18,19 @@ from tcip_annotation.state import RING_MIN_POINTS
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
-from tests._producer_fixtures import install_stub_proposer, write_image
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import (
+    dataset_registered,
+    install_stub_proposer,
+    write_image,
+)
+
+
+@pytest.fixture(autouse=True)
+def _registered(tmp_path: Path) -> None:
+    """Register ``tmp_path``, the dataset root every image here is written under, in itself."""
+    dataset_registered(tmp_path, tmp_path, crop=CROP)
+
 
 UNIT_CANDIDATE = {
     "candidate_id": 0,

@@ -2,7 +2,8 @@
 
 In a scratch session (``tools/fixture_session.py``), a project created through
 ``tests._web_fixtures.named_project`` and opened through the picker's route holds one capture of
-:data:`IMAGES` images (``tests._producer_fixtures.write_image``), a registered checkpoint
+:data:`IMAGES` images (``tests._producer_fixtures.write_image``), the project its own registered
+dataset (``tests._producer_fixtures.register_dataset_at``), a registered checkpoint
 (``tests._verified_checkpoint_fixtures.project_checkpoint``) and a file that is no checkpoint.
 Each pass is launched through ``POST /api/inference/launch``, built through the route's request
 model, and runs on the route's own worker, which holds at each pause of a
@@ -83,7 +84,8 @@ def produce() -> dict[str, JsonValue]:
     from tcip_mcp.tools import inference_tools
     from tcip_web.routes import inference
     from tcip_web.routes._body_common import PersonPayload
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at, write_image
     from tests._verified_checkpoint_fixtures import project_checkpoint
     from tests._web_fixtures import named_project
 
@@ -114,6 +116,7 @@ def produce() -> dict[str, JsonValue]:
         opened(client, named_project(root, "Inference"))
         for i in range(IMAGES):
             write_image(image_dir(root, CAPTURE) / f"img{i}.jpg")
+        register_dataset_at(root, root, crop=CROP)
         checkpoint = project_checkpoint(
             root, data={"num_channels": 3, "scope": {"subject": SUBJECT}}
         )

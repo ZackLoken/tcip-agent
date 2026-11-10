@@ -16,6 +16,7 @@ from tcip_mcp.dataset_layout import (
     image_root,
     label_key_of as image_label_key,
 )
+from tests._mapping_fixtures import CROP
 from tests._training_values import drawn_split
 
 if TYPE_CHECKING:
@@ -122,6 +123,40 @@ def label_image(
     )
 
 
+def register_dataset_at(
+    project: Path, dataset_root: Path, *, crop: str
+) -> str:
+    """Register ``dataset_root`` in ``project`` at ``crop``, asserting it returned no error.
+
+    Returns the dataset's id. A bucket published under the root afterwards records that id;
+    registering again keeps it.
+    """
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    registered = register_dataset(
+        project, str(dataset_root), crop=crop, actor=None
+    )
+    assert "error" not in registered, registered
+    return registered["id"]
+
+
+def dataset_registered(
+    project: Path, dataset_root: Path, *, crop: str
+) -> Path:
+    """Return ``dataset_root``, registered in ``project`` at ``crop`` when it carries no identity.
+
+    A root carrying none is made where nothing has made it and registered through
+    :func:`register_dataset_at`; a root already carrying one keeps its crop, and its audit log
+    gains no line.
+    """
+    from tcip_mcp.dataset_layout import read_dataset_identity
+
+    if read_dataset_identity(dataset_root) is None:
+        Path(dataset_root).mkdir(parents=True, exist_ok=True)
+        register_dataset_at(project, dataset_root, crop=crop)
+    return dataset_root
+
+
 def published_document(
     project: Path,
     name: str,
@@ -129,21 +164,28 @@ def published_document(
     annotations: Iterable[Annotation],
     width: int,
     height: int,
+    *,
+    crop: str | None = CROP,
 ) -> Bucket:
     """Publish ``annotations`` at ``width`` by ``height`` as the bucket ``name``'s one document.
 
     The document is the image at ``image``'s, encoded by ``json_io.document_payload`` and
     published by ``buckets.publish`` under the image's dataset root for ``project``, proposed by
-    ``agent:test`` under no class scope. Returns the bucket.
+    ``agent:test`` under no class scope, the root registered at ``crop`` first when it carries no
+    identity (:func:`dataset_registered`); ``crop`` ``None`` publishes under the root as it
+    stands, unregistered when nothing registered it. Returns the bucket.
     """
     from tcip_annotation.json_io import document_payload
     from tcip_mcp.buckets import Document, Proposed, publish, source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
 
+    root = source_root([image])
+    if crop is not None:
+        dataset_registered(project, root, crop=crop)
     return publish(
         project,
-        source_root([image]),
+        root,
         name,
         [Document(str(image), document_payload(annotations, width, height))],
         producer=Proposed(proposed_by="agent:test"),
@@ -639,11 +681,15 @@ def staged_box(project: Path, image: Path, box: list[float]) -> str:
     """Stage one ``bud`` box over the pixel ``box`` on ``image``; return its bucket's name.
 
     The box is proposed at 0.9 by the model ``detector`` through ``stage_proposals``, normalized
-    by the image's own dimensions.
+    by the image's own dimensions, the image's dataset root registered at
+    :data:`~tests._mapping_fixtures.CROP` first when it carries no identity
+    (:func:`dataset_registered`).
     """
+    from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
     from tcip_mcp.tools.proposal_tools import StagedShapes, stage_proposals
 
+    dataset_registered(project, parse_image_path(image)[0], crop=CROP)
     width, height = image_path_dimensions(image)
     x1, y1, x2, y2 = box
     staged = stage_proposals(

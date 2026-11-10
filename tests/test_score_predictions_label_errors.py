@@ -14,7 +14,13 @@ import pytest
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.tools.annotation_tools import score_predictions
-from tests._producer_fixtures import image_label_key, label_image, write_image
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import (
+    image_label_key,
+    label_image,
+    register_dataset_at,
+    write_image,
+)
 from tests._training_values import TRIAGE_WEIGHTS
 
 if TYPE_CHECKING:
@@ -69,6 +75,7 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(
 
     img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg")
     label_image(img, ONE_BUD, 100, 80)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     damage_record(image_label_key(img), b"{not json")
     _published(tmp_path, "baseline", img)
 

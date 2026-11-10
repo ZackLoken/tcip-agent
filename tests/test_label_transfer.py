@@ -95,20 +95,18 @@ def _project(path: Path, photographs: Path, registry: dict = REGISTRY) -> Path:
     """
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
+    from tests._producer_fixtures import register_dataset_at
     from tests._web_fixtures import named_project
 
     root = named_project(path, path.name).root
     ingested = ingest_images(root, source=str(photographs), actor=None)
     assert isinstance(ingested, IngestManifest), ingested
-    for answer in (
-        write_subject_registry(root, str(root), subjects=registry, actor=None),
-        register_dataset(
-            root, str(root), crop=sorted(registered_crops())[0], actor=None
-        ),
-    ):
-        assert "error" not in answer, answer
+    written = write_subject_registry(
+        root, str(root), subjects=registry, actor=None
+    )
+    assert "error" not in written, written
+    register_dataset_at(root, root, crop=sorted(registered_crops())[0])
     return root
 
 

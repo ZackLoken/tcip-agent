@@ -131,18 +131,15 @@ def test_the_served_build_and_its_disclosure_read_the_recorded_radius(
         plant_mapping_disclosure,
     )
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._mapping_fixtures import register_plant_registry_for
+    from tests._producer_fixtures import register_dataset_at
     from tests._web_fixtures import named_project
     from tests.test_deliver_per_plant_csv import _bucket
 
     named_project(tmp_path, "Orchard")
     _build(tmp_path, [1.2, 2.5, 0.8, 1.0])
     dataset_root = tmp_path / "ds"
-    registered = register_dataset(
-        tmp_path, str(dataset_root), crop=CROP, actor=None
-    )
-    assert "error" not in registered, registered
+    register_dataset_at(tmp_path, dataset_root, crop=CROP)
     built = build_plant_mapping(
         tmp_path,
         name="valley",

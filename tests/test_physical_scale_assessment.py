@@ -82,23 +82,24 @@ def _reference(
     from PIL import Image
 
     from tcip_mcp.tools.data_tools import draw_splits
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import geo_exif
     from tests._mapping_fixtures import (
         PHOTO_POSITION_ERROR_M,
         plant_positions,
     )
-    from tests._producer_fixtures import registry_of, registry_over
+    from tests._producer_fixtures import (
+        register_dataset_at,
+        registry_of,
+        registry_over,
+    )
 
     root = project / f"ds{name}"
     place = plant_positions(["p1"])["p1"]
     images = image_dir(root, DATE)
     images.mkdir(parents=True)
     registry_over(root, registry_of(SUBJECT))
-    assert "error" not in register_dataset(
-        project, str(root), crop=sorted(registered_crops())[0], actor=None
-    )
+    register_dataset_at(project, root, crop=sorted(registered_crops())[0])
     rows = []
     for i in range(n):
         stem = f"r{i}"

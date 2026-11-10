@@ -26,6 +26,7 @@ from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.operationalization import OperationalizationRefusedError
 from tests import REFUSED_NAMES, _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
+from tests._mapping_fixtures import COUNT_CROP
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -57,7 +58,7 @@ def _bucket(root: Path) -> Bucket:
     """Return ``root``'s one unassessed bucket ``counts/2026-02-11``, publishing it on first use.
 
     The bucket holds three detections on one frame of the dataset ``ds``, published through
-    ``_chain_fixtures.published``.
+    ``_chain_fixtures.published`` with the dataset registered at :data:`COUNT_CROP`.
     """
     pytest.importorskip("torch")
     import tcip_store
@@ -77,6 +78,7 @@ def _bucket(root: Path) -> Bucket:
                 )
             ],
             scope=_SCOPE,
+            crop=COUNT_CROP,
         )
     return read_bucket(dataset, name)
 
@@ -198,12 +200,11 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     from tests._chain_fixtures import deliver_acknowledged
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
-        COUNT_CROP,
         PHOTO_POSITION_ERROR_M,
         map_plants,
         plant_positions,
-        register_dataset_at,
     )
+    from tests._producer_fixtures import register_dataset_at
 
     both = fx.with_operationalization(
         _count_entry(),
@@ -411,6 +412,8 @@ def test_a_proposal_is_admitted_once_and_a_stored_record_decodes_without_the_voc
     fx.propose(tmp_path, _count_entry(statement="a second reading"))
     assert len(reads) == 1
 
+    # Registering the bucket's dataset reads the vocabulary for its crop, so it publishes first.
+    _bucket(tmp_path)
     monkeypatch.setattr(traits, "_crops_traits", lambda: [])
     assert (
         traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest_confirmed

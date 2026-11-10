@@ -191,7 +191,7 @@ def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(
     from tests._record_damage_fixtures import damage_record
 
     root = tmp_path / "ds"
-    synthetic_capture(root)
+    synthetic_capture(tmp_path, root)
     selection = draw_reference_selection(
         tmp_path, root, tmp_path / "selection"
     )

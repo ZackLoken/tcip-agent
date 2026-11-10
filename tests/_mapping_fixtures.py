@@ -214,23 +214,6 @@ def plant_positions(plants: Sequence[str]) -> dict[str, tuple[float, float]]:
     }
 
 
-def register_dataset_at(
-    project: Path, dataset_root: Path, *, crop: str
-) -> str:
-    """Register ``dataset_root`` in ``project`` at ``crop``, asserting it returned no error.
-
-    Returns the dataset's id. A bucket published under the root afterwards records that id;
-    registering again keeps it.
-    """
-    from tcip_mcp.tools.project_tools import register_dataset
-
-    registered = register_dataset(
-        project, str(dataset_root), crop=crop, actor=None
-    )
-    assert "error" not in registered, registered
-    return registered["id"]
-
-
 def registered_copy(
     project: Path, root: Path, name: str, *, crop: str
 ) -> tuple[Path, str]:
@@ -242,6 +225,7 @@ def registered_copy(
     import shutil
 
     import tcip_store as ts
+    from tests._producer_fixtures import register_dataset_at
 
     copy = root.parent / name
     ts.release_root(root)
@@ -264,6 +248,7 @@ def map_plants(
     ``project`` at ``crop`` too and mapped by ``build_plant_mapping``.
     """
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests._producer_fixtures import register_dataset_at
 
     register_dataset_at(project, dataset_root, crop=crop)
     plant_csv = write_plots_csv(
@@ -296,6 +281,7 @@ def map_captures(
     dataset and the registry both registered at ``crop``. Returns each date's captures.
     """
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests._producer_fixtures import register_dataset_at
 
     dataset_root.mkdir(parents=True, exist_ok=True)
     register_dataset_at(project, dataset_root, crop=crop)

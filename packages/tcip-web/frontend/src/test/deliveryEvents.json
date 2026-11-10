@@ -1546,7 +1546,7 @@
               }
             ],
             "selection_dir": "/scratch/workspace/counts/selection",
-            "dataset_id": null,
+            "dataset_id": "<count dataset>",
             "kind": "selection"
           },
           "disjointness": {
@@ -2179,7 +2179,7 @@
               }
             ],
             "selection_dir": "/scratch/workspace/counts/selection",
-            "dataset_id": null,
+            "dataset_id": "<count dataset>",
             "kind": "selection"
           },
           "disjointness": {
@@ -2786,7 +2786,7 @@
               }
             ],
             "selection_dir": "/scratch/workspace/failed/selection",
-            "dataset_id": null,
+            "dataset_id": "<dataset_id n86>",
             "kind": "selection"
           },
           "disjointness": {
@@ -2948,7 +2948,7 @@
           "delivery_kind": "per_image_count",
           "producer": {
             "kind": "checkpoint",
-            "checkpoint_sha256": "<checkpoint_sha256 n86>",
+            "checkpoint_sha256": "<checkpoint_sha256 n87>",
             "origin": "run"
           },
           "execution": {
@@ -3021,7 +3021,7 @@
         "entry": {
           "name": "<second run>",
           "checkpoint_path": "/scratch/workspace/counts/.tcip/experiments/<second run>/model_final.pt",
-          "sha256": "<sha256 n87>",
+          "sha256": "<sha256 n88>",
           "registered_at": "2000-01-01T00:00:04+00:00",
           "metrics": {},
           "tags": [],
@@ -3033,7 +3033,7 @@
         "entry": {
           "name": "other",
           "checkpoint_path": "/scratch/workspace/counts/.tcip/experiments/<second run>/second.pt",
-          "sha256": "<sha256 n88>",
+          "sha256": "<sha256 n89>",
           "registered_at": "2000-01-01T00:00:05+00:00",
           "metrics": {},
           "tags": [],
@@ -3239,7 +3239,7 @@
       "validation": {
         "kind": "shown_unvalidated",
         "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-        "digests": { "curves": "<export 1 digest>", "milestones": "<milestones n89>" }
+        "digests": { "curves": "<export 1 digest>", "milestones": "<milestones n90>" }
       },
       "positive_class_assessed": true,
       "plant_mapping": {
@@ -3420,16 +3420,16 @@
         "validation": {
           "kind": "shown_unvalidated",
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n90>", "milestones": "<milestones n91>" }
+          "digests": { "curves": "<curves n91>", "milestones": "<milestones n92>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "kind": "plant_mapping",
           "name": "valley",
-          "dataset_id": "<dataset_id n92>",
+          "dataset_id": "<dataset_id n93>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n93>",
+          "record_sha256": "<record_sha256 n94>",
           "match_radius": {
             "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
             "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
@@ -3499,16 +3499,16 @@
         "validation": {
           "kind": "shown_unvalidated",
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n94>", "milestones": "<milestones n95>" }
+          "digests": { "curves": "<curves n95>", "milestones": "<milestones n96>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "kind": "plant_mapping",
           "name": "valley",
-          "dataset_id": "<dataset_id n92>",
+          "dataset_id": "<dataset_id n93>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n93>",
+          "record_sha256": "<record_sha256 n94>",
           "match_radius": {
             "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
             "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
@@ -3582,16 +3582,16 @@
         "validation": {
           "kind": "shown_unvalidated",
           "message": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment. no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment.",
-          "digests": { "curves": "<curves n96>", "milestones": "<milestones n97>" }
+          "digests": { "curves": "<curves n97>", "milestones": "<milestones n98>" }
         },
         "positive_class_assessed": true,
         "plant_mapping": {
           "kind": "plant_mapping",
           "name": "valley",
-          "dataset_id": "<dataset_id n92>",
+          "dataset_id": "<dataset_id n93>",
           "dataset_root": "ds",
           "built_at": "2000-01-01T00:00:15+00:00",
-          "record_sha256": "<record_sha256 n93>",
+          "record_sha256": "<record_sha256 n94>",
           "match_radius": {
             "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
             "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
@@ -3692,10 +3692,10 @@
       "plant_mapping": {
         "kind": "plant_mapping",
         "name": "valley",
-        "dataset_id": "<dataset_id n98>",
+        "dataset_id": "<dataset_id n99>",
         "dataset_root": "ds",
         "built_at": "2000-01-01T00:00:16+00:00",
-        "record_sha256": "<record_sha256 n99>",
+        "record_sha256": "<record_sha256 n100>",
         "match_radius": {
           "2026-02-11": { "source": "h_pos_err", "value": 3.0 },
           "2026-02-25": { "source": "h_pos_err", "value": 3.0 },
