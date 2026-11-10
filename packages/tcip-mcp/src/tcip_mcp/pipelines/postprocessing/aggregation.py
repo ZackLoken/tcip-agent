@@ -304,10 +304,10 @@ def _attributed(
     :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.admission` answers for ``plants``.
     Refuses (``ValueError``) once, after reading every result, naming each result's image that is
     not admitted, or that an earlier result names, as ``<date>/<stem>`` in the order submitted
-    under its reason, with the reason's next step; an image named by several results is named
-    once. Otherwise refuses, naming each with its images on the delivered dates, a plant of
-    ``plants`` the delivery read no image of; and, naming each, a read image of a plant of
-    ``plants``
+    under its reason, with the reason's next step and, after an image outside the population,
+    its plant; an image named by several results is named once. Otherwise refuses, naming each
+    with its images on the delivered dates, a plant of ``plants`` the delivery read no image of;
+    and, naming each, a read image of a plant of ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.read_images`) no result names.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -317,6 +317,7 @@ def _attributed(
         Inadmissible,
         admission,
         named_images,
+        quoted_plant,
         read_images,
     )
 
@@ -361,7 +362,7 @@ def _attributed(
             for plant in unread
         }
         named = ", ".join(
-            f"{p!r} ({named_images(s)})" for p, s in images.items()
+            f"{quoted_plant(p)} ({named_images(s)})" for p, s in images.items()
         )
         raise ValueError(
             f"the delivery read none of the images of plant(s) {named}: {UNREAD_CAUSE}; "
