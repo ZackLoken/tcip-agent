@@ -388,26 +388,6 @@ class MappingBuild:
             for date, rows in self.assignments.items()
         }
 
-    def attributed_assignment(self, date: str, stem: str) -> Assignment:
-        """Return the assignment of the image of stem ``stem`` captured on ``date``.
-
-        Refuses (``ValueError``), naming the image, when this build records no image of that stem
-        on that date and when the image's assignment names no plant
-        (:func:`assignment_is_attributed`).
-        """
-        assignment = self.by_stem.get(date, {}).get(stem)
-        if assignment is None:
-            raise ValueError(
-                f"image {stem!r} of {date}: mapping {self.name!r} records no image of that "
-                "stem on that date, so it attributes the image to no plant."
-            )
-        if not assignment_is_attributed(assignment):
-            raise ValueError(
-                f"image {stem!r} of {date}: mapping {self.name!r} assigned it to no plant "
-                f"({assignment.source}), so its value belongs to none."
-            )
-        return assignment
-
     def to_record(self) -> dict:
         """Return the stored document: every field but ``record_sha256``."""
         return _MAPPING_RECORD.dump_python(

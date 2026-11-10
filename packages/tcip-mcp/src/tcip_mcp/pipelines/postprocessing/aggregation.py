@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import statistics
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -293,6 +293,18 @@ PER_IMAGE_COLUMNS = ("n_images", "plant_id_source", "plant_id_distance_m_max")
 images' plant assignments (:func:`_per_plant`)."""
 
 
+_UNREAD_CAUSE = (
+    "the delivered bucket holds no prediction document for the image, or the image is no "
+    "longer on disk"
+)
+"""Why an image the mapping attributes to a plant was not read by the delivery."""
+
+
+def _named(images: Iterable[tuple[str, str]]) -> str:
+    """Return the ``(date, stem)`` ``images`` as ``<date>/<stem>``, joined with ", "."""
+    return ", ".join(f"{date}/{stem}" for date, stem in images)
+
+
 def _attributed(
     results: Sequence[ImageObservation],
     mapping: MappingResolution,
@@ -300,76 +312,96 @@ def _attributed(
 ) -> list[Observed]:
     """Return each of ``results`` with the assignment ``mapping`` attributes its image to.
 
-    Each result's image is looked up by its date and stem in the mapping's build
-    (:meth:`~tcip_mcp.pipelines.postprocessing.plant_mapping.MappingBuild.attributed_assignment`,
-    refusing as it does). Refuses (``ValueError``), naming the image, a result whose date is not a
-    delivered date, whose image's plant is not one of ``plants``, whose image the mapping's
-    verification did not read (no document in the delivered bucket, or no longer on disk), or
-    whose image another result names too; then, naming each with its images on the delivered
-    dates, a plant of ``plants`` the delivery read no image of; and, naming each, a read image of a
-    plant of ``plants``
+    Each result's image is looked up by its date and stem in the mapping's build. Refuses
+    (``ValueError``) once, after reading every result, naming each inadmissible image as
+    ``<date>/<stem>`` under its reason, the reasons in this order and the images in the order
+    submitted: a date that is not a delivered date; an image the mapping records no image of
+    that stem for; an image it assigned to no plant; an image of a plant not in ``plants``; an
+    image the mapping's verification did not read; an image another result names too. A result
+    takes the first reason that applies. Otherwise refuses, naming each with its images on the
+    delivered dates, a plant of ``plants`` the delivery read no image of; and, naming each, a
+    read image of a plant of ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.read_images`) no result names.
     """
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_images
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        assignment_is_attributed,
+        read_images,
+    )
 
     delivered = mapping.disclosure.dates_delivered
     read_stems = mapping.verified.read_stems
+    name = mapping.build.name
+    reasons = (
+        f"on a date that is not a delivered date ({delivered})",
+        f"mapping {name!r} records no image of that stem on that date",
+        f"mapping {name!r} assigned to no plant",
+        f"of a plant the population {list(plants)} does not name",
+        f"not read by the delivery ({_UNREAD_CAUSE})",
+        "named by more than one result",
+    )
+    not_delivered, no_image, no_plant, outside, unread, repeated = reasons
     seen: set[tuple[str, str]] = set()
     observed: list[Observed] = []
+    refused: dict[tuple[str, str], str] = {}
     for result in results:
-        image = f"image {result.stem!r} of {result.date}"
-        if result.date not in delivered:
-            raise ValueError(
-                f"{image}: {result.date} is not a delivered date ({delivered}); deliver its "
-                "bucket or drop the result."
-            )
-        assignment = mapping.build.attributed_assignment(
-            result.date, result.stem
+        image = (result.date, result.stem)
+        assignment = mapping.build.by_stem.get(result.date, {}).get(
+            result.stem
         )
-        if assignment.plant_id not in plants:
-            raise ValueError(
-                f"{image} is of plant {assignment.plant_id!r}, which the population "
-                f"{list(plants)} does not name; deliver that plant or drop the result."
-            )
-        if result.stem not in read_stems[result.date]:
-            raise ValueError(
-                f"{image} was not read by the delivery: the delivered bucket holds no "
-                "prediction document for it, or it is no longer on disk; drop the result."
-            )
-        if (result.date, result.stem) in seen:
-            raise ValueError(
-                f"{image} is named by two results; each image is delivered once."
-            )
-        seen.add((result.date, result.stem))
-        observed.append((assignment, result.value))
+        if result.date not in delivered:
+            reason = not_delivered
+        elif assignment is None:
+            reason = no_image
+        elif not assignment_is_attributed(assignment):
+            reason = no_plant
+        elif assignment.plant_id not in plants:
+            reason = outside
+        elif result.stem not in read_stems[result.date]:
+            reason = unread
+        elif image in seen:
+            reason = repeated
+        else:
+            seen.add(image)
+            observed.append((assignment, result.value))
+            continue
+        refused.setdefault(image, reason)
+    if refused:
+        named = "; ".join(
+            f"{reason}: {_named(i for i, r in refused.items() if r == reason)}"
+            for reason in reasons
+            if reason in refused.values()
+        )
+        raise ValueError(
+            f"the results name images the door does not admit; {named}; drop those "
+            "results, or deliver the buckets and plants they need."
+        )
     read = read_images(mapping, plants)
-    unread = [plant for plant, images in read.items() if not images]
-    if unread:
+    unread_plants = [plant for plant, images in read.items() if not images]
+    if unread_plants:
         images = {
             plant: sorted(
-                f"{date}/{a.stem}"
+                (date, a.stem)
                 for date in delivered
                 for a in mapping.build.assignments[date]
                 if a.plant_id == plant
             )
-            for plant in unread
+            for plant in unread_plants
         }
-        named = ", ".join(f"{p!r} ({', '.join(s)})" for p, s in images.items())
+        named = ", ".join(f"{p!r} ({_named(s)})" for p, s in images.items())
         raise ValueError(
-            f"the delivery read none of the images of plant(s) {named}: the delivered "
-            "bucket holds no prediction document for them, or they are no longer on disk; "
+            f"the delivery read none of the images of plant(s) {named}: {_UNREAD_CAUSE}; "
             "deliver without the plant or restore its images."
         )
     uncovered = sorted(
-        f"{date}/{stem}"
+        image
         for images in read.values()
-        for date, stem in images
-        if (date, stem) not in seen
+        for image in images
+        if image not in seen
     )
     if uncovered:
         raise ValueError(
-            f"image(s) {uncovered} of the delivered plants were read by the delivery and no "
-            "result names them: every image the delivery read counts toward its plant."
+            f"image(s) {_named(uncovered)} of the delivered plants were read by the delivery "
+            "and no result names them: every image the delivery read counts toward its plant."
         )
     return observed
 

@@ -477,9 +477,12 @@ def _but(*left_out: tuple[str, str]) -> list[dict]:
 
 
 def _published(
-    project: Path, dataset_root: Path, without: frozenset = frozenset()
+    project: Path,
+    dataset_root: Path,
+    without: frozenset = frozenset(),
+    name: str = "manual",
 ) -> list[str]:
-    """Publish one bucket per date of :data:`CAPTURES`; return their names.
+    """Publish one bucket per date of :data:`CAPTURES`, named ``<name>/<date>``; return their names.
 
     Each holds a document for every image of its date but the ``(date, stem)`` pairs ``without``
     names.
@@ -490,6 +493,7 @@ def _published(
             dataset_root,
             date,
             {stem: 1 for stem in taken if (date, stem) not in without},
+            name,
         )
         for date, taken in CAPTURES.items()
     ]
@@ -524,13 +528,17 @@ def _second_folder_gone(project: Path, dataset_root: Path) -> list[str]:
     return buckets
 
 
-def _p2_unread(project: Path, dataset_root: Path) -> list[str]:
+def _p2_unread(
+    project: Path, dataset_root: Path, name: str = "manual"
+) -> list[str]:
     """Publish both dates, the first's ``c`` undocumented, then remove the second's folder.
 
     The delivery reads no image of ``P2``: its first-date image has no document and its
     second-date image is gone with its folder.
     """
-    buckets = _published(project, dataset_root, frozenset({(FIRST, "c")}))
+    buckets = _published(
+        project, dataset_root, frozenset({(FIRST, "c")}), name
+    )
     shutil.rmtree(image_dir(dataset_root, SECOND))
     return buckets
 
@@ -637,63 +645,63 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
             _rows(*READ[:3], (SECOND, "a", 8)),
             ("P1", "P2"),
             "is not a delivered date",
-            f"image 'a' of {SECOND}",
+            f"{SECOND}/a",
         ),
         (
             _both,
             _rows(*READ, (SECOND, "b", 32)),
             ("P1", "P2"),
             "records no image of that stem on that date",
-            f"image 'b' of {SECOND}",
+            f"{SECOND}/b",
         ),
         (
             _both,
             _rows(*READ, (FIRST, "far", 32)),
             ("P1", "P2"),
-            "assigned it to no plant",
-            f"image 'far' of {FIRST}",
+            "assigned to no plant",
+            f"{FIRST}/far",
         ),
         (
             _both,
             _but((SECOND, "a")),
             ("P1",),
-            "which the population ['P1'] does not name",
-            f"image 'c' of {FIRST}",
+            "the population ['P1'] does not name",
+            f"{FIRST}/c",
         ),
         (
             _b_undocumented,
             _rows(*READ),
             ("P1", "P2"),
-            "was not read by the delivery",
-            f"image 'b' of {FIRST}",
+            "not read by the delivery",
+            f"{FIRST}/b",
         ),
         (
             _b_off_disk,
             _rows(*READ),
             ("P1", "P2"),
-            "was not read by the delivery",
-            f"image 'b' of {FIRST}",
+            "not read by the delivery",
+            f"{FIRST}/b",
         ),
         (
             _second_folder_gone,
             _rows(*READ),
             ("P1", "P2"),
-            "was not read by the delivery",
-            f"image 'a' of {SECOND}",
+            "not read by the delivery",
+            f"{SECOND}/a",
         ),
         (
             _both,
             _rows(*READ, READ[0]),
             ("P1", "P2"),
-            "is named by two results",
-            f"image 'a' of {FIRST}",
+            "named by more than one result",
+            f"{FIRST}/a",
         ),
         (
             _both,
             _but((FIRST, "b")),
             ("P1", "P2"),
             UNCOVERED,
-            f"'{FIRST}/b'",
+            f"image(s) {FIRST}/b of the delivered plants",
         ),
         (
             _p2_unread,
@@ -755,8 +763,187 @@ def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_
     assert phrase in refused.get("error", ""), refused
     assert named in refused["error"], refused
     assert (UNCOVERED in refused["error"]) == (phrase == UNCOVERED), refused
+    assert "image '" not in refused["error"]
+    assert f"['{FIRST}/" not in refused["error"]
     assert read_delivery_events(tmp_path) == []
     assert not (tmp_path / "o.csv").exists()
+
+
+UNDELIVERED = "on a date that is not a delivered date"
+NO_IMAGE = "records no image of that stem on that date"
+NO_PLANT = "assigned to no plant"
+OUTSIDE = "the population ['P1'] does not name"
+UNREAD = "not read by the delivery"
+REPEATED = "named by more than one result"
+IN_ORDER = (UNDELIVERED, NO_IMAGE, NO_PLANT, OUTSIDE, UNREAD, REPEATED)
+"""The phrases of the per-result reasons, in the order the refusal gives them."""
+IMAGE_NAME = r"\d{4}-\d{2}-\d{2}/\w+"
+"""The pattern of an image named as ``<date>/<stem>``."""
+
+
+def _named_under(error: str, phrases: tuple[str, ...]) -> dict[str, list[str]]:
+    """Return, for each of ``phrases`` the ``error`` states, the images it names after it.
+
+    Each phrase must appear once and the phrases in the order given; an image runs from its
+    phrase to the next phrase stated or the end of the sentence.
+    """
+    import re
+
+    assert all(error.count(p) == 1 for p in phrases), error
+    starts = [error.index(p) for p in phrases]
+    assert starts == sorted(starts), error
+    ends = [*starts[1:], len(error)]
+    return {
+        phrase: re.findall(IMAGE_NAME, error[start:end])
+        for phrase, start, end in zip(phrases, starts, ends, strict=True)
+    }
+
+
+def test_one_refusal_names_every_inadmissible_image_with_its_reason_once(
+    tmp_path: Path,
+) -> None:
+    """Every reason a result can be refused for is stated once, followed by all its images.
+
+    One call carries two results on dates no bucket was delivered for, a stem the mapping
+    records no image of (submitted twice, named once), an unmapped capture, an image of a plant
+    outside the population, an image the delivery did not read and an image two results name,
+    beside one admissible image. The refusal names each as ``<date>/<stem>`` in the order
+    submitted, the reasons in a fixed order, and leaves no delivery event.
+    """
+    from tcip_mcp.delivery import read_delivery_events
+
+    dataset_root, _ = _mapped(tmp_path, TWO_PLANTS, CAPTURES)
+    rows = _rows(
+        ("2026-03-02", "y", 1),
+        (FIRST, "zz", 1),
+        (FIRST, "far", 1),
+        (FIRST, "a", 1),
+        (FIRST, "c", 1),
+        (FIRST, "b", 1),
+        (SECOND, "c", 1),
+        ("2026-03-01", "x", 1),
+        (FIRST, "zz", 1),
+        (FIRST, "a", 1),
+    )
+    arguments = _arguments_over(
+        tmp_path,
+        dataset_root,
+        _b_undocumented(tmp_path, dataset_root),
+        rows,
+        ("P1",),
+    )
+
+    refused = _called(tmp_path, arguments)
+
+    assert isinstance(refused, dict), refused
+    assert _named_under(refused["error"], IN_ORDER) == {
+        UNDELIVERED: ["2026-03-02/y", "2026-03-01/x"],
+        NO_IMAGE: [f"{FIRST}/zz"],
+        NO_PLANT: [f"{FIRST}/far"],
+        OUTSIDE: [f"{FIRST}/c"],
+        UNREAD: [f"{FIRST}/b"],
+        REPEATED: [f"{FIRST}/a"],
+    }
+    assert f"{SECOND}/c" not in refused["error"]
+    assert read_delivery_events(tmp_path) == []
+    assert not (tmp_path / "o.csv").exists()
+
+
+def test_a_refusal_names_every_unmapped_capture_without_a_cap(
+    tmp_path: Path,
+) -> None:
+    """More than twenty captures the mapping attributes to no plant are all named.
+
+    Each is submitted, in reverse of the order its photograph was taken, beside the plant's own
+    image; the refusal names every one in the order submitted.
+    """
+    plant_place = ONE_PLANT["P1"]
+    unmapped = [f"u{i:02d}" for i in range(25)]
+    dataset_root, date = _mapped(
+        tmp_path,
+        ONE_PLANT,
+        {DATE: {"P1": plant_place, **dict.fromkeys(unmapped, FAR)}},
+    )
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
+    submitted = [*reversed(unmapped)]
+    arguments = _arguments_over(
+        tmp_path,
+        dataset_root,
+        [bucket],
+        _rows((date, "P1", 1), *((date, stem, 1) for stem in submitted)),
+        ("P1",),
+    )
+
+    refused = _called(tmp_path, arguments)
+
+    assert isinstance(refused, dict), refused
+    assert _named_under(refused["error"], (NO_PLANT,)) == {
+        NO_PLANT: [f"{date}/{stem}" for stem in submitted]
+    }
+
+
+def test_an_inadmissible_result_refuses_before_a_plant_nothing_was_read_of(
+    tmp_path: Path,
+) -> None:
+    """A result the door does not admit is refused alone, ahead of the delivery-wide refusals.
+
+    The delivery reads no image of ``P2`` and a read image of ``P1`` is left unnamed, yet the
+    refusal states neither: it names the one inadmissible result.
+    """
+    dataset_root, _ = _mapped(tmp_path, TWO_PLANTS, CAPTURES)
+    arguments = _arguments_over(
+        tmp_path,
+        dataset_root,
+        _p2_unread(tmp_path, dataset_root),
+        _rows(READ[0], ("2026-03-01", "x", 1)),
+    )
+
+    refused = _called(tmp_path, arguments)
+
+    assert isinstance(refused, dict), refused
+    assert _named_under(refused["error"], (UNDELIVERED,)) == {
+        UNDELIVERED: ["2026-03-01/x"]
+    }
+    assert NO_READ_IMAGE not in refused["error"]
+    assert UNCOVERED not in refused["error"]
+
+
+def test_the_two_refusals_of_an_unread_image_state_one_cause(
+    tmp_path: Path,
+) -> None:
+    """An unread image's refusal and an unread plant's refusal give the same cause clause.
+
+    The first is the refusal of a result naming an image the delivered bucket holds no document
+    for; the second, of a plant the delivery read no image of. Both are produced over the one
+    scene, and the clause that follows the reason in the one is found in the other.
+    """
+    dataset_root, _ = _mapped(tmp_path, TWO_PLANTS, CAPTURES)
+    by_image = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path,
+            dataset_root,
+            _b_undocumented(tmp_path, dataset_root),
+            _rows(*READ),
+        ),
+    )
+    by_plant = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path,
+            dataset_root,
+            _p2_unread(tmp_path, dataset_root, "other"),
+            _rows(*READ[:2]),
+        ),
+    )
+
+    assert isinstance(by_image, dict) and isinstance(by_plant, dict)
+    cause = by_image["error"].split(f"{UNREAD} (")[1].split(")")[0]
+    assert cause.startswith(
+        "the delivered bucket holds no prediction document"
+    )
+    assert NO_READ_IMAGE in by_plant["error"]
+    assert cause in by_plant["error"]
 
 
 @pytest.mark.parametrize(
