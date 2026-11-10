@@ -25,7 +25,7 @@ const [DECLARED_KEYS, UNDECLARED_KEYS] = [true, false].map((declared) =>
 
 /** The dataset fingerprints `comparison`'s read columns carry, in column order. */
 function fingerprintsOf(comparison: Comparison): (string | null)[] {
-  return readColumns(comparison).map((c) => c.dataset_fingerprint);
+  return readColumns(comparison).map((c) => c.dataset.fingerprint);
 }
 
 /** A metric the produced rich comparison serves with no declared direction. */
