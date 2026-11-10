@@ -371,6 +371,7 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
         f"{selection_place(selection_dir)}: "
         f"{two_roots_refusal([tmp_path / 'ds', other], 'its samples')} {NEXT_STEP}"
     ), refused.value
+    assert "bucket" not in str(refused.value), refused.value
     assert read_selection(selection_dir, project=tmp_path) == drawn
 
 
@@ -410,6 +411,7 @@ def test_a_selection_with_a_sample_under_no_image_tree_refuses_at_its_write(
     assert str(refused.value) == (
         f"{selection_place(out)}: {unrooted_refusal(loose, 'its samples')} {NEXT_STEP}"
     ), refused.value
+    assert "bucket" not in str(refused.value), refused.value
     assert not out.exists()
 
 
