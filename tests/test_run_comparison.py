@@ -113,8 +113,8 @@ def test_an_id_naming_no_run_is_uncompared_beside_the_runs_own_fingerprints(
     ).experiments
     assert e1.kind == "compared", e1
     assert e2.kind == "compared", e2
-    assert e1.dataset_fingerprint is not None
-    assert e1.dataset_fingerprint == e2.dataset_fingerprint
+    assert e1.dataset.fingerprint is not None
+    assert e1.dataset.fingerprint == e2.dataset.fingerprint
     assert missing.kind == "uncompared", missing
 
 
