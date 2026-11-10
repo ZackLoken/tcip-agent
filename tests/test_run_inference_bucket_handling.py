@@ -14,6 +14,8 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from tcip_mcp.workspace import BoundProject
+
 torch = pytest.importorskip("torch")
 import tcip_store  # noqa: E402
 from tcip_mcp.dataset_layout import (  # noqa: E402
@@ -28,7 +30,12 @@ from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     dataset_registered,
     gray_frame,
+    ingested_unregistered,
+    left_written,
+    register_dataset_at,
+    unregistered_refusal,
 )
+from tests._server_calls import called_through_the_server  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_CONF,
     SAMPLE_DETECTOR_PASS,
@@ -260,6 +267,122 @@ def test_a_raster_outside_a_capture_is_admitted(
 
     assert "error" not in result, result
     assert result["dataset_root"] == str(tmp_path)
+
+
+TILED = Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS)
+"""The stated execution values of a tiled pass over 32 px tiles, as a raster pass runs."""
+
+
+def _unregistered_source(tmp_path: Path, *, raster: bool) -> Path:
+    """Ingest one source into the dataset root ``tmp_path / "field"``, never registering it.
+
+    The source is a black 64 px raster ``mosaic.tif`` when ``raster``, else a 100 px gray
+    ``img.png`` (:func:`~tests._producer_fixtures.gray_frame`); returns its ingested path.
+    """
+    import numpy as np
+    import tifffile
+
+    raw = tmp_path / "raw"
+    if raster:
+        raw.mkdir()
+        tifffile.imwrite(
+            str(raw / "mosaic.tif"), np.zeros((64, 64, 3), dtype=np.uint8)
+        )
+    else:
+        gray_frame(raw, 100)
+    (name,) = (p.name for p in raw.iterdir())
+    return ingested_unregistered(tmp_path / "field", raw) / name
+
+
+@pytest.mark.parametrize(
+    ("raster", "options", "once_registered", "writes"),
+    [
+        (False, {}, lambda answer: "error" not in answer, True),
+        (True, {}, lambda answer: "error" not in answer, True),
+        (
+            False,
+            {"dry_run": True},
+            lambda answer: answer.get("dry_run"),
+            False,
+        ),
+        (
+            True,
+            {"resume": True},
+            lambda answer: "no raster-pass progress" in answer["error"],
+            False,
+        ),
+    ],
+    ids=["image_pass", "raster_pass", "dry_run", "resume"],
+)
+def test_a_pass_under_a_root_never_registered_refuses_naming_it_and_writes_nothing(
+    tmp_path: Path,
+    bound: BoundProject,
+    monkeypatch: pytest.MonkeyPatch,
+    raster: bool,
+    options: dict[str, bool],
+    once_registered: Callable[[dict], bool],
+    writes: bool,
+) -> None:
+    """A pass under a root ingested and never registered refuses before any model runs.
+
+    Called through the server, the answer is the one sentence ``require_dataset_identity``
+    refuses the root with, naming it and ``register_dataset``; the predictor is never called and
+    nothing is written. Registered, the root answers the same call as any registered root does,
+    a pass writing what a dry run and a refused resume do not.
+    """
+    source = _unregistered_source(tmp_path, raster=raster)
+    root = tmp_path / "field"
+    stub = _stubbed(monkeypatch)
+    arguments = {
+        "checkpoint_path": project_checkpoint(tmp_path),
+        **(
+            {"raster_path": str(source)}
+            if raster
+            else {"images_dir": str(source.parent)}
+        ),
+        "bucket": BUCKET,
+        "stated": (TILED if raster else UNTILED).model_dump(
+            mode="json", exclude_unset=True
+        ),
+        **options,
+    }
+    before = left_written(tmp_path, root)
+
+    refused = called_through_the_server(
+        "run_inference", arguments, bound=bound
+    )
+
+    assert refused == {"error": unregistered_refusal(root)}, refused
+    assert stub.calls == 0
+    assert left_written(tmp_path, root) == before
+    register_dataset_at(tmp_path, root, crop=CROP)
+    registered = left_written(tmp_path, root)
+    answer = called_through_the_server("run_inference", arguments, bound=bound)
+    assert isinstance(answer, dict) and once_registered(answer), answer
+    assert (left_written(tmp_path, root) != registered) is writes
+
+
+def test_a_pass_under_a_root_never_registered_refuses_before_its_checkpoint_is_read(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """A pass naming no checkpoint file under a root never registered answers the root's refusal.
+
+    The checkpoint is never read, so no model is built and no pass runs.
+    """
+    source = _unregistered_source(tmp_path, raster=False)
+
+    refused = called_through_the_server(
+        "run_inference",
+        {
+            "checkpoint_path": str(tmp_path / "absent.pt"),
+            "images_dir": str(source.parent),
+            "bucket": BUCKET,
+            "stated": UNTILED.model_dump(mode="json", exclude_unset=True),
+        },
+        bound=bound,
+    )
+
+    assert refused == {"error": unregistered_refusal(tmp_path / "field")}
 
 
 def test_a_dry_run_previews_the_both_sources_refusal(tmp_path: Path) -> None:
