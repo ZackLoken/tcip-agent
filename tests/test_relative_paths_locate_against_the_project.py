@@ -57,14 +57,10 @@ def _relative(path: str | Path, project: Path) -> str:
 
 
 def _register_dataset(project: Path) -> Path:
-    from tcip_mcp.tools.project_tools import (
-        dataset_entry_path,
-        read_datasets,
-        register_dataset,
-    )
+    """Register ``project`` as its own dataset spelled ``"."``; return where its entry resolves."""
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
-    result = register_dataset(project, ".", crop="currant", actor=None)
-    assert "error" not in result, result
+    register_dataset_at(project, Path("."), crop="currant")
     (entry,) = read_datasets(project)
     return dataset_entry_path(project, entry)
 

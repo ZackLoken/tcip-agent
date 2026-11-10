@@ -180,6 +180,7 @@ def test_a_launch_over_a_refused_dataset_identity_answers_the_error_naming_its_p
     from tcip_mcp.tools import training_tools
     from tests._producer_fixtures import (
         fake_popen,
+        register_dataset_at,
         seed_bud_images,
         small_detection_config,
     )
@@ -187,9 +188,7 @@ def test_a_launch_over_a_refused_dataset_identity_answers_the_error_naming_its_p
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
     fake_popen(monkeypatch, [])
-    assert "error" not in register_dataset(
-        tmp_path, str(tmp_path), "currant", actor=None
-    )
+    register_dataset_at(tmp_path, tmp_path, crop="currant")
     path = dataset_identity_path(tmp_path)
     _rewritten(path, {"crop": 5})
 

@@ -19,6 +19,7 @@ from tcip_mcp.tools.project_tools import (
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import (
     label_image,
+    register_dataset_at,
     registry_of,
     registry_over,
     write_image,
@@ -170,7 +171,7 @@ def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(
 
     src = new_project(tmp_path / "proj").root
     _make_dataset(src)
-    register_dataset(src, str(src), crop="currant", actor=None)
+    register_dataset_at(src, src, crop="currant")
 
     result = run_tcip(
         "check-dataset-identity",
@@ -200,7 +201,7 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(
 
     orig = new_project(tmp_path / "orig").root
     _make_dataset(orig)
-    register_dataset(orig, str(orig), crop="currant", actor=None)
+    register_dataset_at(orig, orig, crop="currant")
 
     moved = tmp_path / "moved"
     tcip_store.release_root(orig)
@@ -270,7 +271,7 @@ def test_evidence_roots_resolves_a_relatively_registered_dataset(
     project = tmp_path / "proj"
     dataset = project / "datasets" / "main"
     _make_dataset(dataset)
-    register_dataset(project, str(dataset), crop="currant", actor=None)
+    register_dataset_at(project, dataset, crop="currant")
 
     roots = _evidence_roots(project)
 

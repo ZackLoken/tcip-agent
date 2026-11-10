@@ -167,14 +167,14 @@ def test_a_dataset_entry_missing_its_path_is_refused_naming_it_and_the_registry(
         DatasetEntry,
         dataset_registry_key,
         read_datasets,
-        register_dataset,
         upsert_dataset,
     )
+    from tests._producer_fixtures import register_dataset_at
     from tests.test_project_tools import _make_dataset
 
     root = tmp_path / "ds"
     _make_dataset(root)
-    register_dataset(tmp_path, str(root), crop="currant", actor=None)
+    register_dataset_at(tmp_path, root, crop="currant")
     ts.replace(
         dataset_registry_key(tmp_path),
         [{"id": entry.id} for entry in read_datasets(tmp_path)],
