@@ -300,76 +300,84 @@ def _attributed(
 ) -> list[Observed]:
     """Return each of ``results`` with the assignment ``mapping`` attributes its image to.
 
-    Each result's image is looked up by its date and stem in the mapping's build
-    (:meth:`~tcip_mcp.pipelines.postprocessing.plant_mapping.MappingBuild.attributed_assignment`,
-    refusing as it does). Refuses (``ValueError``), naming the image, a result whose date is not a
-    delivered date, whose image's plant is not one of ``plants``, whose image the mapping's
-    verification did not read (no document in the delivered bucket, or no longer on disk), or
-    whose image another result names too; then, naming each with its images on the delivered
-    dates, a plant of ``plants`` the delivery read no image of; and, naming each, a read image of a
-    plant of ``plants``
+    Each result's image is admitted as
+    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.admission` answers for ``plants``.
+    Refuses (``ValueError``) once, after reading every result, naming each result's image that is
+    not admitted, or that an earlier result names, as ``<date>/<stem>`` in the order submitted
+    under its reason, with the reason's next step; an image named by several results is named
+    once. Otherwise refuses, naming each with its images on the delivered dates, a plant of
+    ``plants`` the delivery read no image of; and, naming each, a read image of a plant of
+    ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.read_images`) no result names.
     """
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_images
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        REASONS,
+        REPEATED,
+        UNREAD_CAUSE,
+        Inadmissible,
+        admission,
+        named_images,
+        read_images,
+    )
 
-    delivered = mapping.disclosure.dates_delivered
-    read_stems = mapping.verified.read_stems
     seen: set[tuple[str, str]] = set()
     observed: list[Observed] = []
+    refused: dict[tuple[str, str], Inadmissible] = {}
     for result in results:
-        image = f"image {result.stem!r} of {result.date}"
-        if result.date not in delivered:
-            raise ValueError(
-                f"{image}: {result.date} is not a delivered date ({delivered}); deliver its "
-                "bucket or drop the result."
+        image = (result.date, result.stem)
+        admitted = admission(mapping, plants, *image)
+        if isinstance(admitted, Inadmissible):
+            refused.setdefault(image, admitted)
+        elif image in seen:
+            refused.setdefault(image, REPEATED)
+        else:
+            seen.add(image)
+            observed.append((admitted, result.value))
+    if refused:
+        by_clause: dict[str, list[tuple[str, str]]] = {}
+        for image, reason in refused.items():
+            by_clause.setdefault(reason.clause, []).append(image)
+        details = {image: reason.detail for image, reason in refused.items()}
+        raise ValueError(
+            "the results name images the door does not admit; "
+            + "; ".join(
+                f"{reason.clause}: "
+                f"{named_images(by_clause[reason.clause], details)} "
+                f"(next step: {reason.next_step})"
+                for reason in REASONS
+                if reason.clause in by_clause
             )
-        assignment = mapping.build.attributed_assignment(
-            result.date, result.stem
         )
-        if assignment.plant_id not in plants:
-            raise ValueError(
-                f"{image} is of plant {assignment.plant_id!r}, which the population "
-                f"{list(plants)} does not name; deliver that plant or drop the result."
-            )
-        if result.stem not in read_stems[result.date]:
-            raise ValueError(
-                f"{image} was not read by the delivery: the delivered bucket holds no "
-                "prediction document for it, or it is no longer on disk; drop the result."
-            )
-        if (result.date, result.stem) in seen:
-            raise ValueError(
-                f"{image} is named by two results; each image is delivered once."
-            )
-        seen.add((result.date, result.stem))
-        observed.append((assignment, result.value))
     read = read_images(mapping, plants)
     unread = [plant for plant, images in read.items() if not images]
     if unread:
         images = {
             plant: sorted(
-                f"{date}/{a.stem}"
-                for date in delivered
+                (date, a.stem)
+                for date in mapping.disclosure.dates_delivered
                 for a in mapping.build.assignments[date]
                 if a.plant_id == plant
             )
             for plant in unread
         }
-        named = ", ".join(f"{p!r} ({', '.join(s)})" for p, s in images.items())
+        named = ", ".join(
+            f"{p!r} ({named_images(s)})" for p, s in images.items()
+        )
         raise ValueError(
-            f"the delivery read none of the images of plant(s) {named}: the delivered "
-            "bucket holds no prediction document for them, or they are no longer on disk; "
+            f"the delivery read none of the images of plant(s) {named}: {UNREAD_CAUSE}; "
             "deliver without the plant or restore its images."
         )
     uncovered = sorted(
-        f"{date}/{stem}"
+        image
         for images in read.values()
-        for date, stem in images
-        if (date, stem) not in seen
+        for image in images
+        if image not in seen
     )
     if uncovered:
         raise ValueError(
-            f"image(s) {uncovered} of the delivered plants were read by the delivery and no "
-            "result names them: every image the delivery read counts toward its plant."
+            f"image(s) {named_images(uncovered)} of the delivered plants were read by the "
+            "delivery and no result names them: every image the delivery read counts toward "
+            "its plant."
         )
     return observed
 
