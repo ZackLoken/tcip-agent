@@ -195,13 +195,17 @@ def left_written(project: Path, root: Path) -> dict[str, list]:
 
 
 def unregistered_refusal(root: Path) -> str:
-    """Return the sentence ``dataset_layout.require_dataset_identity`` refuses ``root`` with."""
+    """Return the sentence ``dataset_layout.require_dataset_identity`` refuses ``root`` with.
+
+    The sentence is asserted to name ``root`` and ``register_dataset``.
+    """
     import pytest
 
     from tcip_mcp.dataset_layout import require_dataset_identity
 
     with pytest.raises(ValueError, match="register_dataset") as refused:
         require_dataset_identity(root)
+    assert str(root) in str(refused.value), refused.value
     return str(refused.value)
 
 
