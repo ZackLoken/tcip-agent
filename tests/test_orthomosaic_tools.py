@@ -23,6 +23,7 @@ from tests._mapping_fixtures import (
     register_plant_registry_for,
     write_plant_csv,
 )
+from tests._producer_fixtures import register_dataset_at
 from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
 
 if TYPE_CHECKING:
@@ -200,19 +201,13 @@ def _raster_bucket(
 ) -> Bucket:
     """Publish a whole-raster bucket ``<name>/2026-01-01`` over ``raster_path`` and return it.
 
-    The raster's dataset is registered at :data:`~tests._mapping_fixtures.COUNT_CROP` first, so
-    the bucket records it. The bucket holds one detection per box and is published through the
-    platform's own publication (``_chain_fixtures.published``).
+    The bucket holds one detection per box and is published through the platform's own
+    publication (``_chain_fixtures.published``), the raster's dataset registered at
+    :data:`~tests._mapping_fixtures.COUNT_CROP` first when it carries no identity, so the bucket
+    records it.
     """
-    from tcip_mcp.dataset_layout import image_capture
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._chain_fixtures import detected, detection_pass, published
 
-    dataset_root, _ = image_capture(raster_path)
-    registered = register_dataset(
-        project, str(dataset_root), crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in registered, registered
     height, width = tifffile.imread(str(raster_path)).shape[:2]
     result = detection_pass(
         raster_path,
@@ -226,6 +221,7 @@ def _raster_bucket(
         [result],
         scope=SCOPE,
         raster_path=raster_path,
+        crop=COUNT_CROP,
     )
 
 
@@ -299,6 +295,7 @@ def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ra
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
     result = run_inference(
@@ -343,6 +340,7 @@ def test_a_second_raster_export_into_a_published_bucket_refuses_and_leaves_it_wh
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
     first = run_inference(
         tmp_path,
@@ -376,6 +374,7 @@ def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
 
     no_checkpoint = run_inference(
         tmp_path,
@@ -411,6 +410,7 @@ def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
 
     refused = run_inference(
         tmp_path,

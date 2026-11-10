@@ -214,7 +214,8 @@ def test_a_scope_with_no_attribute_writes_no_attribute_row(
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import register_dataset_at, write_image
     from tests._verified_checkpoint_fixtures import (
         predicted_over,
         registered_checkpoint,
@@ -223,6 +224,7 @@ def test_a_scope_with_no_attribute_writes_no_attribute_row(
     images_dir = image_dir(tmp_path, "frames")
     for i in range(2):
         write_image(images_dir / f"f{i}.png", (64, 64), (40 + 60 * i, 90, 60))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     checkpoint = registered_checkpoint(tmp_path)
 
     _p, results = predicted_over(

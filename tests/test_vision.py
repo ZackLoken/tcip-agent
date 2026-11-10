@@ -13,7 +13,13 @@ from PIL import Image
 from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.pipelines.raster_source import SourceHeader
-from tests._producer_fixtures import WrittenDataset, kept, write_image
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import (
+    WrittenDataset,
+    dataset_registered,
+    kept,
+    write_image,
+)
 from tests._training_values import IOU_THRESHOLD, TRIAGE_WEIGHTS
 
 if TYPE_CHECKING:
@@ -41,7 +47,8 @@ def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
 def viz_dataset(tmp_path: Path) -> WrittenDataset:
     """Create a dataset of four labeled 640x480 JPEGs under ``images/<undated bucket>``.
 
-    Each of ``img_001`` to ``img_004`` holds one ``bud`` box and one ``nut`` box.
+    Each of ``img_001`` to ``img_004`` holds one ``bud`` box and one ``nut`` box; the dataset is
+    registered in itself at :data:`~tests._mapping_fixtures.CROP`.
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
@@ -63,7 +70,9 @@ def viz_dataset(tmp_path: Path) -> WrittenDataset:
             480,
         )
 
-    return WrittenDataset(tmp_path, images_dir, images)
+    return WrittenDataset(
+        dataset_registered(tmp_path, tmp_path, crop=CROP), images_dir, images
+    )
 
 
 PUBLISHED = "published"
@@ -1601,10 +1610,15 @@ class TestCandidateCacheRoundTrip:
 
 @pytest.fixture
 def sample_dataset(tmp_path: Path) -> WrittenDataset:
-    """Create a fresh dataset of one unlabeled 640x480 ``sample.jpg``."""
+    """Create a fresh dataset of one unlabeled 640x480 ``sample.jpg``, registered in itself.
+
+    The registration is at :data:`~tests._mapping_fixtures.CROP`.
+    """
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     image = write_image(images_dir / "sample.jpg", (640, 480), (80, 120, 60))
-    return WrittenDataset(tmp_path, images_dir, [image])
+    return WrittenDataset(
+        dataset_registered(tmp_path, tmp_path, crop=CROP), images_dir, [image]
+    )
 
 
 def _propose(

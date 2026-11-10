@@ -40,13 +40,16 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
 def _images(tmp_path: Path) -> Path:
     """Write one 100-pixel gray image into capture ``2026-01-01`` of ``tmp_path``; return it.
 
-    The return is the capture directory.
+    ``tmp_path`` is registered in itself at :data:`~tests._mapping_fixtures.CROP` when it carries
+    no identity. The return is the capture directory.
     """
     from tcip_mcp.dataset_layout import image_dir
-    from tests._producer_fixtures import write_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import dataset_registered, write_image
 
     images_dir = image_dir(tmp_path, "2026-01-01")
     write_image(images_dir / "img0.png", (100, 100), (100, 100, 100))
+    dataset_registered(tmp_path, tmp_path, crop=CROP)
     return images_dir
 
 

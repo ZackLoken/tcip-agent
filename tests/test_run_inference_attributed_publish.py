@@ -61,12 +61,17 @@ def _published(
 ) -> tuple[Bucket, list[Annotation]]:
     """Run inference over ``images_dir`` into the bucket ``out/2026-01-01``.
 
-    Return the bucket and the annotations read from its ``img`` document.
+    ``tmp_path``, the dataset root, is registered in itself at
+    :data:`~tests._mapping_fixtures.CROP` first when it carries no identity. Return the bucket
+    and the annotations read from its ``img`` document.
     """
     from tcip_annotation.json_io import read_predictions
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import dataset_registered
 
+    dataset_registered(tmp_path, tmp_path, crop=CROP)
     result = run_inference(
         tmp_path,
         checkpoint,

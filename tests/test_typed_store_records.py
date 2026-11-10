@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir
+from tests._mapping_fixtures import CROP
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -262,10 +263,11 @@ def _published(project: Path) -> tuple[Bucket, Pass, VerifiedCheckpoint, Path]:
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tests._chain_fixtures import RATIONALE, predicted
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import register_dataset_at, write_image
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     image = write_image(image_dir(project / "ds", DATE) / "a.png", (64, 64))
+    register_dataset_at(project, project / "ds", crop=CROP)
     checkpoint = load_registered_checkpoint(
         _run_checkpoint(
             project, data={"num_channels": 3, "scope": {"subject": "bud"}}
@@ -323,10 +325,11 @@ def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
     )
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import register_dataset_at, write_image
 
     image = write_image(image_dir(tmp_path / "ds", DATE) / "a.png", (64, 64))
     root = source_root([str(image)])
+    register_dataset_at(tmp_path, root, crop=CROP)
     publish(
         tmp_path,
         root,
@@ -557,7 +560,7 @@ def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuse
         )
 
 
-def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
+def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_recording_no_dataset(
     tmp_path: Path,
 ) -> None:
     """A scale assessment reads back as calibrated, covering the one capture its samples span.
@@ -607,8 +610,12 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
             [],
             8,
             8,
+            crop=crop,
         )
-        for root in (tmp_path / "ds", tmp_path / "unidentified")
+        for root, crop in (
+            (tmp_path / "ds", CROP),
+            (tmp_path / "unidentified", None),
+        )
         for date in (SCALE_DATE, other_date)
     ]
     assert {

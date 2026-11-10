@@ -63,7 +63,7 @@ def _trained(
     Returns ``(images_dir, selection, selection_dir, checkpoint_path)``.
     """
     root = project / "ds"
-    images_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(project, root)
     selection_dir = project / "selection"
     selection = draw_reference_selection(project, root, selection_dir)
     return (
@@ -270,7 +270,7 @@ def test_a_foreign_checkpoint_fails_its_assessment_on_unknown_training_membershi
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     root = tmp_path / "ds"
-    synthetic_capture(root)
+    synthetic_capture(tmp_path, root)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
     confirm_count_trait(tmp_path)

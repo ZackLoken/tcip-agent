@@ -18,6 +18,8 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.identity import actor
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
 from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
@@ -59,7 +61,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
 ) -> None:
     from tcip_mcp.experiments import run_rows
     from tcip_mcp.project_record import read_record
-    from tcip_mcp.tools.project_tools import read_datasets, register_dataset
+    from tcip_mcp.tools.project_tools import read_datasets
     from tests._verified_checkpoint_fixtures import finished_run
 
     ws = tmp_path.parent
@@ -67,9 +69,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     project = made.root
     finished_run(project, experiment_id="exp-before")
     (project / "ds").mkdir()
-    assert "error" not in register_dataset(
-        project, str(project / "ds"), "currant", actor=None
-    )
+    register_dataset_at(project, project / "ds", crop="currant")
     from tcip_mcp.audit import AUDIT_LOG_STORE
     from tcip_mcp.project_record import PROJECT_RECORD_STORE
 
@@ -219,6 +219,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
         experiment_id="exp-resumed",
         resume_from=str(checkpoint),
     )
+    register_dataset_at(project, project / "data", crop=CROP)
     bucket = "live/2-11-26"
     published = run_inference(
         project,

@@ -555,7 +555,7 @@ def test_a_selection_bound_runs_checkpoint_records_statistics_preflight_admits(
     )
 
     root = tmp_path / "ds"
-    synthetic_capture(root)
+    synthetic_capture(tmp_path, root)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
     checkpoint = load_registered_checkpoint(
@@ -608,7 +608,7 @@ def test_a_configs_statistics_are_its_resolved_train_side_whatever_its_route(
     from tests._verified_checkpoint_fixtures import opened_run
 
     root = tmp_path / "ds"
-    images_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(tmp_path, root)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
     configs = {

@@ -42,9 +42,11 @@ from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
 from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
 from tests._chain_fixtures import detected  # noqa: E402
+from tests._mapping_fixtures import COUNT_CROP  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     label_image,
+    register_dataset_at,
     seed_bud_images,
     write_image,
 )
@@ -580,6 +582,7 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
             size,
             size,
         )
+    register_dataset_at(tmp_path, root, crop=COUNT_CROP)
     drawn = draw_splits(
         tmp_path,
         str(root),

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.passes import DetectionPass
     from tcip_web.routes.inference import InferenceJob
 
+from tcip_mcp.audit import audit_entries
 from tcip_mcp.pipelines.execution import Stated
 from tcip_web.jobstore import Canceled, Completed, Failed
 from tests._audit_fixtures import audit_rows
@@ -32,11 +33,20 @@ from tests._web_fixtures import inference_job
 DATE = "2025-06-01"
 
 
-def _two_images(images_dir: Path) -> Path:
-    from tests._producer_fixtures import gray_frame
+def _two_images(project: Path, root: Path) -> Path:
+    """Write gray frames ``a.jpg`` and ``b.jpg`` into ``root``'s capture :data:`DATE`.
 
+    ``root`` is registered in ``project`` at :data:`~tests._mapping_fixtures.CROP`. Returns the
+    capture's directory.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import gray_frame, register_dataset_at
+
+    images_dir = image_dir(root, DATE)
     for stem in ("a", "b"):
         gray_frame(images_dir, 100, f"{stem}.jpg")
+    register_dataset_at(project, root, crop=CROP)
     return images_dir
 
 
@@ -113,12 +123,11 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
     bucket records agree on everything but the name and the instant each was published under.
     """
     pytest.importorskip("fastapi")
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _two_images(image_dir(tmp_path, DATE))
+    images_dir = _two_images(tmp_path, tmp_path)
     ckpt = registered_checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
     job = inference_job(
@@ -156,13 +165,13 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
     """
     pytest.importorskip("fastapi")
     import tcip_mcp.pipelines.postprocessing.export as export
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     dataset = tmp_path / "orchard"
-    images_dir = _two_images(image_dir(dataset, DATE))
+    images_dir = _two_images(tmp_path, dataset)
+    _, registered = audit_entries(dataset)
     ckpt = registered_checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
 
@@ -195,7 +204,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
     for bucket in (job.bucket, f"mcp/{DATE}"):
         assert _documents(dataset, bucket) == []
         assert not _published(dataset, bucket)
-    assert audit_rows(dataset) == []
+    assert audit_rows(dataset, after=registered) == []
 
 
 def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_published(
@@ -210,13 +219,13 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     document, no record and no audit row.
     """
     pytest.importorskip("fastapi")
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     dataset = tmp_path / "orchard"
-    images_dir = _two_images(image_dir(dataset, DATE))
+    images_dir = _two_images(tmp_path, dataset)
+    _, registered = audit_entries(dataset)
     install(monkeypatch, StubPredictor())
     ckpt = registered_checkpoint(tmp_path)
 
@@ -234,7 +243,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     assert "has no tile_size" in mcp["error"]
     assert _documents(dataset, job.bucket) == []
     assert not _published(dataset, job.bucket)
-    assert audit_rows(dataset) == []
+    assert audit_rows(dataset, after=registered) == []
 
 
 def test_a_canceled_gui_pass_publishes_what_it_predicted(
@@ -246,7 +255,6 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
     is published, the record names that image alone, and the job ends canceled.
     """
     pytest.importorskip("fastapi")
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import (
         DEFAULT_IMAGE_BATCH_SIZE,
         DEFAULT_TILE_BATCH_SIZE,
@@ -255,7 +263,8 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     dataset = tmp_path / "orchard"
-    images_dir = _two_images(image_dir(dataset, DATE))
+    images_dir = _two_images(tmp_path, dataset)
+    _, registered = audit_entries(dataset)
     ckpt = registered_checkpoint(tmp_path)
     job = inference_job(
         images_dir,
@@ -289,9 +298,9 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
     assert (job.state, job.done, job.total) == (Canceled(), 1, 2)
     assert _documents(dataset, job.bucket) == ["a"]
     assert _record(dataset, job.bucket)["documents"] == {"a": "a.jpg"}
-    assert [(r["tool"], r["status"]) for r in audit_rows(dataset)] == [
-        ("prediction_bucket_published", "ok")
-    ]
+    assert [
+        (r["tool"], r["status"]) for r in audit_rows(dataset, after=registered)
+    ] == [("prediction_bucket_published", "ok")]
 
 
 def test_a_full_gui_pass_publishes_every_document_and_the_record(
@@ -306,11 +315,10 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     import tcip_mcp.pipelines.postprocessing.export as export
     from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _two_images(image_dir(tmp_path, DATE))
+    images_dir = _two_images(tmp_path, tmp_path)
     ckpt = registered_checkpoint(tmp_path)
 
     install(monkeypatch, StubPredictor())
@@ -366,7 +374,6 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
 
     pytest.importorskip("fastapi")
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.model_registry import Producer
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
@@ -374,7 +381,7 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     dataset = tmp_path / "orchard"
-    images_dir = _two_images(image_dir(dataset, DATE))
+    images_dir = _two_images(tmp_path, dataset)
     install(monkeypatch, StubPredictor())
     rows: dict[str, list[dict]] = {}
     for door in ("gui", "mcp"):

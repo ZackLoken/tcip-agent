@@ -1387,7 +1387,7 @@ def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
     from tests._verified_checkpoint_fixtures import worker_run
 
     root = tmp_path / "ds"
-    chain.synthetic_capture(root)
+    chain.synthetic_capture(tmp_path, root)
     chain.draw_reference_selection(tmp_path, root, tmp_path / "selection")
     config = chain.run_config(tmp_path, tmp_path / "selection")
     assert config["evaluation"]["selection_metric"] == "objective"

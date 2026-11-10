@@ -166,10 +166,10 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
     import tcip_mcp.pipelines.data.dataset_fingerprint as dataset_fingerprint_mod
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.schemas import DataSpec
-    from tcip_mcp.tools.project_tools import register_dataset
+    from tests._producer_fixtures import register_dataset_at
 
     _make_dataset(tmp_path)
-    register_dataset(tmp_path, str(tmp_path), crop="currant", actor=None)
+    register_dataset_at(tmp_path, tmp_path, crop="currant")
 
     def _raise(_root: str | Path, _admitted: Iterable[Sample]) -> NoReturn:
         raise OSError("simulated I/O error mid-scan")

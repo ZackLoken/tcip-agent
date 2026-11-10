@@ -803,13 +803,16 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS, bucket_key
     from tcip_mcp.pipelines.execution import Stated
     from tests._chain_fixtures import detected
+    from tests._mapping_fixtures import CROP
     from tests._predictor_fixtures import StubPredictor, install
+    from tests._producer_fixtures import register_dataset_at
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         registered_checkpoint,
     )
 
     root = _dataset(tmp_path).root
+    register_dataset_at(root, root, crop=CROP)
     install(
         monkeypatch,
         StubPredictor(width=IMG, height=IMG, detections=[detected(BOX, 0.9)]),

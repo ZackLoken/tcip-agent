@@ -279,17 +279,21 @@ def plant_captures(
 
 
 def synthetic_capture(
+    project: Path,
     root: Path,
     *,
     date: str = DATE,
     positions: Mapping[str, tuple[float, float]] | None = None,
+    crop: str = COUNT_CROP,
 ) -> Path:
-    """Ingest one capture date of painted frames through ``ingest_images``.
+    """Ingest one capture date of painted frames into ``root`` through ``ingest_images``.
 
     Each of :data:`STEMS` is painted with a :data:`~tests._producer_fixtures.BRIGHT` square at
     :func:`object_at` of its index, ingested, and labeled with that square. A stem ``positions``
     names carries that ``(lat, lon)`` in its EXIF, reporting
-    :data:`~tests._mapping_fixtures.PHOTO_POSITION_ERROR_M`. Returns the capture's image
+    :data:`~tests._mapping_fixtures.PHOTO_POSITION_ERROR_M`. ``root`` is then registered in
+    ``project`` at ``crop`` when it carries no identity
+    (:func:`~tests._producer_fixtures.dataset_registered`). Returns the capture's image
     directory.
     """
     from datetime import datetime
@@ -297,7 +301,12 @@ def synthetic_capture(
     from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tests._image_fixtures import capture_exif, geo_exif
     from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M
-    from tests._producer_fixtures import BRIGHT, label_image, painted_frame
+    from tests._producer_fixtures import (
+        BRIGHT,
+        dataset_registered,
+        label_image,
+        painted_frame,
+    )
 
     raw = root.parent / f"raw-{date}"
     raw.mkdir(parents=True, exist_ok=True)
@@ -337,6 +346,7 @@ def synthetic_capture(
             IMG,
             IMG,
         )
+    dataset_registered(project, root, crop=crop)
     return images_dir
 
 
@@ -563,21 +573,23 @@ def unassessed_bucket(
 ) -> Bucket:
     """Return a bucket published under no assessment.
 
-    Ingests, draws, trains and publishes under ``project``. With ``images``, that many captures
-    of each plant it names stand at the plant's place (:func:`plant_captures`) and the project's
-    mapping ``valley`` of them (:func:`~tests._mapping_fixtures.map_plants`, the dataset and its
-    plants at ``crop``) is built after the bucket is published, the dataset registered before.
+    Ingests (the dataset registered at ``crop``, :func:`synthetic_capture`), draws, trains and
+    publishes under ``project``. With ``images``, that many captures of each plant it names stand
+    at the plant's place (:func:`plant_captures`) and the project's mapping ``valley`` of them
+    (:func:`~tests._mapping_fixtures.map_plants`, the dataset and its plants at ``crop``) is built
+    after the bucket is published.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._mapping_fixtures import map_plants, register_dataset_at
+    from tests._mapping_fixtures import map_plants
 
     root = project / "ds"
     images_dir = synthetic_capture(
-        root, positions=plant_captures(images) if images else None
+        project,
+        root,
+        positions=plant_captures(images) if images else None,
+        crop=crop,
     )
-    if images:
-        register_dataset_at(project, root, crop=crop)
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     checkpoint_path = train_on(selection_dir, project, experiment_id)
@@ -835,16 +847,20 @@ def published(
     scope: dict,
     registry: SubjectRegistry | None = None,
     raster_path: Path | None = None,
+    crop: str | None = CROP,
 ) -> Bucket:
     """Publish ``results`` as the bucket named ``name`` and return the bucket.
 
     :func:`~tcip_mcp.buckets.publish` writes it under their images' dataset root, under
     :func:`detector_pass`'s pass for ``scope`` and ``registry``, over the raster ``raster_path``
-    when one is named.
+    when one is named. The root is registered in ``project`` at ``crop`` first when it carries no
+    identity (:func:`~tests._producer_fixtures.dataset_registered`); ``crop`` ``None`` publishes
+    under the root as it stands, unregistered when nothing registered it.
     """
     from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tests._producer_fixtures import dataset_registered
 
     identity = (
         raster_identity(resolve_image_path(raster_path))
@@ -858,6 +874,8 @@ def published(
         if raster_path is not None
         else [r.image for r in results]
     )
+    if crop is not None:
+        dataset_registered(project, root, crop=crop)
     return publish(
         project,
         root,
@@ -1039,7 +1057,6 @@ def attributed_series(
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.ingest_tools import IngestManifest, ingest_images
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
         register_plant_registry_for,
@@ -1047,6 +1064,7 @@ def attributed_series(
     )
     from tests._producer_fixtures import (
         label_image,
+        register_dataset_at,
         registry_of,
         registry_over,
     )
@@ -1117,8 +1135,7 @@ def attributed_series(
                 IMG,
                 IMG,
             )
-    registered = register_dataset(project, str(root), crop=CROP, actor=None)
-    assert "error" not in registered, registered
+    register_dataset_at(project, root, crop=CROP)
 
     selection_dir = project / "selection"
     drawn = draw_splits(
@@ -1220,10 +1237,12 @@ def trained_detector(
 ) -> tuple[Path, Path, Path, str]:
     """Ingest, draw, train and confirm the count trait under ``project``.
 
-    Returns the dataset root, its capture's images, the reference selection and the checkpoint.
+    The dataset is registered at :data:`~tests._mapping_fixtures.COUNT_CROP`, the one crop
+    crops.yml names for the count trait's ``stem_count`` (:func:`synthetic_capture`). Returns the
+    dataset root, its capture's images, the reference selection and the checkpoint.
     """
     root = project / "ds"
-    images_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(project, root)
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     checkpoint_path = train_on(selection_dir, project, experiment_id)

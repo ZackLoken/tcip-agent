@@ -26,6 +26,8 @@ pytest.importorskip("torchvision")
 
 import tcip_store  # noqa: E402
 from tcip_mcp.pipelines.execution import EXECUTION_RECORD, MaskCut  # noqa: E402
+from tests._mapping_fixtures import COUNT_CROP  # noqa: E402
+from tests._producer_fixtures import register_dataset_at  # noqa: E402
 from tests._training_values import MASK_CUT  # noqa: E402
 from tests.test_orthomosaic_tools import (  # noqa: E402
     TILE,
@@ -66,10 +68,11 @@ def _setup(tmp_path: Path) -> tuple[str, Path]:
     """Return a registered bespoke detection checkpoint and a 64x64 geo raster.
 
     The raster is written in the undated capture of the dataset ``ds``, in the project
-    ``tmp_path``.
+    ``tmp_path``, the dataset registered at :data:`~tests._mapping_fixtures.COUNT_CROP`.
     """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path, height=64, width=64)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     return _bespoke_detection_checkpoint(tmp_path), raster_path
 
 
@@ -224,6 +227,7 @@ def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_
     """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path, height=64, width=64)
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     ckpt = _instance_seg_checkpoint(tmp_path)
     interrupted, uninterrupted = (
         "interrupted/2026-01-01",

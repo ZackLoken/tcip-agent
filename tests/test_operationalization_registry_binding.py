@@ -128,13 +128,13 @@ def test_the_tool_refuses_a_project_registering_two_datasets_with_no_dataset_roo
     project: Path,
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.tools.project_tools import register_dataset
+    from tests._producer_fixtures import register_dataset_at
 
     dataset_a, dataset_b = tmp_path / "dataset_a", tmp_path / "dataset_b"
     dataset_a.mkdir()
     dataset_b.mkdir()
-    register_dataset(project, str(dataset_a), "chestnut", actor=None)
-    register_dataset(project, str(dataset_b), "currant", actor=None)
+    register_dataset_at(project, dataset_a, crop="chestnut")
+    register_dataset_at(project, dataset_b, crop="currant")
 
     result = _propose(project)
 

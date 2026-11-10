@@ -25,7 +25,13 @@ from tcip_mcp.pipelines.execution import NoPass
 from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
-from tests._producer_fixtures import kept, stub_images, write_jpegs
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import (
+    dataset_registered,
+    kept,
+    stub_images,
+    write_jpegs,
+)
 
 if TYPE_CHECKING:
     from tcip_mcp.tools.proposal_tools import StagedAssignments, StagedShapes
@@ -107,7 +113,7 @@ def _damage(root: Path, bucket: str, stem: str) -> None:
 def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(
     tmp_path: Path, bound: BoundProject
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     images = stub_images(
         image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(5)]
@@ -128,7 +134,7 @@ def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(
 def test_focus_over_a_bucket_skips_an_empty_prediction_document(
     tmp_path: Path, bound: BoundProject
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     images = stub_images(
         image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(3)]
@@ -149,7 +155,7 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
     The corrupt document does not close the call: the frame it lands on is readable, and the
     answer names the unreadable one.
     """
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     images = stub_images(
         image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(3)]
@@ -167,7 +173,7 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
 def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(
     tmp_path: Path, bound: BoundProject
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     images = stub_images(
         image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(3)]
@@ -186,7 +192,7 @@ def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(
 def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(
     tmp_path: Path, bound: BoundProject
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     images = stub_images(
         image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(4)]
@@ -203,7 +209,7 @@ def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(
 def test_focus_refuses_a_name_that_is_no_bucket(
     tmp_path: Path, bound: BoundProject
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     stub_images(image_dir(root, "2026-02-11"), ["IMG_0000.JPG"])
     res = focus_human_attention(
         bound, str(root), "bud", "2026-02-11", bucket="baseline/2026-02-11"
@@ -214,7 +220,7 @@ def test_focus_refuses_a_name_that_is_no_bucket(
 def test_stage_proposals_writes_prediction_format_not_gt(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
     image_path = str(image)
@@ -269,7 +275,7 @@ def test_stage_proposals_writes_prediction_format_not_gt(
 
 
 def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
     image_path = str(image)
@@ -309,7 +315,7 @@ def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
     """
     from tests._server_calls import called_through_the_server
 
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     (image,) = write_jpegs(image_dir(root, "2026-02-11"), ["IMG_0001"], SIZE)
     good = [
         {
@@ -338,9 +344,8 @@ def test_stage_proposals_admits_a_model_name_of_one_segment_through_the_server(
     """A model_name of one path segment passes the same schema and stages its bucket."""
     from tests._server_calls import called_through_the_server
 
-    (image,) = write_jpegs(
-        image_dir(tmp_path / "proj", "2026-02-11"), ["IMG_0001"], SIZE
-    )
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
+    (image,) = write_jpegs(image_dir(root, "2026-02-11"), ["IMG_0001"], SIZE)
     good = [
         {
             "subject": "bud",
@@ -366,7 +371,7 @@ def test_stage_proposals_admits_a_model_name_of_one_segment_through_the_server(
 def test_focus_rejects_path_traversal(
     tmp_path: Path, bound: BoundProject
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     stub_images(image_dir(root, date), ["IMG_0000.JPG"])
     # The focus is read-only, but a traversal date still refuses: it becomes a path segment under
@@ -376,7 +381,7 @@ def test_focus_rejects_path_traversal(
 
 
 def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
     image_path = str(image)
@@ -405,7 +410,7 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
     A box or polygon naming no subject is refused with an error opening with its kind and index
     1 and naming ``subject``, and no document is staged.
     """
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
     image_path = str(image)
@@ -443,7 +448,7 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
 
 
 def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0132"], SIZE)
     image_path = str(image)
@@ -491,7 +496,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
 def test_stage_proposals_stages_boxes_and_polygons_together(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
     image_path = str(image)
@@ -540,7 +545,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
 
 
 def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
     image_path = str(image)
@@ -624,7 +629,7 @@ def _staged_assignments_image(
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     register_proposal_engine("fake_single_box", _FakeSingleBoxEngine())
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0205"], SIZE)
     image_path = str(image)
@@ -725,7 +730,7 @@ def test_stage_proposals_refuses_model_name_beside_assignments(
 def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0206"], SIZE)
     image_path = str(image)
@@ -812,7 +817,7 @@ class _FakeMultiRingEngine:
 def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0200"], SIZE)
     image_path = str(image)
@@ -856,7 +861,7 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
 
     register_proposal_engine("fake_multi_ring", _FakeMultiRingEngine())
 
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0201_b"], SIZE)
     accept_image_path = str(image)
@@ -881,7 +886,7 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
 
 
 def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0202"], SIZE)
     image_path = str(image)
@@ -910,7 +915,7 @@ def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
 def test_stage_proposals_refuses_neither_points_nor_rings(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0203"], SIZE)
     image_path = str(image)
@@ -931,7 +936,7 @@ def test_stage_proposals_refuses_neither_points_nor_rings(
 def test_stage_proposals_refuses_a_short_ring_under_rings(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0204"], SIZE)
     image_path = str(image)
@@ -957,7 +962,7 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(
 def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0205"], SIZE)
     image_path = str(image)
@@ -988,7 +993,7 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
     A ring under ``rings`` with vertices at negative pixel coordinates is refused at the
     module's own default image size, and nothing is staged.
     """
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0206"], SIZE)
     image_path = str(image)
@@ -1020,7 +1025,7 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(
     module's own default image size, naming a ring that spans under a pixel, and nothing is
     staged.
     """
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0207"], SIZE)
     image_path = str(image)
@@ -1058,7 +1063,7 @@ def test_a_second_stage_of_the_same_stem_publishes_a_second_bucket(
     Both buckets read back, each holding its own staging, and the first document keeps its
     version.
     """
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
     image_path = str(image)
@@ -1089,7 +1094,7 @@ def test_stage_proposals_admits_two_stems_staged_in_turn(
     tmp_path: Path,
 ) -> None:
     """Two stems staged in turn under one model name both land, each in its own bucket."""
-    root = tmp_path / "proj"
+    root = dataset_registered(tmp_path, tmp_path / "proj", crop=CROP)
     date = "2026-02-11"
     first_image, second_image = (
         str(image)

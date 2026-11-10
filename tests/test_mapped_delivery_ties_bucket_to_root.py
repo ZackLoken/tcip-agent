@@ -20,10 +20,10 @@ from tests._mapping_fixtures import (
     COUNT_CROP,
     CROP,
     PHOTO_POSITION_ERROR_M,
-    register_dataset_at,
     registered_copy,
     write_photos,
 )
+from tests._producer_fixtures import register_dataset_at
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -129,7 +129,7 @@ def test_a_per_plant_delivery_of_a_bucket_recording_no_dataset_refuses(
         datetime.fromisoformat(DATE).replace(hour=9, minute=30),
         timedelta(minutes=5),
     )
-    bucket = _bucket(tmp_path, bare, DATE, {"P1": 1})
+    bucket = _bucket(tmp_path, bare, DATE, {"P1": 1}, crop=None)
     assert read_bucket(bare, bucket).dataset_id is None
     register_dataset_at(tmp_path, bare, crop=COUNT_CROP)
     _map(tmp_path, "bare-valley", bare, "reg")
@@ -211,7 +211,7 @@ def test_a_phenology_delivery_of_a_bucket_recording_no_dataset_refuses(
     body = _currant_bloom_body(tmp_path)
     bare = tmp_path / "bare"
     bare.mkdir()
-    _, buckets = _write_scene(bare)
+    _, buckets = _write_scene(bare, crop=None)
     recorded = {read_bucket(bare, b).dataset_id for b in buckets.values()}
     assert recorded == {None}
     register_dataset_at(tmp_path, bare, crop=CROP)

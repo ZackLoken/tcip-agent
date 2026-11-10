@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
 from tests._training_values import (
     COMBINED_SCORER,
     IOU_THRESHOLD,
@@ -55,14 +57,10 @@ def _relative(path: str | Path, project: Path) -> str:
 
 
 def _register_dataset(project: Path) -> Path:
-    from tcip_mcp.tools.project_tools import (
-        dataset_entry_path,
-        read_datasets,
-        register_dataset,
-    )
+    """Register ``project`` as its own dataset spelled ``"."``; return where its entry resolves."""
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
-    result = register_dataset(project, ".", crop="currant", actor=None)
-    assert "error" not in result, result
+    register_dataset_at(project, Path("."), crop="currant")
     (entry,) = read_datasets(project)
     return dataset_entry_path(project, entry)
 
@@ -217,6 +215,7 @@ def _stage_proposals(project: Path) -> dict:
         "w": 0.25,
         "h": 0.25,
     }
+    register_dataset_at(project, project, crop=CROP)
     result = stage_proposals(
         project, IMAGE, boxes=[box], model_name="stub", actor=None
     )
@@ -333,6 +332,7 @@ def _published(project: Path) -> None:
     from tcip_mcp.tools.inference_tools import run_inference
 
     _labeled(project)
+    register_dataset_at(project, project, crop=CROP)
     result = run_inference(
         project,
         str((project / _registered(project)).resolve()),
@@ -347,6 +347,7 @@ def _published(project: Path) -> None:
 def _run_inference(project: Path) -> Path:
     from tcip_mcp.tools.inference_tools import run_inference
 
+    register_dataset_at(project, project, crop=CROP)
     result = run_inference(
         project,
         _registered(project),
@@ -1253,16 +1254,13 @@ def test_the_identity_command_reads_a_relative_dataset_root_under_its_project(
     """
     import json
 
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._cli_fixtures import run_tcip
     from tests._web_fixtures import new_project
     from tests.test_check_dataset_identity_script import _real_dataset
 
     project = new_project(tmp_path / "project").root
     _real_dataset(project / "ds")
-    assert "error" not in register_dataset(
-        project, str(project / "ds"), "chestnut", actor=None
-    )
+    register_dataset_at(project, project / "ds", crop="chestnut")
     cwd = tmp_path / "cwd"
     cwd.mkdir()
 

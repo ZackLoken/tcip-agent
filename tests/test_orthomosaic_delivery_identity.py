@@ -37,14 +37,11 @@ def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
     The raster's dataset ``ds`` is registered first, so the bucket records it.
     """
     from tcip_mcp.tools.inference_tools import run_inference
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._mapping_fixtures import COUNT_CROP
+    from tests._producer_fixtures import register_dataset_at
     from tests.test_orthomosaic_tools import RASTER_PASS
 
-    registered = register_dataset(
-        tmp_path, str(tmp_path / "ds"), crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in registered, registered
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
     result = run_inference(
         tmp_path,
         _bespoke_detection_checkpoint(tmp_path),
@@ -115,6 +112,7 @@ def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(
     tmp_path: Path,
 ) -> None:
     from tests._chain_fixtures import detection_pass, published
+    from tests._mapping_fixtures import COUNT_CROP
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
@@ -123,6 +121,7 @@ def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(
         "frames/2026-01-01",
         [detection_pass(raster_path.parent / "img1.jpg", (64, 64), [], cap=1)],
         scope=SCOPE,
+        crop=COUNT_CROP,
     ).name
 
     refused = _delivered(tmp_path, bucket, raster_path)

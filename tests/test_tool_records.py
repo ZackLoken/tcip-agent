@@ -167,14 +167,14 @@ def test_a_dataset_entry_missing_its_path_is_refused_naming_it_and_the_registry(
         DatasetEntry,
         dataset_registry_key,
         read_datasets,
-        register_dataset,
         upsert_dataset,
     )
+    from tests._producer_fixtures import register_dataset_at
     from tests.test_project_tools import _make_dataset
 
     root = tmp_path / "ds"
     _make_dataset(root)
-    register_dataset(tmp_path, str(root), crop="currant", actor=None)
+    register_dataset_at(tmp_path, root, crop="currant")
     ts.replace(
         dataset_registry_key(tmp_path),
         [{"id": entry.id} for entry in read_datasets(tmp_path)],
@@ -198,14 +198,20 @@ def test_a_dataset_entry_missing_its_path_is_refused_naming_it_and_the_registry(
 def _proposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
     """Propose the stub engine's one candidate on a dated image.
 
-    Returns the image, the candidate and the run's answer.
+    The image's dataset is ``tmp_path``, registered in itself at
+    :data:`~tests._mapping_fixtures.CROP`. Returns the image, the candidate and the run's answer.
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
-    from tests._producer_fixtures import install_stub_proposer
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import (
+        install_stub_proposer,
+        register_dataset_at,
+    )
     from tests.test_proposal_staging_record import _candidate, _make_image
 
     image = image_dir(tmp_path, "2026-04-01") / "leaf.jpg"
     _make_image(image)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     candidate = _candidate(0, 5.0)
     install_stub_proposer(monkeypatch, [candidate])
     result = propose_annotations(

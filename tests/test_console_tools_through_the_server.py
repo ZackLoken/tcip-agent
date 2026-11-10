@@ -18,7 +18,11 @@ import pytest
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.cli import hyphenated
 from tcip_mcp.dataset_layout import image_dir
-from tests._producer_fixtures import label_image, write_image
+from tests._producer_fixtures import (
+    label_image,
+    register_dataset_at,
+    write_image,
+)
 from tests._training_values import RATIONALE, TRIAGE_WEIGHTS
 
 if TYPE_CHECKING:
@@ -95,10 +99,7 @@ def console_cases(
     )
     from tcip_mcp.tools.feedback_tools import triage_predictions
     from tcip_mcp.tools.phenology_tools import shp_to_plant_csv
-    from tcip_mcp.tools.project_tools import (
-        check_dataset_identity,
-        register_dataset,
-    )
+    from tcip_mcp.tools.project_tools import check_dataset_identity
     from tcip_mcp.tools.training_tools import (
         inspect_compute_resources,
         preflight_config,
@@ -145,9 +146,7 @@ def console_cases(
         ],
         scope={"subject": "bud"},
     )
-    assert "error" not in register_dataset(
-        project, "ds", "chestnut", actor=None
-    )
+    register_dataset_at(project, Path("ds"), crop="chestnut")
     checkpoint = registered_checkpoint(project)
     candidates = project / "candidates"
     candidates.mkdir()

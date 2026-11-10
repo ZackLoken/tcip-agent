@@ -25,9 +25,11 @@ from tcip_web.routes.annotate import VersionConflictRefusal
 from tcip_web.routes.inference import BucketExistsRefusal
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
+from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import (
     image_label_key,
     label_image,
+    register_dataset_at,
     registry_over,
     store_labels,
     write_image,
@@ -185,6 +187,7 @@ def dataset_root(tmp_path: Path) -> Path:
             (100, 80),
             (128, 128, 128),
         )
+    register_dataset_at(tmp_path, root, crop=CROP)
     return root
 
 
@@ -1635,6 +1638,7 @@ def _launch_setup(
     write_image(
         image_dir(dataset_root, date) / "img.png", (100, 100), (110, 110, 110)
     )
+    register_dataset_at(tmp_path, dataset_root, crop=CROP)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     return str(ckpt), str(dataset_root), date, inference_routes

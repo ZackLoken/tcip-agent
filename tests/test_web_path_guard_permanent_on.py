@@ -23,7 +23,8 @@ from tcip_mcp.tools.project_tools import DatasetEntry, upsert_dataset
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
 from tests._audit_fixtures import audit_rows
-from tests._producer_fixtures import write_image
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at, write_image
 from tests._trait_fixtures import BUD_OPENING, propose, seed_confirmed_crossing
 from tests._web_fixtures import new_project, open_new_project
 from tests.test_results_mapping_summary_and_audit_anchoring import (
@@ -105,12 +106,10 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     With the project's own tree registered as a dataset, every allowed root is absolute and the
     project is among them.
     """
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_web.paths import allowed_roots
 
     project = new_project(tmp_path).root
-    registered = register_dataset(project, str(project), "currant", actor=None)
-    assert "error" not in registered
+    register_dataset_at(project, project, crop="currant")
 
     roots = allowed_roots()
 
@@ -262,6 +261,7 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
 
     inside = open_new_project(tmp_path / "proj").root
     image = write_image(image_dir(inside, "2026-02-11") / "a.jpg", (8, 8))
+    register_dataset_at(inside, inside, crop=CROP)
     staged = stage_proposals(
         inside,
         str(image),
