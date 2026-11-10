@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 
 import tcip_store
+from tcip_annotation.text import Text
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.execution import ProposalExecution
@@ -92,7 +93,7 @@ class Bucket:
     producer: BucketProducer
     scope: ClassScope
     execution: ProposalExecution
-    dataset_id: str | None
+    dataset_id: Text
     date: str | None
     raster_path: str | None
     raster_identity: RasterIdentity | None
@@ -220,17 +221,10 @@ def shared_root(buckets: Iterable[Bucket]) -> Path:
 def require_bucket_of_dataset(bucket: Bucket, identity: DatasetRecord) -> None:
     """Require ``bucket`` to record the dataset ``identity`` is the identity of.
 
-    ``identity`` is its root's identity record. A bucket recording no dataset (published outside a
-    capture of a registered dataset) refuses (``ValueError``) naming the bucket and its root. A
-    bucket recording another dataset than ``identity``'s refuses (``ValueError``) naming the
-    bucket, its root, the id it records and the id of its root.
+    ``identity`` is its root's identity record. A bucket recording another dataset than
+    ``identity``'s refuses (``ValueError``) naming the bucket, its root, the id it records and the
+    id of its root.
     """
-    if bucket.dataset_id is None:
-        raise ValueError(
-            f"bucket {bucket.name!r} under {bucket.root} records no dataset: its predictions were "
-            "published outside a capture of a registered dataset, so nothing ties them to a "
-            "dataset's plants; register the dataset and publish the predictions again."
-        )
     if bucket.dataset_id != identity.id:
         raise ValueError(
             f"bucket {bucket.name!r} records dataset {bucket.dataset_id!r}, and its root "
