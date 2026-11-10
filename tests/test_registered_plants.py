@@ -80,8 +80,7 @@ def _scene(project: Path) -> Scene:
     ]
     photos = project / "photos"
     photos.mkdir()
-    for root in (photos, bucket.root):
-        register_dataset_at(project, root, crop=COUNT_CROP)
+    register_dataset_at(project, photos, crop=COUNT_CROP)
     geolocated_captures(photos, [DATE], plants)
     return Scene(
         project,
