@@ -1673,7 +1673,17 @@ def test_a_doors_error_answers_400_carrying_its_text(
 def _launch_setup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[str, str, str, ModuleType]:
+    """Lay down a launch over the project ``tmp_path`` whose worker does nothing.
+
+    Returns a checkpoint a run produced under another root, registered into the project through
+    ``register_model``, a registered dataset root holding one capture, that capture and the
+    inference routes' module.
+    """
     from tcip_web.routes import inference as inference_routes
+    from tests._verified_checkpoint_fixtures import (
+        produced_checkpoint,
+        register_checkpoint,
+    )
 
     monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
 
@@ -1683,9 +1693,9 @@ def _launch_setup(
         image_dir(dataset_root, date) / "img.png", (100, 100), (110, 110, 110)
     )
     register_dataset_at(tmp_path, dataset_root, crop=CROP)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    return str(ckpt), str(dataset_root), date, inference_routes
+    ckpt = str(produced_checkpoint(tmp_path / "m.pt", "launch setup"))
+    register_checkpoint(tmp_path, ckpt, name="launch-setup")
+    return ckpt, str(dataset_root), date, inference_routes
 
 
 def _held_worker(
