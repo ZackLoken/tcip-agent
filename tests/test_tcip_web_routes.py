@@ -27,11 +27,15 @@ from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import (
+    gray_frame,
     image_label_key,
+    ingested_unregistered,
     label_image,
+    left_written,
     register_dataset_at,
     registry_over,
     store_labels,
+    unregistered_refusal,
     write_image,
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
@@ -1397,14 +1401,15 @@ def _find(client: TestClient, image: Path, phrase: str) -> httpx.Response:
     )
 
 
-def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_stages_nothing(
+def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_publishes_no_bucket(
     opened_client: TestClient,
     dataset_root: Path,
     engines: dict[str, _PromptedEngine],
 ) -> None:
-    """The phrase reaches the detector with its libraries' defaults; its boxes come back unstaged.
+    """The phrase reaches the detector with its libraries' defaults; its boxes come back as prompts.
 
-    The boxes are prompts for the person to send on, so no bucket is published by a find.
+    The boxes are prompts for the person to send on, so no bucket is published by a find; the run
+    leaves its staging record.
     """
     from tcip_mcp.buckets import buckets_under
     from tcip_mcp.pipelines.proposal_engines import (
@@ -1413,6 +1418,7 @@ def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_stage
         TextPromptedDetector,
         detector_defaults,
     )
+    from tcip_mcp.tools.proposal_tools import PROPOSAL_STAGING_STORE
 
     resp = _find(opened_client, _image_of(dataset_root), "open bud")
 
@@ -1426,6 +1432,44 @@ def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_stage
     )
     assert engines[PromptableSegmenter.name].prompts == []
     assert buckets_under(dataset_root) == []
+    assert tcip_store.keys(PROPOSAL_STAGING_STORE, str(dataset_root))
+
+
+@pytest.mark.parametrize("door", ["propose", "find"])
+def test_a_proposal_door_over_an_image_of_a_root_never_registered_refuses_and_runs_no_engine(
+    opened_client: TestClient,
+    tmp_path: Path,
+    engines: dict[str, _PromptedEngine],
+    door: str,
+) -> None:
+    """A propose or a find over an image of a root never registered answers the root's refusal.
+
+    The answer is 400 carrying the sentence ``require_dataset_identity`` refuses the root with;
+    no engine is prompted and nothing is written. Once the root is registered, the same request
+    runs.
+    """
+    raw = tmp_path / "raw"
+    gray_frame(raw, 100)
+    root = tmp_path / "field"
+    (name,) = (p.name for p in raw.iterdir())
+    image = ingested_unregistered(root, raw) / name
+    registry_over(root, SubjectRegistry((Subject("bud", ""),)))
+
+    def ask() -> httpx.Response:
+        if door == "propose":
+            return _propose(opened_client, image, {"points": [[20, 20]]})
+        return _find(opened_client, image, "open bud")
+
+    before = left_written(tmp_path, root)
+
+    refused = ask()
+
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["detail"] == unregistered_refusal(root)
+    assert all(stub.prompts == [] for stub in engines.values())
+    assert left_written(tmp_path, root) == before
+    register_dataset_at(tmp_path, root, crop=CROP)
+    assert ask().status_code == 200
 
 
 def test_a_phrase_sent_as_a_prompt_is_refused_by_the_payload(
