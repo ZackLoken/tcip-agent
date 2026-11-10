@@ -2211,10 +2211,9 @@ def resolve_delivery_mapping(
     """Load the named mapping and verify it for a delivery of ``buckets``.
 
     A delivered bucket's recorded date the mapping does not cover is refused (``buckets`` keyed
-    by those dates); the delivered buckets' one dataset root is resolved, each bucket is required
-    to record the dataset that root's identity names
-    (:func:`~tcip_mcp.buckets.require_bucket_of_dataset`, naming the bucket), and the root is
-    required to carry the mapping's own minted dataset id; then the mapping's recorded inputs are
+    by those dates); each bucket is required to record the dataset the delivered buckets' one root
+    is (:func:`~tcip_mcp.buckets.require_delivered_dataset`), and the root is required to carry
+    the mapping's own minted dataset id; then the mapping's recorded inputs are
     verified against that resolved root for exactly the captures the buckets read, and the root's
     dataset identity is required to be of its verified registry's crop
     (:func:`require_agreeing_crops`).
@@ -2227,8 +2226,7 @@ def resolve_delivery_mapping(
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
     from, a mapping that will not read included.
     """
-    from tcip_mcp.buckets import require_bucket_of_dataset, shared_root
-    from tcip_mcp.dataset_layout import require_dataset_identity
+    from tcip_mcp.buckets import require_delivered_dataset
 
     try:
         mapping_build = load_mapping(project, name)
@@ -2251,10 +2249,9 @@ def resolve_delivery_mapping(
         )
 
     try:
-        delivered_root = shared_root(buckets.values())
-        delivered_identity = require_dataset_identity(delivered_root)
-        for bucket in buckets.values():
-            require_bucket_of_dataset(bucket, delivered_identity)
+        delivered_root, delivered_identity = require_delivered_dataset(
+            buckets.values()
+        )
     except ValueError as exc:
         raise MappingDeliveryError(str(exc)) from exc
     if delivered_identity.id != mapping_build.dataset_id:

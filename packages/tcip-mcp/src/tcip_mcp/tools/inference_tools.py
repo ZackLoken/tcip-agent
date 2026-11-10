@@ -559,7 +559,8 @@ def deliver_per_image_counts(
     ``delivery_event_id``. The bucket clears the delivery gate when the assessment it was
     published under answers for a ``per_image_count`` delivery of ``trait``'s latest confirmed
     revision; an unvalidated bucket ships only under ``acknowledgment_id``, a breeder's recorded
-    acknowledgment of exactly this result, which this door executes and never records. Every
+    acknowledgment of exactly this result, which this door executes and never records. A bucket
+    recording another dataset than its root is, and a root carrying no identity, refuse. Every
     delivery appends one delivery event.
 
     Args:
