@@ -16,7 +16,7 @@ import math
 import re
 import statistics
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Container, Iterable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from enum import StrEnum
@@ -388,26 +388,6 @@ class MappingBuild:
             for date, rows in self.assignments.items()
         }
 
-    def attributed_assignment(self, date: str, stem: str) -> Assignment:
-        """Return the assignment of the image of stem ``stem`` captured on ``date``.
-
-        Refuses (``ValueError``), naming the image, when this build records no image of that stem
-        on that date and when the image's assignment names no plant
-        (:func:`assignment_is_attributed`).
-        """
-        assignment = self.by_stem.get(date, {}).get(stem)
-        if assignment is None:
-            raise ValueError(
-                f"image {stem!r} of {date}: mapping {self.name!r} records no image of that "
-                "stem on that date, so it attributes the image to no plant."
-            )
-        if not assignment_is_attributed(assignment):
-            raise ValueError(
-                f"image {stem!r} of {date}: mapping {self.name!r} assigned it to no plant "
-                f"({assignment.source}), so its value belongs to none."
-            )
-        return assignment
-
     def to_record(self) -> dict:
         """Return the stored document: every field but ``record_sha256``."""
         return _MAPPING_RECORD.dump_python(
@@ -493,22 +473,137 @@ class MappingBuild:
         )
 
 
+@dataclass(frozen=True)
+class Inadmissible:
+    """Why a per-plant delivery does not admit an image, in the words a refusal gives it.
+
+    ``clause`` states the reason, ``next_step`` what to do about an image refused for it, and
+    ``detail`` a fact of this image alone (``plant 'P2'`` for an image outside the population),
+    empty for a reason that has none.
+    """
+
+    clause: str
+    next_step: str
+    detail: str
+
+
+UNREAD_CAUSE = (
+    "no prediction document in the delivered bucket, or no longer on disk"
+)
+"""Why an image an assignment attributes to a plant was not read by the delivery
+(:func:`stems_delivery_reads`, :func:`verify_mapping_inputs`)."""
+
+(
+    NOT_DELIVERED,
+    NO_IMAGE,
+    NO_PLANT,
+    OUTSIDE_POPULATION,
+    UNREAD,
+    REPEATED,
+) = REASONS = (
+    Inadmissible(
+        "on a date that is not a delivered date",
+        "deliver those dates' buckets or drop those results",
+        "",
+    ),
+    Inadmissible(
+        "the mapping records no image of that stem on that date",
+        "correct the date and stem, or drop those results",
+        "",
+    ),
+    Inadmissible(
+        "the mapping assigned to no plant",
+        "drop those results, which belong to no plant",
+        "",
+    ),
+    Inadmissible(
+        "of a plant the population does not name",
+        "deliver those plants or drop those results",
+        "",
+    ),
+    Inadmissible(
+        f"not read by the delivery ({UNREAD_CAUSE})",
+        "drop those results, or deliver a bucket documenting them with the images on disk",
+        "",
+    ),
+    Inadmissible(
+        "named by more than one result",
+        "name each image in one result only",
+        "",
+    ),
+)
+"""The reasons a result is refused for, in the order a refusal gives them.
+
+:func:`admission` answers the first five, in the order it checks them; the sixth is the reason
+for a result whose image an earlier result names, which only a caller reading results can find."""
+
+
+def quoted_plant(plant: str) -> str:
+    """Return ``plant``'s id as a refusal names it, quoted."""
+    return repr(plant)
+
+
+def admission(
+    mapping: MappingResolution,
+    plants: Container[str],
+    date: str,
+    stem: str,
+) -> Assignment | Inadmissible:
+    """Return the assignment the per-plant door admits for the image ``stem`` of ``date``.
+
+    An image is admitted when its date is delivered, ``mapping``'s build records it, attributes it
+    to a plant in ``plants`` and the verification read it
+    (:attr:`MappingVerification.read_stems`). Any other image answers the first of the first five
+    :data:`REASONS` that applies, in that order; one outside the population carries its plant as
+    the detail.
+    """
+    if date not in mapping.disclosure.dates_delivered:
+        return NOT_DELIVERED
+    assignment = mapping.build.by_stem.get(date, {}).get(stem)
+    if assignment is None:
+        return NO_IMAGE
+    if not assignment_is_attributed(assignment):
+        return NO_PLANT
+    if assignment.plant_id not in plants:
+        plant = quoted_plant(cast(str, assignment.plant_id))
+        return replace(OUTSIDE_POPULATION, detail=f"plant {plant}")
+    if stem not in mapping.verified.read_stems[date]:
+        return UNREAD
+    return assignment
+
+
+def named_images(
+    images: Iterable[tuple[str, str]],
+    details: Mapping[tuple[str, str], str] | None = None,
+) -> str:
+    """Return the ``(date, stem)`` ``images`` as ``<date>/<stem>``, joined with ", ".
+
+    An image ``details`` states a non-empty fact of is followed by it in parentheses.
+    """
+    facts = details or {}
+    return ", ".join(
+        f"{date}/{stem}"
+        + (f" ({facts[date, stem]})" if facts.get((date, stem)) else "")
+        for date, stem in images
+    )
+
+
 def read_images(
     mapping: MappingResolution, plants: Iterable[str]
 ) -> dict[str, list[tuple[str, str]]]:
     """Return the ``(date, stem)`` of each of ``plants``' images ``mapping``'s delivery read.
 
-    An image is read when its date is delivered, the build attributes it to that plant and the
-    verification read it (:attr:`MappingVerification.read_stems`); each plant's images come in
-    date and stem order.
+    These are the images :func:`admission` admits for ``plants``, each plant's in date and stem
+    order.
     """
     wanted = list(plants)
+    population = set(wanted)
     read: dict[str | None, list[tuple[str, str]]] = {p: [] for p in wanted}
-    for date in mapping.disclosure.dates_delivered:
-        for stem in sorted(mapping.verified.read_stems[date]):
-            plant = mapping.build.by_stem[date][stem].plant_id
-            if plant in read:
-                read[plant].append((date, stem))
+    for date in sorted(mapping.build.dates):
+        for stem in sorted(mapping.build.by_stem[date]):
+            admitted = admission(mapping, population, date, stem)
+            if isinstance(admitted, Assignment):
+                read[admitted.plant_id].append((date, stem))
     return {plant: read[plant] for plant in wanted}
 
 
