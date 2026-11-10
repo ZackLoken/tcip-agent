@@ -534,15 +534,17 @@ def propose(payload: ProposePayload) -> ProposeAnswer:
 
 @router.post("/find")
 def find(payload: FindPayload) -> FindAnswer:
-    """Run the detector on the image for the phrase and answer the boxes it found, unstaged.
+    """Run the detector on the image for the phrase and answer the boxes it found.
 
     The image is admitted by :func:`~tcip_web.paths.allowed_file`. The phrase prompts the
     detector under its libraries' own thresholds and merge
     (:func:`~tcip_mcp.pipelines.proposal_engines.detector_defaults`) through
     :func:`~tcip_mcp.tools.proposal_tools.propose_annotations`, on the open project and by the
-    person :func:`~tcip_mcp.identity.actor` makes of ``user``; nothing is staged, the boxes being
-    prompts for the person to send on. The door's error answers 400 carrying its text; no project
-    open answers 409.
+    person :func:`~tcip_mcp.identity.actor` makes of ``user``. A run that found boxes leaves the
+    proposal's staging record and its audit line; no subject is assigned and no bucket is
+    published, the boxes being prompts for the person to send on. The door's error answers 400
+    carrying its text, an image under a dataset root never registered included; no project open
+    answers 409.
     """
     from tcip_mcp.identity import actor
     from tcip_mcp.pipelines.proposal_engines import (
