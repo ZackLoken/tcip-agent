@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from tcip_mcp.model_registry import Producer
+from tcip_mcp.model_registry import (
+    Producer,
+    RegistryEntry,
+    registered_bytes,
+)
 from tcip_mcp.pipelines.execution import (
     DEFAULT_TILE_BATCH_SIZE,
     EXECUTION_RECORD,
@@ -96,6 +100,25 @@ def registered_pass_root(
     return root
 
 
+def admitted_pass(
+    project: Path,
+    *,
+    checkpoint_path: Path,
+    images_dir: str | None,
+    raster_path: str | None,
+) -> tuple[Path, bytes, RegistryEntry]:
+    """Admit a pass of ``project``: its dataset root, then the checkpoint at ``checkpoint_path``.
+
+    The root is :func:`registered_pass_root`'s for ``images_dir`` or ``raster_path``, and the
+    checkpoint's bytes and the entry registering them are
+    :func:`~tcip_mcp.model_registry.registered_bytes`'s; nothing is unpickled. Returns
+    ``(root, bytes, entry)``. Raises the root's refusal before anything of the checkpoint is
+    read, then each refusal and error ``registered_bytes`` raises.
+    """
+    root = registered_pass_root(images_dir=images_dir, raster_path=raster_path)
+    return root, *registered_bytes(checkpoint_path, project=project)
+
+
 def infer(
     project: Path,
     *,
@@ -118,9 +141,9 @@ def infer(
     The pass of the checkpoint at ``checkpoint_path`` runs over the capture ``images_dir``
     or ``raster_path``, each an established location, and its predictions are published as the
     bucket named ``bucket`` under their dataset root by ``actor``, answering the publication's
-    result or the error dict naming a refusal. The pass's own root is
-    :func:`registered_pass_root`'s, which refuses a directory that is no capture and a root never
-    registered before the checkpoint loads, a dry run and a resume included, and the bucket is
+    result or the error dict naming a refusal. The pass is admitted by :func:`admitted_pass`, its
+    root and then its checkpoint, a dry run and a resume included; each refusal the admission
+    raises is answered as its sentence, and any other error it raises propagates. The bucket is
     published under the root :func:`~tcip_mcp.buckets.publish` reads off its sources.
     ``progress`` is called with ``(done, total)`` images once the pass is prepared and after each
     image, and ``canceled`` asked before each image: once it answers true the pass stops at that
@@ -130,10 +153,7 @@ def infer(
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import pass_documents, publish
     from tcip_mcp.dataset_layout import bucket_key
-    from tcip_mcp.model_registry import (
-        UnregisteredCheckpointError,
-        load_registered_checkpoint,
-    )
+    from tcip_mcp.model_registry import unpickled_checkpoint
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
 
     if not bucket:
@@ -150,13 +170,16 @@ def infer(
     if raster_path is not None and not Path(raster_path).is_file():
         return {"error": f"raster_path not found: {raster_path}"}
     try:
-        root = registered_pass_root(
-            images_dir=images_dir, raster_path=raster_path
+        root, data, entry = admitted_pass(
+            project,
+            checkpoint_path=checkpoint_path,
+            images_dir=images_dir,
+            raster_path=raster_path,
         )
-        checkpoint = load_registered_checkpoint(
-            checkpoint_path, project=project
+        checkpoint = unpickled_checkpoint(
+            data, entry, checkpoint_path=checkpoint_path, project=project
         )
-    except (UnregisteredCheckpointError, FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
 
     stored = (
