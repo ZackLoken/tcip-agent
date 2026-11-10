@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 
 import tcip_store
+from tcip_annotation.text import Text
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.execution import ProposalExecution
@@ -92,7 +93,7 @@ class Bucket:
     producer: BucketProducer
     scope: ClassScope
     execution: ProposalExecution
-    dataset_id: str | None
+    dataset_id: Text
     date: str | None
     raster_path: str | None
     raster_identity: RasterIdentity | None
@@ -220,17 +221,10 @@ def shared_root(buckets: Iterable[Bucket]) -> Path:
 def require_bucket_of_dataset(bucket: Bucket, identity: DatasetRecord) -> None:
     """Require ``bucket`` to record the dataset ``identity`` is the identity of.
 
-    ``identity`` is its root's identity record. A bucket recording no dataset (published outside a
-    capture of a registered dataset) refuses (``ValueError``) naming the bucket and its root. A
-    bucket recording another dataset than ``identity``'s refuses (``ValueError``) naming the
-    bucket, its root, the id it records and the id of its root.
+    ``identity`` is its root's identity record. A bucket recording another dataset than
+    ``identity``'s refuses (``ValueError``) naming the bucket, its root, the id it records and the
+    id of its root.
     """
-    if bucket.dataset_id is None:
-        raise ValueError(
-            f"bucket {bucket.name!r} under {bucket.root} records no dataset: its predictions were "
-            "published outside a capture of a registered dataset, so nothing ties them to a "
-            "dataset's plants; register the dataset and publish the predictions again."
-        )
     if bucket.dataset_id != identity.id:
         raise ValueError(
             f"bucket {bucket.name!r} records dataset {bucket.dataset_id!r}, and its root "
@@ -335,7 +329,6 @@ def source_dataset_identity(sources: Iterable[str | Path]) -> DatasetRecord:
 
 def publish(
     project: Path,
-    root: Path,
     name: str,
     documents: Iterable[Document],
     *,
@@ -347,31 +340,38 @@ def publish(
     assessment_id: str | None,
     actor: str | None,
 ) -> Bucket:
-    """Publish ``documents`` as the bucket ``name`` under the dataset root ``root``, by ``actor``.
+    """Publish ``documents`` as the bucket ``name`` under their sources' dataset root, by ``actor``.
 
-    ``root`` is the one :func:`source_root` answers for their sources. One commit covers the
-    bucket's record, every document and the publication's audit line,
-    ``prediction_bucket_published``, naming the bucket and its ``dropped_boxes``. Returns the
-    bucket as read back.
+    The root is the one :func:`source_root` answers for every document's source and the raster.
+    One commit covers the bucket's record, every document and the publication's audit line,
+    ``prediction_bucket_published``, naming the root, the bucket and its ``dropped_boxes``.
+    Returns the bucket as read back.
 
     The record states ``producer``, ``scope``, ``execution``, the raster and the assessment as
-    given, and the capture of the raster, else the one capture every document's source image is
-    of (:func:`~tcip_mcp.dataset_layout.image_capture`), with its root's dataset id. Refuses
-    with nothing written
-    (``ValueError``): no document, two documents of one stem, documents of two captures, and a
-    bucket of that name already published under the root (:class:`BucketExistsError`).
+    given, the root's dataset id, and the capture of the raster, else the one capture every
+    document's source image is of (:func:`~tcip_mcp.dataset_layout.image_capture`). Refuses
+    with nothing written (``ValueError``): no document, what :func:`source_root` refuses of the
+    sources, a root never registered
+    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`), two documents of one stem,
+    documents of two captures, and a bucket of that name already published under the root
+    (:class:`BucketExistsError`).
     """
     from tcip_mcp.audit import audit_line, audit_log_key
     from tcip_mcp.dataset_layout import (
         bucket_key,
-        dataset_id_of,
         image_capture,
+        require_dataset_identity,
     )
     from tcip_mcp.registry_paths import recorded_paths
 
     documents = list(documents)
     if not documents:
         raise ValueError(f"bucket {name!r} has no document to publish.")
+    root = source_root(
+        [d.source for d in documents]
+        + ([] if raster_path is None else [raster_path])
+    )
+    identity = require_dataset_identity(root)
     stems = [Path(d.source).stem for d in documents]
     repeated = sorted(s for s, n in Counter(stems).items() if n > 1)
     if repeated:
@@ -391,8 +391,7 @@ def publish(
             f"{sorted(str(c) for _, c in captures)}, and a publication states the one capture "
             "its documents are of: publish each capture's own."
         )
-    ((captured_root, date),) = captures
-    dataset_id = dataset_id_of(captured_root)
+    ((_, date),) = captures
     dropped_boxes = sum(d.dropped for d in documents)
     line = audit_line(
         "prediction_bucket_published",
@@ -411,7 +410,7 @@ def publish(
         producer=producer,
         scope=scope,
         execution=execution,
-        dataset_id=dataset_id,
+        dataset_id=identity.id,
         date=date,
         raster_path=raster_path,
         raster_identity=raster_identity,

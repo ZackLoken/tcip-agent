@@ -28,6 +28,7 @@ from pydantic import (
     TypeAdapter,
 )
 
+from tcip_annotation.text import Text
 from tcip_mcp.assessment_evidence import (
     INSUFFICIENCY_FAILURES,
     REFERENCE_FLOOR,
@@ -173,12 +174,11 @@ class _Reference:
 class SelectionReference(_Reference):
     """A reference drawn from the selection at ``selection_dir``.
 
-    ``dataset_id`` is the identity id the samples' dataset root recorded when it was measured,
-    ``None`` for a root that recorded none.
+    ``dataset_id`` is the identity id the samples' dataset root recorded when it was measured.
     """
 
     selection_dir: str
-    dataset_id: str | None
+    dataset_id: Text
     kind: Literal["selection"] = "selection"
 
     def covers(self, bucket: Bucket) -> bool:

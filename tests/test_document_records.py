@@ -19,6 +19,7 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_annotation.verdicts import read_verdicts
 from tcip_mcp.dataset_layout import (
     LABELS_IMPORTED,
+    PREDICTION_DOCUMENTS,
     Decisions,
     Gestures,
     image_dir,
@@ -262,7 +263,6 @@ def test_a_document_its_bucket_names_is_required(tmp_path: Path) -> None:
     with pytest.raises(BucketExistsError):
         publish(
             tmp_path,
-            root,
             f"n/{DATE}",
             [Document(str(images[2]), {"annotations": []})],
             producer=bucket.producer,
@@ -318,7 +318,6 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
     def again(name: str, identity: RasterIdentity | None) -> None:
         publish(
             tmp_path,
-            root,
             name,
             others,
             producer=first.producer,
@@ -349,6 +348,85 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
 
     assert sorted(read_bucket(root, f"n/{DATE}").documents) == ["b", "c"]
     assert len(audit_rows(root, "prediction_bucket_published")) == 2
+
+
+def _proposals(
+    project: Path, documents: list[Path], *, raster_path: Path | None = None
+) -> None:
+    """Publish an empty proposal document for each of ``documents`` as the bucket ``p``.
+
+    The bucket is published by ``agent:test`` under no class scope, over ``raster_path`` when one
+    is named.
+    """
+    from tcip_mcp.buckets import Document, Proposed, publish
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.execution import NoPass
+
+    publish(
+        project,
+        "p",
+        [Document(str(p), {"annotations": []}) for p in documents],
+        producer=Proposed(proposed_by="agent:test"),
+        scope=ClassScope(),
+        execution=NoPass(),
+        raster_path=None if raster_path is None else str(raster_path),
+        raster_identity=None,
+        assessment_id=None,
+        actor=None,
+    )
+
+
+def test_a_publication_under_a_root_never_registered_refuses_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    """A publication under a root never registered refuses with nothing written.
+
+    The refusal is the sentence ``require_dataset_identity`` refuses the root with, and no
+    document, bucket record or audit line is written. An empty publication there answers that it
+    holds no document, its emptiness read before its root.
+    """
+    pytest.importorskip("torch")
+    from tests._producer_fixtures import left_written, unregistered_refusal
+
+    root = tmp_path / "ds"
+    images = _capture(image_dir(root, DATE))
+    before = left_written(tmp_path, root)
+
+    with pytest.raises(ValueError) as refused:
+        _proposals(tmp_path, images)
+    with pytest.raises(ValueError, match="no document"):
+        _proposals(tmp_path, [])
+
+    assert str(refused.value) == unregistered_refusal(root)
+    assert left_written(tmp_path, root) == before
+    assert ts.keys(PREDICTION_DOCUMENTS, str(root)) == []
+
+
+def test_a_raster_under_one_root_beside_a_document_under_another_refuses(
+    tmp_path: Path,
+) -> None:
+    """A raster under one registered root beside a document under another refuses, writing nothing.
+
+    The publication reads its root off every source it is given, the raster among them.
+    """
+    pytest.importorskip("torch")
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import dataset_registered, left_written
+
+    first, second = (
+        dataset_registered(tmp_path, tmp_path / name, crop=CROP)
+        for name in ("a", "b")
+    )
+    raster = write_image(image_dir(first, DATE) / "mosaic.tif", (SIZE, SIZE))
+    document = write_image(
+        image_dir(second, DATE) / "mosaic.png", (SIZE, SIZE)
+    )
+    before = [left_written(tmp_path, root) for root in (first, second)]
+
+    with pytest.raises(ValueError, match="a bucket's source images lie under"):
+        _proposals(tmp_path, [document], raster_path=raster)
+
+    assert [left_written(tmp_path, root) for root in (first, second)] == before
 
 
 def test_a_publication_writes_each_document_under_its_own_stems_key(

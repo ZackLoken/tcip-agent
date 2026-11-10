@@ -1880,7 +1880,7 @@ export interface SelectionReference {
   ground_truth: RetainedFile[];
   samples: ReferenceSample[];
   selection_dir: string;
-  dataset_id: string | null;
+  dataset_id: string;
   kind: "selection";
 }
 

@@ -116,12 +116,14 @@ def infer(
     The pass of the checkpoint at ``checkpoint_path`` runs over the capture ``images_dir``
     or ``raster_path``, each an established location, and its predictions are published as the
     bucket named ``bucket`` under their dataset root by ``actor``, answering the publication's
-    result or the error dict naming a refusal. The root is :func:`registered_pass_root`'s, which
-    refuses a directory that is no capture and a root never registered before the checkpoint
-    loads, a dry run and a resume included. ``progress`` is called with
-    ``(done, total)`` images once the pass is prepared and after each image, and ``canceled``
-    asked before each image: once it answers true the pass stops at that image boundary and
-    publishes the documents predicted, or publishes nothing when it predicted none.
+    result or the error dict naming a refusal. The pass's own root is
+    :func:`registered_pass_root`'s, which refuses a directory that is no capture and a root never
+    registered before the checkpoint loads, a dry run and a resume included, and the bucket is
+    published under the root :func:`~tcip_mcp.buckets.publish` reads off its sources.
+    ``progress`` is called with ``(done, total)`` images once the pass is prepared and after each
+    image, and ``canceled`` asked before each image: once it answers true the pass stops at that
+    image boundary and publishes the documents predicted, or publishes nothing when it predicted
+    none.
     """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import pass_documents, publish
@@ -292,7 +294,6 @@ def infer(
     try:
         published = publish(
             project,
-            root,
             bucket,
             pass_documents(p, results),
             producer=p.checkpoint.producer,

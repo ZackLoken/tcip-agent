@@ -175,7 +175,6 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
 
     bucket = publish(
         tmp_path,
-        tmp_path / "ds",
         "r/2026-01-01",
         pass_documents(p, p.predict(p.paths)),
         producer=checkpoint.producer,

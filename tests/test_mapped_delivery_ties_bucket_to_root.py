@@ -1,29 +1,20 @@
 """A mapped delivery refuses a bucket whose recorded dataset is not the dataset of its root.
 
 Through the doors that read a plant mapping: the per-plant tool, and the phenology tool with its
-two routes. A bucket recording no dataset (published before its images' dataset was registered)
-and a bucket recording another dataset than the root it is delivered under (the dataset copied
-without its identity document, the copy registered and a mapping built over it) each refuse naming
-the bucket, and no delivery event is recorded. The orthomosaic door's own tests hold the same two
-refusals there.
+two routes. A bucket recording another dataset than the root it is delivered under (the dataset
+copied without its identity document, the copy registered and a mapping built over it) refuses
+naming the bucket, and no delivery event is recorded. The orthomosaic door's own tests hold the
+same refusal there.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from tests._mapping_fixtures import (
-    COUNT_CROP,
-    CROP,
-    PHOTO_POSITION_ERROR_M,
-    registered_copy,
-    write_photos,
-)
-from tests._producer_fixtures import register_dataset_at
+from tests._mapping_fixtures import COUNT_CROP, CROP, registered_copy
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -91,61 +82,8 @@ def test_a_per_plant_delivery_of_a_bucket_recording_another_dataset_than_its_roo
     )
 
     assert "error" in refused, refused
-    assert recorded is not None
     for named in (bucket, recorded, minted):
         assert named in refused["error"], refused
-    assert not (tmp_path / "o.csv").exists()
-    _no_delivery_recorded(tmp_path)
-
-
-@pytest.mark.usefixtures("confirmed_count_aggregate")
-def test_a_per_plant_delivery_of_a_bucket_recording_no_dataset_refuses(
-    tmp_path: Path,
-) -> None:
-    """The per-plant tool refuses a bucket published before its images' dataset was registered.
-
-    A second root holds the photograph and the bucket is published under it unregistered; the
-    root is then registered and a mapping built over it.
-    """
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import image_dir
-    from tests.test_deliver_per_plant_csv import (
-        DATE,
-        ONE_PLANT,
-        _bucket,
-        _deliver,
-        _mapped,
-        _results,
-    )
-
-    _mapped(tmp_path)
-    bare = tmp_path / "bare"
-    write_photos(
-        image_dir(bare, DATE),
-        {
-            f"{plant}.jpg": (lat, lon, PHOTO_POSITION_ERROR_M)
-            for plant, (lat, lon) in ONE_PLANT.items()
-        },
-        datetime.fromisoformat(DATE).replace(hour=9, minute=30),
-        timedelta(minutes=5),
-    )
-    bucket = _bucket(tmp_path, bare, DATE, {"P1": 1}, crop=None)
-    assert read_bucket(bare, bucket).dataset_id is None
-    register_dataset_at(tmp_path, bare, crop=COUNT_CROP)
-    _map(tmp_path, "bare-valley", bare, "reg")
-
-    refused = _deliver(
-        tmp_path,
-        _results(DATE, ("P1", 1)),
-        ["P1"],
-        bare,
-        [bucket],
-        plant_mapping="bare-valley",
-    )
-
-    assert "error" in refused, refused
-    assert bucket in refused["error"], refused
-    assert "records no dataset" in refused["error"], refused
     assert not (tmp_path / "o.csv").exists()
     _no_delivery_recorded(tmp_path)
 
@@ -181,57 +119,10 @@ def test_a_phenology_delivery_of_a_bucket_recording_another_dataset_than_its_roo
         {**body, "dataset_root": str(copy), "mapping_name": "copy-valley"},
     )
 
-    assert recorded is not None
     for refusal in refusals:
         for named in (recorded, minted):
             assert named in refusal, refusal
         assert any(b in refusal for b in body["buckets"]), refusal
-    _no_delivery_recorded(tmp_path)
-
-
-def test_a_phenology_delivery_of_a_bucket_recording_no_dataset_refuses(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """The phenology tool and both routes refuse buckets published before their dataset existed.
-
-    A second root holds the scene and its buckets are published under it unregistered; the root
-    is then registered and a mapping built over it.
-    """
-    from tcip_mcp.buckets import read_bucket
-    from tests._producer_fixtures import registry_over
-    from tests.test_plant_mapping_binding import _write_scene
-    from tests.test_second_trait_acceptance import (
-        FLOWERS,
-        _currant_bloom_body,
-    )
-    from tests.test_the_delivered_crop_is_the_registrys import (
-        _phenology_refusals,
-    )
-
-    body = _currant_bloom_body(tmp_path)
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    _, buckets = _write_scene(bare, crop=None)
-    recorded = {read_bucket(bare, b).dataset_id for b in buckets.values()}
-    assert recorded == {None}
-    register_dataset_at(tmp_path, bare, crop=CROP)
-    registry_over(bare, FLOWERS)
-    _map(tmp_path, "bare-valley", bare, "reg")
-
-    refusals = _phenology_refusals(
-        client,
-        tmp_path,
-        {
-            **body,
-            "dataset_root": str(bare),
-            "mapping_name": "bare-valley",
-            "buckets": list(buckets.values()),
-        },
-    )
-
-    for refusal in refusals:
-        assert "records no dataset" in refusal, refusal
-        assert any(b in refusal for b in buckets.values()), refusal
     _no_delivery_recorded(tmp_path)
 
 
@@ -263,7 +154,6 @@ def test_an_acknowledged_per_plant_delivery_of_a_bucket_recording_another_datase
     bucket = unassessed_bucket(
         tmp_path, experiment_id="exp-copied", images={"p1": 1}
     )
-    assert bucket.dataset_id is not None
     copy, minted = registered_copy(
         tmp_path, bucket.root, "ds-copy", crop=COUNT_CROP
     )

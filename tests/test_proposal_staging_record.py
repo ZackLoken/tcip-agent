@@ -128,6 +128,45 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     assert min(xs) == pytest.approx(5.0)
 
 
+def test_a_staging_publishes_under_the_root_its_staging_record_is_keyed_by(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A staged proposal's bucket is published under the root its staging record is keyed by.
+
+    The image is in a capture named ``images`` of the root ``data``, a position read two ways and
+    settled by the root carrying its own state. The staging record's key is the door's reading
+    of the image at entry; the publication's audit line is the publication's own.
+    """
+    import tcip_store as ts
+    from tcip_mcp.tools.proposal_tools import (
+        PROPOSAL_STAGING_STORE,
+        propose_annotations,
+        stage_proposals,
+    )
+    from tests._audit_fixtures import audit_rows
+
+    root = dataset_registered(tmp_path, tmp_path / "data", crop=CROP)
+    image = image_dir(root, "images") / "leaf.jpg"
+    _make_image(image)
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
+    proposed = propose_annotations(
+        tmp_path, image_path=str(image), engine="stub", actor=None
+    )
+    staged = stage_proposals(
+        tmp_path,
+        image_path=str(image),
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
+    )
+    assert "error" not in staged, staged
+
+    (key,) = ts.keys(PROPOSAL_STAGING_STORE, str(root))
+    rows = audit_rows(Path(key.root), "prediction_bucket_published")
+    assert [r["arguments"]["dataset_root"] for r in rows] == [key.root]
+    assert staged.bucket.endswith("/".join(key.parts))
+
+
 def test_assignments_naming_no_run_are_refused_by_their_type() -> None:
     from pydantic import ValidationError
 
