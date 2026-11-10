@@ -360,10 +360,12 @@ def compare_best_route(payload: CompareBestPayload) -> Ranking:
     The ranking is :func:`~tcip_mcp.tools.model_tools.ranked_registered_model`'s.
 
     A registry index that will not decode, or a run record of the project that will not read,
-    answers 409 naming why; the ranking's own error dicts map to 422 (``_refused``).
+    answers 409 naming why (:func:`~tcip_web.routes._admission.registry_unreadable`); the
+    ranking's own error dicts map to 422 (``_refused``).
     """
     from tcip_mcp.tools.model_tools import ranked_registered_model
     from tcip_store import DecodeError, ReadRefusedError
+    from tcip_web.routes._admission import registry_unreadable
 
     try:
         result = ranked_registered_model(
@@ -375,7 +377,7 @@ def compare_best_route(payload: CompareBestPayload) -> Ranking:
             tag=None,
         )
     except (DecodeError, ReadRefusedError) as exc:
-        raise HTTPException(409, f"registry unreadable: {exc}") from exc
+        raise registry_unreadable(exc) from exc
     if isinstance(result, dict):
         raise _refused(result)
     return result

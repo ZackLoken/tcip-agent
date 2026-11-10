@@ -647,24 +647,19 @@ def launch_priority_queue(
     capture's image directory (:func:`~tcip_mcp.dataset_layout.image_dir`) and its subject
     (:func:`~tcip_web.state.selected`, no capture selected answering 400); the record is the
     job's as it stands before the thread starts. A checkpoint outside the allowed roots is
-    refused, a missing one answers 404, and one the open project's registry does not name
-    (:func:`~tcip_mcp.model_registry.registered_bytes`) answers 400 with that sentence and starts
-    no job.
+    refused; the checkpoint is then admitted by the open project's registry
+    (:func:`~tcip_mcp.model_registry.registered_bytes`), each failure answered as
+    :func:`~tcip_web.routes._admission.answered_admission` answers it, starting no job.
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.model_registry import registered_bytes
+    from tcip_web.routes._admission import answered_admission
 
     project, held = store.held_state()
     selection = selected(held)
     checkpoint_path = allowed_path(payload.checkpoint_path)
-    if not checkpoint_path.is_file():
-        raise HTTPException(
-            404, f"checkpoint not found: {payload.checkpoint_path}"
-        )
-    try:
+    with answered_admission():
         registered_bytes(checkpoint_path, project=project.root)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
     return _pq_registry.launch(
         PriorityQueueJob(
             job_id=f"pq-{uuid.uuid4().hex[:8]}",
