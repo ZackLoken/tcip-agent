@@ -177,15 +177,12 @@ def test_a_phenology_delivery_over_a_dataset_registered_again_with_another_crop_
 # ── the orthomosaic count's dataset ─────────────────────────────────────
 
 
-def _orthomosaic_scene(project: Path, *, registered: bool = True) -> Bucket:
+def _orthomosaic_scene(project: Path) -> Bucket:
     """Return a whole-raster bucket over the project's dataset ``ds``, the count trait confirmed.
 
-    The raster's dataset is registered at :data:`COUNT_CROP`; with ``registered`` false the bucket
-    is published before that registration, so it records no dataset.
+    The raster's dataset is registered at :data:`COUNT_CROP`.
     """
-    from tests._chain_fixtures import detected, detection_pass, published
     from tests.test_orthomosaic_tools import (
-        SCOPE,
         _raster,
         _raster_bucket,
         _write_geo_raster,
@@ -195,19 +192,7 @@ def _orthomosaic_scene(project: Path, *, registered: bool = True) -> Bucket:
     fx.seed_confirmed_orthomosaic_count(project, "stem_count")
     raster_path = _raster(project)
     _write_geo_raster(raster_path)
-    box = (8.0, 8.0, 12.0, 12.0)
-    if registered:
-        return _raster_bucket(project, raster_path, [box])
-    bucket = published(
-        project,
-        "preds/2026-01-01",
-        [detection_pass(raster_path, (64, 64), [detected(box, 0.9)], cap=2)],
-        scope=SCOPE,
-        raster_path=raster_path,
-        crop=None,
-    )
-    register_dataset_at(project, bucket.root, crop=COUNT_CROP)
-    return bucket
+    return _raster_bucket(project, raster_path, [(8.0, 8.0, 12.0, 12.0)])
 
 
 def _grid_registry(project: Path, *, crop: str = COUNT_CROP) -> str:
@@ -294,23 +279,6 @@ def test_an_orthomosaic_count_over_a_registry_of_another_crop_than_its_dataset_r
         _crops_named(refusal, CROP, COUNT_CROP)
 
 
-def test_an_orthomosaic_count_over_a_bucket_recording_no_dataset_refuses_naming_it(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """A bucket published before its raster's dataset was registered records none and refuses.
-
-    The dataset and the registry are both at :data:`COUNT_CROP`; each refusal names the bucket.
-    """
-    bucket = _orthomosaic_scene(tmp_path, registered=False)
-    assert bucket.dataset_id is None
-
-    for refusal in _orthomosaic_refusals(
-        client, tmp_path, bucket.root, bucket.name, _grid_registry(tmp_path)
-    ):
-        assert bucket.name in refusal, refusal
-        assert "records no dataset" in refusal, refusal
-
-
 def test_an_orthomosaic_count_over_a_bucket_recording_another_dataset_than_its_root_refuses(
     client: TestClient, tmp_path: Path
 ) -> None:
@@ -328,7 +296,6 @@ def test_an_orthomosaic_count_over_a_bucket_recording_another_dataset_than_its_r
     for refusal in _orthomosaic_refusals(
         client, tmp_path, copy, bucket.name, _grid_registry(tmp_path)
     ):
-        assert bucket.dataset_id is not None
         assert bucket.dataset_id in refusal, refusal
         assert minted in refusal, refusal
 

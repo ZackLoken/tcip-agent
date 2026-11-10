@@ -918,7 +918,6 @@ def test_a_stated_date_refuses_an_image_a_published_bucket_names(
     register_dataset_at(project, project, crop=CROP)
     publish(
         project,
-        project,
         "proposals",
         [Document(str(image), {"annotations": []})],
         producer=Proposed(proposed_by="agent:test"),
