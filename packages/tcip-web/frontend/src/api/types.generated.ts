@@ -1059,8 +1059,7 @@ export interface ComparedRun {
   registry: Listed[];
   split: SplitColumn;
   subject: string | null;
-  dataset_id: string | null;
-  dataset_fingerprint: string | null;
+  dataset: DatasetIdentity;
 }
 
 export interface Completed {
@@ -1120,6 +1119,11 @@ export interface CurveRow {
   n_unclassified: number;
   n_missing: number;
   ratio: number | null;
+}
+
+export interface DatasetIdentity {
+  id: string | null;
+  fingerprint: string | null;
 }
 
 export interface DateCounts {

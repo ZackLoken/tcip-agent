@@ -1657,8 +1657,9 @@ class ComparedRun(BaseModel):
     last epoch's row (:func:`epoch_rows`, not a verified result), ``None`` before one;
     ``rows_after_end`` counts rows whose own ``timestamp`` is a later instant than the final
     status's ``ended``, ``None`` before a final status; ``registry`` is a completed run's own
-    entry as listed, a one-entry list, empty otherwise. The subject and dataset identity, its
-    fingerprint ``None`` where the record carries none, are its records'.
+    entry as listed, a one-entry list, empty otherwise. The subject and ``dataset``, the identity
+    the run's launch record stores (:class:`DatasetIdentity`, each field ``None`` where the record
+    carries none), are its records'.
     """
 
     kind: Literal["compared"] = "compared"
@@ -1669,8 +1670,7 @@ class ComparedRun(BaseModel):
     registry: list[Listed]
     split: SplitColumn
     subject: str | None
-    dataset_id: DatasetId | None
-    dataset_fingerprint: str | None
+    dataset: DatasetIdentity
 
 
 class UncomparedRun(BaseModel):
@@ -1688,7 +1688,7 @@ type ComparedEntry = Annotated[
 
 
 class Comparison(BaseModel):
-    """Runs side by side, each with the dataset fingerprint its record carries.
+    """Runs side by side, each with the dataset identity its record carries.
 
     ``directions`` holds each metric key their registered checkpoints carry
     (``model_registry.metric_keys``) with its declared direction
@@ -1769,8 +1769,7 @@ def compare_experiments(
                 subject=run.resolved.data.recorded_scope.subject
                 if run.resolved is not None
                 else None,
-                dataset_id=run.dataset.id,
-                dataset_fingerprint=run.dataset.fingerprint,
+                dataset=run.dataset,
             )
         )
 
@@ -1785,8 +1784,9 @@ def get_experiment_lineage(
 ) -> dict[str, Any]:
     """Return a training run's data-to-model chain read off its records.
 
-    The chain is the data section it resolved, its dataset identity, the run it was relaunched
-    from and the checkpoint it resumed from, and the checkpoint its completion selected.
+    The chain is the data section it resolved, its ``dataset`` (the identity the launch record
+    stores, as the full view serves it), the run it was relaunched from and the checkpoint it
+    resumed from, and the checkpoint its completion selected.
     ``{"error": ...}`` for an id naming no training run.
     """
     observation = find_observation(experiment_id, project=project)
@@ -1799,8 +1799,7 @@ def get_experiment_lineage(
             "data": run.resolved.data.record()
             if run.resolved is not None
             else None,
-            "dataset_id": run.dataset.id,
-            "dataset_fingerprint": run.dataset.fingerprint,
+            "dataset": run.dataset.model_dump(mode="json"),
             "relaunched_from": run.relaunched_from,
             "resume_from": run.resume_from,
             "checkpoint": observation.checkpoint

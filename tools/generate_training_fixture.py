@@ -174,7 +174,7 @@ FAILURE = "a sample failure the scene records for this run"
 UNKNOWN_RUN = "train-unknown"
 """An id naming no run, whose stream answers so."""
 
-NUMBERED = frozenset({"dataset_fingerprint", "sha256", "agent_session"})
+NUMBERED = frozenset({"fingerprint", "sha256", "agent_session"})
 """The served strings that differ between runs or platforms: the digest of the image bytes a
 platform's encoder wrote and of the checkpoint bytes a run saved, and the agent session minted."""
 

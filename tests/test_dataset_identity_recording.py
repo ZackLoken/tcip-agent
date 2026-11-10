@@ -26,6 +26,8 @@ from tests.test_typed_store_records import STATES_NO_ID, _stating
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from fastapi.testclient import TestClient
+
     from tcip_mcp.pipelines.data.selection import Sample
 
 SUBJECT = "bud"
@@ -75,8 +77,35 @@ def _fingerprints(ids: list[str], project: Path) -> list[str | None]:
     fingerprints = []
     for entry in compare_experiments(ids, project=project).experiments:
         assert entry.kind == "compared", entry
-        fingerprints.append(entry.dataset_fingerprint)
+        fingerprints.append(entry.dataset.fingerprint)
     return fingerprints
+
+
+def _open_loose_run(project: Path, experiment_id: str) -> Path:
+    """Open a classifier run over images under no dataset root; return its directory."""
+    from tests._verified_checkpoint_fixtures import table_images
+    from tests.tiny_trainer_fixtures import (
+        MEAN_INTENSITY_CLASSIFIER,
+        TINY_TRAINER_FILE,
+    )
+
+    return opened_run(
+        project,
+        training_config(
+            project,
+            {
+                "builder": MEAN_INTENSITY_CLASSIFIER,
+                "source_files": [TINY_TRAINER_FILE],
+                "task": "classification",
+                "normalization": FRAME_STATISTICS,
+            },
+            {
+                **table_images(project / "loose"),
+                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
+            },
+        ),
+        experiment_id=experiment_id,
+    )
 
 
 def test_compare_experiments_surfaces_shared_fingerprint(
@@ -104,34 +133,12 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
     The second run is over a dataset holding no label document, and its column carries no
     fingerprint.
     """
-    from tests._verified_checkpoint_fixtures import table_images
-    from tests.tiny_trainer_fixtures import (
-        MEAN_INTENSITY_CLASSIFIER,
-        TINY_TRAINER_FILE,
-    )
-
     opened_run(
         tmp_path,
         _config(tmp_path, _make_dataset(tmp_path / "first")),
         experiment_id="a",
     )
-    opened_run(
-        tmp_path,
-        training_config(
-            tmp_path,
-            {
-                "builder": MEAN_INTENSITY_CLASSIFIER,
-                "source_files": [TINY_TRAINER_FILE],
-                "task": "classification",
-                "normalization": FRAME_STATISTICS,
-            },
-            {
-                **table_images(tmp_path / "loose"),
-                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
-            },
-        ),
-        experiment_id="b",
-    )
+    _open_loose_run(tmp_path, "b")
     a, b = _fingerprints(["a", "b"], tmp_path)
     assert a is not None and b is None
 
@@ -268,40 +275,102 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
     )
 
 
+def _runs_over_each_identity_state(project: Path) -> tuple[list[str], str]:
+    """Open a run over an unregistered root, a registered one and none; return their ids and the id.
+
+    The ids are ``"a"`` (unregistered, so a fingerprint beside no id), ``"b"`` (registered) and
+    ``"c"`` (images under no dataset root, so neither); the string is the id ``b``'s root was
+    registered with.
+    """
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    unregistered = _make_dataset(project / "first")
+    registered_images = _make_dataset(project / "second")
+    registered = register_dataset(
+        project / "second", str(project / "second"), crop="currant", actor=None
+    )
+    opened_run(project, _config(project, unregistered), experiment_id="a")
+    opened_run(project, _config(project, registered_images), experiment_id="b")
+    _open_loose_run(project, "c")
+    return ["a", "b", "c"], registered["id"]
+
+
 def test_a_comparison_serves_the_id_a_run_recorded_and_none_for_an_unregistered_root(
     tmp_path: Path,
 ) -> None:
     """A run over an unregistered root records no id, one over a registered root records its id.
 
-    Both runs are opened by the launcher's producers; the comparison serves each run's recorded
+    The runs are opened by the launcher's producers; the comparison serves each run's recorded
     id, an unregistered root's run still carrying its fingerprint.
     """
-    from tcip_mcp.experiments import read_run
-    from tcip_mcp.tools.project_tools import register_dataset
+    ids, registered_id = _runs_over_each_identity_state(tmp_path)
 
-    unregistered = _make_dataset(tmp_path / "first")
-    registered_images = _make_dataset(tmp_path / "second")
-    registered = register_dataset(
-        tmp_path / "second",
-        str(tmp_path / "second"),
-        crop="currant",
-        actor=None,
-    )
-    a = opened_run(
-        tmp_path, _config(tmp_path, unregistered), experiment_id="a"
-    )
-    b = opened_run(
-        tmp_path, _config(tmp_path, registered_images), experiment_id="b"
-    )
+    rows = compare_experiments(ids, project=tmp_path).experiments
+    datasets = [row.dataset for row in rows if row.kind == "compared"]
+    assert [dataset.id for dataset in datasets] == [None, registered_id, None]
+    assert datasets[0].fingerprint is not None
 
-    assert read_run(a).dataset.id is None
-    assert read_run(a).dataset.fingerprint is not None
-    assert read_run(b).dataset.id == registered["id"]
-    rows = compare_experiments(["a", "b"], project=tmp_path).experiments
-    assert [row.dataset_id for row in rows if row.kind == "compared"] == [
-        None,
-        registered["id"],
-    ]
+
+def test_the_comparison_and_the_lineage_serve_the_dataset_the_run_record_serves(
+    opened_client: TestClient, opened_project: Path
+) -> None:
+    """A run's comparison row and lineage carry the dataset its record serves, as one object.
+
+    Three runs are opened by the launcher's producers, over an unregistered root, a registered
+    root and images under no dataset root. The comparison route's row, the lineage view of
+    ``get_experiment`` and its full view's run record state equal ``dataset`` objects; the
+    third run's id and fingerprint are both null.
+    """
+    from tcip_mcp.tools.experiment_tools import get_experiment
+
+    ids, registered_id = _runs_over_each_identity_state(opened_project)
+
+    answer = opened_client.post(
+        "/api/training/compare", json={"experiment_ids": ids}
+    )
+    assert answer.status_code == 200, answer.text
+    served = []
+    for row, eid in zip(answer.json()["experiments"], ids, strict=True):
+        record = get_experiment(opened_project, eid)["run"]["dataset"]
+        lineage = get_experiment(opened_project, eid, view="lineage")[
+            "lineage"
+        ]["dataset"]
+        assert row["dataset"] == record == lineage
+        served.append(record)
+
+    unregistered, registered, loose = served
+    assert unregistered["id"] is None
+    assert unregistered["fingerprint"] is not None
+    assert registered["id"] == registered_id
+    assert loose == {"id": None, "fingerprint": None}
+
+
+def test_neither_the_comparison_nor_the_lineage_restates_the_dataset_fields(
+    opened_client: TestClient, opened_project: Path
+) -> None:
+    """A comparison row and a lineage carry the run's dataset under ``dataset`` alone.
+
+    The runs are opened as in the agreement test; the comparison route's JSON and the lineage
+    view of ``get_experiment`` hold no ``dataset_id`` or ``dataset_fingerprint`` key.
+    """
+    from tcip_mcp.tools.experiment_tools import get_experiment
+
+    ids, _ = _runs_over_each_identity_state(opened_project)
+
+    answer = opened_client.post(
+        "/api/training/compare", json={"experiment_ids": ids}
+    )
+    assert answer.status_code == 200, answer.text
+    restated = {"dataset_id", "dataset_fingerprint"}
+    for row in answer.json()["experiments"]:
+        assert "dataset" in row
+        assert restated.isdisjoint(row)
+    for eid in ids:
+        lineage = get_experiment(opened_project, eid, view="lineage")[
+            "lineage"
+        ]
+        assert "dataset" in lineage
+        assert restated.isdisjoint(lineage)
 
 
 @STATES_NO_ID
