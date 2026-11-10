@@ -1408,7 +1408,8 @@ def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_publi
 ) -> None:
     """The phrase reaches the detector with its libraries' defaults; its boxes come back as prompts.
 
-    The boxes are prompts for the person to send on, so no bucket is published by a find.
+    The boxes are prompts for the person to send on, so no bucket is published by a find; the run
+    leaves its staging record.
     """
     from tcip_mcp.buckets import buckets_under
     from tcip_mcp.pipelines.proposal_engines import (
@@ -1417,6 +1418,7 @@ def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_publi
         TextPromptedDetector,
         detector_defaults,
     )
+    from tcip_mcp.tools.proposal_tools import PROPOSAL_STAGING_STORE
 
     resp = _find(opened_client, _image_of(dataset_root), "open bud")
 
@@ -1430,6 +1432,7 @@ def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_publi
     )
     assert engines[PromptableSegmenter.name].prompts == []
     assert buckets_under(dataset_root) == []
+    assert tcip_store.keys(PROPOSAL_STAGING_STORE, str(dataset_root))
 
 
 @pytest.mark.parametrize("door", ["propose", "find"])
