@@ -356,7 +356,8 @@ def run_inference(
     full-raster pixels) and the bucket's record of the checkpoint, class scope, execution record,
     capture and assessment behind them, in one commit. A bucket is published once: a name already
     published under that root refuses once the pass has predicted, and a new run names a new
-    bucket.
+    bucket. Images or a raster under a dataset root never registered refuse before anything is
+    read, a dry run and a resume included, naming ``register_dataset``.
 
     With ``assessment_id`` the pass runs exactly that assessment's execution record (its conf,
     object density, mask cut, tile edge, overlap, merge and threshold)
