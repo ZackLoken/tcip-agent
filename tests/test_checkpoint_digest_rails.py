@@ -130,17 +130,23 @@ def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(
 def test_assess_checkpoint_refuses_an_unregistered_checkpoint(
     tmp_path: Path,
 ) -> None:
+    """An assessment over a drawn selection of a registered root refuses an unregistered checkpoint.
+
+    The refusal names ``register_model``, and no assessment directory is opened.
+    """
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tests import _trait_fixtures as fx
+    from tests.test_physical_scale_assessment import _reference
 
     fx.seed_confirmed_count(tmp_path)
+    selection_dir, _csv_path = _reference(tmp_path)
 
     r = assess_checkpoint(
         tmp_path,
         checkpoint_path=secondary_checkpoint(tmp_path),
         trait=fx.COUNT_TRAIT,
         delivery_kind="per_image_count",
-        selection_dir=str(tmp_path / "selection"),
+        selection_dir=str(selection_dir),
         equivalence_z=EQUIVALENCE_Z,
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
