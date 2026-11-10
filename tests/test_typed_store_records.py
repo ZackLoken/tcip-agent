@@ -560,7 +560,7 @@ def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuse
         )
 
 
-def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
+def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_recording_no_dataset(
     tmp_path: Path,
 ) -> None:
     """A scale assessment reads back as calibrated, covering the one capture its samples span.
