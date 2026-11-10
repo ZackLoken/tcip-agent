@@ -627,15 +627,16 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
     image tree, or the first sample under one root's image tree and every other under a second's,
     stored past the selection's writer (:func:`_relocated`). Each reader answers the selection's
     own refusal: its place, the one root reading's sentence for its samples and the draw_splits
-    step. The readers are the two assessment doors called through the server, a training launch
-    bound to the selection, its config made over a detection selection before it is moved, and
-    the doctor's selection check over the project's ``splits``.
+    step. Each reader is a tool called through a client: the two assessment doors answer it as
+    their error, ``preflight_config`` over a config bound to the selection (made over a detection
+    selection before it is moved) answers it among its ``issues`` and not ``valid``, and
+    ``diagnose_project`` answers it as an error finding over the project's ``splits``.
     """
     from tcip_mcp.pipelines.data.selection import selection_place
-    from tcip_mcp.tools.doctor_tools import check_selections
     from tests._chain_fixtures import training_config
     from tests._server_calls import called_through_the_server
-    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+    from tests.test_doctor import _answered
     from tests.test_physical_scale_assessment import (
         SUBJECT as BAR,
         _author_tolerance,
@@ -684,21 +685,27 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
         )
         assert isinstance(served, dict), served
         answer = served["error"]
-    elif door == "bound_launch":
-        launch["data"]["split"]["selection_dir"] = str(selection_dir)
-        with pytest.raises(ValueError) as launched:
-            opened_run(tmp_path, launch, experiment_id="exp-relocated")
-        answer = str(launched.value)
-    else:
-        findings: list = []
-        check_selections(tmp_path, findings)
-        assert [level for level, _ in findings] == ["error"], findings
-        answer = findings[0][1].removeprefix("selection will not read: ")
-
-    assert isinstance(answer, str), answer
-    assert answer == (
+    expected = (
         f"{selection_place(selection_dir)}: {sentence(copies)} {NEXT_STEP}"
-    ), answer
+    )
+    if door == "bound_launch":
+        launch["data"]["split"]["selection_dir"] = str(selection_dir)
+        served = called_through_the_server(
+            "preflight_config", {"config": launch}, bound=bound
+        )
+        assert isinstance(served, dict), served
+        assert served["valid"] is False, served
+        issues = served["issues"]
+        assert isinstance(issues, list) and expected in issues, served
+        answer = expected
+    elif door == "doctor":
+        found = _answered(bound)
+        finding = f"selection will not read: {expected}"
+        assert ("error", finding) in found, found
+        answer = finding
+    else:
+        assert answer == expected, answer
+    assert isinstance(answer, str), answer
     assert "bucket" not in answer, answer
 
 
