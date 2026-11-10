@@ -14,8 +14,8 @@ from tcip_annotation.json_io import (
     read_predictions,
 )
 from tcip_annotation.matching import Matching
-from tcip_mcp.buckets import Bucket, read_bucket, source_root
-from tcip_mcp.dataset_layout import label_key_of
+from tcip_mcp.buckets import Bucket, read_bucket
+from tcip_mcp.dataset_layout import label_key_of, source_root
 from tcip_mcp.pipelines.image_utils import image_path_dimensions
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
@@ -346,7 +346,9 @@ def score_predictions(
         return {"error": f"Path not found: {path}"}
     try:
         entry = latest_confirmed(trait, project).entry if trait else None
-        found = read_bucket(source_root([p]), bucket)
+        found = read_bucket(
+            source_root([p], what="a bucket's source images"), bucket
+        )
         if p.is_file():
             return _evaluate_image(
                 p, found, iou_threshold, conf_threshold, detail, entry

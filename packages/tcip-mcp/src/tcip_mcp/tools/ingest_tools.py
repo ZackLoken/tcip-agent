@@ -463,7 +463,7 @@ def state_capture_date(
     """
     from tcip_annotation.flags import flag_key
     from tcip_mcp.audit import audit_line, audit_log_key
-    from tcip_mcp.buckets import buckets_under, source_root
+    from tcip_mcp.buckets import buckets_under
     from tcip_mcp.pipelines.image_utils import (
         BandGroupRef,
         resolve_image_paths,
@@ -482,7 +482,7 @@ def state_capture_date(
     bucket = date.isoformat()
     try:
         named = [located(image, project) for image in images]
-        root = source_root(named)
+        root = dataset_layout.source_root(named, what="the images to move")
         logical = resolve_image_paths(named)
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}

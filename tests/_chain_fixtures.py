@@ -857,7 +857,8 @@ def published(
     when one is named. The root is registered in ``project`` at ``crop`` first when it carries no
     identity (:func:`~tests._producer_fixtures.dataset_registered`).
     """
-    from tcip_mcp.buckets import pass_documents, publish, source_root
+    from tcip_mcp.buckets import pass_documents, publish
+    from tcip_mcp.dataset_layout import source_root
     from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tests._producer_fixtures import dataset_registered
@@ -874,7 +875,8 @@ def published(
         source_root(
             [raster_path]
             if raster_path is not None
-            else [r.image for r in results]
+            else [r.image for r in results],
+            what="a bucket's source images",
         ),
         crop=crop,
     )

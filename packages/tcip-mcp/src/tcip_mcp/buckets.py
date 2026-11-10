@@ -215,6 +215,8 @@ def shared_root(buckets: Iterable[Bucket]) -> Path:
 
     Buckets under more than one root, or no bucket, refuse (``ValueError``) naming them.
     """
+    from tcip_mcp.dataset_layout import _one_root
+
     return _one_root((b.root for b in buckets), "a delivery's buckets")
 
 
@@ -291,54 +293,6 @@ def pass_documents(
         )
 
 
-def _one_root(roots: Iterable[Path], what: str) -> Path:
-    """Return the one dataset root among ``roots``.
-
-    None, or more than one, refuses (``ValueError``) naming ``what`` and the roots.
-    """
-    found = {tcip_store.canonical_path(root): root for root in roots}
-    if len(found) != 1:
-        raise ValueError(
-            f"{what} lie under {sorted(found) or 'no'} dataset root(s), and they "
-            "belong to one."
-        )
-    return next(iter(found.values()))
-
-
-def source_root(sources: Iterable[str | Path]) -> Path:
-    """Return the one dataset root every source image of a bucket lies under.
-
-    Each source's root is :func:`~tcip_mcp.dataset_layout.dataset_root_of` its directory: the
-    capture's, or the image tree's for a raster in no capture, a directory position reads both
-    ways read by which root carries its own state. A source under no dataset image tree, one
-    whose directory neither or both roots claim, and sources under more than one root, refuse
-    (``ValueError``) naming them.
-    """
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    def root_of(source: str | Path) -> Path:
-        root = dataset_root_of(Path(source).parent)
-        if root is None:
-            raise ValueError(
-                f"{source} lies under no dataset image tree, so no dataset root holds "
-                "a bucket of its predictions."
-            )
-        return root
-
-    return _one_root(map(root_of, sources), "a bucket's source images")
-
-
-def source_dataset_identity(sources: Iterable[str | Path]) -> DatasetRecord:
-    """Return the identity record of the dataset root :func:`source_root` answers for ``sources``.
-
-    Refuses (``ValueError``) what :func:`source_root` refuses, and a root never registered
-    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming ``register_dataset``).
-    """
-    from tcip_mcp.dataset_layout import require_dataset_identity
-
-    return require_dataset_identity(source_root(sources))
-
-
 def publish(
     project: Path,
     name: str,
@@ -354,36 +308,36 @@ def publish(
 ) -> Bucket:
     """Publish ``documents`` as the bucket ``name`` under their sources' dataset root, by ``actor``.
 
-    The root is the one :func:`source_root` answers for every document's source and the raster.
-    One commit covers the bucket's record, every document and the publication's audit line,
-    ``prediction_bucket_published``, naming the root, the bucket and its ``dropped_boxes``.
-    Returns the bucket as read back.
+    The root and its identity are the ones
+    :func:`~tcip_mcp.dataset_layout.registered_source_root` answers for every document's source
+    and the raster, as a bucket's source images. One commit covers the bucket's record, every
+    document and the publication's audit line, ``prediction_bucket_published``, naming the root,
+    the bucket and its ``dropped_boxes``. Returns the bucket as read back.
 
     The record states ``producer``, ``scope``, ``execution``, the raster and the assessment as
     given, the root's dataset id, and the capture of the raster, else the one capture every
     document's source image is of (:func:`~tcip_mcp.dataset_layout.image_capture`). Refuses
-    with nothing written (``ValueError``): no document, what :func:`source_root` refuses of the
-    sources, a root never registered
-    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`), two documents of one stem,
-    documents of two captures, and a bucket of that name already published under the root
-    (:class:`BucketExistsError`).
+    with nothing written (``ValueError``): no document, what
+    :func:`~tcip_mcp.dataset_layout.registered_source_root` refuses of the sources, two
+    documents of one stem, documents of two captures, and a bucket of that name already
+    published under the root (:class:`BucketExistsError`).
     """
     from tcip_mcp.audit import audit_line, audit_log_key
     from tcip_mcp.dataset_layout import (
         bucket_key,
         image_capture,
-        require_dataset_identity,
+        registered_source_root,
     )
     from tcip_mcp.registry_paths import recorded_paths
 
     documents = list(documents)
     if not documents:
         raise ValueError(f"bucket {name!r} has no document to publish.")
-    root = source_root(
+    root, identity = registered_source_root(
         [d.source for d in documents]
-        + ([] if raster_path is None else [raster_path])
+        + ([] if raster_path is None else [raster_path]),
+        what="a bucket's source images",
     )
-    identity = require_dataset_identity(root)
     stems = [Path(d.source).stem for d in documents]
     repeated = sorted(s for s, n in Counter(stems).items() if n > 1)
     if repeated:
