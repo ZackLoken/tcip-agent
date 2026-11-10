@@ -848,15 +848,14 @@ def published(
     scope: dict,
     registry: SubjectRegistry | None = None,
     raster_path: Path | None = None,
-    crop: str | None = CROP,
+    crop: str = CROP,
 ) -> Bucket:
     """Publish ``results`` as the bucket named ``name`` and return the bucket.
 
     :func:`~tcip_mcp.buckets.publish` writes it under their images' dataset root, under
     :func:`detector_pass`'s pass for ``scope`` and ``registry``, over the raster ``raster_path``
     when one is named. The root is registered in ``project`` at ``crop`` first when it carries no
-    identity (:func:`~tests._producer_fixtures.dataset_registered`); ``crop`` ``None`` publishes
-    under the root as it stands, unregistered when nothing registered it.
+    identity (:func:`~tests._producer_fixtures.dataset_registered`).
     """
     from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.pipelines.data.split_construction import raster_identity
@@ -870,16 +869,17 @@ def published(
     )
     p = detector_pass(project, scope=scope, registry=registry)
     checkpoint = p.checkpoint
-    root = source_root(
-        [raster_path]
-        if raster_path is not None
-        else [r.image for r in results]
+    dataset_registered(
+        project,
+        source_root(
+            [raster_path]
+            if raster_path is not None
+            else [r.image for r in results]
+        ),
+        crop=crop,
     )
-    if crop is not None:
-        dataset_registered(project, root, crop=crop)
     return publish(
         project,
-        root,
         name,
         pass_documents(p, results),
         producer=checkpoint.producer,

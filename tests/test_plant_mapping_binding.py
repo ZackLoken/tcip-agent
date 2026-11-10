@@ -77,14 +77,12 @@ def _dataset(tmp_path: Path, name: str = "ds") -> Path:
     return root
 
 
-def _publish(
-    project: Path, bucket: str, images: list[Path], *, crop: str | None = CROP
-) -> str:
+def _publish(project: Path, bucket: str, images: list[Path]) -> str:
     """Publish one bucket named ``bucket`` holding an open flower on each of ``images``.
 
     The bucket is published unassessed under ``project`` (``_chain_fixtures.published``, the
-    root registered at ``crop`` when it carries no identity, ``None`` leaving it as it stands)
-    from a checkpoint whose scope declares the bloom state. Return its name.
+    root registered at :data:`CROP` when it carries no identity) from a checkpoint whose scope
+    declares the bloom state. Return its name.
     """
     from tests._chain_fixtures import detected, detection_pass, published
 
@@ -109,7 +107,6 @@ def _publish(
         results,
         scope={"subject": "flower"},
         registry=FLOWERS,
-        crop=crop,
     ).name
 
 
@@ -187,13 +184,12 @@ def _write_scene(
     dates: list[str] = DATES,
     plants: list[dict] | None = None,
     unpredicted: frozenset[str] = frozenset(),
-    crop: str | None = CROP,
 ) -> tuple[Path, dict[str, str]]:
     """Write real geolocated images for ``plants`` across ``dates`` and publish their buckets.
 
     ``plants`` defaults to ``PLANTS``. One bucket per date is published under the project the
-    dataset sits in (:func:`_publish` at ``crop``), holding a document for every image but the
-    stems ``unpredicted`` names. Returns (plant_csv, preds_by_date).
+    dataset sits in (:func:`_publish`), holding a document for every image but the stems
+    ``unpredicted`` names. Returns (plant_csv, preds_by_date).
     """
     pytest.importorskip("torch")
     plants = PLANTS if plants is None else plants
@@ -202,7 +198,6 @@ def _write_scene(
             dataset_root.parent,
             f"live/{date}",
             [image for image in images if image.stem not in unpredicted],
-            crop=crop,
         )
         for date, images in geolocated_captures(
             dataset_root, dates, plants

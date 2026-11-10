@@ -424,7 +424,6 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(
     with pytest.raises(BucketExistsError):
         publish(
             tmp_path,
-            first.root,
             chain.bucket,
             documents,
             producer=first.producer,

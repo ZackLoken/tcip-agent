@@ -217,27 +217,23 @@ def published_document(
     width: int,
     height: int,
     *,
-    crop: str | None = CROP,
+    crop: str = CROP,
 ) -> Bucket:
     """Publish ``annotations`` at ``width`` by ``height`` as the bucket ``name``'s one document.
 
     The document is the image at ``image``'s, encoded by ``json_io.document_payload`` and
     published by ``buckets.publish`` under the image's dataset root for ``project``, proposed by
     ``agent:test`` under no class scope, the root registered at ``crop`` first when it carries no
-    identity (:func:`dataset_registered`); ``crop`` ``None`` publishes under the root as it
-    stands, unregistered when nothing registered it. Returns the bucket.
+    identity (:func:`dataset_registered`). Returns the bucket.
     """
     from tcip_annotation.json_io import document_payload
     from tcip_mcp.buckets import Document, Proposed, publish, source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import NoPass
 
-    root = source_root([image])
-    if crop is not None:
-        dataset_registered(project, root, crop=crop)
+    dataset_registered(project, source_root([image]), crop=crop)
     return publish(
         project,
-        root,
         name,
         [Document(str(image), document_payload(annotations, width, height))],
         producer=Proposed(proposed_by="agent:test"),

@@ -635,9 +635,9 @@ def _published_bucket(
     box = Annotation(
         subject="bud", geometry=BBox(1, 1, 9, 9), score=0.9, created_by="agent"
     )
+    dataset_registered(root, source_root(images), crop=CROP)
     publish(
         root,
-        dataset_registered(root, source_root(images), crop=CROP),
         name,
         [
             Document(str(i), json_io.document_payload([box], 32, 32))
