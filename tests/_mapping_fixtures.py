@@ -214,25 +214,6 @@ def plant_positions(plants: Sequence[str]) -> dict[str, tuple[float, float]]:
     }
 
 
-def registered_copy(
-    project: Path, root: Path, name: str, *, crop: str
-) -> tuple[Path, str]:
-    """Copy ``root`` with its store and without its identity document, and register the copy.
-
-    The copy is ``name`` beside ``root`` and is registered at ``crop``, which mints it its own id.
-    Returns the copy and that id.
-    """
-    import shutil
-
-    import tcip_store as ts
-    from tests._producer_fixtures import register_dataset_at
-
-    copy = root.parent / name
-    ts.release_root(root)
-    shutil.copytree(root, copy, ignore=shutil.ignore_patterns("dataset.json"))
-    return copy, register_dataset_at(project, copy, crop=crop)
-
-
 def map_plants(
     project: Path,
     dataset_root: Path,

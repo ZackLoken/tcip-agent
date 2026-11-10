@@ -129,7 +129,8 @@ def register_dataset_at(
     """Register ``dataset_root`` in ``project`` at ``crop``, asserting it returned no error.
 
     Returns the dataset's id. A bucket published under the root afterwards records that id;
-    registering again keeps it.
+    registering again keeps it, and restores it to a root whose identity document is absent when
+    it is the one id the root's registry entries and buckets cite.
     """
     from tcip_mcp.tools.project_tools import register_dataset
 
@@ -155,6 +156,25 @@ def dataset_registered(
         Path(dataset_root).mkdir(parents=True, exist_ok=True)
         register_dataset_at(project, dataset_root, crop=crop)
     return dataset_root
+
+
+def bucket_of_another_dataset(root: Path, *names: str) -> str:
+    """Rewrite each bucket ``names`` names under ``root`` to record one freshly minted dataset id.
+
+    Fault injection: each bucket's stored ``dataset_id`` is replaced through the store, a record no
+    producer writes. Returns the minted id.
+    """
+    import tcip_store
+    from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.project_record import mint_id
+
+    other = mint_id()
+    for name in names:
+        key = bucket_key(root, name)
+        record = tcip_store.read(key)
+        assert isinstance(record, dict), record
+        tcip_store.replace(key, {**record, "dataset_id": other})
+    return other
 
 
 def ingested_unregistered(root: Path, raw: Path) -> Path:
