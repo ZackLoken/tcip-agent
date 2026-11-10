@@ -68,12 +68,11 @@ def _dataset(tmp_path: Path, name: str = "ds") -> Path:
 
     The dataset's own subject registry is ``FLOWERS``, declaring the second trait's positive state.
     """
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import register_dataset_at, registry_over
 
     root = tmp_path / name
     root.mkdir(parents=True, exist_ok=True)
-    result = register_dataset(tmp_path, str(root), crop=CROP, actor=None)
-    assert "error" not in result, result
+    register_dataset_at(tmp_path, root, crop=CROP)
     registry_over(root, FLOWERS)
     return root
 

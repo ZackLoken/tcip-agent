@@ -83,13 +83,13 @@ def test_the_served_plant_mapping_section_names_every_source_an_assignment_takes
 def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     from datetime import datetime
 
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
         CROP,
         register_plant_registry_for,
         write_plant_csv,
     )
+    from tests._producer_fixtures import register_dataset_at
     from tests._web_fixtures import named_project
 
     named_project(tmp_path, "Orchard")
@@ -99,7 +99,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         -90.058000,
         datetime(2026, 2, 11, 9, 30),
     )
-    register_dataset(tmp_path, str(tmp_path), crop=CROP, actor=None)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     csv_path = write_plant_csv(
         tmp_path / "plants.csv",
         [{"plot": "P1", "accession": "acc-9", "lat": 43.197, "lon": -90.058}],
@@ -154,15 +154,13 @@ def test_build_plant_mapping_missing_dataset_root(tmp_path: Path) -> None:
 
 
 def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
+    from tests._producer_fixtures import register_dataset_at
     from tests._web_fixtures import named_project
 
     named_project(tmp_path, "Orchard")
     image_dir(tmp_path, "2026-02-11").mkdir(parents=True)
-    register_dataset(
-        tmp_path, str(tmp_path), crop=sorted(registered_crops())[0], actor=None
-    )
+    register_dataset_at(tmp_path, tmp_path, crop=sorted(registered_crops())[0])
     res = build_plant_mapping(
         tmp_path,
         dataset_root=str(tmp_path),

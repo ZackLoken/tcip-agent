@@ -46,11 +46,9 @@ def _scene(
     ``captures`` holds each date's images by stem, each taken at its ``(lat, lon)``, five minutes
     apart in the order given. Returns ``(dataset root, plant csv)``.
     """
-    from tcip_mcp.tools.project_tools import (
-        initialize_project,
-        register_dataset,
-    )
+    from tcip_mcp.tools.project_tools import initialize_project
     from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M, write_photos
+    from tests._producer_fixtures import register_dataset_at
     from tests._web_fixtures import INVARIANCES
 
     assert "error" not in initialize_project(
@@ -71,10 +69,7 @@ def _scene(
             datetime.fromisoformat(date).replace(hour=9, minute=30),
             timedelta(minutes=5),
         )
-    result = register_dataset(
-        tmp_path, str(dataset_root), crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in result, result
+    register_dataset_at(tmp_path, dataset_root, crop=COUNT_CROP)
     plant_csv = write_plots_csv(tmp_path / PLANT_CSV, plants)
     return dataset_root, plant_csv
 
@@ -270,9 +265,9 @@ def test_a_delivered_date_the_mapping_does_not_cover_refuses(
 def test_predictions_under_another_dataset_than_the_mappings_refuse(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
+    from tests._producer_fixtures import register_dataset_at
 
     _dataset_root, date = _mapped(tmp_path)
     other = tmp_path / "ds2"
@@ -281,9 +276,7 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(
         *ONE_PLANT["P1"],
         datetime(2026, 2, 11, 9, 30),
     )
-    assert "error" not in register_dataset(
-        tmp_path, str(other), crop=sorted(registered_crops())[0], actor=None
-    )
+    register_dataset_at(tmp_path, other, crop=sorted(registered_crops())[0])
 
     res = _deliver(
         tmp_path,

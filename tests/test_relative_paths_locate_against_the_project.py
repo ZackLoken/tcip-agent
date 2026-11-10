@@ -1258,16 +1258,13 @@ def test_the_identity_command_reads_a_relative_dataset_root_under_its_project(
     """
     import json
 
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._cli_fixtures import run_tcip
     from tests._web_fixtures import new_project
     from tests.test_check_dataset_identity_script import _real_dataset
 
     project = new_project(tmp_path / "project").root
     _real_dataset(project / "ds")
-    assert "error" not in register_dataset(
-        project, str(project / "ds"), "chestnut", actor=None
-    )
+    register_dataset_at(project, project / "ds", crop="chestnut")
     cwd = tmp_path / "cwd"
     cwd.mkdir()
 

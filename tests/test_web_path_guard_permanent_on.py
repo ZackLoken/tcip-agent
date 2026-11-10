@@ -106,12 +106,10 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     With the project's own tree registered as a dataset, every allowed root is absolute and the
     project is among them.
     """
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_web.paths import allowed_roots
 
     project = new_project(tmp_path).root
-    registered = register_dataset(project, str(project), "currant", actor=None)
-    assert "error" not in registered
+    register_dataset_at(project, project, crop="currant")
 
     roots = allowed_roots()
 

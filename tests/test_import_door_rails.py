@@ -21,7 +21,7 @@ from tcip_mcp.tools.project_tools import (
 from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import lock_file_for
 from tests._chain_fixtures import BUILT_DETECTOR
-from tests._producer_fixtures import one_labeled_capture
+from tests._producer_fixtures import one_labeled_capture, register_dataset_at
 from tests._training_values import drawn_split
 
 if TYPE_CHECKING:
@@ -277,11 +277,10 @@ def test_dataset_registry_stores_the_relative_dot_after_import(
     The project registered as its own dataset reads back after the archive/import round trip
     with ``path`` ``"."`` and no unresolved dataset path.
     """
-    from tcip_mcp.tools.project_tools import read_datasets, register_dataset
+    from tcip_mcp.tools.project_tools import read_datasets
 
     root = one_labeled_capture(tmp_path / "source")
-    registered = register_dataset(root, str(root), crop="currant", actor=None)
-    assert "error" not in registered
+    register_dataset_at(root, root, crop="currant")
 
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(
@@ -300,15 +299,10 @@ def test_dataset_registry_travels_with_nothing_rewritten(
     tmp_path: Path,
 ) -> None:
     """The project's own dataset entry resolves to the import destination after an import."""
-    from tcip_mcp.tools.project_tools import (
-        dataset_entry_path,
-        read_datasets,
-        register_dataset,
-    )
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
     root = one_labeled_capture(tmp_path / "source")
-    registered = register_dataset(root, str(root), crop="currant", actor=None)
-    assert "error" not in registered
+    register_dataset_at(root, root, crop="currant")
 
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(
@@ -325,14 +319,9 @@ def test_dataset_registry_travels_with_nothing_rewritten(
 def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.tools.project_tools import register_dataset
-
     root = one_labeled_capture(tmp_path / "source")
     external = one_labeled_capture(tmp_path / "external_dataset")
-    registered = register_dataset(
-        root, str(external), crop="currant", actor=None
-    )
-    assert "error" not in registered
+    register_dataset_at(root, external, crop="currant")
 
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(
@@ -435,7 +424,6 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         dataset_entry_path,
         initialize_project,
         read_datasets,
-        register_dataset,
     )
     from tcip_mcp.traits import read_trait
     from tests._trait_fixtures import COUNT_TRAIT, seed_confirmed_count
@@ -450,9 +438,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         invariances=INVARIANCES,
         actor=None,
     )
-    assert "error" not in register_dataset(
-        root, str(root), crop="currant", actor=None
-    )
+    register_dataset_at(root, root, crop="currant")
     confirmed = seed_confirmed_count(root)
     assert confirmed.state.kind == "confirmed"
 
