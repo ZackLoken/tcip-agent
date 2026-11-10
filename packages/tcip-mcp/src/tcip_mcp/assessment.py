@@ -478,12 +478,13 @@ def _reference_sides(
     """Return the selection at ``selection_dir``, its calibration and holdout sides and dataset id.
 
     The id is the identity id of the one dataset root every sample of the selection lies under
-    (:func:`~tcip_mcp.buckets.source_dataset_identity`). A selection holding either side empty
-    refuses (:class:`AssessmentRefusedError`); samples under no dataset image tree or under two
-    roots, and a root never registered, refuse (``ValueError``), the last naming
-    ``register_dataset``.
+    (:func:`~tcip_mcp.dataset_layout.registered_source_root`). A selection that will not read
+    refuses as :func:`~tcip_mcp.pipelines.data.selection.read_selection` does, its samples under
+    no dataset image tree or under two roots among it; a selection holding either side empty
+    refuses (:class:`AssessmentRefusedError`); and a root never registered refuses
+    (``ValueError``) naming ``register_dataset``.
     """
-    from tcip_mcp.buckets import source_dataset_identity
+    from tcip_mcp.dataset_layout import registered_source_root
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
         read_selection,
@@ -503,7 +504,9 @@ def _reference_sides(
             "assessment fits on the calibration side and checks on the "
             "holdout side. Draw a selection with both (draw_splits)."
         )
-    identity = source_dataset_identity(s.source for s in selection.samples)
+    _root, identity = registered_source_root(
+        (s.source for s in selection.samples), what="the selection's samples"
+    )
     return selection, cal, hold, identity.id
 
 
@@ -1132,13 +1135,13 @@ def assess_reserved_regions(
     project produced, a run with no reserved regions, regions not attested complete, too few
     bands carrying ground truth, a band not held out from the run's training regions, a mosaic
     that changed since the split, and a mosaic label document only the model stands behind. A
-    mosaic whose dataset root was never registered refuses (``ValueError``) once the checkpoint
-    names it and before its reference is read
-    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`).
+    mosaic under no dataset image tree, or whose dataset root was never registered, refuses
+    (``ValueError``) once the checkpoint names it and before its reference is read
+    (:func:`~tcip_mcp.dataset_layout.registered_source_root`).
     """
     import numpy as np
 
-    from tcip_mcp.buckets import source_dataset_identity
+    from tcip_mcp.dataset_layout import registered_source_root
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, object_region
@@ -1178,7 +1181,7 @@ def assess_reserved_regions(
             "calibration and holdout region (train it with data.split.calibration_ratio set)."
         )
     (mosaic,) = resolved.partition.samples
-    source_dataset_identity([mosaic.source])
+    registered_source_root([mosaic.source], what="the run's mosaic")
     stem = mosaic.member
     lattice = cast("TilingSpec", resolved.data.tiling)
     tile_size, overlap = (

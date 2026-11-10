@@ -942,6 +942,73 @@ def test_a_stated_date_refuses_an_image_a_published_bucket_names(
     assert not image_dir(project, "2026-05-15").exists()
 
 
+def test_a_stated_date_over_images_under_two_roots_refuses_naming_both(
+    project: Path, tmp_path: Path
+) -> None:
+    """A stated date over images ingested under two dataset roots refuses, moving nothing.
+
+    One image is ingested into the project and one into a second root; the refusal is the one
+    root reading's sentence for the images to move, both roots named, and neither image moves.
+    """
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tests._producer_fixtures import (
+        ingested_unregistered,
+        two_roots_refusal,
+    )
+
+    here = _undated_labeled(project, tmp_path)
+    _make_image(tmp_path / "raw-other" / "b.png")
+    other = tmp_path / "other"
+    there = ingested_unregistered(other, tmp_path / "raw-other") / "b.png"
+
+    refused = state_capture_date(
+        project,
+        images=[str(here), str(there)],
+        date=STATED,
+        rationale="known",
+        actor=None,
+    )
+
+    assert refused == {
+        "error": two_roots_refusal([project, other], "the images to move")
+    }, refused
+    assert "bucket" not in refused["error"], refused
+    assert here.is_file() and there.is_file()
+
+
+def test_a_stated_date_over_an_image_under_no_image_tree_refuses_naming_it(
+    project: Path, tmp_path: Path
+) -> None:
+    """A stated date over an image moved out of every image tree refuses, naming the image.
+
+    An ingested image is moved by hand to a directory no dataset root's image tree holds; the
+    refusal is the no-image-tree sentence for the images to move, and nothing is made.
+    """
+    import shutil
+
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tests._producer_fixtures import unrooted_refusal
+
+    loose = tmp_path / "loose" / "a.png"
+    loose.parent.mkdir()
+    shutil.move(_undated_labeled(project, tmp_path), loose)
+
+    refused = state_capture_date(
+        project,
+        images=[str(loose)],
+        date=STATED,
+        rationale="known",
+        actor=None,
+    )
+
+    assert refused == {
+        "error": unrooted_refusal(loose, "the images to move")
+    }, refused
+    assert "bucket" not in refused["error"], refused
+    assert loose.is_file()
+    assert not image_dir(project, "2026-05-15").exists()
+
+
 def test_a_stated_date_is_refused_by_its_type_unless_it_is_a_date() -> None:
     """A stated date is refused by the parameter's type unless it is a calendar date.
 

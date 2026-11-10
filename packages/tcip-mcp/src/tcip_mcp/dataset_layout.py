@@ -298,6 +298,53 @@ def require_dataset_identity(dataset_root: str | Path) -> DatasetRecord:
     return identity
 
 
+def _one_root(roots: Iterable[Path], what: str) -> Path:
+    """Return the one dataset root among ``roots``, keyed by its canonical spelling.
+
+    None, or more than one, refuses (``ValueError``) naming ``what`` and the roots.
+    """
+    found = {tcip_store.canonical_path(root): root for root in roots}
+    if len(found) != 1:
+        raise ValueError(
+            f"{what} lie under {sorted(found) or 'no'} dataset root(s), and they "
+            "belong to one."
+        )
+    return next(iter(found.values()))
+
+
+def source_root(sources: Iterable[str | Path], *, what: str) -> Path:
+    """Return the one dataset root every source image of ``sources`` lies under.
+
+    Each source's root is :func:`dataset_root_of` its directory: the capture's, or the image
+    tree's for a source in no capture. ``what`` names the sources in each refusal (``ValueError``):
+    a source under no dataset image tree, and sources under more than one root. A directory
+    neither or both roots claim refuses as :func:`_capture` does.
+    """
+
+    def root_of(source: str | Path) -> Path:
+        root = dataset_root_of(Path(source).parent)
+        if root is None:
+            raise ValueError(
+                f"{source} lies under no dataset image tree, and one dataset root is "
+                f"required for {what}."
+            )
+        return root
+
+    return _one_root(map(root_of, sources), what)
+
+
+def registered_source_root(
+    sources: Iterable[str | Path], *, what: str
+) -> tuple[Path, DatasetRecord]:
+    """Return the one dataset root of ``sources`` and that root's identity record.
+
+    The root is :func:`source_root`'s for ``what``, refusing what it refuses, and the record
+    :func:`require_dataset_identity`'s, refusing a root never registered.
+    """
+    root = source_root(sources, what=what)
+    return root, require_dataset_identity(root)
+
+
 @dataclass(frozen=True)
 class Decisions:
     """The proposals of one bucket a save decides.

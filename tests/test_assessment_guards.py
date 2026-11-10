@@ -516,9 +516,9 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_either_door(
     Each sample of a drawn reference names a copy of its image outside any capture: in no image
     tree, or the first sample under one root's image tree and every other under a second's.
     ``write_selection`` writes that selection, and called through the server each assessment door
-    answers the refusal ``buckets.source_root`` gives over every one of its samples.
+    answers the refusal ``dataset_layout.source_root`` gives over every one of its samples.
     """
-    from tcip_mcp.buckets import source_root
+    from tcip_mcp.dataset_layout import source_root
     from tests._server_calls import called_through_the_server
     from tests.test_physical_scale_assessment import (
         SUBJECT as BAR,
@@ -544,7 +544,7 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_either_door(
             "reference_subject": BAR,
         }
     with pytest.raises(ValueError) as unrooted:
-        source_root(sources)
+        source_root(sources, what="the selection's samples")
 
     refused = called_through_the_server(door, arguments, bound=bound)
 
