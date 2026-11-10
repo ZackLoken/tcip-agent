@@ -3,8 +3,9 @@
 The inference launch and the review-queue launch admit a checkpoint through the registry's own
 read (``registered_bytes``). A checkpoint path that is a directory, or that lies beneath a regular
 file, answers 404 with that read's sentence; a run record that will not read answers 400 with the
-refused read's sentence; a registry index that will not decode, and a checkpoint the process may
-not read, answer 409 as an unreadable registry with the error's own sentence.
+refused read's sentence; a registry index that will not decode answers 409 as an unreadable
+registry with the store's sentence; and a checkpoint the process may not read answers 409 with the
+operating system's own error, naming no registry.
 """
 
 from __future__ import annotations
@@ -199,12 +200,14 @@ def test_a_registry_index_that_will_not_decode_answers_409_as_an_unreadable_regi
 
 
 @pytest.mark.parametrize("door", DOORS)
-def test_a_checkpoint_the_process_may_not_read_answers_409_as_an_unreadable_registry(
+def test_a_checkpoint_the_process_may_not_read_answers_409_with_the_read_s_own_error(
     opened_client: TestClient, tmp_path: Path, door: str
 ) -> None:
     """A registered checkpoint the operating system denies a read of answers 409 with its error.
 
-    Skipped where the platform lets this process read the file anyway (a POSIX superuser).
+    The answer carries the error ``registered_bytes`` raises under the same denial and names no
+    registry. Skipped where the platform lets this process read the file anyway (a POSIX
+    superuser).
     """
     from tcip_mcp.model_registry import registered_bytes
 
@@ -225,5 +228,6 @@ def test_a_checkpoint_the_process_may_not_read_answers_409_as_an_unreadable_regi
         answer = launch(checkpoint)
 
     assert answer.status_code == 409, answer.text
-    assert answer.json()["detail"] == f"registry unreadable: {denied}"
+    assert answer.json()["detail"] == f"could not read: {denied}"
+    assert "registry" not in answer.json()["detail"]
     assert jobs() == before
