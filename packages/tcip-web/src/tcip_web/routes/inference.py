@@ -207,7 +207,9 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {images_dir}")
     try:
-        registered_pass_root(images_dir=str(images_dir), raster_path=None)
+        root = registered_pass_root(
+            images_dir=str(images_dir), raster_path=None
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -216,7 +218,7 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
             j.project == str(project)
             and j.state.status not in FINAL_STATES
             and j.bucket == payload.bucket
-            and canonical_path(j.dataset_root) == canonical_path(dataset_root)
+            and canonical_path(j.dataset_root) == canonical_path(root)
         ),
         lambda: InferenceJob(
             job_id=f"inf-{uuid.uuid4().hex[:8]}",
@@ -234,7 +236,7 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
         raise HTTPException(
             409,
             BucketExistsRefusal(
-                message=f"bucket {payload.bucket!r} under {dataset_root} is the bucket job "
+                message=f"bucket {payload.bucket!r} under {root} is the bucket job "
                 f"{job.job_id} is still writing.",
                 job=job,
             ).model_dump(mode="json"),
