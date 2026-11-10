@@ -501,23 +501,24 @@ def as_selection(document: JsonValue, *, where: str) -> Selection:
 
     Every refusal is ``tcip_store.ReadRefusedError`` naming the document at ``where``: the
     record's own issues (each field that does not decode, an empty ``samples`` list and a side
-    outside :data:`SIDES` among them), or the sentence of samples whose sources lie under more
-    than one dataset root (:func:`~tcip_mcp.dataset_layout.image_capture`), a partition whose
-    sides cross (:func:`refuse_crossing_sides`), or a scope its samples' shape cannot be read
-    under (:meth:`ClassScope.admitted_for`).
+    outside :data:`SIDES` among them), what
+    :func:`~tcip_mcp.dataset_layout.source_root` refuses of its samples' sources followed by the
+    ``draw_splits`` step, a partition whose sides cross (:func:`refuse_crossing_sides`), or a
+    scope its samples' shape cannot be read under (:meth:`ClassScope.admitted_for`).
     """
-    from tcip_mcp.dataset_layout import image_capture
+    from tcip_mcp.dataset_layout import source_root
 
     place = selection_place(where)
     selection = tcip_store.validated(_SELECTION, document, place)
     with tcip_store.unreadable(place, ValueError):
-        roots = {image_capture(s.source)[0] for s in selection.samples}
-        if len(roots) > 1:
-            raise ValueError(
-                "it holds samples under the dataset roots "
-                f"{', '.join(sorted(map(str, roots)))}: a selection is drawn over one dataset "
-                "root. Draw it over one with draw_splits."
+        try:
+            source_root(
+                (s.source for s in selection.samples), what="its samples"
             )
+        except ValueError as exc:
+            raise ValueError(
+                f"{exc} Draw it over one with draw_splits."
+            ) from exc
         refuse_crossing_sides(selection.samples)
         selection.scope.admitted_for(selection.samples[0].shape, "it")
     return selection
