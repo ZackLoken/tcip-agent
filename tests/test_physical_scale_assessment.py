@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.workspace import BoundProject
     from tcip_store import Key, Versioned
 
 DATE = "2026-01-01"
@@ -71,13 +72,14 @@ def _reference(
     unit: str = "mm",
     angles: dict[int, float] | None = None,
     name: str = "",
+    registered: bool = True,
 ) -> tuple[Path, Path]:
     """Return ``(selection_dir, reference_csv)`` over ``n`` frames of one 100 px bar each.
 
-    The frames sit in a registered dataset, beside their breeder CSV (each physical extent
-    ``extents_mm[i]``, else the fixed scale's) and a selection drawn over them. A ``name``
-    suffixes the dataset, the CSV and the selection, so a second reference stands beside the
-    first in one project.
+    The frames sit in a dataset, registered unless ``registered`` is false, beside their breeder
+    CSV (each physical extent ``extents_mm[i]``, else the fixed scale's) and a selection drawn
+    over them. A ``name`` suffixes the dataset, the CSV and the selection, so a second reference
+    stands beside the first in one project.
     """
     from PIL import Image
 
@@ -99,7 +101,8 @@ def _reference(
     images = image_dir(root, DATE)
     images.mkdir(parents=True)
     registry_over(root, registry_of(SUBJECT))
-    register_dataset_at(project, root, crop=sorted(registered_crops())[0])
+    if registered:
+        register_dataset_at(project, root, crop=sorted(registered_crops())[0])
     rows = []
     for i in range(n):
         stem = f"r{i}"
@@ -547,3 +550,47 @@ def test_the_scale_is_measured_from_the_retained_table(
     assert recorded.reference.moved(run_dir) == []
     _write_csv(csv_path, [(f"r{i}", 30.0, "mm") for i in range(8)])
     assert recorded.reference.moved(run_dir) == [str(csv_path)]
+
+
+def test_a_scale_over_a_root_never_registered_refuses_naming_it_and_writes_nothing(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """A scale whose reference lies under a root never registered refuses before it is derived.
+
+    Called through the server, the answer is the one sentence ``require_dataset_identity``
+    refuses the root with, naming it and ``register_dataset``, and no assessment is recorded or
+    logged. Registered, the root admits the same call.
+    """
+    from tcip_mcp.traits import registered_crops
+    from tests._producer_fixtures import (
+        left_written,
+        register_dataset_at,
+        unregistered_refusal,
+    )
+    from tests._server_calls import called_through_the_server
+
+    _author_tolerance(tmp_path)
+    selection, csv_path = _reference(tmp_path, registered=False)
+    root = tmp_path / "ds"
+    arguments = {
+        "trait": "plant_surface_area",
+        "selection_dir": str(selection),
+        "reference_csv": str(csv_path),
+        "unit": "mm",
+        "reference_subject": SUBJECT,
+    }
+    before = left_written(tmp_path, root)
+
+    refused = called_through_the_server(
+        "calibrate_physical_scale", arguments, bound=bound
+    )
+
+    assert refused == {"error": unregistered_refusal(root)}, refused
+    assert left_written(tmp_path, root) == before
+    register_dataset_at(tmp_path, root, crop=sorted(registered_crops())[0])
+    registered = left_written(tmp_path, root)
+    scaled = called_through_the_server(
+        "calibrate_physical_scale", arguments, bound=bound
+    )
+    assert isinstance(scaled, dict) and "error" not in scaled, scaled
+    assert left_written(tmp_path, root) != registered

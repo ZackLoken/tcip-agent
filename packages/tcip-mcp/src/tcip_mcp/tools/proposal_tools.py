@@ -28,6 +28,7 @@ from tcip_annotation.json_io import stored_box_extent_ok
 from tcip_annotation.state import Rings
 from tcip_annotation.viz import render_candidates, render_detections
 from tcip_mcp.audit import now, record_event_or_raise
+from tcip_mcp.dataset_layout import parse_image_path, require_dataset_identity
 from tcip_mcp.pipelines.execution import (
     ExecutionRefusedError,
     NoPass,
@@ -183,8 +184,6 @@ def _staging_key_for(image_path: str, staging_id: str) -> ts.Key:
     Raises ``ValueError``, :func:`~tcip_mcp.dataset_layout.parse_image_path`'s own, for an image of
     no capture.
     """
-    from tcip_mcp.dataset_layout import parse_image_path
-
     return proposal_staging_key(*parse_image_path(image_path), staging_id)
 
 
@@ -282,7 +281,8 @@ def propose_annotations(
     which the response answers as ``staging_id``, alongside the content identity of the pixels the
     engine ran on; an earlier run's record stays as it was, and a run proposing nothing stages
     nothing. A path outside any dataset's ``images/`` tree, having no staging address, refuses
-    before the engine runs, as does a path naming no logical image (a band of a grouped capture,
+    before the engine runs, as do an image of a dataset root never registered, naming
+    ``register_dataset``, and a path naming no logical image (a band of a grouped capture,
     which names its manifest; :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`).
     Writing the staged record leaves one audit line in the dataset's log naming its
     ``staging_id``, by ``actor`` (the person who prompted the run, or ``None`` for a call no person
@@ -340,6 +340,7 @@ def propose_annotations(
         }
 
     try:
+        require_dataset_identity(address.root)
         source = resolve_image_path(img)
         proposer = resolve_proposer(engine)
         header = SourceHeader(source)
@@ -481,17 +482,20 @@ def _placed_image(
 ) -> tuple[str, Path, ts.Key] | dict:
     """Return ``image_path`` located against ``project``, its file and its staging key.
 
-    The key is the one ``staging_id`` names for it (:func:`proposal_staging_key`); a missing file
-    or a path no staging key names answers the refusal naming why.
+    The key is the one ``staging_id`` names for it (:func:`proposal_staging_key`); a missing file,
+    a path no staging key names and an image of a dataset root never registered
+    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`) answer the refusal naming why.
     """
     image_path = str(located(image_path, project))
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
     try:
-        return image_path, img, _staging_key_for(image_path, staging_id)
+        address = _staging_key_for(image_path, staging_id)
+        require_dataset_identity(address.root)
     except ValueError as exc:
         return {"error": str(exc)}
+    return image_path, img, address
 
 
 def stage_assignments(
@@ -931,7 +935,8 @@ def stage_proposals(
     of the same run refuses (:class:`~tcip_mcp.buckets.BucketExistsError`), and a new run or new
     explicit shapes publish a bucket of their own, so nothing overwrites reviewed predictions or
     orphans their verdicts. The publication's audit line names ``actor``, the person who staged
-    it, or ``None`` for a call no person makes.
+    it, or ``None`` for a call no person makes. An image under a dataset root never registered
+    refuses in either regime before anything is read, naming ``register_dataset``.
 
     A staged annotation's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named;
     the platform validates no subject name.
