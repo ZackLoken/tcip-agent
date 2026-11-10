@@ -531,16 +531,17 @@ def checkpoint_payload(checkpoint_path: str | Path, sha256: str) -> dict:
     )
 
 
-def load_registered_checkpoint(
+def registered_bytes(
     checkpoint_path: Path, *, project: Path
-) -> VerifiedCheckpoint:
-    """Return the checkpoint at the established location ``checkpoint_path``, verified.
+) -> tuple[bytes, RegistryEntry]:
+    """Return the bytes of the checkpoint at ``checkpoint_path`` and the entry registering them.
 
-    It is read once and unpickled from the same bytes its digest is taken over, when
-    ``project``'s :func:`registered_entries` name that digest.
+    The file is read once and its digest matched against ``project``'s
+    :func:`registered_entries`; nothing is unpickled.
 
     Raises :class:`UnregisteredCheckpointError` naming the path, the digest and the root searched
-    when none does, and :class:`CheckpointNotFoundError` when no file is at the location.
+    when no entry names that digest, :class:`CheckpointNotFoundError` when no file is at the
+    location, and each refusal :func:`registered_entries` raises.
     """
     ckpt = Path(checkpoint_path)
     root = str(project)
@@ -554,7 +555,23 @@ def load_registered_checkpoint(
     )
     if entry is None:
         raise _unregistered_checkpoint_error(ckpt, digest, root)
-    payload = _load_verified_payload(data, source=f"{ckpt} (sha256 {digest})")
+    return data, entry
+
+
+def load_registered_checkpoint(
+    checkpoint_path: Path, *, project: Path
+) -> VerifiedCheckpoint:
+    """Return the checkpoint at the established location ``checkpoint_path``, verified.
+
+    It is unpickled from the bytes :func:`registered_bytes` admitted for ``project``, the same
+    bytes its digest is taken over, and raises each refusal that function and
+    :func:`_load_verified_payload` raise.
+    """
+    ckpt = Path(checkpoint_path)
+    data, entry = registered_bytes(ckpt, project=project)
+    payload = _load_verified_payload(
+        data, source=f"{ckpt} (sha256 {entry.sha256})"
+    )
     return VerifiedCheckpoint(
         path=str(ckpt), payload=payload, entry=entry, project=Path(project)
     )
