@@ -6,13 +6,13 @@ the content identity of the pixels the engine ran on.
 ``propose_annotations`` writes the record and answers its ``staging_id``; ``stage_proposals``
 reads back the run that id names and refuses when the image does not match the identity that run
 recorded. Both tools run over a stub engine installed at
-``tcip_mcp.pipelines.proposal.resolve_proposer``.
+``tcip_mcp.pipelines.proposal.resolve_proposer`` or named as a dotted ``module:factory``.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 import pytest
@@ -27,8 +27,11 @@ from tests._producer_fixtures import (
 )
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from tcip_mcp.pipelines.raster_source import RasterSource
     from tcip_mcp.tools.vision_tools import DisplayRead
+    from tcip_mcp.workspace import BoundProject
     from tcip_store import Key
 
 
@@ -734,3 +737,145 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     assert "error" not in accepted, accepted
     assert len(audit_rows(tmp_path, "prediction_bucket_published")) == 1
     assert audit_rows(tmp_path, "stage_proposals") == []
+
+
+STUB_ENGINE = "tests.proposal_stub:factory"
+"""A dotted engine proposing one candidate box, ``tests.proposal_stub``'s."""
+
+UNRUNNABLE_ENGINE = "tests.test_proposal_staging_record:unrunnable_proposer"
+"""A dotted engine whose pass fails the test that reaches it (:func:`unrunnable_proposer`)."""
+
+
+class _UnrunnableProposer:
+    """A proposal engine whose pass fails the test that reaches it."""
+
+    def propose(self, image_path: str, **params: object) -> NoReturn:
+        pytest.fail(f"the proposal engine ran over {image_path}")
+
+
+def unrunnable_proposer() -> _UnrunnableProposer:
+    """Return the engine :data:`UNRUNNABLE_ENGINE` names."""
+    return _UnrunnableProposer()
+
+
+def _unregistered_image(tmp_path: Path) -> Path:
+    """Ingest one 64 px image into the dataset root ``tmp_path / "field"``, never registering it.
+
+    Returns the ingested image's path.
+    """
+    from tests._producer_fixtures import ingested_unregistered
+
+    _make_image(tmp_path / "raw" / "leaf.png")
+    return (
+        ingested_unregistered(tmp_path / "field", tmp_path / "raw")
+        / "leaf.png"
+    )
+
+
+def test_a_proposal_under_a_root_never_registered_refuses_before_its_engine_runs(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """A proposal over an image of a root never registered refuses before its engine runs.
+
+    Called through the server, the answer is the one sentence ``require_dataset_identity``
+    refuses the root with, naming it and ``register_dataset`` and nothing of the images tree,
+    and nothing is staged or logged. Registered, the root admits a proposal.
+    """
+    from tests._producer_fixtures import (
+        left_written,
+        register_dataset_at,
+        unregistered_refusal,
+    )
+    from tests._server_calls import called_through_the_server
+
+    image = _unregistered_image(tmp_path)
+    root = tmp_path / "field"
+    before = left_written(tmp_path, root)
+
+    refused = called_through_the_server(
+        "propose_annotations",
+        {"image_path": str(image), "engine": UNRUNNABLE_ENGINE},
+        bound=bound,
+    )
+
+    assert refused == {"error": unregistered_refusal(root)}, refused
+    assert left_written(tmp_path, root) == before
+    register_dataset_at(tmp_path, root, crop=CROP)
+    registered = left_written(tmp_path, root)
+    proposed = called_through_the_server(
+        "propose_annotations",
+        {"image_path": str(image), "engine": STUB_ENGINE},
+        bound=bound,
+    )
+    assert isinstance(proposed, dict) and proposed["staging_id"], proposed
+    assert left_written(tmp_path, root) != registered
+
+
+@pytest.mark.parametrize(
+    "assigned", [False, True], ids=["explicit", "assignments"]
+)
+def test_a_stage_under_a_root_never_registered_refuses_naming_it_and_writes_nothing(
+    tmp_path: Path, bound: BoundProject, assigned: bool
+) -> None:
+    """Either regime of a stage over an image of a root never registered refuses naming it.
+
+    Called through the server, the answer is the one sentence ``require_dataset_identity``
+    refuses the root with, and no bucket is published or logged. Registered, the root admits the
+    stage of a proposal run over the image or of explicit shapes.
+    """
+    from tests._producer_fixtures import (
+        left_written,
+        register_dataset_at,
+        unregistered_refusal,
+    )
+    from tests._server_calls import called_through_the_server
+
+    image = _unregistered_image(tmp_path)
+    root = tmp_path / "field"
+
+    def staged(staging_id: str) -> JsonValue:
+        shapes = (
+            {
+                "assignments": {
+                    "staging_id": staging_id,
+                    "candidates": [{"candidate_id": 0, "subject": "bud"}],
+                }
+            }
+            if assigned
+            else {
+                "model_name": "detector",
+                "boxes": [
+                    {
+                        "subject": "bud",
+                        "conf": 0.9,
+                        "cx": 0.5,
+                        "cy": 0.5,
+                        "w": 0.25,
+                        "h": 0.25,
+                    }
+                ],
+            }
+        )
+        return called_through_the_server(
+            "stage_proposals",
+            {"image_path": str(image), **shapes},
+            bound=bound,
+        )
+
+    before = left_written(tmp_path, root)
+
+    refused = staged("staging-never-proposed")
+
+    assert refused == {"error": unregistered_refusal(root)}, refused
+    assert left_written(tmp_path, root) == before
+    register_dataset_at(tmp_path, root, crop=CROP)
+    proposed = called_through_the_server(
+        "propose_annotations",
+        {"image_path": str(image), "engine": STUB_ENGINE},
+        bound=bound,
+    )
+    assert isinstance(proposed, dict), proposed
+    proposed_only = left_written(tmp_path, root)
+    accepted = staged(str(proposed["staging_id"]))
+    assert isinstance(accepted, dict) and accepted["bucket"], accepted
+    assert left_written(tmp_path, root) != proposed_only
