@@ -296,7 +296,6 @@ def test_an_orthomosaic_count_over_a_bucket_recording_another_dataset_than_its_r
     for refusal in _orthomosaic_refusals(
         client, tmp_path, copy, bucket.name, _grid_registry(tmp_path)
     ):
-        assert bucket.dataset_id is not None
         assert bucket.dataset_id in refusal, refusal
         assert minted in refusal, refusal
 

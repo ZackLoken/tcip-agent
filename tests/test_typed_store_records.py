@@ -653,3 +653,79 @@ def test_a_scale_assessment_reads_back_as_produced_and_covers_no_bucket_of_anoth
         with pytest.raises(ts.ReadRefusedError, match=match) as refused:
             read_assessment(tmp_path, produced["assessment_id"])
         assert refused.value.served.where == str(path)
+
+
+NO_ID = pytest.mark.parametrize(
+    "stated", [None, "", "   "], ids=["null", "empty", "whitespace"]
+)
+"""A dataset id that states no dataset: null, empty, or only whitespace."""
+
+
+@NO_ID
+def test_an_assessment_reference_stating_no_dataset_refuses_at_its_read(
+    tmp_path: Path, stated: str | None
+) -> None:
+    """An assessment whose selection reference states no dataset id refuses where it is read.
+
+    The scale assessment is recorded by ``calibrate_physical_scale`` and its ``assessment.json``
+    then rewritten through the store, a fault injected past its producer; the refusal names the
+    file and the field.
+    """
+    from tcip_mcp.assessment import (
+        ASSESSMENT_FILE,
+        assessment_dir,
+        read_assessment,
+    )
+    from tests import _trait_fixtures as fx
+    from tests.test_a_refused_record_reads_as_its_readers_sentence import (
+        _rewritten,
+    )
+    from tests.test_physical_scale_assessment import (
+        _author_tolerance,
+        _calibrate,
+        _reference,
+    )
+
+    fx.seed_delivery_traits(tmp_path)
+    _author_tolerance(tmp_path)
+    produced = _calibrate(tmp_path, *_reference(tmp_path))
+    path = (
+        assessment_dir(tmp_path, produced["assessment_id"]) / ASSESSMENT_FILE
+    )
+    reference = json.loads(path.read_text(encoding="utf-8"))["reference"]
+    _rewritten(path, {"reference": {**reference, "dataset_id": stated}})
+
+    with pytest.raises(
+        ts.ReadRefusedError, match=r"reference\.selection\.dataset_id: "
+    ) as refused:
+        read_assessment(tmp_path, produced["assessment_id"])
+
+    assert refused.value.served.where == str(path)
+
+
+@NO_ID
+def test_a_dataset_identity_stating_no_id_refuses_at_its_read(
+    tmp_path: Path, stated: str | None
+) -> None:
+    """A dataset identity document stating no id refuses where it is read, naming the document.
+
+    The document ``register_dataset`` wrote is rewritten through the store, a fault injected past
+    its producer; the refusal names the document and the field.
+    """
+    from tcip_mcp.dataset_layout import (
+        dataset_identity_path,
+        read_dataset_identity,
+    )
+    from tests._producer_fixtures import dataset_registered
+    from tests.test_a_refused_record_reads_as_its_readers_sentence import (
+        _rewritten,
+    )
+
+    root = dataset_registered(tmp_path, tmp_path / "ds", crop=CROP)
+    path = dataset_identity_path(root)
+    _rewritten(path, {"id": stated})
+
+    with pytest.raises(ts.ReadRefusedError, match=r": id: ") as refused:
+        read_dataset_identity(root)
+
+    assert str(path) in str(refused.value), refused.value

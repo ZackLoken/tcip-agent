@@ -291,6 +291,44 @@ def test_a_raster_outside_a_capture_publishes_a_bucket_of_its_roots_dataset(
 
 
 @pytest.mark.parametrize(
+    "stated", [None, "", "   "], ids=["null", "empty", "whitespace"]
+)
+def test_a_bucket_record_stating_no_dataset_refuses_at_its_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stated: str | None
+) -> None:
+    """A bucket record whose dataset id is null, empty or only whitespace refuses where it is read.
+
+    The bucket is published by ``run_inference`` and its record then rewritten through the store,
+    a fault injected past its producer; the refusal names the bucket, its root and the field.
+    """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    images_dir = _images(image_dir(tmp_path, "2026-01-01"))
+    _stubbed(monkeypatch)
+    ran = run_inference(
+        tmp_path,
+        project_checkpoint(tmp_path),
+        str(images_dir),
+        bucket=BUCKET,
+        stated=UNTILED,
+        actor=None,
+    )
+    assert "error" not in ran, ran
+    key = bucket_key(tmp_path, BUCKET)
+    stored = tcip_store.read(key)
+    assert isinstance(stored, dict)
+    tcip_store.replace(key, {**stored, "dataset_id": stated})
+
+    with pytest.raises(tcip_store.ReadRefusedError) as refused:
+        read_bucket(tmp_path, BUCKET)
+
+    assert str(refused.value).startswith(
+        f"bucket {BUCKET!r} under {tmp_path}: dataset_id: "
+    ), refused.value
+
+
+@pytest.mark.parametrize(
     "raster", [False, True], ids=["image_pass", "raster_pass"]
 )
 def test_a_pass_publishes_under_the_root_its_dry_run_states(

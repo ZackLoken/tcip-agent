@@ -1382,18 +1382,12 @@
       },
       "SelectionReference": {
         "additionalProperties": false,
-        "description": "A reference drawn from the selection at ``selection_dir``.\n\n``dataset_id`` is the identity id the samples' dataset root recorded when it was measured,\n``None`` for a root that recorded none.",
+        "description": "A reference drawn from the selection at ``selection_dir``.\n\n``dataset_id`` is the identity id the samples' dataset root recorded when it was measured.",
         "properties": {
           "dataset_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Id"
+            "minLength": 1,
+            "title": "Dataset Id",
+            "type": "string"
           },
           "ground_truth": {
             "items": {
@@ -2094,15 +2088,9 @@
         "title": "Assessment Id"
       },
       "dataset_id": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "title": "Dataset Id"
+        "minLength": 1,
+        "title": "Dataset Id",
+        "type": "string"
       },
       "date": {
         "anyOf": [
@@ -2210,6 +2198,7 @@
         "title": "Fingerprint"
       },
       "id": {
+        "minLength": 1,
         "title": "Id",
         "type": "string"
       }
@@ -8623,6 +8612,7 @@
             "title": "Fingerprint"
           },
           "id": {
+            "minLength": 1,
             "title": "Id",
             "type": "string"
           }

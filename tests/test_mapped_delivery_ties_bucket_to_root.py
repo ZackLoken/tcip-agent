@@ -82,7 +82,6 @@ def test_a_per_plant_delivery_of_a_bucket_recording_another_dataset_than_its_roo
     )
 
     assert "error" in refused, refused
-    assert recorded is not None
     for named in (bucket, recorded, minted):
         assert named in refused["error"], refused
     assert not (tmp_path / "o.csv").exists()
@@ -120,7 +119,6 @@ def test_a_phenology_delivery_of_a_bucket_recording_another_dataset_than_its_roo
         {**body, "dataset_root": str(copy), "mapping_name": "copy-valley"},
     )
 
-    assert recorded is not None
     for refusal in refusals:
         for named in (recorded, minted):
             assert named in refusal, refusal
@@ -156,7 +154,6 @@ def test_an_acknowledged_per_plant_delivery_of_a_bucket_recording_another_datase
     bucket = unassessed_bucket(
         tmp_path, experiment_id="exp-copied", images={"p1": 1}
     )
-    assert bucket.dataset_id is not None
     copy, minted = registered_copy(
         tmp_path, bucket.root, "ds-copy", crop=COUNT_CROP
     )
