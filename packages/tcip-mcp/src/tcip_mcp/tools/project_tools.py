@@ -100,27 +100,59 @@ def entry_is_at(
     )
 
 
-def registered_entry_at(
-    project: str | Path, root: str | Path
-) -> DatasetEntry | None:
-    """Return the project's registry entry whose path resolves to ``root``, or ``None``."""
-    return next(
-        (e for e in read_datasets(project) if entry_is_at(project, e, root)),
-        None,
+def dataset_ids_citing(
+    project: str | Path, root: Path
+) -> dict[DatasetId, list[str]]:
+    """Return each dataset id that cites the dataset ``root``, beside what cites it.
+
+    The citations are every entry of ``project``'s registry whose path is ``root``
+    (:func:`entry_is_at`) and every bucket published under ``root``
+    (:func:`~tcip_mcp.buckets.buckets_under`), each named as a refusal names it. A registry or a
+    bucket record that does not read raises its reader's refusal.
+    """
+    from tcip_mcp.buckets import buckets_under
+
+    cited: dict[DatasetId, list[str]] = {}
+    for entry in read_datasets(project):
+        if entry_is_at(project, entry, root):
+            cited.setdefault(entry.id, []).append(
+                "this project's registry at this path"
+            )
+    for bucket in buckets_under(root):
+        cited.setdefault(bucket.dataset_id, []).append(
+            f"this root's bucket {bucket.name!r}"
+        )
+    return cited
+
+
+def _cited_by(cited: dict[DatasetId, list[str]]) -> str:
+    """Return each id of ``cited`` beside what cites it, in id order."""
+    return "; ".join(
+        f"id {dataset_id!r} is cited by {', '.join(witnesses)}"
+        for dataset_id, witnesses in sorted(cited.items())
     )
 
 
-def identity_repair_door(project: str | Path, root: str | Path) -> str:
-    """Return the sentence naming how a refused identity document at ``root`` is repaired.
+def _identity_repair(cited: dict[DatasetId, list[str]]) -> str:
+    """Return the sentence naming how the identity of a root whose ids are ``cited`` is repaired.
 
-    ``register_dataset`` repairs it when the project's registry holds ``root``; otherwise the
-    document is restored from a backup.
+    One id: ``register_dataset`` restores it. More than one: the records that cite them are
+    brought to one identity outside the platform. None: the document is restored from a backup.
     """
-    if registered_entry_at(project, root) is not None:
-        return "repair it with register_dataset on this root, which the project's registry holds"
+    if len(cited) == 1:
+        return (
+            "repair it with register_dataset on this root, which restores the one id its "
+            f"records cite ({_cited_by(cited)})"
+        )
+    if cited:
+        records = dict.fromkeys(w for ws in cited.values() for w in ws)
+        return (
+            f"{_cited_by(cited)}: no one identity satisfies them and a fresh id would satisfy "
+            f"none, so bring {', '.join(records)} to one identity outside the platform"
+        )
     return (
-        "restore the document from a backup; the project's registry holds no entry for this "
-        "root, which register_dataset needs to repair it"
+        "restore the document from a backup; neither the project's registry nor a bucket under "
+        "this root cites an id, which register_dataset needs to repair it"
     )
 
 
@@ -159,16 +191,17 @@ def register_dataset(
     The registration is ``actor``'s.
 
     The identity is ``{crop, id, fingerprint}``, and the path the registry holds is
-    :func:`~tcip_mcp.registry_paths.stored_path`'s. ``id`` is minted once and kept across re-runs
-    and moves, ``fingerprint`` is
-    :func:`~tcip_mcp.pipelines.data.dataset_fingerprint.dataset_fingerprint` now, and the identity
-    write is compare-and-set against the version this call read, a conflict keeping the id that
-    committed.
+    :func:`~tcip_mcp.registry_paths.stored_path`'s. ``id`` is kept across re-runs and moves,
+    ``fingerprint`` is :func:`~tcip_mcp.pipelines.data.dataset_fingerprint.dataset_fingerprint`
+    now, and the identity write is compare-and-set against the version this call read, a conflict
+    keeping the id that committed.
 
-    A document present but refused by its model is rewritten, with the id of the registry entry
-    whose path is ``dataset_root``, the answer's ``repaired`` stating what was refused; at a root
-    the registry does not hold it refuses, minting no id. A crop that is empty or that
-    ``crops.yml`` names for no trait refuses, writing nothing.
+    A document absent, or present but refused by its model, takes the one id that cites the root
+    (:func:`dataset_ids_citing`: the registry's entries at its path and the buckets under it), the
+    answer's ``repaired`` stating what was absent or refused and what cites the id. A root cited
+    by more than one id refuses, naming each id and what cites it; a refused document nothing
+    cites refuses; only an absent one nothing cites mints its id. A crop that is empty or that
+    ``crops.yml`` names for no trait refuses. A refusal writes nothing.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
@@ -196,7 +229,7 @@ def register_dataset(
     # identity is actually changing under it and ends when this write is the one that lands.
     while True:
         stored = tcip_store.read_blob_versioned(ident_path, default=None)
-        repaired = None
+        repaired = refused = None
         try:
             existing_id = (
                 None
@@ -206,13 +239,20 @@ def register_dataset(
                 ).id
             )
         except ValueError as exc:
-            held = registered_entry_at(project, root)
-            if held is None:
+            existing_id, refused = None, str(exc)
+        if existing_id is None:
+            cited = dataset_ids_citing(project, root)
+            found = refused or f"{ident_path} is absent"
+            if len(cited) > 1:
+                return {"error": f"{found}; {_identity_repair(cited)}"}
+            if cited:
+                (existing_id,) = cited
+                repaired = f"{found}; its id is restored: {_cited_by(cited)}"
+            elif refused is not None:
                 return {
-                    "error": f"{exc}; minting a fresh id over it would sever every record "
-                    f"that cites the old one; {identity_repair_door(project, root)}"
+                    "error": f"{refused}; minting a fresh id over it would sever every record "
+                    f"that cites the old one; {_identity_repair(cited)}"
                 }
-            existing_id, repaired = held.id, str(exc)
         entry = DatasetEntry(
             id=mint_id() if existing_id is None else existing_id,
             path=stored_path(root, project),
@@ -316,7 +356,7 @@ def check_dataset_identity(
             dataset_root=str(root),
             state="refused",
             fingerprint=current,
-            reason=f"{exc}; {identity_repair_door(project, root)}",
+            reason=f"{exc}; {_identity_repair(dataset_ids_citing(project, root))}",
         )
     except (ValueError, OSError) as exc:
         return DatasetIdentityCheck(
