@@ -32,6 +32,8 @@ from tcip_web.routes.results import (
 )
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
 
 if TYPE_CHECKING:
@@ -1221,6 +1223,7 @@ def test_the_plant_mapping_list_refuses_while_no_project_is_open(
 def test_inference_launch_missing_checkpoint(
     client: TestClient, opened_project: Path
 ) -> None:
+    register_dataset_at(opened_project, opened_project, crop=CROP)
     resp = client.post(
         "/api/inference/launch",
         json={
@@ -1263,6 +1266,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     assert isinstance(
         ingest_images(opened_project, str(source), actor=None), IngestManifest
     )
+    register_dataset_at(opened_project, opened_project, crop=CROP)
     ckpt = produced_checkpoint(
         opened_project / "m.pt", "cancel fixture weights"
     )

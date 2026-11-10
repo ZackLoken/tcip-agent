@@ -38,6 +38,8 @@ from tests._chain_fixtures import (  # noqa: E402
     run_config,
     training_config,
 )
+from tests._mapping_fixtures import CROP  # noqa: E402
+from tests._producer_fixtures import register_dataset_at  # noqa: E402
 from tests._training_values import (  # noqa: E402
     RATIONALE,
     drawn_split,
@@ -336,6 +338,7 @@ def test_a_frozen_selection_is_refused_as_a_scale_reference_naming_its_empty_sid
         ),
     )
     root = _two_subject_two_date_dataset(tmp_path / "ds")
+    register_dataset_at(tmp_path, root, crop=CROP)
     _real_drawn_experiment(tmp_path, root, "exp-src")
     frozen = freeze_selection(tmp_path, "exp-src", actor=None)
     assert "error" not in frozen, frozen

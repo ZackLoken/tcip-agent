@@ -20,7 +20,13 @@ from tcip_annotation.json_io import (
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
-from tests._producer_fixtures import image_label_key, label_image, write_image
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import (
+    image_label_key,
+    label_image,
+    register_dataset_at,
+    write_image,
+)
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -512,6 +518,7 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(
     images_dir = image_dir(tmp_path, "2026-01-01")
     image = images_dir / "img_001.jpg"
     write_image(image, (200, 150))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
 
     result = stage_proposals(
         tmp_path,
@@ -555,6 +562,7 @@ def test_stage_proposals_whose_every_box_drops_refuses_naming_the_count(
 
     image = image_dir(tmp_path, "2026-01-01") / "img_001.jpg"
     write_image(image, (200, 150))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
 
     result = stage_proposals(
         tmp_path,
@@ -599,6 +607,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(
 
     image = image_dir(tmp_path, "2026-01-01") / "img_001.jpg"
     write_image(image, (200, 150))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     unscored = (
         {
             "boxes": [
@@ -636,6 +645,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(
 
     image = image_dir(tmp_path, "2026-01-01") / "img_001.jpg"
     write_image(image, (200, 150))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     unstated = (
         {"boxes": [{"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}]}
         if shape == "box"

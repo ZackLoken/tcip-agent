@@ -65,12 +65,17 @@ class PatchProposer:
 
 @pytest.fixture
 def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Write a dataset image with one red patch at ``PATCH`` and wire in the patch engine."""
+    """Write a dataset image with one red patch at ``PATCH`` and wire in the patch engine.
+
+    The dataset is ``tmp_path``, registered in itself at :data:`~tests._mapping_fixtures.CROP`.
+    """
     from tcip_mcp.pipelines import proposal
-    from tests._producer_fixtures import painted_frame
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import painted_frame, register_dataset_at
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     x1, y1, x2, y2 = PATCH
     path = images / "region.png"
     # The patch engine reports inclusive extents, so the patch covers its far edge too.

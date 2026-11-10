@@ -18,7 +18,12 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_mcp.dataset_layout import image_dir
-from tests._producer_fixtures import GroupedDataset, write_image
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import (
+    GroupedDataset,
+    register_dataset_at,
+    write_image,
+)
 from tests._training_values import RATIONALE
 
 if TYPE_CHECKING:
@@ -356,6 +361,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     images_dir = image_dir(tmp_path, "2026-01-01")
     images_dir.mkdir(parents=True)
     _write_group(images_dir, "cap_001")
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     ckpt = registered_checkpoint(tmp_path)
 
     from tcip_mcp.buckets import read_bucket

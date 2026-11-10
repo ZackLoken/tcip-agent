@@ -1073,7 +1073,12 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
     from tcip_mcp.pipelines.training.evaluation import score_bucket
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.proposal_tools import stage_proposals
-    from tests._producer_fixtures import gray_frame, label_image
+    from tests._mapping_fixtures import CROP
+    from tests._producer_fixtures import (
+        gray_frame,
+        label_image,
+        register_dataset_at,
+    )
     from tests._verified_checkpoint_fixtures import (
         project_checkpoint,
         verified_checkpoint,
@@ -1087,6 +1092,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
         96,
         96,
     )
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     published = run_inference(
         tmp_path,
         project_checkpoint(tmp_path),

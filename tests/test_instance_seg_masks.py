@@ -21,9 +21,11 @@ from tests._chain_fixtures import (
     detection_pass,
     detector_values,
 )
+from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import (
     checkpoint_admission,
     gray_frame,
+    register_dataset_at,
     write_image,
 )
 from tests._training_values import MASK_CUT, RATIONALE, tiling_block
@@ -392,6 +394,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     p, results = predicted_over(
         tmp_path,
         instance_seg_ckpt,
@@ -440,6 +443,7 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     fx.seed_confirmed_count(tmp_path)
     bucket = "baseline/2026-01-01"
     ran = run_inference(
@@ -501,6 +505,7 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     r = run_inference(
         tmp_path,
         instance_seg_ckpt,
@@ -528,6 +533,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir)
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     r = run_inference(
         tmp_path,
         instance_seg_ckpt,

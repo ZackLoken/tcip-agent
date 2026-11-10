@@ -23,13 +23,24 @@ from tcip_mcp.dataset_layout import (  # noqa: E402
 )
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._audit_fixtures import audit_rows  # noqa: E402
+from tests._mapping_fixtures import CROP  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
-from tests._producer_fixtures import gray_frame  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    dataset_registered,
+    gray_frame,
+)
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_CONF,
     SAMPLE_DETECTOR_PASS,
     project_checkpoint,
 )
+
+
+@pytest.fixture(autouse=True)
+def _registered(tmp_path: Path) -> None:
+    """Register ``tmp_path``, the dataset root most images here are written under, in itself."""
+    dataset_registered(tmp_path, tmp_path, crop=CROP)
+
 
 UNTILED = Stated(
     tile=False, conf=SAMPLE_CONF, rationale="a sample reason the test states"
@@ -108,7 +119,7 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS
     from tcip_mcp.tools.inference_tools import run_inference
 
-    root = tmp_path / "dataset"
+    root = dataset_registered(tmp_path, tmp_path / "dataset", crop=CROP)
     images_dir = _images(image_dir(root, "2026-01-01"))
     _stubbed(monkeypatch)
     ckpt = project_checkpoint(tmp_path)

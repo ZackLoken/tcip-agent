@@ -17,7 +17,7 @@ from tcip_web.jobstore import (
     ProjectJob,
     Running,
 )
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import register_dataset_at, write_image
 from tests._training_values import RATIONALE
 
 if TYPE_CHECKING:
@@ -177,11 +177,13 @@ def test_inference_cancel_endpoint_and_worker(
     from tcip_web.routes._body_common import PersonPayload
     from tcip_web.routes.inference import _registry, _worker, cancel_job
     from tests._audit_fixtures import audit_rows
+    from tests._mapping_fixtures import CROP
     from tests._verified_checkpoint_fixtures import project_checkpoint
     from tests._web_fixtures import inference_job
 
     images_dir = image_dir(tmp_path, "2026-01-01")
     write_image(images_dir / "img.jpg", (16, 16))
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     _fake_predictor(monkeypatch)
 
     job = inference_job(

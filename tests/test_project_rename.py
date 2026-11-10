@@ -18,6 +18,8 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.identity import actor
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
 from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
@@ -219,6 +221,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
         experiment_id="exp-resumed",
         resume_from=str(checkpoint),
     )
+    register_dataset_at(project, project / "data", crop=CROP)
     bucket = "live/2-11-26"
     published = run_inference(
         project,

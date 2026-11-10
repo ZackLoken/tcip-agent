@@ -13,6 +13,9 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -52,6 +55,7 @@ def test_inference_launch_confines_checkpoint_to_image_roots(
     # torch.load(weights_only=False), an arbitrary-pickle sink.
     outside = tmp_path_factory.mktemp("outside") / "evil.pt"
     outside.write_bytes(b"x")
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     resp = client.post(
         "/api/inference/launch",
         json={
@@ -71,6 +75,7 @@ def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(
 ) -> None:
     # With no additive TCIP_IMAGE_ROOTS, a checkpoint under the workspace still clears the guard:
     # a missing checkpoint reaches its own 404, never a 403 from the path check.
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     resp = client.post(
         "/api/inference/launch",
         json={

@@ -13,6 +13,8 @@ import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._mapping_fixtures import CROP
+from tests._producer_fixtures import register_dataset_at
 from tests._training_values import (
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
@@ -775,6 +777,7 @@ def test_the_dry_run_reports_the_record_the_bucket_keeps(
     images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     _png(images, _frame())
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     stated = Stated(
         tile=True,
         tile_size=TILE,
@@ -816,7 +819,8 @@ def _blob_capture(project: Path) -> Path:
     """Ingest a capture of blob frames into the dataset ``ds`` and return its images directory.
 
     It writes :data:`N_CALIBRATION_IMAGES` blob frames, each labeled ``bud`` by one box per
-    blob, ingests them into ``project / "ds"`` and states them one capture date.
+    blob, ingests them into ``project / "ds"``, states them one capture date and registers the
+    dataset at :data:`~tests._mapping_fixtures.COUNT_CROP`.
     """
     import datetime
 
@@ -826,6 +830,7 @@ def _blob_capture(project: Path) -> Path:
         ingest_images,
         state_capture_date,
     )
+    from tests._mapping_fixtures import COUNT_CROP
     from tests._producer_fixtures import label_image
 
     root, raw, date = project / "ds", project / "raw", "2026-01-01"
@@ -857,6 +862,7 @@ def _blob_capture(project: Path) -> Path:
     images = image_dir(root, date)
     for name, boxed in labels.items():
         label_image(images / name, boxed, FRAME, FRAME)
+    register_dataset_at(project, root, crop=COUNT_CROP)
     return images
 
 
@@ -993,6 +999,7 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
     images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     _png(images, _frame())
+    register_dataset_at(tmp_path, tmp_path, crop=CROP)
     cut = {"masks": True, "mask_cut": MASK_CUT} if with_masks else {}
 
     for merge in ("nms", "nmm"):
