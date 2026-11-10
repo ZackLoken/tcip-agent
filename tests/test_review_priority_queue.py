@@ -94,13 +94,21 @@ def _no_queue_jobs() -> None:
 def test_launch_404s_on_missing_checkpoint(
     opened_client: TestClient, opened_project: Path
 ) -> None:
+    """A launch naming no checkpoint file answers 404 with the registry's read's sentence."""
+    from tcip_mcp.model_registry import (
+        CheckpointNotFoundError,
+        registered_bytes,
+    )
+
     select(opened_client, opened_project, "bud")
+    with pytest.raises(CheckpointNotFoundError) as missing:
+        registered_bytes(opened_project / "nope.pt", project=opened_project)
     resp = opened_client.post(
         "/api/annotate/queue/launch",
         json={"checkpoint_path": str(opened_project / "nope.pt"), **QUEUE},
     )
-    assert resp.status_code == 404
-    assert "checkpoint not found" in resp.json()["detail"]
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == str(missing.value)
 
 
 def test_launch_over_a_checkpoint_the_registry_does_not_name_answers_400_and_starts_no_job(
