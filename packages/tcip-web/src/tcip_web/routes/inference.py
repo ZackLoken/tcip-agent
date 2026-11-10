@@ -184,9 +184,10 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     record is the job's as it stands before the thread starts. A checkpoint that is no file and a
     capture that is no directory refuse (404). A capture whose dataset root the pass refuses
     (:func:`~tcip_mcp.tools.inference_tools.registered_pass_root`: one never registered, one whose
-    identity does not decode, a directory that is no capture) refuses (400) with that sentence and
-    starts no job. A bucket a live job under the same dataset root is still writing refuses (409,
-    :class:`BucketExistsRefusal`).
+    identity does not decode, a directory that is no capture), and then a checkpoint the open
+    project's registry does not name (:func:`~tcip_mcp.model_registry.registered_bytes`), refuse
+    (400) with that sentence and start no job. A bucket a live job under the same dataset root is
+    still writing refuses (409, :class:`BucketExistsRefusal`).
     """
     person = actor(payload.user)
     project = store.held().root
@@ -195,6 +196,7 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     dataset_root = allowed_path(payload.dataset_root)
 
     from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.model_registry import registered_bytes
     from tcip_mcp.tools.inference_tools import registered_pass_root
     from tcip_store import canonical_path
 
@@ -210,6 +212,7 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
         root = registered_pass_root(
             images_dir=str(images_dir), raster_path=None
         )
+        registered_bytes(checkpoint_path, project=project)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
