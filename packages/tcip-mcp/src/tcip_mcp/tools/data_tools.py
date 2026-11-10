@@ -35,10 +35,12 @@ def freeze_selection(
     when: ``experiment_id`` names no training run; the split is spatial (region identities, not
     stems); the run's val side is empty; a member's ground truth has moved since the run (it now
     digests differently from the digest the record holds, or is absent); a member's ground truth
-    will not read (the store's refusal); a selection already exists at the output directory; the
-    output directory's store will not read; or the selection its resolved ``scope`` composes is
-    one :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses. The two ground-truth
-    refusals name the one member the read stopped at, never every member affected.
+    will not read (the store's refusal); the run's samples lie under no one dataset root
+    (:func:`~tcip_mcp.dataset_layout.source_root`'s refusal); a selection already exists at the
+    output directory; the output directory's store will not read; or the selection its resolved
+    ``scope`` composes is one :func:`~tcip_mcp.pipelines.data.selection.write_selection`
+    refuses. The two ground-truth refusals name the one member the read stopped at, never every
+    member affected. The selection's fingerprint is that root's.
 
     The frozen selection's ``calibration`` and ``holdout`` sides are always empty, so an assessment
     against it refuses by name; this tool's answer carries a ``note`` saying so.
@@ -46,13 +48,12 @@ def freeze_selection(
     Args:
         experiment_id: The finished run to freeze the drawn partition of.
         output_path: Where to write the selection. Defaults to
-            ``<dataset_root>/splits/frozen-<experiment_id>``, resolved from the run's own recorded
-            sources' directory through ``dataset_root_of``; refused when that does not resolve
-            (a source outside the canonical ``<dataset_root>/images/...`` layout).
+            ``<dataset_root>/splits/frozen-<experiment_id>`` of the one dataset root the run's
+            samples lie under.
 
     """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
-    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.dataset_layout import source_root
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.pipelines.data.label_queries import (
@@ -104,14 +105,12 @@ def freeze_selection(
             "so no selection is composed from it."
         }
 
-    a_source = samples[0].source
-    dataset_root = dataset_root_of(Path(a_source).parent)
-    if dataset_root is None:
-        return {
-            "error": f"this run's own source {a_source!r} does not resolve under a dataset "
-            "root (dataset_root_of), so the frozen selection has no dataset to "
-            "record a fingerprint for."
-        }
+    try:
+        dataset_root = source_root(
+            (s.source for s in samples), what="this run's samples"
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
     out_dir = (
         located(output_path, project)
         if output_path is not None
