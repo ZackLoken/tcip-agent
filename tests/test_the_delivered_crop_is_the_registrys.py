@@ -290,12 +290,12 @@ def test_an_orthomosaic_count_over_a_bucket_recording_another_dataset_than_its_r
     from tests._producer_fixtures import bucket_of_another_dataset
 
     bucket = _orthomosaic_scene(tmp_path)
-    recorded = bucket_of_another_dataset(bucket.root, bucket.name)
+    injected = bucket_of_another_dataset(bucket.root, bucket.name)
 
     for refusal in _orthomosaic_refusals(
         client, tmp_path, bucket.root, bucket.name, _grid_registry(tmp_path)
     ):
-        assert recorded in refusal, refusal
+        assert injected in refusal, refusal
         assert require_dataset_identity(bucket.root).id in refusal, refusal
 
 

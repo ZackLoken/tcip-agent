@@ -129,7 +129,8 @@ def register_dataset_at(
     """Register ``dataset_root`` in ``project`` at ``crop``, asserting it returned no error.
 
     Returns the dataset's id. A bucket published under the root afterwards records that id;
-    registering again keeps it, and restores it to a root whose identity document is absent.
+    registering again keeps it, and restores it to a root whose identity document is absent when
+    it is the one id the root's registry entries and buckets cite.
     """
     from tcip_mcp.tools.project_tools import register_dataset
 

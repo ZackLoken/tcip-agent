@@ -57,12 +57,13 @@ def test_the_check_of_a_refused_identity_answers_refused_and_names_the_repair(
     assert "backup" not in checked.reason
 
 
-def test_the_check_of_a_refused_identity_at_an_unregistered_root_names_the_restore(
+def test_the_check_of_a_refused_identity_at_a_root_nothing_cites_names_the_restore(
     tmp_path: Path,
 ) -> None:
-    """A damaged identity at a root the project's registry does not hold reads as a restore.
+    """A damaged identity at a root nothing cites reads as a restore from a backup.
 
-    The root was registered to another project, so this project's registry holds no entry for it.
+    The root was registered to another project and holds no bucket, so neither this project's
+    registry nor a bucket under the root cites an id.
     """
     _, root, _ = _registered(tmp_path)
     other = new_project(tmp_path / "other").root
@@ -125,10 +126,13 @@ def test_register_dataset_repairs_a_damaged_identity_at_a_registered_root(
     assert read_datasets(project) == entries
 
 
-def test_register_dataset_refuses_a_damaged_identity_at_a_root_the_registry_does_not_hold(
+def test_register_dataset_refuses_a_damaged_identity_at_a_root_nothing_cites(
     tmp_path: Path,
 ) -> None:
-    """A damaged document at a root this registry lacks stays; the refusal names the restore."""
+    """A damaged document at a root nothing cites stays; the refusal names the restore.
+
+    The root was registered to another project and holds no bucket.
+    """
     _, root, _ = _registered(tmp_path)
     other = new_project(tmp_path / "other").root
     path = dataset_identity_path(root)
