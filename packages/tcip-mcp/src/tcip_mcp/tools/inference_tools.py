@@ -68,6 +68,32 @@ class RasterPassIdentity(BaseModel):
     execution: Execution
 
 
+def registered_pass_root(
+    *, images_dir: str | None, raster_path: str | None
+) -> Path:
+    """Return the registered dataset root a pass over ``images_dir`` or ``raster_path`` reads.
+
+    The root of a raster is :func:`~tcip_mcp.buckets.source_root` of it and the root of a capture
+    directory is :func:`~tcip_mcp.dataset_layout.parse_capture_dir`'s; exactly one of the two is
+    stated. A directory that is no capture or is readable two ways, a root never registered and
+    an identity document that does not decode each raise ``ValueError`` naming the cause
+    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity` for the last two).
+    """
+    from tcip_mcp.buckets import source_root
+    from tcip_mcp.dataset_layout import (
+        parse_capture_dir,
+        require_dataset_identity,
+    )
+
+    root = (
+        source_root([raster_path])
+        if raster_path is not None
+        else parse_capture_dir(cast(str, images_dir))[0]
+    )
+    require_dataset_identity(root)
+    return root
+
+
 def infer(
     project: Path,
     *,
@@ -88,23 +114,18 @@ def infer(
     """Run the registered checkpoint's pass and publish its predictions as the bucket ``bucket``.
 
     The pass of the checkpoint at ``checkpoint_path`` runs over the capture ``images_dir``
-    (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`, which refuses any other directory) or
-    ``raster_path``, each an established location, and its predictions are published as the
-    bucket named ``bucket`` under their dataset root (:func:`~tcip_mcp.buckets.source_root`) by
-    ``actor``, answering the publication's result or the error dict naming a refusal. A root
-    never registered refuses before the checkpoint loads, a dry run and a resume included
-    (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`). ``progress`` is called with
+    or ``raster_path``, each an established location, and its predictions are published as the
+    bucket named ``bucket`` under their dataset root by ``actor``, answering the publication's
+    result or the error dict naming a refusal. The root is :func:`registered_pass_root`'s, which
+    refuses a directory that is no capture and a root never registered before the checkpoint
+    loads, a dry run and a resume included. ``progress`` is called with
     ``(done, total)`` images once the pass is prepared and after each image, and ``canceled``
     asked before each image: once it answers true the pass stops at that image boundary and
     publishes the documents predicted, or publishes nothing when it predicted none.
     """
     from tcip_mcp.assessment import read_assessment
-    from tcip_mcp.buckets import pass_documents, publish, source_root
-    from tcip_mcp.dataset_layout import (
-        bucket_key,
-        parse_capture_dir,
-        require_dataset_identity,
-    )
+    from tcip_mcp.buckets import pass_documents, publish
+    from tcip_mcp.dataset_layout import bucket_key
     from tcip_mcp.model_registry import (
         UnregisteredCheckpointError,
         load_registered_checkpoint,
@@ -125,12 +146,9 @@ def infer(
     if raster_path is not None and not Path(raster_path).is_file():
         return {"error": f"raster_path not found: {raster_path}"}
     try:
-        root = (
-            source_root([raster_path])
-            if raster_path is not None
-            else parse_capture_dir(cast(str, images_dir))[0]
+        root = registered_pass_root(
+            images_dir=images_dir, raster_path=raster_path
         )
-        require_dataset_identity(root)
         checkpoint = load_registered_checkpoint(
             checkpoint_path, project=project
         )
