@@ -18,6 +18,7 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_store.file_backend import is_bookkeeping
 from tests import _trait_fixtures as fx, csv_rows
+from tests._mapping_fixtures import COUNT_CROP
 
 if TYPE_CHECKING:
     from tcip_mcp.subject_registry import SubjectRegistry
@@ -64,7 +65,12 @@ def _bucket(
     names = [scope["subject"]] * 2 if scope["subject"] else []
     image = image_dir(project / "ds", "2026-01-01") / "a.png"
     return published(
-        project, name, [predicted(image, names)], scope=scope, **published_kw
+        project,
+        name,
+        [predicted(image, names)],
+        scope=scope,
+        crop=COUNT_CROP,
+        **published_kw,
     ).name
 
 
@@ -93,6 +99,7 @@ def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(
         [predicted(raster, [fx.COUNT_SUBJECT])],
         scope=SCOPE,
         raster_path=raster,
+        crop=COUNT_CROP,
     ).name
 
     res = _deliver(tmp_path, tmp_path / "ds", bucket)

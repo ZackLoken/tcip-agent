@@ -164,6 +164,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
     )
     from tests import _trait_fixtures as fx, csv_rows
     from tests._chain_fixtures import acknowledged, predicted, published
+    from tests._mapping_fixtures import COUNT_CROP
 
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_count(tmp_path)
@@ -173,6 +174,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
         "m/2026-01-01",
         [predicted(image, [fx.COUNT_SUBJECT] * 3)],
         scope={"subject": fx.COUNT_SUBJECT},
+        crop=COUNT_CROP,
     )
     out = tmp_path / "counts.csv"
 
