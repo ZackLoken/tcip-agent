@@ -93,7 +93,7 @@ def orthomosaic_plant_counts(
         read_label_document,
     )
     from tcip_annotation.state import bbox_of
-    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.buckets import read_bucket, require_bucket_of_dataset
     from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.delivery import OrthomosaicDelivered
     from tcip_mcp.pipelines.delivery_events_schema import (
@@ -147,18 +147,7 @@ def orthomosaic_plant_counts(
             "raster: deliver its counts through deliver_per_image_counts."
         )
     identity = require_dataset_identity(found.root)
-    if found.dataset_id is None:
-        raise ValueError(
-            f"bucket {bucket!r} under {found.root} records no dataset: its raster was published "
-            "outside a capture of a registered dataset, so nothing ties its counts to a "
-            "dataset's plants; register the dataset and publish the raster's predictions again."
-        )
-    if found.dataset_id != identity.id:
-        raise ValueError(
-            f"bucket {bucket!r} records dataset {found.dataset_id!r}, and its root "
-            f"{found.root} is dataset {identity.id!r}: deliver it under the root of the dataset "
-            "it records."
-        )
+    require_bucket_of_dataset(found, identity)
     require_agreeing_crops(
         identity,
         found.root,

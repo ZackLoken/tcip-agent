@@ -566,16 +566,18 @@ def unassessed_bucket(
     Ingests, draws, trains and publishes under ``project``. With ``images``, that many captures
     of each plant it names stand at the plant's place (:func:`plant_captures`) and the project's
     mapping ``valley`` of them (:func:`~tests._mapping_fixtures.map_plants`, the dataset and its
-    plants at ``crop``) is built after the bucket is published.
+    plants at ``crop``) is built after the bucket is published, the dataset registered before.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._mapping_fixtures import map_plants
+    from tests._mapping_fixtures import map_plants, register_dataset_at
 
     root = project / "ds"
     images_dir = synthetic_capture(
         root, positions=plant_captures(images) if images else None
     )
+    if images:
+        register_dataset_at(project, root, crop=crop)
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     checkpoint_path = train_on(selection_dir, project, experiment_id)

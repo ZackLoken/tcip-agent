@@ -202,6 +202,7 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
         PHOTO_POSITION_ERROR_M,
         map_plants,
         plant_positions,
+        register_dataset_at,
     )
 
     both = fx.with_operationalization(
@@ -212,13 +213,14 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     )
     revision = fx.propose_and_confirm(tmp_path, both)
 
-    count_event = _deliver_counts(tmp_path, "per_image")
     write_geo_image(
         image_dir(tmp_path / "ds", "2026-02-11") / "a.png",
         *plant_positions(["p1"])["p1"],
         datetime(2026, 2, 11, 9),
         h_pos_err=PHOTO_POSITION_ERROR_M,
     )
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
+    count_event = _deliver_counts(tmp_path, "per_image")
     map_plants(tmp_path, tmp_path / "ds", ["p1"], crop=COUNT_CROP)
     deliver_acknowledged(
         tmp_path,

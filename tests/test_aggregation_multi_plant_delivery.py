@@ -254,7 +254,11 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         synthetic_capture,
         train_on,
     )
-    from tests._mapping_fixtures import COUNT_CROP, map_plants
+    from tests._mapping_fixtures import (
+        COUNT_CROP,
+        map_plants,
+        register_dataset_at,
+    )
 
     entry = fx.with_operationalization(
         fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=SUBJECT
@@ -274,6 +278,7 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         root,
         positions=plant_captures({p: len(v) for p, v in _VALUES.items()}),
     )
+    register_dataset_at(project, root, crop=COUNT_CROP)
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, experiment_id)
     assessment = assess_checkpoint(
