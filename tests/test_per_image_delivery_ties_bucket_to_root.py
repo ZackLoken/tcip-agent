@@ -17,23 +17,21 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import tcip_store
 from tcip_mcp.buckets import read_bucket
-from tcip_mcp.dataset_layout import (
-    dataset_identity_path,
-    read_dataset_identity,
-)
+from tcip_mcp.dataset_layout import dataset_identity_path
 from tcip_mcp.delivery import (
-    ACKNOWLEDGMENTS_STORE,
     DeliveryRefusal,
     Unacknowledgeable,
     read_delivery_events,
 )
-from tcip_mcp.project_paths import project_state_dir
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
 from tests._mapping_fixtures import COUNT_CROP
-from tests._producer_fixtures import register_dataset_at, unregistered_refusal
+from tests._producer_fixtures import (
+    left_written,
+    register_dataset_at,
+    unregistered_refusal,
+)
 from tests._web_fixtures import BROWSER
 
 if TYPE_CHECKING:
@@ -45,19 +43,11 @@ pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 
-def _acknowledgment_keys(project: Path) -> list[tcip_store.Key]:
-    """Return the key of every acknowledgment recorded under ``project``."""
-    return list(
-        tcip_store.keys(ACKNOWLEDGMENTS_STORE, str(project_state_dir(project)))
-    )
-
-
-def _footprint(project: Path, root: Path) -> dict[str, object]:
-    """Return what a delivery under ``project`` and ``root`` leaves: audit rows, events, records."""
+def _footprint(project: Path, root: Path) -> dict[str, list]:
+    """Return what a door can write for ``project`` over ``root``, and its delivery events."""
     return {
-        "audit": [audit_rows(project), audit_rows(root)],
+        **left_written(project, root),
         "events": read_delivery_events(project),
-        "acknowledgments": _acknowledgment_keys(project),
     }
 
 
@@ -67,11 +57,8 @@ def _identity_removed(root: Path) -> None:
 
 
 def _registered_again(project: Path, root: Path) -> str:
-    """Register ``root`` again, which mints it a new id; return the id its identity record holds."""
-    register_dataset_at(project, root, crop=COUNT_CROP)
-    identity = read_dataset_identity(root)
-    assert identity is not None
-    return identity.id
+    """Register ``root`` again, which mints it a new id; return that id."""
+    return register_dataset_at(project, root, crop=COUNT_CROP)
 
 
 # ── the tool ─────────────────────────────────────────────────────────────
@@ -110,7 +97,6 @@ def test_a_per_image_delivery_under_a_root_with_no_identity_refuses_at_the_tool(
     assert answered == {"error": unregistered_refusal(root)}
     assert not (tmp_path / "out" / "counts.csv").exists()
     assert _footprint(tmp_path, root) == before
-    assert read_delivery_events(tmp_path) == []
 
 
 def test_a_per_image_delivery_of_a_bucket_of_another_dataset_than_its_root_refuses_at_the_tool(
@@ -131,7 +117,6 @@ def test_a_per_image_delivery_of_a_bucket_of_another_dataset_than_its_root_refus
         assert named in answered["error"], answered
     assert not (tmp_path / "out" / "counts.csv").exists()
     assert _footprint(tmp_path, root) == before
-    assert read_delivery_events(tmp_path) == []
 
 
 def test_a_raster_bucket_under_a_root_with_no_identity_still_answers_the_raster_refusal(
@@ -219,19 +204,26 @@ def test_a_per_image_export_of_a_bucket_of_another_dataset_than_its_root_refuses
 def test_a_posted_acknowledgment_does_not_carry_a_per_image_export_past_the_tie(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """An acknowledged request refuses the same way; only the acknowledgment's own record stands."""
+    """An acknowledgment of the result's real digest refuses the same way, shipping nothing.
+
+    The digest is the one the bucket's unacknowledged export names before the identity is
+    removed, so the baseline delivers under it; only the acknowledgment's own record stands.
+    """
+    from tests.test_tcip_web_results_routes import _digest, _per_image
+
     bucket = _route_bucket(tmp_path)
+    digest = _digest(client, _per_image(bucket))
     _identity_removed(tmp_path)
 
     refusal = _refused_by_the_route(
         client,
         tmp_path,
         bucket,
-        acknowledgment={"reason": "a look", "result_sha256": "0" * 64},
+        acknowledgment={"reason": "a look", "result_sha256": digest},
     )
 
     assert refusal.message == unregistered_refusal(tmp_path)
-    assert len(_acknowledgment_keys(tmp_path)) == 1
+    assert len(audit_rows(tmp_path, "delivery_acknowledged")) == 1
 
 
 # ── the three doors that read the tie ────────────────────────────────────
@@ -312,6 +304,6 @@ def test_the_per_image_the_orthomosaic_and_the_per_plant_doors_answer_one_tie(
         assert named in per_image, per_image
     assert per_plant == per_image
     assert orthomosaic == per_image.replace(image_bucket, raster_bucket)
-    assert not (tmp_path / "counts.csv").exists()
-    assert not (tmp_path / "o.csv").exists()
+    for written in ("out/counts.csv", "counts.csv", "o.csv"):
+        assert not (tmp_path / written).exists(), written
     assert read_delivery_events(tmp_path) == []
