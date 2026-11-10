@@ -70,8 +70,8 @@ def deliver_per_plant_csv(
             ``stem`` and carrying the image's measurement as ``value`` (``null`` for an image
             yielding none); a row naming any other key is refused. Every image the delivery reads
             of a plant in ``plants`` (attributed by the mapping, with a document in its date's
-            bucket, on disk) needs exactly one result, and a result naming any other image is
-            refused.
+            bucket, on disk) needs exactly one result, and results naming any other image are
+            refused in one answer, each such image named with its reason.
         output_path: Where to write the CSV.
         delivered_phenotype: The crop-vocabulary phenotype this CSV ships under.
         delivery_kind: A kind whose per-plant value is the trait's ``plant_aggregation`` over

@@ -289,7 +289,8 @@ resolved = plant_mapping_disclosure(
 counts = read_stage_b_counts("stage-b/<date>")
 
 # The door admits exactly one record per image the mapping attributes to a plant of `plants` that
-# the delivery read (read_images), and refuses a record of any other image, naming it.
+# the delivery read (read_images), and refuses a record of any other image, the one refusal naming
+# every such image with its reason.
 records = [
     {"date": date, "stem": stem, "value": counts[date, stem]}
     for images in read_images(resolved, plants).values()
