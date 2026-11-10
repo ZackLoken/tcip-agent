@@ -63,7 +63,7 @@ def _scene(project: Path) -> Scene:
     The plants stand on the raster's own grid; a dataset of geolocated photographs maps them and a
     whole-raster bucket counts them.
     """
-    from tcip_mcp.tools.project_tools import register_dataset
+    from tests._producer_fixtures import register_dataset_at
 
     raster_path = _raster(project)
     _write_geo_raster(raster_path)
@@ -81,10 +81,7 @@ def _scene(project: Path) -> Scene:
     photos = project / "photos"
     photos.mkdir()
     for root in (photos, bucket.root):
-        registered = register_dataset(
-            project, str(root), crop=COUNT_CROP, actor=None
-        )
-        assert "error" not in registered, registered
+        register_dataset_at(project, root, crop=COUNT_CROP)
     geolocated_captures(photos, [DATE], plants)
     return Scene(
         project,

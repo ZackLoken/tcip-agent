@@ -330,8 +330,8 @@ def _registered_dataset(project: Path) -> dict:
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_mcp.tools.annotation_tools import write_subject_registry
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._producer_fixtures import (
+        register_dataset_at,
         seed_bud_images,
         small_detection_config,
     )
@@ -340,9 +340,7 @@ def _registered_dataset(project: Path) -> dict:
     assert "error" not in write_subject_registry(
         project, str(project), {"bud": {"description": "one bud"}}, actor=None
     )
-    assert "error" not in register_dataset(
-        project, str(project), "currant", actor=None
-    )
+    register_dataset_at(project, project, crop="currant")
     return small_detection_config(images, project=project)
 
 

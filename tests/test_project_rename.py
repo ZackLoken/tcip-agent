@@ -61,7 +61,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
 ) -> None:
     from tcip_mcp.experiments import run_rows
     from tcip_mcp.project_record import read_record
-    from tcip_mcp.tools.project_tools import read_datasets, register_dataset
+    from tcip_mcp.tools.project_tools import read_datasets
     from tests._verified_checkpoint_fixtures import finished_run
 
     ws = tmp_path.parent
@@ -69,9 +69,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     project = made.root
     finished_run(project, experiment_id="exp-before")
     (project / "ds").mkdir()
-    assert "error" not in register_dataset(
-        project, str(project / "ds"), "currant", actor=None
-    )
+    register_dataset_at(project, project / "ds", crop="currant")
     from tcip_mcp.audit import AUDIT_LOG_STORE
     from tcip_mcp.project_record import PROJECT_RECORD_STORE
 

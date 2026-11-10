@@ -24,6 +24,7 @@ from tests._mapping_fixtures import (
     register_plant_registry_for,
     registered_copy,
 )
+from tests._producer_fixtures import register_dataset_at
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -98,7 +99,6 @@ def test_a_per_plant_delivery_over_a_dataset_registered_again_with_another_crop_
     dataset is then registered again at :data:`CROP`, which keeps its id, so the id the mapping
     recorded still matches. The refusal names both crops, and no CSV is written.
     """
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests.test_deliver_per_plant_csv import (
         _bucket,
         _deliver,
@@ -108,10 +108,7 @@ def test_a_per_plant_delivery_over_a_dataset_registered_again_with_another_crop_
 
     dataset_root, date = _mapped(tmp_path)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
-    again = register_dataset(
-        tmp_path, str(dataset_root), crop=CROP, actor=None
-    )
-    assert "error" not in again, again
+    register_dataset_at(tmp_path, dataset_root, crop=CROP)
 
     refused = _deliver(
         tmp_path,
@@ -168,14 +165,10 @@ def test_a_phenology_delivery_over_a_dataset_registered_again_with_another_crop_
     The mapping was built with both at :data:`CROP`; the dataset is registered again at
     :data:`COUNT_CROP`. Each door's refusal names both crops.
     """
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests.test_second_trait_acceptance import _currant_bloom_body
 
     body = _currant_bloom_body(tmp_path)
-    again = register_dataset(
-        tmp_path, body["dataset_root"], crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in again, again
+    register_dataset_at(tmp_path, Path(body["dataset_root"]), crop=COUNT_CROP)
 
     for refusal in _phenology_refusals(client, tmp_path, body):
         _crops_named(refusal, CROP, COUNT_CROP)
@@ -190,7 +183,6 @@ def _orthomosaic_scene(project: Path, *, registered: bool = True) -> Bucket:
     The raster's dataset is registered at :data:`COUNT_CROP`; with ``registered`` false the bucket
     is published before that registration, so it records no dataset.
     """
-    from tcip_mcp.tools.project_tools import register_dataset
     from tests._chain_fixtures import detected, detection_pass, published
     from tests.test_orthomosaic_tools import (
         SCOPE,
@@ -214,10 +206,7 @@ def _orthomosaic_scene(project: Path, *, registered: bool = True) -> Bucket:
         raster_path=raster_path,
         crop=None,
     )
-    done = register_dataset(
-        project, str(bucket.root), crop=COUNT_CROP, actor=None
-    )
-    assert "error" not in done, done
+    register_dataset_at(project, bucket.root, crop=COUNT_CROP)
     return bucket
 
 

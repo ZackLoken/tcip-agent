@@ -16,7 +16,7 @@ from tcip_mcp.dataset_layout import (
     label_key,
     parse_image_path,
 )
-from tests._producer_fixtures import label_image
+from tests._producer_fixtures import label_image, register_dataset_at
 
 
 def test_parse_image_path_date_nested() -> None:
@@ -143,7 +143,6 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
         image_path,
         parse_capture_dir,
     )
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
 
     crop = sorted(registered_crops())[0]
@@ -154,9 +153,7 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
         image = image_path(root, capture, "a", ".png")
         image.parent.mkdir(parents=True)
         image.write_bytes(b"\x89PNG")
-        assert "error" not in register_dataset(
-            tmp_path, str(root), crop=crop, actor=None
-        )
+        register_dataset_at(tmp_path, root, crop=crop)
         assert image_capture(image) == (root, capture)
         assert parse_capture_dir(image_dir(root, capture)) == (root, capture)
         assert source_root([image]) == root
@@ -169,9 +166,7 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
     raster = image_root(named) / "raster.tif"
     raster.parent.mkdir(parents=True)
     raster.write_bytes(b"II*\x00")
-    assert "error" not in register_dataset(
-        tmp_path, str(named), crop=crop, actor=None
-    )
+    register_dataset_at(tmp_path, named, crop=crop)
     assert source_root([raster]) == named
     assert image_capture(raster) == (None, None)
     assert dataset_scope_of(raster) == named
