@@ -189,12 +189,14 @@ ADMISSION_CASES = {
         400,
     ),
     "checkpoint_is_a_directory": (True, "directory", None, 404),
+    "checkpoint_beneath_a_regular_file": (True, "beneath a file", None, 404),
     "identity_does_not_decode": (True, "registered", "identity", 400),
     "run_record_refused": (True, "registered", "run record", 400),
     "admitted": (True, "registered", None, 200),
 }
 """Each admission case by id: whether its root is registered, what its checkpoint is (one the
-registry does not name, one a run of the project completed, no file, a directory), the record
+registry does not name, one a run of the project completed, no file, a directory, a path beneath
+a regular file), the record
 damaged after a legitimate write, and the launch's status."""
 
 
@@ -229,6 +231,7 @@ def test_the_launch_and_the_tool_answer_each_admission_case_alike(
         "registered": lambda: Path(registered_checkpoint(tmp_path)),
         "missing": lambda: tmp_path / "absent.pt",
         "directory": lambda: tmp_path / "weights.pt",
+        "beneath a file": lambda: checkpoint / "weights.pt",
     }[checkpoint_is]()
     if checkpoint_is == "directory":
         named.mkdir()
