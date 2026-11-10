@@ -103,6 +103,40 @@ def test_launch_404s_on_missing_checkpoint(
     assert "checkpoint not found" in resp.json()["detail"]
 
 
+def test_launch_over_a_checkpoint_the_registry_does_not_name_answers_400_and_starts_no_job(
+    opened_client: TestClient, opened_project: Path
+) -> None:
+    """A launch over a checkpoint the open project never registered answers 400, no job.
+
+    The answer is the sentence the registry's load refuses the checkpoint with, naming its path,
+    its digest and ``register_model``; no job is registered and nothing is written.
+    """
+    from tcip_mcp.model_registry import (
+        UnregisteredCheckpointError,
+        load_registered_checkpoint,
+    )
+    from tcip_web.routes.annotate import _pq_registry
+    from tests._producer_fixtures import left_written
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
+
+    ckpt = produced_checkpoint(opened_project / "m.pt", "queue launch")
+    select(opened_client, opened_project, "bud")
+    with pytest.raises(UnregisteredCheckpointError) as unregistered:
+        load_registered_checkpoint(ckpt, project=opened_project)
+    before = left_written(opened_project, opened_project)
+
+    resp = opened_client.post(
+        "/api/annotate/queue/launch",
+        json={"checkpoint_path": str(ckpt), **QUEUE},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == str(unregistered.value)
+    assert "register_model" in resp.json()["detail"]
+    assert _pq_registry.jobs == {}
+    assert left_written(opened_project, opened_project) == before
+
+
 def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
     opened_client: TestClient, opened_project: Path
 ) -> None:
