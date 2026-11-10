@@ -181,8 +181,12 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     """Launch a pass over the dataset's images on a background thread, answering its record.
 
     The person ``user`` names launches it and publishes its bucket (``payload.bucket``). The
-    record is the job's as it stands before the thread starts. A bucket a live job under the same
-    dataset root is still writing refuses (409, :class:`BucketExistsRefusal`).
+    record is the job's as it stands before the thread starts. A checkpoint that is no file and a
+    capture that is no directory refuse (404). A capture whose dataset root the pass refuses
+    (:func:`~tcip_mcp.tools.inference_tools.registered_pass_root`: one never registered, one whose
+    identity does not decode, a directory that is no capture) refuses (400) with that sentence and
+    starts no job. A bucket a live job under the same dataset root is still writing refuses (409,
+    :class:`BucketExistsRefusal`).
     """
     person = actor(payload.user)
     project = store.held().root
@@ -191,6 +195,7 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     dataset_root = allowed_path(payload.dataset_root)
 
     from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.tools.inference_tools import registered_pass_root
     from tcip_store import canonical_path
 
     try:
@@ -201,6 +206,10 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
         raise HTTPException(404, f"checkpoint not found: {checkpoint_path}")
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {images_dir}")
+    try:
+        registered_pass_root(images_dir=str(images_dir), raster_path=None)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     job, created = _registry.find_or_launch(
         lambda j: (
