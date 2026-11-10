@@ -709,22 +709,17 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     it. An export whose buckets' root is not a dataset registered to the project is refused.
     """
     pytest.importorskip("torch")
+    from dataclasses import replace
+
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
     from tests._chain_fixtures import run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-web-count")
     open_new_project(tmp_path)
     bucket = read_bucket(chain.root, chain.bucket)
-    unregistered = _export_count(client, _per_image(bucket))
-    registered = register_dataset(
-        tmp_path,
-        str(chain.root),
-        crop=sorted(registered_crops())[0],
-        actor=None,
+    unregistered = _export_count(
+        client, _per_image(replace(bucket, root=tmp_path / "unregistered"))
     )
-    assert "error" not in registered, registered
 
     bare = _export_count(client, _per_image(bucket))
     posted = _export_count(

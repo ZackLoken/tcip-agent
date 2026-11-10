@@ -171,7 +171,7 @@ def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(
     assert trained["data"].recorded_scope == ClassScope(
         subject=None, attributes=None
     )
-    chain.synthetic_capture(tmp_path / "ds")
+    chain.synthetic_capture(tmp_path, tmp_path / "ds")
     chain.draw_reference_selection(
         tmp_path, tmp_path / "ds", tmp_path / "selection"
     )

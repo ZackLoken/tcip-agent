@@ -179,7 +179,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
 
     The scenes are made in projects created under ``workspace`` and served through ``client``.
     """
-    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.dataset_layout import image_dir, require_dataset_identity
     from tcip_mcp.delivery import DeliveryRefusal, delivery_event_key
     from tcip_mcp.identity import actor
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -188,8 +188,6 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     )
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.traits import registered_crops
     from tcip_web.routes.annotate import ServedProposals
     from tcip_web.routes.results import (
         EXPORT_HEADER,
@@ -219,7 +217,6 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         trained_detector,
     )
     from tests._mapping_fixtures import (
-        COUNT_CROP,
         PLANTS,
         POSITION_ERROR_M,
         geolocated_captures,
@@ -301,7 +298,6 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
 
     minted: dict[str, str] = dict(HELD_RUNS)
     exports: list[str] = []
-    crop = sorted(registered_crops())[0]
 
     out: dict[str, JsonValue] = {}
     answers: dict[str, JsonValue] = {}
@@ -339,9 +335,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     second_run = Path(foreign_checkpoint(root, name="other")).parent.name
     models = answered(client, "registered_models", 200)
     assessments = answered(client, "assessments", 200)
-    registered = register_dataset(root, str(chain.root), crop=crop, actor=None)
-    delivered(registered)
-    minted[registered["id"]] = "<count dataset>"
+    minted[require_dataset_identity(chain.root).id] = "<count dataset>"
     count_export = ExportCountCsvPayload(
         delivery=PerImageCountDelivery(
             kind="per_image_count",
@@ -607,11 +601,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         )
     )
     out["registry"] = served(project, "registry")
-    nearest = register_dataset(
-        root, str(bucket.root), crop=COUNT_CROP, actor=None
-    )
-    delivered(nearest)
-    minted[nearest["id"]] = "<nearest dataset>"
+    minted[require_dataset_identity(bucket.root).id] = "<nearest dataset>"
     plant_counts = ExportCountCsvPayload(
         delivery=OrthomosaicPlantCountsDelivery(
             kind="orthomosaic_plant_counts",

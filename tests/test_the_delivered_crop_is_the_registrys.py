@@ -212,6 +212,7 @@ def _orthomosaic_scene(project: Path, *, registered: bool = True) -> Bucket:
         [detection_pass(raster_path, (64, 64), [detected(box, 0.9)], cap=2)],
         scope=SCOPE,
         raster_path=raster_path,
+        crop=None,
     )
     done = register_dataset(
         project, str(bucket.root), crop=COUNT_CROP, actor=None
