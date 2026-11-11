@@ -484,18 +484,9 @@ class TestPushPanelDataTool:
         self, bound: BoundProject
     ) -> None:
         """The tool's advertised schema names the panels; the server refuses any other name."""
-        import asyncio
+        from tests._server_calls import called_through_the_server, listed_tools
 
-        from tests._server_calls import (
-            called_through_the_server,
-            client_server,
-        )
-
-        (listed,) = [
-            t
-            for t in asyncio.run(client_server(bound).list_tools())
-            if t.name == "push_panel_event"
-        ]
+        listed = listed_tools(bound)["push_panel_event"]
         assert listed.input_schema["properties"]["panel"] == {
             "$ref": "#/$defs/Panel"
         }
