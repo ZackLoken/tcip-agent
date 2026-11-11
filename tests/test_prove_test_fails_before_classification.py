@@ -72,47 +72,6 @@ def _run(
     )
 
 
-def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(
-    tmp_path: Path,
-) -> None:
-    """A fixture-shaped TypeError in the test body is refused.
-
-    A constructor called with a keyword the baseline does not accept raises TypeError at the call
-    site inside the test file, and the tool reports it REFUSED, fixture-shaped.
-    """
-    repo = _scratch_repo(tmp_path)
-    _write(
-        repo / "widgets.py",
-        "class Widget:\n"
-        "    def __init__(self, size):\n"
-        "        self.size = size\n",
-    )
-    baseline = _commit_all(repo, "widget carries no color")
-
-    _write(
-        repo / "widgets.py",
-        "class Widget:\n"
-        "    def __init__(self, size, color=None):\n"
-        "        self.size = size\n"
-        "        self.color = color\n",
-    )
-    _write(
-        repo / "tests" / "test_widgets.py",
-        "def test_widget_carries_a_color():\n"
-        "    from widgets import Widget\n"
-        "    w = Widget(size=3, color='red')\n"
-        "    assert w.color == 'red'\n",
-    )
-    _commit_all(repo, "widget carries a color")
-
-    result = _run(repo, "tests/test_widgets.py", baseline)
-
-    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "REFUSED" in result.stdout
-    assert CALL_PHASE_SENTENCE in result.stdout
-    assert "[fixture]" in result.stdout
-
-
 def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
     """A setup fixture error is refused.
 
@@ -156,6 +115,7 @@ def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
     assert "REFUSED" in result.stdout
     assert FIXTURE_SENTENCE in result.stdout
     assert CALL_PHASE_SENTENCE not in result.stdout
+    assert CAUSE_CLAUSE not in result.stdout
 
 
 def test_an_assertion_failure_guards(tmp_path: Path) -> None:
@@ -332,6 +292,7 @@ NOT_WRONG_CALLS = {
 CALL_PHASE_SENTENCE = (
     "the test's own code raised a TypeError before its assertion"
 )
+CAUSE_CLAUSE = "A call that does not fit the baseline's code is one cause"
 FIXTURE_SENTENCE = "a fixture failed during setup"
 
 
@@ -383,7 +344,9 @@ def test_a_wrong_call_in_the_test_body_is_refused_whatever_its_wording(
     """Each kind of wrong call the interpreter words differently is refused.
 
     The test's call fits the head's signature and not the baseline's, so the baseline raises the
-    interpreter's own TypeError in the test body.
+    interpreter's own TypeError in the test body. The refusal says what was observed, names a
+    misfit call as one possible cause, and neither asks for a rerun nor says the code was never
+    reached.
     """
     baseline_source, head_source, call = WRONG_CALLS[kind]
     repo, baseline = _one_call_repo(
@@ -394,8 +357,14 @@ def test_a_wrong_call_in_the_test_body_is_refused_whatever_its_wording(
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert CALL_PHASE_SENTENCE in result.stdout
     assert "[fixture]" in result.stdout
+    why = _why(result)
+    assert CALL_PHASE_SENTENCE in why
+    assert CAUSE_CLAUSE in why
+    assert "no behavior was compared" in why
+    assert "not evidence either way" in why
+    assert "redo" not in why.lower()
+    assert "never reached" not in why.lower()
 
 
 @pytest.mark.parametrize("kind", sorted(NOT_WRONG_CALLS))
@@ -404,7 +373,7 @@ def test_a_type_error_that_no_call_made_is_refused_the_same_way(
 ) -> None:
     """A TypeError from using what the baseline returned is refused with the call-phase sentence.
 
-    The class and the place of the raise are all the tool reads, so it claims no cause.
+    The class and the place of the raise are all the tool reads.
     """
     baseline_source, head_source, expression = NOT_WRONG_CALLS[kind]
     repo, baseline = _one_call_repo(
@@ -441,22 +410,27 @@ def test_a_valid_call_whose_package_code_raises_type_error_guards(
     assert "TypeError" in result.stdout
 
 
-def test_a_refusal_for_a_wrong_call_does_not_say_redo_or_never_reached(
+def test_a_type_error_raised_inside_a_library_by_package_code_guards(
     tmp_path: Path,
 ) -> None:
-    """The refusal reports what was observed and neither asks for a rerun nor claims a cause."""
-    baseline_source, head_source, call = WRONG_CALLS["unexpected keyword"]
+    """A TypeError raised in a library frame under a right call is counted, not refused.
+
+    The crash frame is the standard library's, which cannot be placed under the tests/ of the
+    baseline's tree, so the run is not said to have the test's own code raising.
+    """
     repo, baseline = _one_call_repo(
-        tmp_path, baseline_source, head_source, f"{call} is not None"
+        tmp_path,
+        "import json\n\n\ndef f():\n    return json.dumps({1})\n",
+        "import json\n\n\ndef f():\n    return json.dumps([1])\n",
+        'f() == "[1]"',
     )
+    _passes_at_head(repo, "tests/test_widgets.py")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
-    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert CALL_PHASE_SENTENCE in result.stdout
-    assert "not evidence either way" in result.stdout
-    assert "redo" not in result.stdout.lower()
-    assert "never reached" not in result.stdout.lower()
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "[behavioral]" in result.stdout
+    assert "the test's own code raised" not in result.stdout
 
 
 def _why(result: subprocess.CompletedProcess) -> str:

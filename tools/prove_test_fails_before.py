@@ -35,9 +35,11 @@ Four verdicts, each its own exit code:
                        fixture-shaped), so no behavior was compared. A setup or teardown
                        failure that is neither a missing import or file nor a pytest-timeout
                        report is fixture-shaped, whatever raised it; a call-phase failure is
-                       fixture-shaped when it is a ``TypeError`` raised inside ``tests/``,
-                       whatever its message. This is a policy: the class and the place of the raise
-                       do not establish that a call failed to fit, so no wording is read, and a
+                       fixture-shaped when it is a ``TypeError`` whose crash frame is placed
+                       under ``tests/`` of the baseline's tree (a frame that cannot be placed
+                       there, a library's, is behavioral), whatever its message. This is a
+                       policy: the class and the place of the raise do not establish that a call
+                       failed to fit, so no wording is read, and a
                        ``TypeError`` from handling what the code under test returned (a ``None``
                        subscripted) is refused the same way. Such a test becomes a guard by
                        asserting on what was returned before using it.
@@ -603,20 +605,38 @@ def _is_unreached(headline: str, crash_path: str | None, tree: Path) -> bool:
     return False
 
 
-def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
-    """Return whether the failure's crash frame sits outside ``tests/`` in the materialized tree.
+def _crash_relative_to_tree(crash_path: str | None, tree: Path) -> str | None:
+    """Return the crash frame's forward-slash path relative to the materialized tree.
 
-    A frame under ``tests/`` is the test's own body or a fixture; one outside it is the code
-    under test raising. An unresolvable or missing path (a report with no exception repr) is
-    never treated as outside.
+    ``None`` for a missing path (a report with no exception repr) and for one that cannot be
+    placed under the tree, such as a frame in the standard library or site-packages.
     """
     if not crash_path:
-        return False
+        return None
     try:
         rel = Path(crash_path).resolve().relative_to(tree.resolve())
     except (OSError, ValueError):
-        return False
-    return not str(rel).replace("\\", "/").startswith(f"{TEST_TREE}/")
+        return None
+    return str(rel).replace("\\", "/")
+
+
+def _crash_under_test_tree(crash_path: str | None, tree: Path) -> bool:
+    """Return whether the crash frame is placed positively under ``tests/`` in the tree.
+
+    A frame under ``tests/`` is the test's own body or a fixture. A missing or unplaceable path
+    is not under it.
+    """
+    rel = _crash_relative_to_tree(crash_path, tree)
+    return rel is not None and rel.startswith(f"{TEST_TREE}/")
+
+
+def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
+    """Return whether the crash frame is placed in the tree and outside ``tests/``.
+
+    One outside it is the code under test raising. A missing or unplaceable path is never outside.
+    """
+    rel = _crash_relative_to_tree(crash_path, tree)
+    return rel is not None and not rel.startswith(f"{TEST_TREE}/")
 
 
 def _failure_kind(entry: dict, tree: Path) -> str:
@@ -638,9 +658,11 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     ``behavioral``: the test's own ``assert`` or ``pytest.fail``/``pytest.raises`` failed (the
     raised exception's own class is ``AssertionError`` or ``Failed``, read from
     ``exc_typename``), or the crash frame sits outside ``tests/``, meaning the code under test
-    raised. ``fixture``: a ``TypeError`` raised from inside ``tests/``, whatever its message. The
-    class and the place of the raise do not establish that a call failed to fit, so the tool reads
-    no wording and claims no cause. Any other call-phase exception is ``behavioral``.
+    raised. ``fixture``: a ``TypeError`` whose crash frame is placed under ``tests/``
+    (:func:`_crash_under_test_tree`), whatever its message. The class and the place of the raise
+    do not establish that a call failed to fit, so the tool reads no wording and claims no cause.
+    Any other call-phase exception, and a ``TypeError`` whose crash frame cannot be placed under
+    the tree (a library's), is ``behavioral``.
     """
     headline = entry.get("headline", "")
     if _is_unreached(headline, entry.get("crash_path"), tree):
@@ -653,7 +675,9 @@ def _failure_kind(entry: dict, tree: Path) -> str:
         return "behavioral"
     if _crash_outside_test_tree(entry.get("crash_path"), tree):
         return "behavioral"
-    if entry.get("exc_typename") == "TypeError":
+    if entry.get("exc_typename") == "TypeError" and _crash_under_test_tree(
+        entry.get("crash_path"), tree
+    ):
         return "fixture"
     return "behavioral"
 
@@ -665,7 +689,8 @@ def _not_counted(entry: dict, kind: str) -> str:
     if kind == "unreached":
         return f"{where}: a missing import or file ({headline})"
     if entry["phase"] == "call":
-        return f"{where}: the test's own code raised a TypeError before its assertion ({headline})"
+        raised = entry["exc_typename"]
+        return f"{where}: the test's own code raised a {raised} before its assertion ({headline})"
     return f"{where}: a fixture failed during {entry['phase']} ({headline})"
 
 
@@ -713,8 +738,7 @@ def _classify(
         )
     if failed and not behavioral and fixture:
         cause = (
-            " A call that does not fit the baseline's code is one cause of a TypeError raised "
-            "there."
+            " A call that does not fit the baseline's code is one cause of this."
             if any(t["phase"] == "call" for t in fixture)
             else ""
         )
