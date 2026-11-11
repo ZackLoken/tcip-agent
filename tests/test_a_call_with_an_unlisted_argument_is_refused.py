@@ -8,55 +8,73 @@ record; a call carrying listed arguments alone answers as it always has.
 
 from __future__ import annotations
 
-import asyncio
+import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import anyio
 import pytest
-from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import CallToolResult, TextContent
+from mcp.types import TextContent
 
 from tcip_mcp import dataset_layout, traits
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tcip_mcp.server import _CONTEXT
 from tcip_mcp.workspace import BoundProject
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
-from tests._server_calls import client_server, results_through_handshake
+from tests._server_calls import (
+    called_through_the_server,
+    client_server,
+    results_through_handshake,
+)
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 DIRECT, WIRE = "direct", "wire"
 ROUTES = (DIRECT, WIRE)
 """The server's own ``call_tool``, and a client session over in-memory streams."""
 
 
-def _text(result: CallToolResult) -> str:
-    """Return the text of the one block a call answered with."""
-    (block,) = result.content
-    assert isinstance(block, TextContent), block
-    return block.text
+def _listing(bound: BoundProject | None) -> dict[str, list[str]]:
+    """Return each listed tool's argument names, from the server's own listing."""
+    return {
+        listed.name: list(listed.input_schema["properties"])
+        for listed in anyio.run(client_server(bound).list_tools)
+    }
+
+
+LISTED = _listing(None)
+"""Every tool the server lists, with the argument names its schema lists."""
+
+STRANGER = "an_argument_no_tool_lists"
+"""A name no listed tool holds."""
 
 
 def _call(
-    route: str, tool: str, arguments: dict, bound: BoundProject
-) -> tuple[bool, str]:
-    """Return whether ``tool`` called with ``arguments`` on ``route`` was refused, and its text."""
-    if route == WIRE:
-        (result,) = results_through_handshake([(tool, arguments)], bound=bound)
-        return bool(result.is_error), _text(result)
-    try:
-        answer = asyncio.run(client_server(bound).call_tool(tool, arguments))
-    except ToolError as exc:
-        return True, str(exc)
-    assert isinstance(answer, CallToolResult), answer
-    return False, _text(answer)
+    route: str, tool: str, arguments: dict, bound: BoundProject | None
+) -> tuple[bool, JsonValue]:
+    """Return whether ``tool`` called with ``arguments`` on ``route`` was refused, and the answer.
+
+    A refused call's answer is its error's text; an admitted call's is the tool's answer, which is
+    never a bare string for the tools called here.
+    """
+    if route == DIRECT:
+        answer = called_through_the_server(tool, arguments, bound=bound)
+        return isinstance(answer, str), answer
+    (result,) = results_through_handshake([(tool, arguments)], bound=bound)
+    (block,) = result.content
+    assert isinstance(block, TextContent), block
+    if result.is_error:
+        return True, block.text
+    return False, json.loads(block.text)
 
 
-def _listed(bound: BoundProject, tool: str) -> list[str]:
-    """Return the argument names ``tool``'s schema lists, from the server's own listing."""
-    (listed,) = [
-        t for t in anyio.run(client_server(bound).list_tools) if t.name == tool
-    ]
-    return list(listed.input_schema["properties"])
+def _sentence(tool: str, unlisted: list[str], takes: list[str]) -> str:
+    """Return the refusal of ``tool`` for ``unlisted``, listing ``takes`` as the tool's own."""
+    named = ", ".join(repr(name) for name in unlisted)
+    return f"{tool} does not take {named}; it takes {', '.join(takes) or 'no argument'}"
 
 
 def _raw_images(project: Path) -> Path:
@@ -70,8 +88,8 @@ def _ingested_file(project: Path) -> Path:
     return image_dir(project, UNDATED_BUCKET) / "a.png"
 
 
-UNLISTED = ["dataset_root", "destination", "project", "bound", "actor"]
-"""Arguments ``ingest_images`` does not list: two it never took, three the server supplies."""
+UNLISTED = ["dataset_root", "destination", *_CONTEXT]
+"""Arguments ``ingest_images`` does not list: two it never took, the names the server supplies."""
 
 REFUSED = [
     *(("ingest_images", [name]) for name in UNLISTED),
@@ -95,12 +113,13 @@ def _refusal(
     """
     before = audit_rows(project)
     arguments = {name: str(project / "elsewhere") for name in unlisted}
-    if "source" in _listed(bound, tool):
+    if "source" in LISTED[tool]:
         arguments["source"] = str(_raw_images(project))
 
     refused, sentence = _call(route, tool, arguments, bound)
 
     assert refused, sentence
+    assert isinstance(sentence, str), sentence
     assert not _ingested_file(project).exists()
     assert dataset_layout.list_dates(project) == []
     assert audit_rows(project) == before
@@ -116,17 +135,10 @@ def test_a_call_naming_arguments_the_tool_does_not_list_is_refused_before_it_run
     tool: str,
     unlisted: list[str],
 ) -> None:
-    """The refusal names each unlisted argument, then lists the tool's own or says it takes none."""
+    """The refusal names the tool and each unlisted argument, then the tool's own arguments."""
     sentence = _refusal(route, tool, unlisted, project, bound)
 
-    named, _, takes = sentence.partition("; ")
-    assert [repr(name) in named for name in unlisted] == [True] * len(unlisted)
-    listed = _listed(bound, tool)
-    assert (
-        takes == f"it takes {', '.join(listed)}"
-        if listed
-        else takes == "it takes no argument"
-    ), sentence
+    assert sentence == _sentence(tool, unlisted, LISTED[tool])
 
 
 @pytest.mark.parametrize(("tool", "unlisted"), REFUSED)
@@ -140,11 +152,24 @@ def test_the_two_routes_refuse_a_call_in_the_same_sentence(
     assert direct == wire
 
 
+@pytest.mark.parametrize("tool", LISTED)
+def test_every_listed_tool_refuses_an_argument_outside_its_properties(
+    tool: str,
+) -> None:
+    """Each listed tool, called with a name outside its properties, is refused naming it."""
+    assert STRANGER not in LISTED[tool]
+
+    refused, sentence = _call(DIRECT, tool, {STRANGER: "x"}, None)
+
+    assert refused
+    assert sentence == _sentence(tool, [STRANGER], LISTED[tool])
+
+
 @pytest.mark.parametrize("route", ROUTES)
 def test_a_tool_taking_no_argument_is_called_with_none(
     bound: BoundProject, route: str
 ) -> None:
-    assert _listed(bound, "inspect_project") == []
+    assert LISTED["inspect_project"] == []
 
     refused, answer = _call(route, "inspect_project", {}, bound)
 
