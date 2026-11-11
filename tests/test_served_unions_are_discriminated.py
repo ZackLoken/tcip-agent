@@ -81,6 +81,7 @@ NULLABLE_SETS = {
     "NonFiniteBest": {"best_value_spread", "split_sensitivity"},
     "OverfitReport": {"initial", "final", "issue"},
     "RasterIdentity": {"band_interpretations", "geotransform"},
+    "RegisteredDataset": {"fingerprint", "repaired"},
     "RecordedIdentity": {
         "agent_client_name",
         "agent_client_version",

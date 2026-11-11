@@ -1,25 +1,34 @@
-"""Dataset routes: what a dataset root holds, the dataset selection and the image position.
+"""Dataset routes: what a dataset root holds, its identity, the selection and the image position.
 
 A dataset root holds its dates and subjects, through :mod:`tcip_mcp.dataset_layout`, and its
-published buckets, through :mod:`tcip_mcp.buckets`; the selection is ``GuiState.dataset``, and
-the position is the current image's within it.
+published buckets, through :mod:`tcip_mcp.buckets`; its identity is read there and registered
+through ``register_dataset``; the selection is ``GuiState.dataset``, and the position is the
+current image's within it.
 """
 
 from __future__ import annotations
 
 import datetime
 from pathlib import Path
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tcip_mcp.buckets import buckets_by_date
 from tcip_mcp.dataset_layout import (
+    DatasetRecord,
     capture_date,
     capture_subjects,
     list_dates,
     list_subjects,
+    read_dataset_identity,
 )
+from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    DatasetMappings,
+    mappings_over_dataset,
+)
+from tcip_mcp.traits import registered_crops
 from tcip_mcp.web_client import (
     CaptureChoice,
     DatasetChoice,
@@ -121,6 +130,141 @@ def contents_of(root: Path) -> TreeContents:
 def tree_of(root: Path) -> DatasetTree:
     """Return the tree of the dataset root ``root``: :func:`contents_of` beside the root."""
     return DatasetTree(dataset_root=str(root), **dict(contents_of(root)))
+
+
+class UnregisteredRoot(BaseModel):
+    """A dataset root at which no identity document is stored."""
+
+    kind: Literal["unregistered"] = "unregistered"
+
+
+class RegisteredRoot(BaseModel):
+    """A dataset root's identity, and the open project's plant mappings built over it."""
+
+    kind: Literal["registered"] = "registered"
+    identity: DatasetRecord
+    mappings: DatasetMappings
+
+
+class RefusedIdentity(BaseModel):
+    """A dataset root whose identity document is stored and will not read, and why."""
+
+    kind: Literal["refused"] = "refused"
+    reason: str
+
+
+class RootIdentity(BaseModel):
+    """What a dataset root's identity document reads as, beside every crop it may be registered at.
+
+    ``crops`` is :func:`~tcip_mcp.traits.registered_crops`, sorted.
+    """
+
+    dataset_root: str
+    identity: Annotated[
+        UnregisteredRoot | RegisteredRoot | RefusedIdentity,
+        Field(discriminator="kind"),
+    ]
+    crops: list[str]
+
+
+@router.get("/identity")
+def get_dataset_identity(dataset_root: str) -> RootIdentity:
+    """Return what :func:`~tcip_mcp.dataset_layout.read_dataset_identity` reads at a root.
+
+    A registered root carries the open project's mappings built over it
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.mappings_over_dataset`); no project
+    open answers 409.
+    """
+    root = allowed_path(dataset_root)
+    project = store.held().root
+    state: UnregisteredRoot | RegisteredRoot | RefusedIdentity
+    try:
+        identity = read_dataset_identity(root)
+    except ValueError as exc:
+        state = RefusedIdentity(reason=str(exc))
+    else:
+        state = (
+            UnregisteredRoot()
+            if identity is None
+            else RegisteredRoot(
+                identity=identity,
+                mappings=mappings_over_dataset(project, identity.id),
+            )
+        )
+    return RootIdentity(
+        dataset_root=str(root),
+        identity=state,
+        crops=sorted(registered_crops()),
+    )
+
+
+class RegisterPayload(BaseModel):
+    """A registration of ``dataset_root`` at ``crop`` by the person ``user`` names.
+
+    ``confirmed_crop`` is the crop the person was shown as stored, which a change of it carries.
+    """
+
+    dataset_root: str
+    crop: str
+    user: str
+    confirmed_crop: str | None = None
+
+
+class RegisteredDataset(DatasetRecord):
+    """The identity a registration wrote at ``dataset_root``.
+
+    ``repaired`` is ``register_dataset``'s sentence naming the id it restored, ``None`` when it
+    kept or minted one.
+    """
+
+    dataset_root: str
+    repaired: str | None = None
+
+
+@router.post("/register")
+def register_dataset_route(payload: RegisterPayload) -> RegisteredDataset:
+    """Register the dataset at ``dataset_root`` in the open project at ``crop``.
+
+    The registration is :func:`~tcip_mcp.tools.project_tools.register_dataset`'s, by the person
+    :func:`~tcip_mcp.identity.actor` makes of ``user``. A root whose identity reads at a crop
+    other than ``crop`` refuses (409) naming it, writing nothing, unless ``confirmed_crop`` is
+    that crop. The function's error, or a ``ValueError`` it raises, answers 400 with its
+    sentence; a change committed whose audit line could not be written 409; no project open 409;
+    a root outside the allowed roots 403.
+    """
+    from tcip_mcp.audit import MutationCommittedWithoutAuditLineError
+    from tcip_mcp.identity import actor
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    person = actor(payload.user)
+    root = allowed_path(payload.dataset_root)
+    project = store.held().root
+    try:
+        stored = read_dataset_identity(root)
+    except ValueError:
+        stored = None  # a refused document: register_dataset restores its id or refuses
+    if stored is not None and stored.crop not in (
+        payload.crop,
+        payload.confirmed_crop,
+    ):
+        raise HTTPException(
+            409,
+            f"{root} is registered at crop {stored.crop!r}; registering it at "
+            f"{payload.crop!r} changes its crop, which the request confirms by naming "
+            f"{stored.crop!r} as the crop shown",
+        )
+    try:
+        answer = register_dataset(
+            project, str(root), payload.crop, actor=person
+        )
+    except MutationCommittedWithoutAuditLineError as exc:
+        raise audit_gap_409(exc, committed=True, what=None) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if "error" in answer:
+        raise HTTPException(400, answer["error"])
+    return RegisteredDataset.model_validate(answer)
 
 
 class SelectAnswer(BaseModel):
