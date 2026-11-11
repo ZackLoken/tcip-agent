@@ -348,6 +348,19 @@ def test_a_registration_at_the_stored_crop_needs_no_confirmation(
     assert resp.json()["id"] == registered
 
 
+def test_a_padded_crop_equal_to_the_stored_one_needs_no_confirmation(
+    opened_client: TestClient, opened_project: Path
+) -> None:
+    """The request's crop reads as the stored crop reads, its surrounding spaces stripped."""
+    root = _imaged(opened_project / "ds")
+    registered = register_dataset_at(opened_project, root, crop=CROP)
+
+    resp = _register(opened_client, root, f"  {CROP} ")
+
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["id"], resp.json()["crop"]) == (registered, CROP)
+
+
 # ── Reading a root's identity ──────────────────────────────────────────
 
 
