@@ -154,8 +154,10 @@ def assert_path_allowed(path: str | Path) -> Path:
     ancestor, against the roots that read (:func:`allowed_roots`). An ``.imports`` or
     ``.removed`` staging tree is never admitted, by name (:func:`_excluded_by_name`). Raises
     :class:`ValueError` on any resolution or comparison error and, naming the roots checked, on
-    refusal; a path no root that read contains while some registry did not read raises
-    :class:`UnreadRegistryError` instead, naming each such registry.
+    refusal. A path with an existing ancestor and outside every staging tree that no root that
+    read contains, while some registry did not read, raises :class:`UnreadRegistryError`
+    instead, naming each such registry; any other path is refused as it is with every registry
+    read.
     """
     try:
         resolved = _in_open_project(path)
@@ -197,7 +199,7 @@ def resolved_path(path: str) -> Path:
 
 
 def allowed_path(path: str | Path) -> Path:
-    """Resolve an allowed path, translating refusal to HTTP 403.
+    """Resolve an allowed path, translating refusal to HTTP 403, or 409 beside an unread registry.
 
     The path is admitted by :func:`assert_path_allowed`; its refusal is answered as 403 naming it,
     and a path refused beside an unread registry (:class:`UnreadRegistryError`) as the 409 of a
