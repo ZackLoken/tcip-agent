@@ -246,7 +246,7 @@ def test_a_refused_entry_after_a_valid_one_leaves_none_of_its_projects_roots(
 def test_two_unread_registries_are_each_named(
     client: TestClient, arranged: Arranged
 ) -> None:
-    second = new_project(arranged.damaged.parent / "another-too").root
+    second = new_project(arranged.damaged.parent / "beside").root
     register_dataset_at(second, second, crop=CROP)
 
     with _undecodable(arranged.damaged) as first_refusal:
