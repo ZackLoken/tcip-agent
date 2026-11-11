@@ -1979,8 +1979,9 @@ def mappings_over_dataset(
     """Return each of ``project``'s mappings whose build records ``dataset_id``.
 
     Each is read by :func:`load_mapping` and its registry by :func:`load_registry`; a mapping
-    that will not read is unplaced with its refusal, and a registry that will not read stands as
-    its mapping's refusal in place of a crop. No crop is compared here.
+    that will not read is unplaced with its refusal, and a registry that is absent, refused by its
+    model or whose bytes will not decode stands as its mapping's refusal in place of a crop. No
+    crop is compared here.
     """
     placed: list[DatasetMapping] = []
     unplaced: list[UnplacedMapping] = []
@@ -1996,7 +1997,7 @@ def mappings_over_dataset(
         read: RegistryCrop | RegistryRefused
         try:
             read = RegistryCrop(crop=load_registry(project, registry)["crop"])
-        except ValueError as exc:
+        except (ValueError, tcip_store.DecodeError) as exc:
             read = RegistryRefused(refusal=str(exc))
         placed.append(
             DatasetMapping(name=name, plant_registry=registry, registry=read)

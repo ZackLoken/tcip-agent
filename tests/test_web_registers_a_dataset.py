@@ -480,3 +480,32 @@ def test_a_mapping_or_registry_that_will_not_read_is_listed_with_its_refusal(
     (unplaced,) = mappings["unplaced"]
     assert unplaced["name"] == "east"
     assert "east" in unplaced["refusal"]
+
+
+def test_a_registry_whose_bytes_will_not_decode_stands_as_its_mappings_refusal(
+    opened_client: TestClient, opened_project: Path
+) -> None:
+    """The registry's stored bytes are damaged; the read answers, ``valley`` carrying why."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_registry_key,
+    )
+    from tests._record_damage_fixtures import damage_record
+
+    root, _dataset_id = _mapped(opened_project)
+    key = plant_registry_key(opened_project, "reg")
+    damage_record(key, b"{not json")
+    with pytest.raises(tcip_store.DecodeError) as refusal:
+        tcip_store.read(key)
+
+    placed = _identity(opened_client, root)["identity"]["mappings"]["placed"]
+
+    assert placed == [
+        {
+            "name": "valley",
+            "plant_registry": "reg",
+            "registry": {
+                "kind": "registry_refused",
+                "refusal": str(refusal.value),
+            },
+        }
+    ]
