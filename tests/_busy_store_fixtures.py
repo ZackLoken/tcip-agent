@@ -65,6 +65,23 @@ def waiting(lock_timeout_s: float) -> Iterator[SqliteBackend]:
         backend.close()
 
 
+@contextmanager
+def locked_by_another_holder(root: str | Path) -> Iterator[None]:
+    """Hold ``root``'s database from another connection while the bound backend waits briefly.
+
+    The bound backend's connections on ``root`` are released first, then a backend waiting
+    :data:`SHORT_WAIT_S` is bound (:func:`waiting`) and the database held
+    (:func:`held_by_another_connection`). On leaving, the holder and the short-wait backend are
+    closed and a new default backend is bound.
+    """
+    tcip_store.release_root(root)
+    try:
+        with waiting(SHORT_WAIT_S), held_by_another_connection(root):
+            yield
+    finally:
+        tcip_store.bind()
+
+
 def seconds_given_up_after(sentence: str) -> float:
     """Return the seconds the store's busy ``sentence`` says the operation gave up after."""
     found = re.search(r"gave up after (\d+(?:\.\d+)?)s", sentence)

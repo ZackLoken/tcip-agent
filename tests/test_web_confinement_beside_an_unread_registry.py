@@ -24,11 +24,7 @@ from tcip_mcp.tools.project_tools import (
 )
 from tcip_mcp.workspace import project_dirs
 from tcip_web.state import store
-from tests._busy_store_fixtures import (
-    SHORT_WAIT_S,
-    held_by_another_connection,
-    waiting,
-)
+from tests._busy_store_fixtures import locked_by_another_holder
 from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import register_dataset_at, write_image
 from tests._record_damage_fixtures import damage_record, unopenable_database
@@ -125,17 +121,12 @@ def _unopenable(project: Path) -> Iterator[str]:
 
 @contextmanager
 def _busy(project: Path) -> Iterator[str]:
-    """Hold ``project``'s store past a short wait; yield the store's busy phrase.
+    """Hold ``project``'s store past a short wait (:func:`locked_by_another_holder`).
 
-    On leaving, the holder and the short-wait backend are closed and a new default backend is
-    bound.
+    Yields the store's busy phrase.
     """
-    tcip_store.release_root(project)
-    try:
-        with waiting(SHORT_WAIT_S), held_by_another_connection(project):
-            yield "was busy"
-    finally:
-        tcip_store.bind()
+    with locked_by_another_holder(project):
+        yield "was busy"
 
 
 DAMAGE = {

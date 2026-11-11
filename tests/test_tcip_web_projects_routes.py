@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import time
-from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,13 +16,14 @@ from tests._busy_store_fixtures import (
     GAVE_UP_WITHIN_S,
     SHORT_WAIT_S,
     held_by_another_connection,
+    locked_by_another_holder,
     seconds_given_up_after,
     waiting,
 )
 from tests._web_fixtures import INVARIANCES
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
     from tcip_store import RefusedRead
     from tcip_web.state import OpenProject
@@ -459,29 +459,12 @@ def test_opening_an_id_no_project_holds_is_404(
     assert client.get("/api/projects").json()["open_id"] is None
 
 
-@contextmanager
-def _locked_by_another_holder(root: Path) -> Iterator[None]:
-    """Hold ``root``'s database from another connection while the bound backend waits briefly.
-
-    The bound backend's connections on ``root`` are released first. On leaving, the holder and
-    the short-wait backend are closed and a new default backend is bound.
-    """
-    import tcip_store
-
-    tcip_store.release_root(root)
-    try:
-        with waiting(SHORT_WAIT_S), held_by_another_connection(root):
-            yield
-    finally:
-        tcip_store.bind()
-
-
 def test_opening_a_project_whose_store_is_held_answers_409_not_404(
     client: TestClient, workspace_dir: Path
 ) -> None:
     held = _make_project(workspace_dir, "locked_orchard")
 
-    with _locked_by_another_holder(held.root):
+    with locked_by_another_holder(held.root):
         resp = client.post(
             "/api/projects/open", json={"id": held.id, "user": "grower"}
         )
@@ -500,7 +483,7 @@ def test_a_held_project_does_not_stop_another_from_opening(
     held = _make_project(workspace_dir, "locked_orchard")
     free = _make_project(workspace_dir, "free_orchard")
 
-    with _locked_by_another_holder(held.root):
+    with locked_by_another_holder(held.root):
         opened = client.post(
             "/api/projects/open", json={"id": free.id, "user": "grower"}
         )
@@ -520,7 +503,7 @@ def test_a_held_project_opens_once_the_hold_is_released(
     client: TestClient, workspace_dir: Path
 ) -> None:
     held = _make_project(workspace_dir, "locked_orchard")
-    with _locked_by_another_holder(held.root):
+    with locked_by_another_holder(held.root):
         pass
 
     resp = client.post(
