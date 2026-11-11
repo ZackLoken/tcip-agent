@@ -804,13 +804,14 @@ def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_
     assert phrase in refused.get("error", ""), refused
     assert named in refused["error"], refused
     assert (UNCOVERED in refused["error"]) == (phrase == UNCOVERED), refused
+    own = [(p, s) for p, s in REASONS if p == phrase]
     assert [
         (p, s)
         for p, s in REASONS
         if p in refused["error"] or s in refused["error"]
-    ] == (
-        [(phrase, dict(REASONS)[phrase])] if phrase in dict(REASONS) else []
-    ), refused
+    ] == own, refused
+    if own:
+        _named_under(refused["error"], tuple(own))
     assert "image '" not in refused["error"], refused
     assert "['" not in refused["error"], refused
     assert read_delivery_events(tmp_path) == []
@@ -839,20 +840,19 @@ def test_the_next_step_of_a_result_on_a_date_not_delivered_leads_to_a_delivery(
     date; in both it delivers both dates' buckets, with every read image's result.
     """
     from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
     dataset_root, _ = _mapped(tmp_path, TWO_PLANTS, CAPTURES, covered)
     buckets = _both(tmp_path, dataset_root)
-
-    refused = _called(
+    first = _arguments_over(
         tmp_path,
-        _arguments_over(
-            tmp_path,
-            dataset_root,
-            buckets[:1],
-            _rows(*READ[:3], (SECOND, "a", 8)),
-        ),
+        dataset_root,
+        buckets[:1],
+        _rows(*READ[:3], (SECOND, "a", 8)),
     )
+
+    refused = _called(tmp_path, first)
 
     assert isinstance(refused, dict), refused
     assert _named_under(refused["error"], ((phrase, step),)) == {
@@ -860,11 +860,13 @@ def test_the_next_step_of_a_result_on_a_date_not_delivered_leads_to_a_delivery(
     }
     assert not [s for p, s in REASONS if p != phrase and s in refused["error"]]
     if covered is not None:
+        built = load_mapping(tmp_path, first["plant_mapping"])
+        assert built is not None
         rebuilt = build_plant_mapping(
             tmp_path,
-            name="valley",
+            name=built.name,
             dataset_root=str(dataset_root),
-            plant_registry="reg",
+            plant_registry=built.plant_registry.name,
             actor=None,
         )
         assert "error" not in rebuilt, rebuilt
