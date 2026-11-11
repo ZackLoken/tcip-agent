@@ -31,13 +31,14 @@ Four verdicts, each its own exit code:
                        everything was skipped, the baseline could not collect the file, the
                        baseline's own source was not what got imported, pytest did not finish
                        within ``--timeout``, hit an internal error or never reported an outcome,
-                       or no failure is behavioral (each rests on a missing import or file or is
-                       fixture-shaped), so no behavior was compared. A setup or teardown
+                       or no failure is behavioral (each is ``unreached``, ``fixture`` or
+                       ``test_code``), so no behavior was compared. A setup or teardown
                        failure that is neither a missing import or file nor a pytest-timeout
-                       report is fixture-shaped, whatever raised it; a call-phase failure is
-                       fixture-shaped when it is a ``TypeError`` whose crash frame is placed
-                       under ``tests/`` of the baseline's tree (a frame that cannot be placed
-                       there, a library's, is behavioral), whatever its message. This is a
+                       report is ``fixture``, whatever raised it; a call-phase failure is
+                       ``test_code``, raised in the test's own code, when it is a ``TypeError``
+                       whose crash frame is placed under ``tests/`` of the materialized tree (a
+                       frame that cannot be placed there, a library's, is behavioral), whatever
+                       its message. This is a
                        policy: the class and the place of the raise do not establish that a call
                        failed to fit, so no wording is read, and a
                        ``TypeError`` from handling what the code under test returned (a ``None``
@@ -212,7 +213,7 @@ def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
     except ValueError:
         return None, f"{raw} is outside this repository ({REPO})."
     rel_str = str(rel).replace("\\", "/")
-    if not rel_str.startswith(f"{TEST_TREE}/"):
+    if not _is_test_side(rel_str):
         return None, f"{raw} resolves to {rel_str}, outside {TEST_TREE}/."
     return rel_str, ""
 
@@ -230,9 +231,10 @@ def git_output(*args: str) -> str:
 
 
 def _is_test_side(path: str) -> bool:
-    """Return whether ``path`` is one the tool overlays from the current tree.
+    """Return whether ``path``, with either slash, lies under ``tests/``.
 
-    A diff in such a path is not the change under test.
+    A path under ``tests/`` is the test side: the tool overlays it from the current tree, so a diff
+    in it is not the change under test.
     """
     return path.replace("\\", "/").startswith(f"{TEST_TREE}/")
 
@@ -627,7 +629,7 @@ def _crash_under_test_tree(crash_path: str | None, tree: Path) -> bool:
     is not under it.
     """
     rel = _crash_relative_to_tree(crash_path, tree)
-    return rel is not None and rel.startswith(f"{TEST_TREE}/")
+    return rel is not None and _is_test_side(rel)
 
 
 def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
@@ -636,13 +638,14 @@ def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
     One outside it is the code under test raising. A missing or unplaceable path is never outside.
     """
     rel = _crash_relative_to_tree(crash_path, tree)
-    return rel is not None and not rel.startswith(f"{TEST_TREE}/")
+    return rel is not None and not _is_test_side(rel)
 
 
 def _failure_kind(entry: dict, tree: Path) -> str:
-    """Classify one failed test: ``unreached``, ``timeout``, ``behavioral`` or ``fixture``.
+    """Return the kind of one failed test.
 
-    An errored test is classified the same way.
+    The kind is one of ``unreached``, ``timeout``, ``behavioral``, ``test_code`` or ``fixture``. An
+    errored test is classified the same way.
 
     ``unreached``: the import never resolved, always; or a needed file was missing and the crash
     frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
@@ -658,7 +661,7 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     ``behavioral``: the test's own ``assert`` or ``pytest.fail``/``pytest.raises`` failed (the
     raised exception's own class is ``AssertionError`` or ``Failed``, read from
     ``exc_typename``), or the crash frame sits outside ``tests/``, meaning the code under test
-    raised. ``fixture``: a ``TypeError`` whose crash frame is placed under ``tests/``
+    raised. ``test_code``: a ``TypeError`` whose crash frame is placed under ``tests/``
     (:func:`_crash_under_test_tree`), whatever its message. The class and the place of the raise
     do not establish that a call failed to fit, so the tool reads no wording and claims no cause.
     Any other call-phase exception, and a ``TypeError`` whose crash frame cannot be placed under
@@ -678,25 +681,42 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     if entry.get("exc_typename") == "TypeError" and _crash_under_test_tree(
         entry.get("crash_path"), tree
     ):
-        return "fixture"
+        return "test_code"
     return "behavioral"
 
 
-def _not_counted(entry: dict, kind: str) -> str:
-    """Name a failure that is not counted: its test, what was observed and in which phase."""
+def _not_counted(entry: dict) -> str:
+    """Name a failure that is not counted, by its ``kind``.
+
+    The kind is ``unreached``, ``test_code`` or ``fixture``. The sentence names the test, what was
+    observed and, for a fixture, the phase it failed in.
+    """
     where = entry["nodeid"]
     headline = entry.get("headline", "")
-    if kind == "unreached":
+    if entry["kind"] == "unreached":
         return f"{where}: a missing import or file ({headline})"
-    if entry["phase"] == "call":
+    if entry["kind"] == "test_code":
         raised = entry["exc_typename"]
         return f"{where}: the test's own code raised a {raised} before its assertion ({headline})"
     return f"{where}: a fixture failed during {entry['phase']} ({headline})"
 
 
+def _kinded_failures(observed: dict, tree: Path) -> list[dict]:
+    """Return each failed or errored test's entry with its :func:`_failure_kind` under ``kind``."""
+    return [
+        {**t, "kind": _failure_kind(t, tree)}
+        for t in observed["tests"]
+        if t["outcome"] in ("failed", "error")
+    ]
+
+
 def _classify(
-    observed: dict, baseline_precedes: bool, tree: Path
+    observed: dict, baseline_precedes: bool, failed: list[dict]
 ) -> tuple[str, str]:
+    """Return the verdict and its sentence for ``observed``.
+
+    ``failed`` is :func:`_kinded_failures` of ``observed``.
+    """
     if observed.get("internal_error"):
         return (
             REFUSED,
@@ -721,14 +741,10 @@ def _classify(
             f"all {len(outcomes)} selected tests were skipped, so nothing was evaluated. A "
             "module-level importorskip at the baseline will do this."
         )
-    failed = [
-        t for t in observed["tests"] if t["outcome"] in ("failed", "error")
-    ]
-    kinds = [_failure_kind(t, tree) for t in failed]
-    unreached = [t for t, k in zip(failed, kinds) if k == "unreached"]
-    timed_out = [t for t, k in zip(failed, kinds) if k == "timeout"]
-    fixture = [t for t, k in zip(failed, kinds) if k == "fixture"]
-    behavioral = [t for t, k in zip(failed, kinds) if k == "behavioral"]
+    unreached = [t for t in failed if t["kind"] == "unreached"]
+    timed_out = [t for t in failed if t["kind"] == "timeout"]
+    not_compared = [t for t in failed if t["kind"] in ("fixture", "test_code")]
+    behavioral = [t for t in failed if t["kind"] == "behavioral"]
     if timed_out:
         names = ", ".join(t["nodeid"] for t in timed_out)
         return INDETERMINATE, (
@@ -736,23 +752,24 @@ def _classify(
             f"--per-test-timeout ({names}), so passing or failing says nothing here: a hung "
             "baseline is a different fact from a slow pass or a real failure."
         )
-    if failed and not behavioral and fixture:
+    if failed and not behavioral and not_compared:
         cause = (
             " A call that does not fit the baseline's code is one cause of this."
-            if any(t["phase"] == "call" for t in fixture)
+            if any(t["kind"] == "test_code" for t in not_compared)
             else ""
         )
         also = (
             " Also not counted: "
-            + "; ".join(_not_counted(t, "unreached") for t in unreached)
+            + "; ".join(_not_counted(t) for t in unreached)
             + "."
             if unreached
             else ""
         )
         return REFUSED, (
-            f"{len(fixture)} of {len(failed)} failing test(s) failed before reaching a comparison "
-            "of behavior, so no behavior was compared and the run is not evidence either way: "
-            + "; ".join(_not_counted(t, "fixture") for t in fixture)
+            f"{len(not_compared)} of {len(failed)} failing test(s) failed before reaching a "
+            "comparison of behavior, so no behavior was compared and the run is not evidence "
+            "either way: "
+            + "; ".join(_not_counted(t) for t in not_compared)
             + f".{cause}{also}"
         )
     if failed and not behavioral:
@@ -764,8 +781,8 @@ def _classify(
         )
     if behavioral:
         others = [
-            *(_not_counted(t, "fixture") for t in fixture),
-            *(_not_counted(t, "unreached") for t in unreached),
+            *(_not_counted(t) for t in not_compared),
+            *(_not_counted(t) for t in unreached),
         ]
         discount = (
             f"; not counted, as not evidence either way: {'; '.join(others)}"
@@ -1016,8 +1033,9 @@ def main() -> int:
             ]
             return _report(record, args.json_out)
 
-        # _failure_kind and _classify resolve crash_path against tree, so they run before the
-        # materialized tree is removed below.
+        # _failure_kind resolves crash_path against tree, so it runs before the materialized tree
+        # is removed below.
+        failed = _kinded_failures(observed, tree)
         record["observed"] = {
             "collected": observed["collected"],
             "counts": {
@@ -1029,15 +1047,14 @@ def main() -> int:
                 {
                     "nodeid": t["nodeid"],
                     "headline": t.get("headline", ""),
-                    "kind": _failure_kind(t, tree),
+                    "kind": t["kind"],
                     "crash_path": t.get("crash_path"),
                     "crash_lineno": t.get("crash_lineno"),
                 }
-                for t in observed["tests"]
-                if t["outcome"] in ("failed", "error")
+                for t in failed
             ],
         }
-        verdict, why = _classify(observed, baseline_precedes, tree)
+        verdict, why = _classify(observed, baseline_precedes, failed)
         record.update(verdict=verdict, why=why)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
