@@ -1643,14 +1643,16 @@ def build_mapping(
 
     if n_stamps == 0:
         raise UngeoreferencedCaptureError(
-            f"no capture under {images} holds an image; captures scanned: {list(captures)}"
+            f"no capture of {list(captures)} under {images} holds an image"
         )
     if n_positioned == 0:
         all_unreadable = sorted(
             {name for names in unreadable.values() for name in names}
         )
         raise UngeoreferencedCaptureError(
-            ungeoreferenced_capture_message(str(images), all_unreadable)
+            ungeoreferenced_capture_message(
+                list(captures), str(images), all_unreadable
+            )
         )
 
     from tcip_mcp.registry_paths import stored_path
@@ -2241,12 +2243,13 @@ def verify_mapping_inputs(
 
 
 def ungeoreferenced_capture_message(
-    walked: str, unreadable: Sequence[str] = ()
+    captures: Sequence[str], walked: str, unreadable: Sequence[str] = ()
 ) -> str:
     """Return the refusal sentence for a walk whose captures carry no position this door reads.
 
-    ``walked`` names what was walked. ``unreadable``, when given, opens the sentence by naming the
-    captures PIL could not open at all, before the position clause.
+    ``captures`` names the captures walked and ``walked`` what they were walked in.
+    ``unreadable``, when given, opens the sentence by naming the captures PIL could not open at
+    all, before the position clause.
     """
     prefix = ""
     if unreadable:
@@ -2255,7 +2258,7 @@ def ungeoreferenced_capture_message(
             "read; "
         )
     return (
-        f"{prefix}no capture under {walked} on the requested dates carries a position this door "
+        f"{prefix}no capture of {list(captures)} under {walked} carries a position this door "
         "reads (a photograph with no GPS position, or a raster or band-group capture, which never "
         "carries one here), so no capture can be assigned to a plant; per-plant identity for "
         "ungeoreferenced capture needs a plant-tag mechanism the platform does not have (README's "
@@ -2376,7 +2379,8 @@ def resolve_delivery_mapping(
         if all(a.distance_m is None for a in delivered_assignments):
             raise MappingDeliveryError(
                 ungeoreferenced_capture_message(
-                    f"mapping {name!r} (dataset {mapping_build.dataset_root!r})"
+                    list(buckets),
+                    f"mapping {name!r} (dataset {mapping_build.dataset_root!r})",
                 )
             )
         radii = {
