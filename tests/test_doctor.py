@@ -41,10 +41,8 @@ def _answered(bound: BoundProject) -> list[tuple[str, str]]:
 
     The call is asserted to be answered, never refused.
     """
-    from tests.test_agent_identity_records import (
-        _body,
-        results_through_handshake,
-    )
+    from tests._server_calls import results_through_handshake
+    from tests.test_agent_identity_records import _body
 
     (result,) = results_through_handshake(
         [("diagnose_project", {})], bound=bound

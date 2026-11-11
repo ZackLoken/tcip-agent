@@ -97,8 +97,7 @@ def test_a_category_or_kind_outside_its_vocabulary_is_refused_at_the_mcp_door(
     import anyio
 
     from tests._audit_fixtures import audit_rows
-    from tests._server_calls import client_server
-    from tests.test_agent_identity_records import results_through_handshake
+    from tests._server_calls import client_server, results_through_handshake
 
     refusals = [
         ("report_friction", "category", {"category": "nope", "detail": "x"}),
@@ -543,7 +542,7 @@ def test_the_page_limit_is_refused_at_the_mcp_door_unless_a_whole_number_of_at_l
     bound: BoundProject,
 ) -> None:
     """Through the server's own registration, a limit of 0, -1 or text refuses and 1 answers."""
-    from tests.test_agent_identity_records import results_through_handshake
+    from tests._server_calls import results_through_handshake
 
     calls = [
         ("load_project_memory", {"kind": "reports", "limit": limit})

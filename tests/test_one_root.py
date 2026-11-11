@@ -5,7 +5,7 @@ for none; the web backend acts on the project it has open; neither ever reads th
 or leaves one behind in the environment.
 
 The MCP cases run the real ``tcip-pipeline`` server in memory through a handshake
-(``tests.test_agent_identity_records.results_through_handshake``); the backend cases go through
+(``tests._server_calls.results_through_handshake``); the backend cases go through
 the app's own open route. Projects are made through the platform's own creation door under the
 workspace ``tmp_path.parent``.
 """
@@ -21,8 +21,8 @@ import pytest
 
 from tcip_web.state import store
 from tests._audit_fixtures import audit_rows
+from tests._server_calls import results_through_handshake
 from tests._web_fixtures import bound_to, named_project
-from tests.test_agent_identity_records import results_through_handshake
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
