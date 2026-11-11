@@ -12,7 +12,9 @@ is registered and its identity document then rewritten so its model refuses it (
 then ``POST /api/dataset/register`` registers ``fresh`` (``registered``), refuses a crop the
 vocabulary does not hold (``unknown_crop``), restores ``damaged``'s id (``repaired``), refuses a
 change of ``mapped``'s crop that names no stored crop (``crop_unconfirmed``) and makes it with
-one (``crop_changed``). Every answer, each refusal with its status, is written normalized
+one (``crop_changed``), and registers a fourth root, ``unrecorded``, while every audit append
+fails (``unrecorded``, ``tests._audit_fixtures.refuse_audit_appends``). Every answer, each
+refusal with its status, is written normalized
 (``fixture_session.normalized``), each minted id read as its name, to :data:`GENERATED_PATH`.
 
     python -m tools.generate_dataset_identity_fixture
@@ -21,6 +23,8 @@ one (``crop_changed``). Every answer, each refusal with its status, is written n
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+import pytest
 
 from tests import FRONTEND_SRC
 from tools.fixture_session import (
@@ -54,6 +58,7 @@ def produce() -> dict[str, JsonValue]:
         image_dir,
         read_dataset_identity,
     )
+    from tests._audit_fixtures import refuse_audit_appends
     from tests._mapping_fixtures import COUNT_CROP, CROP, map_captures
     from tests._producer_fixtures import (
         label_image,
@@ -118,9 +123,14 @@ def produce() -> dict[str, JsonValue]:
             "crop_unconfirmed": register(mapped, COUNT_CROP, 409),
             "crop_changed": register(mapped, COUNT_CROP, 200, CROP),
         }
+        unrecorded = imaged("unrecorded")
+        with pytest.MonkeyPatch.context() as patch:
+            refuse_audit_appends(patch)
+            answers["unrecorded"] = register(unrecorded, CROP, 409)
         ids = {
             "mapped": read_dataset_identity(mapped),
             "fresh": read_dataset_identity(fresh),
+            "unrecorded": read_dataset_identity(unrecorded),
         }
         return normalized(
             answers,

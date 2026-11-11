@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/api/client";
-import { messageOf, StructuredRefusalError } from "@/api/http";
+import { messageOf, refusalOf, StructuredRefusalError } from "@/api/http";
 import { resultsApi } from "@/api/inference";
 import {
+  AUDIT_ENTRY_NOT_WRITTEN,
+  type AuditGapRefusal,
   type CaptureInvariances,
   CROP,
   type MappingNames,
@@ -261,7 +263,11 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
       setRepaired(answer.repaired);
       useStore.getState().pushToast(`Registered at crop ${answer.crop}.`, "success");
     } catch (e) {
-      useStore.getState().pushToast(`Could not register the dataset: ${messageOf(e)}`);
+      // A registration whose audit line was lost still committed, so its message is no failure.
+      const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
+      useStore
+        .getState()
+        .pushToast(gap ? gap.message : `Could not register the dataset: ${messageOf(e)}`);
     } finally {
       setSubmitting(false);
       setConfirming(false);
@@ -478,7 +484,10 @@ export function SetupTab() {
         <TabHeading tab="setup" />
         <TraitRevisionPanel key={projectId} />
         <InvariancesPanel key={`invariances-${projectId}`} projectId={projectId} />
-        <DatasetIdentityPanel key={`identity-${projectId}`} datasetRoot={datasetRoot} />
+        <DatasetIdentityPanel
+          key={`identity-${projectId}-${datasetRoot}`}
+          datasetRoot={datasetRoot}
+        />
         <PlantMappingPanel key={`mapping-${projectId}`} datasetRoot={datasetRoot} />
       </div>
     </div>

@@ -544,6 +544,20 @@ describe("SetupTab dataset identity", () => {
       ),
     );
   });
+
+  it("shows a committed registration's lost audit line as its message, not a failure", async () => {
+    const gap = IDENTITY_ANSWERS.unrecorded;
+    vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(gap));
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: "currant" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    const toasted = () => useStore.getState().toasts.map((t) => t.message);
+    await waitFor(() => expect(toasted()).toContain(gap.body.detail.message));
+    expect(toasted().join()).not.toMatch(/Could not/);
+    await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
+  });
 });
 
 describe("SetupTab heading", () => {
