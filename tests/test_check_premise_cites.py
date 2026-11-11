@@ -96,7 +96,7 @@ def test_a_one_commit_header_yields_its_commit_and_premise_cites() -> None:
 
 def test_a_two_commit_labeled_header_yields_each_label_commit() -> None:
     text = (
-        "Premises, read at tcip-agent a26495a and claude-config db5350e. "
+        "Premises, read at tcip-agent 5807271 and claude-config db5350e. "
         "The mechanism lives in claude-config.\n\n"
         "- [claude-config] at x/y.md:30-31 the definition requires X.\n"
         "- [tcip-agent] at tools/README.md:3-5 each tool is run.\n\n"
@@ -106,7 +106,7 @@ def test_a_two_commit_labeled_header_yields_each_label_commit() -> None:
     half = cites.parse_premise_half(text)
 
     assert half.commits == {
-        "tcip-agent": "a26495a",
+        "tcip-agent": "5807271",
         "claude-config": "db5350e",
     }
     assert half.premises == [

@@ -6,10 +6,10 @@ imported, and pytest's per-test outcome is read rather than its exit code.
 
     python tools/prove_test_fails_before.py tests/test_foo.py
     python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behavior"
-    python tools/prove_test_fails_before.py tests/test_foo.py --baseline 196eedf1~1
+    python tools/prove_test_fails_before.py tests/test_foo.py --baseline 48970001~1
     python tools/prove_test_fails_before.py tests/test_foo.py --json out.json
-    python tools/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17
-        --baseline ae3dbbb8
+    python tools/prove_test_fails_before.py tests/test_foo.py --test-rev e2f9d837
+        --baseline 90d974bd
     python tools/prove_test_fails_before.py tests/test_foo.py --per-test-timeout 30
 
 Four verdicts, each its own exit code:
