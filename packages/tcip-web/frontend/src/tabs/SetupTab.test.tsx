@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
@@ -10,6 +10,7 @@ import {
   READ,
   REFUSED,
   REGISTERED,
+  REGISTRY_REFUSED,
   type ServedMapping,
 } from "@/api/types.generated";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
@@ -19,7 +20,7 @@ import { IDENTITY_ANSWERS } from "@/test/datasetIdentity";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
-import { openTestProject, RAW_SELECTION } from "@/test/store";
+import { GROUPED_SELECTION, openTestProject, RAW_SELECTION } from "@/test/store";
 import { CONFIRM_ANSWERS, TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
@@ -429,11 +430,30 @@ describe("SetupTab plant-mapping build: match radius", () => {
 describe("SetupTab dataset identity", () => {
   const { mapped: MAPPED, refused: REFUSED_READ } = IDENTITY_ANSWERS;
   const ROOT = RAW_SELECTION.dataset_root;
+  /** A crop of the served vocabulary. */
+  const [SERVED_CROP] = IDENTITY_ANSWERS.unregistered.crops;
+  /** Both halves of what the confirmation says a crop change refuses. */
+  const CONSEQUENCE =
+    /A mapped delivery refuses while its plant registry's crop is not the dataset's, and an orthomosaic count is checked against the registry it names when it is delivered\./;
 
-  /** The fixture's registered identity and the one mapping built over it. */
+  /** The fixture's registered identity and the mappings built over it. */
   function registeredOf(read: typeof MAPPED) {
     if (read.identity.kind !== REGISTERED) throw new Error("the produced read is not registered");
     return read.identity;
+  }
+
+  /** A crop of the served vocabulary other than `read`'s stored one. */
+  function anotherCrop(read: typeof MAPPED) {
+    return read.crops.find((c) => c !== registeredOf(read).identity.crop)!;
+  }
+
+  /** Choose another crop and open the confirmation; return the dialog once it shows. */
+  async function openConfirmation(read: typeof MAPPED) {
+    fireEvent.change(await screen.findByLabelText("Crop"), {
+      target: { value: anotherCrop(read) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Change crop" }));
+    return screen.findByRole("dialog");
   }
 
   it("registers an unregistered root at the chosen crop by the person", async () => {
@@ -445,13 +465,13 @@ describe("SetupTab dataset identity", () => {
     render(<SetupTab />);
     expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
     expect(api.dataset.identity).toHaveBeenCalledWith(ROOT);
-    fireEvent.change(screen.getByLabelText("Crop"), { target: { value: "currant" } });
+    fireEvent.change(screen.getByLabelText("Crop"), { target: { value: SERVED_CROP } });
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
     await waitFor(() =>
       expect(register).toHaveBeenCalledWith({
         dataset_root: ROOT,
-        crop: "currant",
+        crop: SERVED_CROP,
         user: "breeder",
         confirmed_crop: null,
       }),
@@ -485,7 +505,7 @@ describe("SetupTab dataset identity", () => {
     render(<SetupTab />);
     fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: chosen } });
     fireEvent.click(screen.getByRole("button", { name: "Change crop" }));
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
 
     expect(
       within(dialog).getByText(`Current crop: ${identity.crop}. Chosen crop: ${chosen}.`),
@@ -495,7 +515,7 @@ describe("SetupTab dataset identity", () => {
         `${mapping.name}: plant registry ${mapping.plant_registry}, crop ${mapping.registry.crop}`,
       ),
     ).toBeInTheDocument();
-    expect(within(dialog).getByText(/A mapped delivery refuses/)).toBeInTheDocument();
+    expect(within(dialog).getByText(CONSEQUENCE)).toBeInTheDocument();
     expect(register).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Change crop" }));
 
@@ -535,7 +555,7 @@ describe("SetupTab dataset identity", () => {
     vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(refusal));
 
     render(<SetupTab />);
-    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: "currant" } });
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
     await waitFor(() =>
@@ -550,13 +570,91 @@ describe("SetupTab dataset identity", () => {
     vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(gap));
 
     render(<SetupTab />);
-    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: "currant" } });
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
     const toasted = () => useStore.getState().toasts.map((t) => t.message);
     await waitFor(() => expect(toasted()).toContain(gap.body.detail.message));
     expect(toasted().join()).not.toMatch(/Could not/);
     await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
+  });
+
+  it("rereads the identity when the confirmation opens, listing a mapping built since", async () => {
+    const before = IDENTITY_ANSWERS.unmapped;
+    expect(registeredOf(before).mappings.placed).toHaveLength(0);
+    const [built] = registeredOf(MAPPED).mappings.placed;
+    vi.spyOn(api.dataset, "identity").mockResolvedValueOnce(before).mockResolvedValue(MAPPED);
+
+    render(<SetupTab />);
+    const chosen = anotherCrop(before);
+    const dialog = await openConfirmation(before);
+
+    expect(api.dataset.identity).toHaveBeenCalledTimes(2);
+    expect(within(dialog).getByText(new RegExp(`^${built.name}: plant registry`))).toBeVisible();
+    expect(within(dialog).queryByText(/No plant mapping/)).toBeNull();
+    expect(within(dialog).getByText(new RegExp(`Chosen crop: ${chosen}\\.`))).toBeInTheDocument();
+  });
+
+  it("lists a mapping that will not read apart and a registry that will not read as its refusal", async () => {
+    const damaged = IDENTITY_ANSWERS.mapped_damaged;
+    vi.spyOn(api.dataset, "identity").mockResolvedValue(damaged);
+    const { placed, unplaced } = registeredOf(damaged).mappings;
+    const refusedRegistry = placed.find((m) => m.registry.kind === REGISTRY_REFUSED);
+    if (refusedRegistry?.registry.kind !== REGISTRY_REFUSED)
+      throw new Error("the produced scene holds no mapping whose registry will not read");
+    const [unreadable] = unplaced;
+
+    render(<SetupTab />);
+    const dialog = await openConfirmation(damaged);
+
+    expect(
+      within(dialog).getByText(
+        `${refusedRegistry.name}: plant registry ${refusedRegistry.plant_registry}, ` +
+          refusedRegistry.registry.refusal,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(`${unreadable.name} could not be placed: ${unreadable.refusal}`),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the server's refusal of a crop change and rereads the identity", async () => {
+    const refusal = IDENTITY_ANSWERS.crop_unconfirmed;
+    vi.spyOn(api.dataset, "identity").mockResolvedValue(MAPPED);
+    vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(refusal));
+
+    render(<SetupTab />);
+    const dialog = await openConfirmation(MAPPED);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Change crop" }));
+
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
+        `Could not register the dataset: ${refusal.body.detail}`,
+      ),
+    );
+    await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(3));
+  });
+
+  it("drops one root's restored-id sentence when another root is selected", async () => {
+    const repaired = IDENTITY_ANSWERS.repaired;
+    vi.spyOn(api.dataset, "identity").mockResolvedValue(REFUSED_READ);
+    vi.spyOn(api.dataset, "register").mockResolvedValue(repaired);
+    if (REFUSED_READ.identity.kind !== REFUSED) throw new Error("the produced read is not refused");
+    const { reason } = REFUSED_READ.identity;
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: repaired.crop } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    expect(await screen.findByText(repaired.repaired!)).toBeInTheDocument();
+    expect(GROUPED_SELECTION.dataset_root).not.toBe(ROOT);
+
+    act(() => openTestProject(GROUPED_SELECTION));
+
+    await waitFor(() =>
+      expect(api.dataset.identity).toHaveBeenLastCalledWith(GROUPED_SELECTION.dataset_root),
+    );
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    expect(screen.queryByText(repaired.repaired!)).toBeNull();
   });
 });
 
