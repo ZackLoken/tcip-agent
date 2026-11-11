@@ -6,12 +6,16 @@ import { resultsApi } from "@/api/inference";
 import {
   type CaptureInvariances,
   CONFIRMED,
+  CROP,
   READ,
+  REFUSED,
+  REGISTERED,
   type ServedMapping,
 } from "@/api/types.generated";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
+import { IDENTITY_ANSWERS } from "@/test/datasetIdentity";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
@@ -43,6 +47,7 @@ beforeEach(() => {
   vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: [], unreadable: [], definitions: {} });
   vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.no_mapping_names);
   vi.spyOn(api.projects, "list").mockResolvedValue(LISTING);
+  vi.spyOn(api.dataset, "identity").mockResolvedValue(IDENTITY_ANSWERS.unregistered);
 });
 
 describe("SetupTab capture invariances", () => {
@@ -418,6 +423,126 @@ describe("SetupTab plant-mapping build: match radius", () => {
 
     expect(screen.queryByText(new RegExp(firstDateLine(LOADED)))).not.toBeInTheDocument();
     expect(screen.queryByText(/radius \d/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SetupTab dataset identity", () => {
+  const { mapped: MAPPED, refused: REFUSED_READ } = IDENTITY_ANSWERS;
+  const ROOT = RAW_SELECTION.dataset_root;
+
+  /** The fixture's registered identity and the one mapping built over it. */
+  function registeredOf(read: typeof MAPPED) {
+    if (read.identity.kind !== REGISTERED) throw new Error("the produced read is not registered");
+    return read.identity;
+  }
+
+  it("registers an unregistered root at the chosen crop by the person", async () => {
+    const register = vi
+      .spyOn(api.dataset, "register")
+      .mockResolvedValue(IDENTITY_ANSWERS.registered);
+    useStore.setState({ user: "breeder" });
+
+    render(<SetupTab />);
+    expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
+    expect(api.dataset.identity).toHaveBeenCalledWith(ROOT);
+    fireEvent.change(screen.getByLabelText("Crop"), { target: { value: "currant" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() =>
+      expect(register).toHaveBeenCalledWith({
+        dataset_root: ROOT,
+        crop: "currant",
+        user: "breeder",
+        confirmed_crop: null,
+      }),
+    );
+    await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a registered root's crop and id", async () => {
+    vi.spyOn(api.dataset, "identity").mockResolvedValue(MAPPED);
+    const { identity } = registeredOf(MAPPED);
+
+    render(<SetupTab />);
+
+    expect(
+      await screen.findByText(`Registered at crop ${identity.crop}, id ${identity.id}.`),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change crop" })).toBeDisabled();
+  });
+
+  it("changes the crop after a confirmation listing each mapping with its registry's crop", async () => {
+    vi.spyOn(api.dataset, "identity").mockResolvedValue(MAPPED);
+    const register = vi
+      .spyOn(api.dataset, "register")
+      .mockResolvedValue(IDENTITY_ANSWERS.crop_changed);
+    const { identity, mappings } = registeredOf(MAPPED);
+    const [mapping] = mappings.placed;
+    if (mapping.registry.kind !== CROP) throw new Error("the produced registry did not read");
+    const chosen = IDENTITY_ANSWERS.crop_changed.crop;
+    useStore.setState({ user: "breeder" });
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: chosen } });
+    fireEvent.click(screen.getByRole("button", { name: "Change crop" }));
+    const dialog = screen.getByRole("dialog");
+
+    expect(
+      within(dialog).getByText(`Current crop: ${identity.crop}. Chosen crop: ${chosen}.`),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        `${mapping.name}: plant registry ${mapping.plant_registry}, crop ${mapping.registry.crop}`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/A mapped delivery refuses/)).toBeInTheDocument();
+    expect(register).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Change crop" }));
+
+    await waitFor(() =>
+      expect(register).toHaveBeenCalledWith({
+        dataset_root: ROOT,
+        crop: chosen,
+        user: "breeder",
+        confirmed_crop: identity.crop,
+      }),
+    );
+  });
+
+  it("offers the crop at a refused identity and shows the sentence of the id restored", async () => {
+    vi.spyOn(api.dataset, "identity").mockResolvedValue(REFUSED_READ);
+    const repaired = IDENTITY_ANSWERS.repaired;
+    const register = vi.spyOn(api.dataset, "register").mockResolvedValue(repaired);
+    if (REFUSED_READ.identity.kind !== REFUSED) throw new Error("the produced read is not refused");
+
+    render(<SetupTab />);
+    expect(await screen.findByText(REFUSED_READ.identity.reason)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Crop"), { target: { value: repaired.crop } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() =>
+      expect(register).toHaveBeenCalledWith(
+        expect.objectContaining({ crop: repaired.crop, confirmed_crop: null }),
+      ),
+    );
+    expect(await screen.findByText(repaired.repaired!)).toBeInTheDocument();
+    await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(repaired.repaired!)).toBeInTheDocument();
+  });
+
+  it("shows the route's refusal as it answered it", async () => {
+    const refusal = IDENTITY_ANSWERS.unknown_crop;
+    vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(refusal));
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: "currant" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
+        `Could not register the dataset: ${refusal.body.detail}`,
+      ),
+    );
   });
 });
 
