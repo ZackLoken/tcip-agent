@@ -1,7 +1,7 @@
 """A refusal a tool raises reaches the agent as an error answer carrying its class and sentence.
 
 The door cases run the real ``tcip-pipeline`` server in memory through a handshake
-(``tests.test_agent_identity_records.results_through_handshake``), each over a project the
+(``tests._server_calls.results_through_handshake``), each over a project the
 platform's own producers set up and a record of it then damaged through
 ``tests._record_damage_fixtures``; the expected sentence is the one the platform's own reader of
 that record raises. The cases no door reaches (an empty sentence, an unknown trait's ``KeyError``,
@@ -22,7 +22,7 @@ from tcip_mcp.dataset_layout import image_dir, label_key_of
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import label_image, write_image
 from tests._record_damage_fixtures import damage_record
-from tests.test_agent_identity_records import results_through_handshake
+from tests._server_calls import results_through_handshake
 
 if TYPE_CHECKING:
     from collections.abc import Callable
