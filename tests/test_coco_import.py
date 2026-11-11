@@ -245,7 +245,7 @@ def test_images_sitting_flat_under_images_are_no_capture_to_import_into(
 
     result = _import(_document(tmp_path / "external.json"), root)
 
-    assert f"{DATE!r} names no capture" in result["error"], result
+    assert f"lists no capture of {[DATE]}" in result["error"], result
     assert (
         capture_label_keys(root, UNDATED_BUCKET) == [] and _written(root) == []
     )
@@ -924,7 +924,7 @@ def test_a_date_that_names_no_capture_refuses(
         RATIONALE,
         actor=None,
     )
-    assert "error" in result and "names no capture" in result["error"]
+    assert f"lists no capture of {[date]}" in result["error"], result
 
 
 def test_a_document_that_lists_no_image_refuses(tmp_path: Path) -> None:

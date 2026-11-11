@@ -504,8 +504,8 @@ UNREAD_CAUSE = (
 ) = REASONS = (
     Inadmissible(
         "on a date the mapping does not cover",
-        "rebuild the mapping to cover those dates and deliver those dates' buckets, "
-        "or drop those results",
+        "ingest any of those dates' captures the dataset lacks, rebuild the mapping to cover "
+        "those dates and deliver those dates' buckets, or drop those results",
         "",
     ),
     Inadmissible(
@@ -1605,18 +1605,22 @@ def build_mapping(
     ingested under a mapped date is a capture the identity sees; its
     :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates.
 
-    Raises :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when the requested
-    dates carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any
-    capture PIL could not open before the position clause) when every capture that was read
-    carries no position this door reads.
+    Raises ``ValueError`` for a stated date the dataset lists no capture of
+    (:func:`~tcip_mcp.dataset_layout.require_listed_captures`). Raises
+    :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when the captures scanned
+    hold no image at all, and with :func:`ungeoreferenced_capture_message` (naming any capture PIL
+    could not open before the position clause) when every capture that was read carries no
+    position this door reads.
     """
-    from tcip_mcp.dataset_layout import image_root
+    from tcip_mcp.dataset_layout import image_root, require_listed_captures
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
         scan_captures,
     )
 
     images = image_root(dataset_root)
+    if dates is not None:
+        require_listed_captures(dataset_root, dates)
     assignments: dict[str, list[Assignment]] = {}
     radii: dict[str, MatchRadius] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
@@ -1639,14 +1643,16 @@ def build_mapping(
 
     if n_stamps == 0:
         raise UngeoreferencedCaptureError(
-            f"no capture under {images} on the requested dates"
+            f"no capture of {list(captures)} under {images} holds an image"
         )
     if n_positioned == 0:
         all_unreadable = sorted(
             {name for names in unreadable.values() for name in names}
         )
         raise UngeoreferencedCaptureError(
-            ungeoreferenced_capture_message(str(images), all_unreadable)
+            ungeoreferenced_capture_message(
+                list(captures), str(images), all_unreadable
+            )
         )
 
     from tcip_mcp.registry_paths import stored_path
@@ -2237,12 +2243,13 @@ def verify_mapping_inputs(
 
 
 def ungeoreferenced_capture_message(
-    walked: str, unreadable: Sequence[str] = ()
+    captures: Sequence[str], walked: str, unreadable: Sequence[str] = ()
 ) -> str:
     """Return the refusal sentence for a walk whose captures carry no position this door reads.
 
-    ``walked`` names what was walked. ``unreadable``, when given, opens the sentence by naming the
-    captures PIL could not open at all, before the position clause.
+    ``captures`` names the captures walked and ``walked`` what they were walked in.
+    ``unreadable``, when given, opens the sentence by naming the captures PIL could not open at
+    all, before the position clause.
     """
     prefix = ""
     if unreadable:
@@ -2251,7 +2258,7 @@ def ungeoreferenced_capture_message(
             "read; "
         )
     return (
-        f"{prefix}no capture under {walked} on the requested dates carries a position this door "
+        f"{prefix}no capture of {list(captures)} under {walked} carries a position this door "
         "reads (a photograph with no GPS position, or a raster or band-group capture, which never "
         "carries one here), so no capture can be assigned to a plant; per-plant identity for "
         "ungeoreferenced capture needs a plant-tag mechanism the platform does not have (README's "
@@ -2325,7 +2332,8 @@ def resolve_delivery_mapping(
     if missing_dates:
         raise MappingDeliveryError(
             f"the delivered buckets record date(s) {missing_dates} the mapping {name!r} does not "
-            "cover; rebuild the mapping to cover them, or drop those buckets"
+            "cover; ingest any of those dates' captures the dataset lacks, rebuild the mapping to "
+            "cover them, or drop those buckets"
         )
 
     try:
@@ -2371,7 +2379,8 @@ def resolve_delivery_mapping(
         if all(a.distance_m is None for a in delivered_assignments):
             raise MappingDeliveryError(
                 ungeoreferenced_capture_message(
-                    f"mapping {name!r} (dataset {mapping_build.dataset_root!r})"
+                    list(buckets),
+                    f"mapping {name!r} (dataset {mapping_build.dataset_root!r})",
                 )
             )
         radii = {

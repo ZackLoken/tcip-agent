@@ -108,12 +108,7 @@ def import_coco_document(
         coco, decode_rle=_rle_mask, vertex_spacing=vertex_spacing
     )
 
-    dates = dataset_layout.list_dates(root)
-    if date not in dates:
-        raise ValueError(
-            f"{date!r} names no capture under {dataset_layout.image_root(root)} "
-            f"(its buckets: {dates})"
-        )
+    dataset_layout.require_listed_captures(root, [date])
     images = coco.get("images")
     if not isinstance(images, list) or not images:
         raise ValueError(
