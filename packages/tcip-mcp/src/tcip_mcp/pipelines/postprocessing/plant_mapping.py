@@ -1935,6 +1935,75 @@ def load_mapping(project: Path | str, name: str) -> MappingBuild | None:
     return build
 
 
+class RegistryCrop(BaseModel):
+    """The crop of the plant registry a mapping names."""
+
+    kind: Literal["crop"] = "crop"
+    crop: Crop
+
+
+class RegistryRefused(BaseModel):
+    """A plant registry a mapping names that will not read, and its reader's sentence."""
+
+    kind: Literal["registry_refused"] = "registry_refused"
+    refusal: str
+
+
+class DatasetMapping(BaseModel):
+    """A plant mapping built over one dataset, beside what the plant registry it names reads as."""
+
+    name: str
+    plant_registry: str
+    registry: Annotated[
+        RegistryCrop | RegistryRefused, Field(discriminator="kind")
+    ]
+
+
+class UnplacedMapping(BaseModel):
+    """A stored plant mapping that will not read, so the dataset it was built over is unknown."""
+
+    name: str
+    refusal: str
+
+
+class DatasetMappings(BaseModel):
+    """A project's plant mappings built over one dataset, and those whose dataset is unknown."""
+
+    placed: list[DatasetMapping]
+    unplaced: list[UnplacedMapping]
+
+
+def mappings_over_dataset(
+    project: Path | str, dataset_id: DatasetId
+) -> DatasetMappings:
+    """Return each of ``project``'s mappings whose build records ``dataset_id``.
+
+    Each is read by :func:`load_mapping` and its registry by :func:`load_registry`; a mapping
+    that will not read is unplaced with its refusal, and a registry that will not read stands as
+    its mapping's refusal in place of a crop. No crop is compared here.
+    """
+    placed: list[DatasetMapping] = []
+    unplaced: list[UnplacedMapping] = []
+    for name in plant_mapping_names(project):
+        try:
+            build = load_mapping(project, name)
+        except ValueError as exc:
+            unplaced.append(UnplacedMapping(name=name, refusal=str(exc)))
+            continue
+        if build is None or build.dataset_id != dataset_id:
+            continue
+        registry = build.plant_registry.name
+        read: RegistryCrop | RegistryRefused
+        try:
+            read = RegistryCrop(crop=load_registry(project, registry)["crop"])
+        except ValueError as exc:
+            read = RegistryRefused(refusal=str(exc))
+        placed.append(
+            DatasetMapping(name=name, plant_registry=registry, registry=read)
+        )
+    return DatasetMappings(placed=placed, unplaced=unplaced)
+
+
 def resolved_mapping_key_for_citation(
     project: Path | str,
     name: str,
