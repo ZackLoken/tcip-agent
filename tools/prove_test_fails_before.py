@@ -31,14 +31,14 @@ Four verdicts, each its own exit code:
                        everything was skipped, the baseline could not collect the file, the
                        baseline's own source was not what got imported, pytest did not finish
                        within ``--timeout``, hit an internal error or never reported an outcome,
-                       or no failure is behavioral (each rests on a missing import or file, a
-                       fixture failure or a raise in the test's own code), so no behavior was
-                       compared. A setup or teardown failure that is neither a missing import
-                       or file nor a pytest-timeout report is ``fixture``, whatever raised it;
-                       a call-phase failure is ``test_code``, raised in the test's own code, when
-                       it is a ``TypeError`` whose crash frame is placed under ``tests/`` of the
-                       materialized tree (a frame that cannot be placed there, a library's, is
-                       behavioral), whatever its message. This is a
+                       or no failure is behavioral (each is ``unreached``, ``fixture`` or
+                       ``test_code``), so no behavior was compared. A setup or teardown
+                       failure that is neither a missing import or file nor a pytest-timeout
+                       report is ``fixture``, whatever raised it; a call-phase failure is
+                       ``test_code``, raised in the test's own code, when it is a ``TypeError``
+                       whose crash frame is placed under ``tests/`` of the materialized tree (a
+                       frame that cannot be placed there, a library's, is behavioral), whatever
+                       its message. This is a
                        policy: the class and the place of the raise do not establish that a call
                        failed to fit, so no wording is read, and a
                        ``TypeError`` from handling what the code under test returned (a ``None``
@@ -231,9 +231,10 @@ def git_output(*args: str) -> str:
 
 
 def _is_test_side(path: str) -> bool:
-    """Return whether ``path`` is one the tool overlays from the current tree.
+    """Return whether ``path``, with either slash, lies under ``tests/``.
 
-    A diff in such a path is not the change under test.
+    A path under ``tests/`` is the test side: the tool overlays it from the current tree, so a diff
+    in it is not the change under test.
     """
     return path.replace("\\", "/").startswith(f"{TEST_TREE}/")
 
