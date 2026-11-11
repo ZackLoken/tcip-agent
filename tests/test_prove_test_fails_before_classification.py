@@ -294,6 +294,8 @@ CALL_PHASE_SENTENCE = (
 )
 CAUSE_CLAUSE = "A call that does not fit the baseline's code is one cause"
 FIXTURE_SENTENCE = "a fixture failed during setup"
+TEARDOWN_SENTENCE = "a fixture failed during teardown"
+UNREACHED_SENTENCE = "a missing import or file"
 
 
 def _one_call_repo(
@@ -543,6 +545,164 @@ def test_a_run_mixing_a_setup_failure_and_a_wrong_call_names_each_with_its_own_s
         "test_widget_carries_a_color" in c and CALL_PHASE_SENTENCE in c
         for c in clauses
     )
+
+
+def _head_adds_color_double_and_gadgets(
+    tmp_path: Path, test_source: str
+) -> tuple[Path, str]:
+    """Build a scratch repository whose head holds ``test_source`` and what it needs.
+
+    The baseline's ``widgets`` has a no-op ``double`` and a ``Widget`` without a color, and has no
+    ``gadgets`` module; the head fixes the first two and adds the third. Returns the repository at
+    its head and the baseline revision.
+    """
+    repo = _scratch_repo(tmp_path)
+    _write(
+        repo / "widgets.py",
+        "def double(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "class Widget:\n"
+        "    def __init__(self, size):\n"
+        "        self.size = size\n",
+    )
+    baseline = _commit_all(repo, "double is a no-op, widget has no color")
+    _write(
+        repo / "widgets.py",
+        "def double(x):\n"
+        "    return x * 2\n"
+        "\n"
+        "\n"
+        "class Widget:\n"
+        "    def __init__(self, size, color=None):\n"
+        "        self.size = size\n"
+        "        self.color = color\n",
+    )
+    _write(repo / "gadgets.py", "GADGET = 1\n")
+    _write(repo / "tests" / "test_widgets.py", test_source)
+    _commit_all(repo, "double doubles, widget carries a color, gadgets exists")
+    return repo, baseline
+
+
+def _clauses_naming(clauses: list[str], test: str, sentence: str) -> list[str]:
+    return [c for c in clauses if test in c and sentence in c]
+
+
+def test_a_fixture_refusal_lists_a_missing_import_failure_as_not_counted(
+    tmp_path: Path,
+) -> None:
+    """A fixture refusal lists the failure resting on a missing import after "Also not counted"."""
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def thing():\n"
+        "    from widgets import Widget\n"
+        "    return Widget(size=3, color='red')\n"
+        "\n"
+        "\n"
+        "def test_uses_thing(thing):\n"
+        "    assert thing.color == 'red'\n"
+        "\n"
+        "\n"
+        "def test_imports_a_gadget():\n"
+        "    from gadgets import GADGET\n"
+        "    assert GADGET == 1\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert why.startswith("REFUSED:")
+    _, marker, listing = why.partition(" Also not counted: ")
+    assert marker, why
+    assert "test_uses_thing" not in listing
+    assert (
+        len(
+            _clauses_naming(
+                listing.split("; "),
+                "test_imports_a_gadget",
+                UNREACHED_SENTENCE,
+            )
+        )
+        == 1
+    )
+
+
+def test_a_guards_run_lists_a_missing_import_failure_as_not_counted(
+    tmp_path: Path,
+) -> None:
+    """A GUARDS run names a missing-import failure as not counted, never among the counted."""
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
+        "def test_double_doubles():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n"
+        "\n"
+        "\n"
+        "def test_imports_a_gadget():\n"
+        "    from gadgets import GADGET\n"
+        "    assert GADGET == 1\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    counted, marker, not_counted = _why(result).partition("not counted")
+    assert marker
+    assert "test_double_doubles" in counted
+    assert "test_imports_a_gadget" not in counted
+    assert "test_double_doubles" not in not_counted
+    assert (
+        len(
+            _clauses_naming(
+                not_counted.split("; "),
+                "test_imports_a_gadget",
+                UNREACHED_SENTENCE,
+            )
+        )
+        == 1
+    )
+
+
+def test_a_fixture_failing_during_teardown_is_refused_with_the_teardown_sentence(
+    tmp_path: Path,
+) -> None:
+    """A fixture raising after its yield is named as failing during teardown, without a cause."""
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def thing():\n"
+        "    yield 1\n"
+        "    from widgets import Widget\n"
+        "    Widget(size=3, color='red')\n"
+        "\n"
+        "\n"
+        "def test_uses_thing(thing):\n"
+        "    assert thing == 1\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert (
+        len(
+            _clauses_naming(
+                why.split("; "), "test_uses_thing", TEARDOWN_SENTENCE
+            )
+        )
+        == 1
+    )
+    assert FIXTURE_SENTENCE not in why
+    assert CAUSE_CLAUSE not in why
 
 
 # ── --baseline-from-working-tree ────────────────────────────────────────────
