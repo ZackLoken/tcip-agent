@@ -494,6 +494,7 @@ UNREAD_CAUSE = (
 (:func:`stems_delivery_reads`, :func:`verify_mapping_inputs`)."""
 
 (
+    NOT_COVERED,
     NOT_DELIVERED,
     NO_IMAGE,
     NO_PLANT,
@@ -501,6 +502,12 @@ UNREAD_CAUSE = (
     UNREAD,
     REPEATED,
 ) = REASONS = (
+    Inadmissible(
+        "on a date the mapping does not cover",
+        "rebuild the mapping to cover those dates and deliver those dates' buckets, "
+        "or drop those results",
+        "",
+    ),
     Inadmissible(
         "on a date that is not a delivered date",
         "deliver those dates' buckets or drop those results",
@@ -534,8 +541,9 @@ UNREAD_CAUSE = (
 )
 """The reasons a result is refused for, in the order a refusal gives them.
 
-:func:`admission` answers the first five, in the order it checks them; the sixth is the reason
-for a result whose image an earlier result names, which only a caller reading results can find."""
+:func:`admission` answers every reason but :data:`REPEATED`, in the order it checks them;
+:data:`REPEATED` is the reason for a result whose image an earlier result names, which only a
+caller reading results can find."""
 
 
 def quoted_plant(plant: str) -> str:
@@ -551,15 +559,17 @@ def admission(
 ) -> Assignment | Inadmissible:
     """Return the assignment the per-plant door admits for the image ``stem`` of ``date``.
 
-    An image is admitted when its date is delivered, ``mapping``'s build records it, attributes it
-    to a plant in ``plants`` and the verification read it
-    (:attr:`MappingVerification.read_stems`). Any other image answers the first of the first five
-    :data:`REASONS` that applies, in that order; one outside the population carries its plant as
-    the detail.
+    An image is admitted when its date is held by ``mapping``'s build and delivered, the build
+    records the stem on it, attributes the image to a plant in ``plants`` and the verification
+    read it (:attr:`MappingVerification.read_stems`). Any other image answers the first of
+    :data:`REASONS` that applies, in that order, :data:`REPEATED` excepted; one outside the
+    population carries its plant as the detail.
     """
+    if date not in mapping.build.by_stem:
+        return NOT_COVERED
     if date not in mapping.disclosure.dates_delivered:
         return NOT_DELIVERED
-    assignment = mapping.build.by_stem.get(date, {}).get(stem)
+    assignment = mapping.build.by_stem[date].get(stem)
     if assignment is None:
         return NO_IMAGE
     if not assignment_is_attributed(assignment):

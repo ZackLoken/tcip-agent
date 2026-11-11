@@ -81,11 +81,13 @@ def _mapped(
     tmp_path: Path,
     plants: Mapping[str, tuple[float, float]] = ONE_PLANT,
     captures: Mapping[str, Mapping[str, tuple[float, float]]] | None = None,
+    dates: list[str] | None = None,
 ) -> tuple[Path, str]:
     """Build :func:`_scene` with the mapping ``valley`` over it; return ``(dataset root, date)``.
 
     The captures are ``captures``, by default one image per plant on :data:`DATE`, each named by
-    its plant and taken at its place; the date returned is the first.
+    its plant and taken at its place; the date returned is the first. The mapping covers
+    ``dates`` of them, every date when ``None``.
     """
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tests._mapping_fixtures import register_plant_registry_for
@@ -99,6 +101,7 @@ def _mapped(
         plant_registry=register_plant_registry_for(
             tmp_path, [plant_csv], crop=COUNT_CROP
         ),
+        dates=dates,
         actor=None,
     )
     assert "error" not in mapped, mapped
@@ -462,6 +465,11 @@ UNREAD_CAUSE = (
     "no prediction document in the delivered bucket, or no longer on disk"
 )
 """Why an image was not read, as both refusals of one state it."""
+NOT_COVERED = "on a date the mapping does not cover"
+NOT_COVERED_STEP = (
+    "rebuild the mapping to cover those dates and deliver those dates' buckets, "
+    "or drop those results"
+)
 UNDELIVERED = "on a date that is not a delivered date"
 UNDELIVERED_STEP = "deliver those dates' buckets or drop those results"
 NO_IMAGE = "the mapping records no image of that stem on that date"
@@ -475,6 +483,7 @@ UNREAD_STEP = "drop those results, or deliver a bucket documenting them with the
 REPEATED = "named by more than one result"
 REPEATED_STEP = "name each image in one result only"
 REASONS = (
+    (NOT_COVERED, NOT_COVERED_STEP),
     (UNDELIVERED, UNDELIVERED_STEP),
     (NO_IMAGE, NO_IMAGE_STEP),
     (NO_PLANT, NO_PLANT_STEP),
@@ -675,7 +684,7 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
             _both,
             _rows(*READ, ("2026-03-01", "x", 32)),
             ("P1", "P2"),
-            UNDELIVERED,
+            NOT_COVERED,
             "2026-03-01/x",
         ),
         (
@@ -751,7 +760,7 @@ def test_each_row_is_the_aggregate_of_the_images_the_mapping_assigned_its_plant(
     ],
     ids=[
         "undelivered_date",
-        "undelivered_date_of_an_unrecorded_stem",
+        "date_the_mapping_does_not_cover",
         "stem_of_another_date",
         "unattributed",
         "plant_outside_the_population",
@@ -774,9 +783,9 @@ def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_
 ) -> None:
     """A result the mapping cannot place, or a read image no result covers, refuses by image.
 
-    The refusal names the image and its reason, through the server's door, and no delivery
-    event or CSV is written. A delivered plant the delivery read no image of refuses naming it
-    and its images, ahead of the read images no result names.
+    The refusal names the image and its reason with that reason's next step alone, through the
+    server's door, and no delivery event or CSV is written. A delivered plant the delivery read
+    no image of refuses naming it and its images, ahead of the read images no result names.
     """
     from tcip_mcp.delivery import read_delivery_events
 
@@ -795,13 +804,78 @@ def test_a_result_the_mapping_does_not_attribute_to_a_read_image_of_a_delivered_
     assert phrase in refused.get("error", ""), refused
     assert named in refused["error"], refused
     assert (UNCOVERED in refused["error"]) == (phrase == UNCOVERED), refused
-    assert [p for p, _ in REASONS if p in refused["error"]] == (
-        [phrase] if phrase in dict(REASONS) else []
+    assert [
+        (p, s)
+        for p, s in REASONS
+        if p in refused["error"] or s in refused["error"]
+    ] == (
+        [(phrase, dict(REASONS)[phrase])] if phrase in dict(REASONS) else []
     ), refused
     assert "image '" not in refused["error"], refused
     assert "['" not in refused["error"], refused
     assert read_delivery_events(tmp_path) == []
     assert not (tmp_path / "o.csv").exists()
+
+
+@pytest.mark.parametrize(
+    ("covered", "phrase", "step"),
+    [
+        ([FIRST], NOT_COVERED, NOT_COVERED_STEP),
+        (None, UNDELIVERED, UNDELIVERED_STEP),
+    ],
+    ids=["date_the_mapping_does_not_cover", "covered_date_not_delivered"],
+)
+def test_the_next_step_of_a_result_on_a_date_not_delivered_leads_to_a_delivery(
+    tmp_path: Path,
+    covered: list[str] | None,
+    phrase: str,
+    step: str,
+) -> None:
+    """Following the next step of a refused date's result reaches a delivery that succeeds.
+
+    The first call delivers the first date's bucket alone, with a result on the second date: the
+    mapping covers only the first date in one case and both in the other, so the refusal gives
+    that case's own step. In the first case the step rebuilds the mapping to cover the second
+    date; in both it delivers both dates' buckets, with every read image's result.
+    """
+    from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+
+    dataset_root, _ = _mapped(tmp_path, TWO_PLANTS, CAPTURES, covered)
+    buckets = _both(tmp_path, dataset_root)
+
+    refused = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path,
+            dataset_root,
+            buckets[:1],
+            _rows(*READ[:3], (SECOND, "a", 8)),
+        ),
+    )
+
+    assert isinstance(refused, dict), refused
+    assert _named_under(refused["error"], ((phrase, step),)) == {
+        phrase: [f"{SECOND}/a"]
+    }
+    assert not [s for p, s in REASONS if p != phrase and s in refused["error"]]
+    if covered is not None:
+        rebuilt = build_plant_mapping(
+            tmp_path,
+            name="valley",
+            dataset_root=str(dataset_root),
+            plant_registry="reg",
+            actor=None,
+        )
+        assert "error" not in rebuilt, rebuilt
+    answer = _delivered(
+        tmp_path,
+        _arguments_over(tmp_path, dataset_root, buckets, _rows(*READ)),
+    )
+
+    assert isinstance(answer, dict) and "error" not in answer, answer
+    assert len(read_delivery_events(tmp_path)) == 1
+    assert set(_by_plant(tmp_path)) == {"P1", "P2"}
 
 
 IMAGE_NAME = r"\d{4}-\d{2}-\d{2}/\w+"
@@ -856,8 +930,9 @@ def test_one_refusal_names_every_inadmissible_image_under_its_reason(
 ) -> None:
     """Every reason a result can be refused for is stated once, with all its images and its step.
 
-    One call carries all six reasons beside an admissible image, submitted out of the order the
-    refusal gives them: two images on dates not delivered, a stem the mapping records no image
+    One call carries every reason beside an admissible image, submitted out of the order the
+    refusal gives them: an image on a date the mapping does not cover, an image on a date the
+    mapping covers and the delivery does not deliver, a stem the mapping records no image
     of, an unmapped capture submitted twice, two images of two different plants outside the
     population, an image the delivery did not read, and the admissible image submitted twice.
     The refusal names each image once as ``<date>/<stem>`` in the order submitted, the plant of
@@ -894,7 +969,8 @@ def test_one_refusal_names_every_inadmissible_image_under_its_reason(
     for stem in ("zz", "far", "d", "c", "b"):
         assert f"{FIRST}/{stem}" in refused["error"], refused
     assert _named_under(refused["error"]) == {
-        UNDELIVERED: [f"{SECOND}/a", "2026-03-02/y"],
+        NOT_COVERED: ["2026-03-02/y"],
+        UNDELIVERED: [f"{SECOND}/a"],
         NO_IMAGE: [f"{FIRST}/zz"],
         NO_PLANT: [f"{FIRST}/far"],
         OUTSIDE: [f"{FIRST}/d (plant 'P3')", f"{FIRST}/c (plant 'P2')"],
@@ -1022,8 +1098,9 @@ def test_an_inadmissible_result_refuses_before_a_plant_nothing_was_read_of(
 
     assert isinstance(refused, dict), refused
     assert _named_under(
-        refused["error"], ((UNDELIVERED, UNDELIVERED_STEP),)
-    ) == {UNDELIVERED: ["2026-03-01/x"]}
+        refused["error"], ((NOT_COVERED, NOT_COVERED_STEP),)
+    ) == {NOT_COVERED: ["2026-03-01/x"]}
+    assert UNDELIVERED not in refused["error"]
     assert NO_READ_IMAGE not in refused["error"]
     assert UNCOVERED not in refused["error"]
 
