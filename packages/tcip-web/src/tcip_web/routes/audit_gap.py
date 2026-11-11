@@ -11,7 +11,10 @@ from typing import Any, Literal
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from tcip_mcp.audit import AuditEntryNotWrittenError
+from tcip_mcp.audit import (
+    AuditEntryNotWrittenError,
+    MutationCommittedWithoutAuditLineError,
+)
 
 
 class AuditGapRefusal(BaseModel):
@@ -29,7 +32,7 @@ class AuditGapRefusal(BaseModel):
 
 
 def audit_gap_409(
-    exc: AuditEntryNotWrittenError,
+    exc: AuditEntryNotWrittenError | MutationCommittedWithoutAuditLineError,
     *,
     committed: bool,
     what: object,
