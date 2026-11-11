@@ -64,14 +64,10 @@ def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(
     the client, and a call through the server writes a record carrying the caller's name.
     """
     from tcip_mcp.tools.meta_tools import Retrospective, memory_entries
-    from tests._server_calls import client_server
+    from tests._server_calls import listed_tools
 
-    tools = {
-        t.name: t for t in client_server(bound)._tool_manager.list_tools()
-    }
-    assert (
-        "project_id" in tools["write_retrospective"].parameters["properties"]
-    )
+    offered = listed_tools()["write_retrospective"].input_schema
+    assert "project_id" in offered["properties"]
 
     (result,) = results_through_handshake(
         [

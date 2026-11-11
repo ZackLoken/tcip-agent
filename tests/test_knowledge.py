@@ -215,19 +215,17 @@ def test_import_tcip_mcp_server_succeeds_and_registers_serve_domain_knowledge() 
 
 
 def test_the_registered_tool_description_names_every_document() -> None:
-    from tcip_mcp.server import Session, build_server
+    from tests._server_calls import listed_tools
 
-    tools = {
-        t.name: t for t in build_server(Session())._tool_manager.list_tools()
-    }
-    tool = tools["serve_domain_knowledge"]
+    description = listed_tools()["serve_domain_knowledge"].description
+    assert description is not None
     assert (
         "Without a name it returns the index of names and descriptions below; with a name "
         "from the lines below it returns that document's content."
-    ) in tool.description
+    ) in description
     for document in list_documents():
-        assert document.name in tool.description
-        assert document.description in tool.description
+        assert document.name in description
+        assert document.description in description
 
 
 def test_serve_domain_knowledge_with_no_name_returns_the_index() -> None:

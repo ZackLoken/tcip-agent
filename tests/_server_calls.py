@@ -1,4 +1,4 @@
-"""A tool called as an MCP client calls it, through the server's own argument schema."""
+"""A tool called as an MCP client calls it, or listed as the server lists it."""
 
 from __future__ import annotations
 
@@ -26,6 +26,17 @@ def client_server(bound: BoundProject | None) -> MCPServer:
     session = Session()
     session.bind(bound, None)
     return build_server(session)
+
+
+def listed_tools() -> dict[str, mcp_types.Tool]:
+    """Return the tools the server lists, keyed by tool name.
+
+    Each value is the tool as the server lists it, its description and input schema included.
+    The listing is the same whichever project the server is bound to.
+    """
+    from tcip_web.cli import tool_listing
+
+    return {tool.name: tool for tool in tool_listing()}
 
 
 def called_through_the_server(

@@ -94,10 +94,8 @@ def test_a_category_or_kind_outside_its_vocabulary_is_refused_at_the_mcp_door(
     never the body's own failure. A known category and kind answer, and only the known report is
     recorded and audited.
     """
-    import anyio
-
     from tests._audit_fixtures import audit_rows
-    from tests._server_calls import client_server, results_through_handshake
+    from tests._server_calls import listed_tools, results_through_handshake
 
     refusals = [
         ("report_friction", "category", {"category": "nope", "detail": "x"}),
@@ -118,17 +116,14 @@ def test_a_category_or_kind_outside_its_vocabulary_is_refused_at_the_mcp_door(
             {"kind": "reports", "category": "missing_tool"},
         ),
     ]
-    schemas = {
-        listed.name: listed.input_schema
-        for listed in anyio.run(client_server(bound).list_tools)
-    }
+    tools = listed_tools()
     *refused, written, listed = results_through_handshake(
         [(name, arguments) for name, _, arguments in refusals] + admitted,
         bound=bound,
     )
 
     for (name, parameter, arguments), result in zip(refusals, refused):
-        advertised = _advertised_enum(schemas[name], parameter)
+        advertised = _advertised_enum(tools[name].input_schema, parameter)
         assert advertised and arguments[parameter] not in advertised, (
             name,
             parameter,

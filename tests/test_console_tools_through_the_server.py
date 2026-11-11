@@ -469,10 +469,9 @@ def test_a_value_outside_a_typed_parameter_is_refused_by_the_advertised_schema(
     Each refused call's arguments are ones the registered tool's advertised input schema admits
     no value for, and the server's answer is its argument validation naming that parameter.
     """
-    import anyio
     from jsonschema import Draft202012Validator
 
-    from tests._server_calls import client_server, results_through_handshake
+    from tests._server_calls import listed_tools, results_through_handshake
 
     plant_draw = {
         "folder_path": "dataset",
@@ -568,10 +567,7 @@ def test_a_value_outside_a_typed_parameter_is_refused_by_the_advertised_schema(
             },
         ),
     ]
-    schemas = {
-        listed.name: Draft202012Validator(listed.input_schema)
-        for listed in anyio.run(client_server(bound).list_tools)
-    }
+    tools = listed_tools()
     refused = results_through_handshake(
         [(name, arguments) for name, _, arguments in refusals], bound=bound
     )
@@ -579,7 +575,8 @@ def test_a_value_outside_a_typed_parameter_is_refused_by_the_advertised_schema(
     for (name, parameter, arguments), result in zip(
         refusals, refused, strict=True
     ):
-        assert not schemas[name].is_valid(arguments), (name, arguments)
+        schema = Draft202012Validator(tools[name].input_schema)
+        assert not schema.is_valid(arguments), (name, arguments)
         (answer,) = result.content
         assert result.is_error, (name, answer)
         assert f"validation error for {name}Arguments\n{parameter}\n" in (
