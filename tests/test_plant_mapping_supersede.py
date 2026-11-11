@@ -163,6 +163,38 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     assert "error" not in res2, res2
 
 
+def test_a_superseding_rebuild_over_a_date_the_dataset_lists_no_capture_of_archives_nothing(
+    tmp_path: Path,
+) -> None:
+    """A superseding rebuild asked for a date with no capture refuses before it archives.
+
+    The cited record stays as it was, nothing is archived under its digest and no receipt is
+    written.
+    """
+    _, dataset_root, _ = _cited_mapping(tmp_path)
+    before = plant_mapping.load_mapping(tmp_path, "valley")
+    assert before is not None
+    receipts = audit_rows(tmp_path)
+
+    res = build_plant_mapping(
+        tmp_path,
+        name="valley",
+        dataset_root=dataset_root,
+        plant_registry=before.plant_registry.name,
+        dates=[DATES[0], "2099-01-01"],
+        supersede=True,
+        actor=None,
+    )
+
+    assert "2099-01-01" in res["error"], res
+    after = plant_mapping.load_mapping(tmp_path, "valley")
+    assert after is not None
+    assert after.record_sha256 == before.record_sha256
+    archived = f"valley@{before.record_sha256[:12]}"
+    assert plant_mapping.load_mapping(tmp_path, archived) is None
+    assert audit_rows(tmp_path) == receipts
+
+
 def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
     tmp_path: Path,
 ) -> None:

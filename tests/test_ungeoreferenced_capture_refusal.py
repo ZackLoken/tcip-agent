@@ -192,6 +192,40 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     ).exists()
 
 
+def test_build_route_refuses_a_date_the_dataset_lists_no_capture_of_naming_it(
+    tmp_path: Path,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The build route refuses a selected date with no capture folder, beside a listed one.
+
+    The route answers 400 carrying the sentence that names the date and the captures the dataset
+    lists, and persists no mapping.
+    """
+    from tcip_web.state import store
+
+    project = _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
+    asyncio.run(store.open_project(project))
+
+    resp = client.post(
+        "/api/results/plant_mapping/build",
+        json={
+            "name": "valley",
+            "dataset_root": str(dataset_root),
+            "plant_registry": registry,
+            "user": "tester",
+            "dates": [DATE, "2099-01-01"],
+        },
+    )
+    assert resp.status_code == 400
+    assert str(["2099-01-01"]) in resp.json()["detail"]
+    assert str([DATE]) in resp.json()["detail"]
+    assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
+
+
 # ── delivery: three sentences, by the record's own evidence ────────────────
 
 

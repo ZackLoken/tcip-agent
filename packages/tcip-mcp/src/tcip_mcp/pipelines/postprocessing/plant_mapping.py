@@ -504,8 +504,8 @@ UNREAD_CAUSE = (
 ) = REASONS = (
     Inadmissible(
         "on a date the mapping does not cover",
-        "rebuild the mapping to cover those dates and deliver those dates' buckets, "
-        "or drop those results",
+        "ingest any of those dates' captures the dataset lacks, rebuild the mapping to cover "
+        "those dates and deliver those dates' buckets, or drop those results",
         "",
     ),
     Inadmissible(
@@ -1605,18 +1605,27 @@ def build_mapping(
     ingested under a mapped date is a capture the identity sees; its
     :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates.
 
-    Raises :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when the requested
-    dates carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any
-    capture PIL could not open before the position clause) when every capture that was read
-    carries no position this door reads.
+    Raises :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when a stated date
+    is not one the dataset lists a capture of (matched by exact name), naming those dates and the
+    captures it lists; when the captures scanned hold no image at all; and with
+    :func:`ungeoreferenced_capture_message` (naming any capture PIL could not open before the
+    position clause) when every capture that was read carries no position this door reads.
     """
-    from tcip_mcp.dataset_layout import image_root
+    from tcip_mcp.dataset_layout import image_root, list_dates
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
         scan_captures,
     )
 
     images = image_root(dataset_root)
+    if dates is not None:
+        listed = list_dates(dataset_root)
+        unlisted = [d for d in dict.fromkeys(dates) if d not in listed]
+        if unlisted:
+            raise UngeoreferencedCaptureError(
+                f"the dataset lists no capture of {unlisted} under {images}, which lists "
+                f"{listed}; state dates from that list, or ingest the missing dates' images first"
+            )
     assignments: dict[str, list[Assignment]] = {}
     radii: dict[str, MatchRadius] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
@@ -1639,7 +1648,7 @@ def build_mapping(
 
     if n_stamps == 0:
         raise UngeoreferencedCaptureError(
-            f"no capture under {images} on the requested dates"
+            f"no capture under {images} holds an image; captures scanned: {list(captures)}"
         )
     if n_positioned == 0:
         all_unreadable = sorted(
@@ -2325,7 +2334,8 @@ def resolve_delivery_mapping(
     if missing_dates:
         raise MappingDeliveryError(
             f"the delivered buckets record date(s) {missing_dates} the mapping {name!r} does not "
-            "cover; rebuild the mapping to cover them, or drop those buckets"
+            "cover; ingest any of those dates' captures the dataset lacks, rebuild the mapping to "
+            "cover them, or drop those buckets"
         )
 
     try:
