@@ -198,6 +198,45 @@ def test_the_gate_over_each_bucket_of_another_dataset_than_its_root_refuses_with
         assert named in str(tie.value), tie.value
 
 
+def test_buckets_published_under_two_roots_refuse_naming_both_with_no_selection_step(
+    tmp_path: Path,
+) -> None:
+    """A delivery of a bucket under each of two roots is refused with the shared check's sentence.
+
+    The sentence names both roots in their canonical spelling and carries no ``draw_splits`` step,
+    which only a selection's refusal of its own samples adds.
+    """
+    from tcip_mcp.buckets import require_delivered_dataset
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._chain_fixtures import predicted, published
+    from tests._producer_fixtures import two_roots_refusal
+    from tests.test_deliver_per_image_counts_bucket_regime import SCOPE
+
+    root, name = _published(tmp_path)
+    here = read_bucket(root, name)
+    there = published(
+        tmp_path,
+        "elsewhere/2026-01-01",
+        [
+            predicted(
+                image_dir(tmp_path / "ds2", "2026-01-01") / "a.png",
+                [SCOPE["subject"]] * 2,
+            )
+        ],
+        scope=SCOPE,
+        crop=COUNT_CROP,
+    )
+    assert there.root != here.root
+
+    with pytest.raises(ValueError) as refused:
+        require_delivered_dataset([here, there])
+
+    assert str(refused.value) == two_roots_refusal(
+        [here.root, there.root], "a delivery's buckets"
+    )
+    assert "draw_splits" not in str(refused.value), refused.value
+
+
 # ── the route ────────────────────────────────────────────────────────────
 
 

@@ -501,12 +501,12 @@ def as_selection(document: JsonValue, *, where: str) -> Selection:
 
     Every refusal is ``tcip_store.ReadRefusedError`` naming the document at ``where``: the
     record's own issues (each field that does not decode, an empty ``samples`` list and a side
-    outside :data:`SIDES` among them), what
-    :func:`~tcip_mcp.dataset_layout.source_root` refuses of its samples' sources followed by the
-    ``draw_splits`` step, a partition whose sides cross (:func:`refuse_crossing_sides`), or a
-    scope its samples' shape cannot be read under (:meth:`ClassScope.admitted_for`).
+    outside :data:`SIDES` among them), what :func:`~tcip_mcp.dataset_layout.source_root` refuses of
+    its samples' sources, a partition whose sides cross (:func:`refuse_crossing_sides`), or a
+    scope its samples' shape cannot be read under (:meth:`ClassScope.admitted_for`). A
+    :class:`~tcip_mcp.dataset_layout.NoOneRootError` alone is followed by the ``draw_splits`` step.
     """
-    from tcip_mcp.dataset_layout import source_root
+    from tcip_mcp.dataset_layout import NoOneRootError, source_root
 
     place = selection_place(where)
     selection = tcip_store.validated(_SELECTION, document, place)
@@ -515,7 +515,7 @@ def as_selection(document: JsonValue, *, where: str) -> Selection:
             source_root(
                 (s.source for s in selection.samples), what="its samples"
             )
-        except ValueError as exc:
+        except NoOneRootError as exc:
             raise ValueError(
                 f"{exc} Draw it over one with draw_splits."
             ) from exc
