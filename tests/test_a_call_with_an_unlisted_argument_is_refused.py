@@ -22,8 +22,7 @@ from tcip_mcp.workspace import BoundProject
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
-from tests._server_calls import client_server
-from tests.test_agent_identity_records import results_through_handshake
+from tests._server_calls import client_server, results_through_handshake
 
 DIRECT, WIRE = "direct", "wire"
 ROUTES = (DIRECT, WIRE)
