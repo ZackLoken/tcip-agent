@@ -23,8 +23,8 @@ TEST_FILE = REPO_ROOT / "tests" / "test_admission_rule_of.py"
 KNOWN_GUARD = "test_admission_rule_of_answers_none_for_no_stamp"
 # A commit whose own tests/ tree holds the guard, paired with the commit before the guard's fix
 # as the baseline, so every fixture the guard reaches is of the baseline's own era.
-TEST_REV = "14d03827"
-BASELINE = "b8ed53a4"
+TEST_REV = "3ebfd372"
+BASELINE = "fd228f1e"
 
 
 def _run_guard_check(test_file: str) -> subprocess.CompletedProcess:
