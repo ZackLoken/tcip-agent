@@ -443,10 +443,15 @@ def _why(result: subprocess.CompletedProcess) -> str:
     )
 
 
-def test_a_run_mixing_an_assertion_failure_and_a_wrong_call_names_each_by_role(
-    tmp_path: Path,
-) -> None:
-    """The verdict names the assertion failure it rests on and the wrong call as not counted."""
+def _head_adds_color_double_and_gadgets(
+    tmp_path: Path, test_source: str
+) -> tuple[Path, str]:
+    """Build a scratch repository whose head holds ``test_source`` and what it needs.
+
+    The baseline's ``widgets`` has a no-op ``double`` and a ``Widget`` without a color, and has no
+    ``gadgets`` module; the head fixes the first two and adds the third. Returns the repository at
+    its head and the baseline revision.
+    """
     repo = _scratch_repo(tmp_path)
     _write(
         repo / "widgets.py",
@@ -470,8 +475,24 @@ def test_a_run_mixing_an_assertion_failure_and_a_wrong_call_names_each_by_role(
         "        self.size = size\n"
         "        self.color = color\n",
     )
-    _write(
-        repo / "tests" / "test_widgets.py",
+    _write(repo / "gadgets.py", "GADGET = 1\n")
+    _write(repo / "tests" / "test_widgets.py", test_source)
+    _commit_all(repo, "double doubles, widget carries a color, gadgets exists")
+    return repo, baseline
+
+
+def _assert_one_clause_names(text: str, test: str, sentence: str) -> None:
+    """Assert exactly one ``"; "`` clause of ``text`` holds both ``test`` and ``sentence``."""
+    clauses = [c for c in text.split("; ") if test in c and sentence in c]
+    assert len(clauses) == 1, text
+
+
+def test_a_run_mixing_an_assertion_failure_and_a_wrong_call_names_each_by_role(
+    tmp_path: Path,
+) -> None:
+    """The verdict names the assertion failure it rests on and the wrong call as not counted."""
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
         "def test_double_doubles():\n"
         "    from widgets import double\n"
         "    assert double(3) == 6\n"
@@ -481,7 +502,6 @@ def test_a_run_mixing_an_assertion_failure_and_a_wrong_call_names_each_by_role(
         "    from widgets import Widget\n"
         "    assert Widget(size=3, color='red').color == 'red'\n",
     )
-    _commit_all(repo, "double doubles, widget carries a color")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -489,8 +509,9 @@ def test_a_run_mixing_an_assertion_failure_and_a_wrong_call_names_each_by_role(
     counted, _, not_counted = _why(result).partition("not counted")
     assert "test_double_doubles" in counted
     assert "test_widget_carries_a_color" not in counted
-    assert "test_widget_carries_a_color" in not_counted
-    assert CALL_PHASE_SENTENCE in not_counted
+    _assert_one_clause_names(
+        not_counted, "test_widget_carries_a_color", CALL_PHASE_SENTENCE
+    )
     assert "test_double_doubles" not in not_counted
 
 
@@ -537,56 +558,11 @@ def test_a_run_mixing_a_setup_failure_and_a_wrong_call_names_each_with_its_own_s
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    clauses = _why(result).split("; ")
-    assert any(
-        "test_uses_thing" in c and FIXTURE_SENTENCE in c for c in clauses
+    why = _why(result)
+    _assert_one_clause_names(why, "test_uses_thing", FIXTURE_SENTENCE)
+    _assert_one_clause_names(
+        why, "test_widget_carries_a_color", CALL_PHASE_SENTENCE
     )
-    assert any(
-        "test_widget_carries_a_color" in c and CALL_PHASE_SENTENCE in c
-        for c in clauses
-    )
-
-
-def _head_adds_color_double_and_gadgets(
-    tmp_path: Path, test_source: str
-) -> tuple[Path, str]:
-    """Build a scratch repository whose head holds ``test_source`` and what it needs.
-
-    The baseline's ``widgets`` has a no-op ``double`` and a ``Widget`` without a color, and has no
-    ``gadgets`` module; the head fixes the first two and adds the third. Returns the repository at
-    its head and the baseline revision.
-    """
-    repo = _scratch_repo(tmp_path)
-    _write(
-        repo / "widgets.py",
-        "def double(x):\n"
-        "    return x\n"
-        "\n"
-        "\n"
-        "class Widget:\n"
-        "    def __init__(self, size):\n"
-        "        self.size = size\n",
-    )
-    baseline = _commit_all(repo, "double is a no-op, widget has no color")
-    _write(
-        repo / "widgets.py",
-        "def double(x):\n"
-        "    return x * 2\n"
-        "\n"
-        "\n"
-        "class Widget:\n"
-        "    def __init__(self, size, color=None):\n"
-        "        self.size = size\n"
-        "        self.color = color\n",
-    )
-    _write(repo / "gadgets.py", "GADGET = 1\n")
-    _write(repo / "tests" / "test_widgets.py", test_source)
-    _commit_all(repo, "double doubles, widget carries a color, gadgets exists")
-    return repo, baseline
-
-
-def _clauses_naming(clauses: list[str], test: str, sentence: str) -> list[str]:
-    return [c for c in clauses if test in c and sentence in c]
 
 
 def test_a_fixture_refusal_lists_a_missing_import_failure_as_not_counted(
@@ -617,19 +593,12 @@ def test_a_fixture_refusal_lists_a_missing_import_failure_as_not_counted(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert why.startswith("REFUSED:")
-    _, marker, listing = why.partition(" Also not counted: ")
+    before, marker, listing = why.partition(" Also not counted: ")
     assert marker, why
+    assert "test_imports_a_gadget" not in before
     assert "test_uses_thing" not in listing
-    assert (
-        len(
-            _clauses_naming(
-                listing.split("; "),
-                "test_imports_a_gadget",
-                UNREACHED_SENTENCE,
-            )
-        )
-        == 1
+    _assert_one_clause_names(
+        listing, "test_imports_a_gadget", UNREACHED_SENTENCE
     )
 
 
@@ -657,15 +626,8 @@ def test_a_guards_run_lists_a_missing_import_failure_as_not_counted(
     assert "test_double_doubles" in counted
     assert "test_imports_a_gadget" not in counted
     assert "test_double_doubles" not in not_counted
-    assert (
-        len(
-            _clauses_naming(
-                not_counted.split("; "),
-                "test_imports_a_gadget",
-                UNREACHED_SENTENCE,
-            )
-        )
-        == 1
+    _assert_one_clause_names(
+        not_counted, "test_imports_a_gadget", UNREACHED_SENTENCE
     )
 
 
@@ -693,14 +655,7 @@ def test_a_fixture_failing_during_teardown_is_refused_with_the_teardown_sentence
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert (
-        len(
-            _clauses_naming(
-                why.split("; "), "test_uses_thing", TEARDOWN_SENTENCE
-            )
-        )
-        == 1
-    )
+    _assert_one_clause_names(why, "test_uses_thing", TEARDOWN_SENTENCE)
     assert FIXTURE_SENTENCE not in why
     assert CAUSE_CLAUSE not in why
 
