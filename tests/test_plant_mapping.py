@@ -247,7 +247,7 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(
     tmp_path: Path,
 ) -> None:
     """``build_mapping`` over no capture refuses with ``UngeoreferencedCaptureError``, saying so."""
-    with pytest.raises(Exception, match="no capture under") as exc:
+    with pytest.raises(Exception, match="holds an image") as exc:
         mapping_over(tmp_path / "ds", [], tmp_path)
     assert type(exc.value).__name__ == "UngeoreferencedCaptureError"
 

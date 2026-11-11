@@ -98,6 +98,7 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     )
     assert "error" in res
     assert "plant-tag mechanism" in res["error"]
+    assert f"no capture of {[DATE]} under" in res["error"]
     assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
 
@@ -164,7 +165,7 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
 ) -> None:
     """The build route refuses a selected date with no captures.
 
-    The route answers 400 saying there is no capture under the selected root.
+    The route answers 400 saying no capture of that date under the selected root holds an image.
     """
     from tcip_web.state import store
 
@@ -186,7 +187,8 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
         },
     )
     assert resp.status_code == 400
-    assert "no capture under" in resp.json()["detail"]
+    assert f"no capture of {['2099-01-01']} under" in resp.json()["detail"]
+    assert "holds an image" in resp.json()["detail"]
     assert not (
         tmp_path / ".tcip" / "state" / "plant_mappings" / "valley.json"
     ).exists()
@@ -435,7 +437,7 @@ def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_
         dataset_root,
         preds_by_date,
         "valley",
-        "plant-tag mechanism",
+        f"no capture of {[DATE]} under mapping 'valley'",
     )
 
 

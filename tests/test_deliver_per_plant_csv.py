@@ -1584,6 +1584,8 @@ ABSENT = "2026-03-01"
 """A date with no capture folder in :data:`CAPTURES`' scene."""
 ALSO_ABSENT = "2026-05-01"
 """A second date with no capture folder in :data:`CAPTURES`' scene."""
+HIDDEN = ".2026-06-01"
+"""A dot-prefixed folder the tests make under the image tree, which the lister does not list."""
 EMPTY = "2026-04-01"
 """A date whose capture folder the tests make and leave holding no image."""
 INGEST_FIRST = "ingest the missing dates' images first"
@@ -1592,21 +1594,33 @@ INGEST_FIRST = "ingest the missing dates' images first"
 
 @pytest.mark.parametrize(
     "dates",
-    [[FIRST, ABSENT], [ABSENT, FIRST, ALSO_ABSENT], [ABSENT]],
-    ids=["one_absent_beside_a_listed", "two_absent", "absent_alone"],
+    [
+        [FIRST, ABSENT],
+        [ABSENT, FIRST, ALSO_ABSENT],
+        [ABSENT],
+        [FIRST, HIDDEN],
+    ],
+    ids=[
+        "one_absent_beside_a_listed",
+        "two_absent",
+        "absent_alone",
+        "a_name_the_lister_does_not_list",
+    ],
 )
 def test_a_build_asked_for_a_date_the_dataset_lists_no_capture_of_refuses_naming_it(
     tmp_path: Path, dates: list[str]
 ) -> None:
-    """A build asked for a date with no capture folder refuses, storing and recording nothing.
+    """A build asked for a date the dataset lists no capture of refuses, storing nothing.
 
     The sentence names each such date, the captures the dataset lists and the step; no mapping is
-    stored under the name and the project's audit log gains no line.
+    stored under the name and the project's audit log gains no line. A dot-prefixed folder, which
+    exists but is no capture the lister lists, is refused the same way.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
     from tests._audit_fixtures import audit_rows
 
     dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
+    image_dir(dataset_root, HIDDEN).mkdir(parents=True)
     logged = audit_rows(tmp_path)
 
     refused = _build(tmp_path, dataset_root, registry, dates)
@@ -1620,37 +1634,47 @@ def test_a_build_asked_for_a_date_the_dataset_lists_no_capture_of_refuses_naming
     assert audit_rows(tmp_path) == logged
 
 
-def test_a_build_asked_for_a_name_the_lister_does_not_list_refuses_naming_it(
-    tmp_path: Path,
-) -> None:
-    """A dot-prefixed folder is no capture the dataset lists, so a build asked for it refuses.
-
-    The folder exists under the image tree; the refusal names it and offers the listed captures.
-    """
-    dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
-    image_dir(dataset_root, ".2026-03-01").mkdir(parents=True)
-
-    refused = _build(tmp_path, dataset_root, registry, [FIRST, ".2026-03-01"])
-
-    assert str([".2026-03-01"]) in refused["error"], refused
-    assert str([FIRST, SECOND]) in refused["error"], refused
-
-
 def test_a_build_asked_for_dates_holding_no_image_names_the_captures_it_scanned(
     tmp_path: Path,
 ) -> None:
     """A build over only dates whose folders hold no image refuses naming those captures.
 
-    The refusal no longer says "the requested dates".
+    The scene's other dates hold images, so the sentence is about the scanned captures alone.
     """
     dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
     image_dir(dataset_root, EMPTY).mkdir(parents=True)
 
     refused = _build(tmp_path, dataset_root, registry, [EMPTY])
 
-    assert "no capture under" in refused["error"], refused
-    assert "the requested dates" not in refused["error"], refused
-    assert str([EMPTY]) in refused["error"], refused
+    assert f"no capture of {[EMPTY]} under" in refused["error"], refused
+    assert "holds an image" in refused["error"], refused
+
+
+def test_the_build_and_the_label_import_refuse_an_unlisted_date_in_one_sentence(
+    tmp_path: Path,
+) -> None:
+    """The plant-mapping build and the label import answer one date the dataset lists no capture of.
+
+    Both answer the same sentence over the same root and date.
+    """
+    from tcip_mcp.tools.ingest_tools import import_coco
+    from tests.test_coco_import import RATIONALE, VERTEX_SPACING, _document
+
+    dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
+
+    built = _build(tmp_path, dataset_root, registry, [ABSENT])
+    imported = import_coco(
+        tmp_path,
+        str(_document(tmp_path / "external.json")),
+        str(dataset_root),
+        ABSENT,
+        VERTEX_SPACING,
+        RATIONALE,
+        actor=None,
+    )
+
+    assert built["error"] == imported["error"]
+    assert INGEST_FIRST in built["error"]
 
 
 @pytest.mark.parametrize(
@@ -1682,7 +1706,8 @@ def test_a_build_over_dates_the_dataset_lists_covers_them(
 
     assert "error" not in built, built
     assert list(built["per_date"]) == covered
-    assert built["per_date"].get(EMPTY, {"n_images": 0})["n_images"] == 0
+    if EMPTY in covered:
+        assert built["per_date"][EMPTY]["n_images"] == 0
 
 
 def test_the_next_step_of_a_result_on_a_date_with_no_capture_leads_to_a_delivery(
@@ -1691,12 +1716,18 @@ def test_the_next_step_of_a_result_on_a_date_with_no_capture_leads_to_a_delivery
     """Following the door's step for a date with no capture folder reaches a delivery.
 
     The result on the date is refused with the step; a rebuild over the date is refused naming it;
-    once the date's capture is written, the mapping rebuilt and the date's bucket published, the
-    delivery with every read image's result succeeds.
+    once the date's capture is ingested, the same rebuild succeeds and the date's bucket published,
+    the delivery with every read image's result succeeds.
     """
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
-    from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M, write_photos
+    from tcip_mcp.tools.ingest_tools import (
+        IngestManifest,
+        bucket_of,
+        ingest_images,
+    )
+    from tests._image_fixtures import write_geo_image
+    from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M
 
     dataset_root, _ = _mapped(tmp_path, TWO_PLANTS, CAPTURES)
     buckets = _both(tmp_path, dataset_root)
@@ -1711,20 +1742,20 @@ def test_the_next_step_of_a_result_on_a_date_with_no_capture_leads_to_a_delivery
     ) == {NOT_COVERED: [f"{ABSENT}/x"]}
     built = load_mapping(tmp_path, "valley")
     assert built is not None
-    rebuilt = _build(
-        tmp_path,
-        dataset_root,
-        built.plant_registry.name,
-        [FIRST, SECOND, ABSENT],
-    )
+    stated = [FIRST, SECOND, ABSENT]
+    rebuilt = _build(tmp_path, dataset_root, built.plant_registry.name, stated)
     assert ABSENT in rebuilt["error"], rebuilt
-    write_photos(
-        image_dir(dataset_root, ABSENT),
-        {"x.jpg": (*TWO_PLANTS["P1"], PHOTO_POSITION_ERROR_M)},
+    source = tmp_path / "ingest_source"
+    write_geo_image(
+        source / "x.jpg",
+        *TWO_PLANTS["P1"],
         datetime(2026, 3, 1, 9, 30),
-        timedelta(minutes=5),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
-    rebuilt = _build(tmp_path, dataset_root, built.plant_registry.name, None)
+    ingested = ingest_images(dataset_root, source=str(source), actor=None)
+    assert isinstance(ingested, IngestManifest), ingested
+    assert [bucket_of(f.date) for f in ingested.files] == [ABSENT]
+    rebuilt = _build(tmp_path, dataset_root, built.plant_registry.name, stated)
     assert "error" not in rebuilt, rebuilt
     buckets.append(_bucket(tmp_path, dataset_root, ABSENT, {"x": 1}))
     answer = _delivered(
