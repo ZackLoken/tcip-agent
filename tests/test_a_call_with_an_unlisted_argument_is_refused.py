@@ -56,7 +56,7 @@ def _listed(bound: BoundProject, tool: str) -> list[str]:
     (listed,) = [
         t for t in anyio.run(client_server(bound).list_tools) if t.name == tool
     ]
-    return list(listed.input_schema.get("properties", {}))
+    return list(listed.input_schema["properties"])
 
 
 def _raw_images(project: Path) -> Path:

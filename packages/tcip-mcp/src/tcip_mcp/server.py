@@ -216,7 +216,7 @@ class _ListedArgumentsServer(MCPServer):
         for listed in await self.list_tools():
             if listed.name != name:
                 continue
-            takes = list(listed.input_schema.get("properties", {}))
+            takes = list(listed.input_schema["properties"])
             unlisted = [repr(key) for key in arguments if key not in takes]
             if unlisted:
                 ending = (
