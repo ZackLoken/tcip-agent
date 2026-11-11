@@ -16,7 +16,7 @@ import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx, csv_rows
-from tests._mapping_fixtures import COUNT_CROP, PLOTS, write_plots_csv
+from tests._mapping_fixtures import COUNT_CROP, write_plots_csv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -321,48 +321,6 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(
     )
 
     assert "different dataset" in res["error"]
-    assert not (tmp_path / "o.csv").exists()
-
-
-def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A mapping with no capture for a delivered date refuses on the record's own evidence.
-
-    The mapping is recorded with no capture at all for that date.
-    """
-    from tests.test_ungeoreferenced_capture_refusal import (
-        DATE,
-        _delivery_scene,
-        _persist_synthetic_mapping,
-    )
-
-    _, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
-    plant_csv = write_plots_csv(tmp_path / "plants.csv")
-    _persist_synthetic_mapping(
-        tmp_path,
-        dataset_root,
-        "valley",
-        plant_csvs=[
-            {
-                "path": str(plant_csv),
-                "sha256": "0" * 64,
-                "n_plants": len(PLOTS),
-            }
-        ],
-        assignments={DATE: []},
-    )
-
-    res = _deliver(
-        tmp_path,
-        _results(DATE, ("P1", 3)),
-        ["P1"],
-        dataset_root,
-        list(preds_by_date.values()),
-        plant_mapping="valley",
-    )
-
-    assert "recorded no capture at all" in res["error"]
     assert not (tmp_path / "o.csv").exists()
 
 

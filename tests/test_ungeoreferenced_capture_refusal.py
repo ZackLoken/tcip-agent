@@ -351,37 +351,6 @@ def _assert_all_doors_refuse(
     assert expected_fragment in resp.json()["detail"]
 
 
-def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
-    tmp_path: Path,
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project, dataset_root, preds_by_date = _delivery_scene(
-        tmp_path, monkeypatch
-    )
-    plant_csv = tmp_path / "plants.csv"
-    write_plant_csv(plant_csv, PLANTS)
-    plant_csvs = [
-        RegistryCsv(path=str(plant_csv), sha256="0" * 64, n_plants=len(PLANTS))
-    ]
-    _persist_synthetic_mapping(
-        tmp_path,
-        dataset_root,
-        "valley",
-        plant_csvs=plant_csvs,
-        assignments={DATE: []},
-    )
-
-    _assert_all_doors_refuse(
-        client,
-        project,
-        dataset_root,
-        preds_by_date,
-        "valley",
-        "recorded no capture at all",
-    )
-
-
 def test_delivery_refuses_naming_the_plant_registry_when_it_holds_no_plant(
     tmp_path: Path,
     client: TestClient,

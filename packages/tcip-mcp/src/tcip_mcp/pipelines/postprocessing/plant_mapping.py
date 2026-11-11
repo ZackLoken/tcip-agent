@@ -2338,8 +2338,8 @@ def resolve_delivery_mapping(
     (:func:`require_agreeing_crops`).
 
     A delivery whose delivered dates attribute nothing (:func:`assignment_is_attributed` false for
-    every one of them, a date recorded with no capture at all included) refuses on the record's own
-    evidence, before ``verify_mapping_inputs`` re-reads anything.
+    every one of them) refuses on the record's own evidence, before ``verify_mapping_inputs``
+    re-reads anything.
 
     Returns the loaded build and :func:`verify_mapping_inputs`'s verification; raises
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
@@ -2384,19 +2384,7 @@ def resolve_delivery_mapping(
     delivered_assignments = [
         a for date in buckets for a in mapping_build.assignments.get(date, [])
     ]
-    if not delivered_assignments or not any(
-        assignment_is_attributed(a) for a in delivered_assignments
-    ):
-        # A no-capture-at-all date is named below only inside this nothing-attributed scope.
-        empty_dates = sorted(
-            d for d in buckets if not mapping_build.assignments.get(d)
-        )
-        if empty_dates:
-            raise MappingDeliveryError(
-                f"the mapping {name!r} recorded no capture at all for date(s) {empty_dates}: a "
-                "date with no capture cannot be delivered; rebuild the mapping, or drop the "
-                "date(s)"
-            )
+    if not any(assignment_is_attributed(a) for a in delivered_assignments):
         # Refused on the record's own evidence, before verify_mapping_inputs reads any capture.
         registry = registry_or_refusal(mapping_build, project)
         if isinstance(registry, str):
