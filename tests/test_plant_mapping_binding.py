@@ -248,7 +248,7 @@ def test_build_plant_mapping_over_an_unregistered_dataset_names_register_dataset
     )
     assert "error" in res
     assert "register_dataset" in res["error"]
-    assert not (tmp_path / ".tcip" / "state" / "plant_mappings").exists()
+    assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
 
 def test_build_plant_mapping_admits_the_dataset_root_spelled_variously(
