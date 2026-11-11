@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from tcip_annotation.text import Crop
 from tcip_mcp.buckets import buckets_by_date
 from tcip_mcp.dataset_layout import (
     DatasetRecord,
@@ -202,12 +203,13 @@ class RegisterPayload(BaseModel):
     """A registration of ``dataset_root`` at ``crop`` by the person ``user`` names.
 
     ``confirmed_crop`` is the crop the person was shown as stored, which a change of it carries.
+    Each crop reads as a stored one does, stripped; a blank one is refused by the model.
     """
 
     dataset_root: str
-    crop: str
+    crop: Crop
     user: str
-    confirmed_crop: str | None = None
+    confirmed_crop: Crop | None = None
 
 
 class RegisteredDataset(DatasetRecord):
@@ -230,7 +232,7 @@ def register_dataset_route(payload: RegisterPayload) -> RegisteredDataset:
     other than ``crop`` refuses (409) naming it, writing nothing, unless ``confirmed_crop`` is
     that crop. The function's error, or a ``ValueError`` it raises, answers 400 with its
     sentence; a change committed whose audit line could not be written 409; no project open 409;
-    a root outside the allowed roots 403.
+    a root outside the allowed roots 403; a blank crop 422.
     """
     from tcip_mcp.audit import MutationCommittedWithoutAuditLineError
     from tcip_mcp.identity import actor
