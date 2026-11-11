@@ -377,7 +377,12 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     )
     assert "error" not in built, built
     for mapping_name, expected_status, expected_detail in (
-        ("partial", 400, "does not cover"),
+        (
+            "partial",
+            400,
+            "does not cover; ingest any of those dates' captures the dataset lacks, rebuild the "
+            "mapping to cover them, or drop those buckets",
+        ),
         ("not-written-yet", 404, "not-written-yet"),
     ):
         broken = {**body, "mapping_name": mapping_name}
