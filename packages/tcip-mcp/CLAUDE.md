@@ -75,11 +75,13 @@ backend. The server supplies only those two and `actor` (`server._CONTEXT`), the
 calls are made by, each read from the server's `server.Session` at the call (`Session.bind` is the
 one way a session gains them; `None` is an MCP client's person), so any other parameter, whatever
 its name, stays the client's (the knowledge door acts on none, the project-creation door on `actor`
-alone); a tool that changes state is `@audited`, by that `actor`, unless the library function it
-calls records its own event with facts the decorator cannot carry (a digest, what was written), and
-then it is not decorated. The decorator writes no line for a call returning its error dict and an
-exception line for a call that raises. A read-only tool (a status poll, a listing, a document served
-back) leaves none, so the audit log records mutations and nothing else; a render under
+alone), and a call naming an argument outside the tool's listed schema, a supplied one included,
+is refused before the tool runs; a tool that changes state is `@audited`, by that `actor`, unless
+the library function it calls records its own event with facts the decorator cannot carry (a
+digest, what was written), and then it is not decorated. The decorator writes no line for a call
+returning its error dict and an exception line for a call that raises. A read-only tool (a status
+poll, a listing, a document served back) leaves none, so the audit log records mutations and
+nothing else; a render under
 `.tcip/artifacts/viz/` is a derived view that can be regenerated, not a state change, and leaves
 none. `serve_domain_knowledge`'s `@tool(description=...)` composes its client-visible description
 from the knowledge corpus at import time rather than leaving it as the bare docstring. A mutating
