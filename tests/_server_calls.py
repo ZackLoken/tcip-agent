@@ -28,6 +28,16 @@ def client_server(bound: BoundProject | None) -> MCPServer:
     return build_server(session)
 
 
+def listed_tools(bound: BoundProject | None) -> dict[str, mcp_types.Tool]:
+    """Return the tools :func:`client_server` lists for ``bound``, keyed by tool name.
+
+    Each value is the tool as the server lists it, its description and input schema included.
+    """
+    return {
+        tool.name: tool for tool in anyio.run(client_server(bound).list_tools)
+    }
+
+
 def called_through_the_server(
     tool: str, arguments: dict, *, bound: BoundProject | None = None
 ) -> JsonValue:

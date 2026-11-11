@@ -538,15 +538,10 @@ def test_neither_delivering_tool_nor_the_count_payload_takes_the_key(
     ``pipeline_version`` (the delivery event's producer). The listing is the MCP server's own;
     the payload's refusal is its schema's, 422.
     """
-    import anyio
-
-    from tcip_mcp.server import Session, build_server
+    from tests._server_calls import listed_tools
     from tests.test_tcip_web_results_routes import COUNT_ROUTE
 
-    listed = {
-        t.name: t.input_schema["properties"]
-        for t in anyio.run(build_server(Session()).list_tools)
-    }
+    tools = listed_tools(None)
     refused = client.post(
         COUNT_ROUTE,
         json={
@@ -565,7 +560,8 @@ def test_neither_delivering_tool_nor_the_count_payload_takes_the_key(
     )
 
     for name in ("deliver_per_plant_csv", "deliver_orthomosaic_plant_counts"):
-        assert {"plant_registry", "plant_mapping"} & set(listed[name])
-        assert key not in listed[name], name
+        listed = tools[name].input_schema["properties"]
+        assert {"plant_registry", "plant_mapping"} & set(listed)
+        assert key not in listed, name
     assert refused.status_code == 422, refused.text
     assert key in refused.text

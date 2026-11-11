@@ -30,13 +30,9 @@ from tests._chain_fixtures import deliver_milestones
 
 def _served_tool_description() -> str:
     """Return the description the tool listing serves for ``build_plant_mapping``."""
-    from tcip_web.cli import tool_listing
+    from tests._server_calls import listed_tools
 
-    (served,) = (
-        t.description
-        for t in tool_listing()
-        if t.name == "build_plant_mapping"
-    )
+    served = listed_tools(None)["build_plant_mapping"].description
     assert served is not None
     return served
 

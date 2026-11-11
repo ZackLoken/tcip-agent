@@ -1508,9 +1508,8 @@ def test_the_door_offers_the_plant_aggregate_kinds_and_refuses_the_mosaic_count(
     The schema the server lists names the three aggregate kinds; a call naming the orthomosaic
     count's kind is refused by that schema, by the parameter's name, before any delivery runs.
     """
-    from tests._server_calls import called_through_the_server, client_server
+    from tests._server_calls import called_through_the_server, listed_tools
 
-    tools = {t.name: t for t in client_server(None)._tool_manager.list_tools()}
     refused = called_through_the_server(
         "deliver_per_plant_csv",
         {
@@ -1522,8 +1521,8 @@ def test_the_door_offers_the_plant_aggregate_kinds_and_refuses_the_mosaic_count(
 
     assert "validation error" in str(refused), refused
     assert "delivery_kind" in str(refused), refused
-    offered = tools["deliver_per_plant_csv"].parameters["properties"]
-    assert offered["delivery_kind"].get("enum") == [
+    door = listed_tools(None)["deliver_per_plant_csv"]
+    assert door.input_schema["properties"]["delivery_kind"].get("enum") == [
         "per_plant_count_aggregate",
         "per_plant_ordinal_aggregate",
         "per_plant_regression_aggregate",

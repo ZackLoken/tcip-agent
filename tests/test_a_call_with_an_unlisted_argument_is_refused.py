@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import anyio
 import pytest
 from mcp.types import TextContent
 
@@ -25,7 +24,7 @@ from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
 from tests._server_calls import (
     called_through_the_server,
-    client_server,
+    listed_tools,
     results_through_handshake,
 )
 
@@ -37,15 +36,10 @@ ROUTES = (DIRECT, WIRE)
 """The server's own ``call_tool``, and a client session over in-memory streams."""
 
 
-def _listing(bound: BoundProject | None) -> dict[str, list[str]]:
-    """Return each listed tool's argument names, from the server's own listing."""
-    return {
-        listed.name: list(listed.input_schema["properties"])
-        for listed in anyio.run(client_server(bound).list_tools)
-    }
-
-
-LISTED = _listing(None)
+LISTED = {
+    name: list(listed.input_schema["properties"])
+    for name, listed in listed_tools(None).items()
+}
 """Every tool the server lists, with the argument names its schema lists."""
 
 STRANGER = "an_argument_no_tool_lists"
