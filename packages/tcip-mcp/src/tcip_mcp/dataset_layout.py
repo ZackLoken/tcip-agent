@@ -299,10 +299,7 @@ def require_dataset_identity(dataset_root: str | Path) -> DatasetRecord:
 
 
 class NoOneRootError(ValueError):
-    """No one dataset root was established for the sources or buckets a caller named.
-
-    That is a source under no dataset image tree, or sources or buckets under more than one root.
-    """
+    """No one dataset root was established for the sources or buckets a caller named."""
 
 
 def _one_root(roots: Iterable[Path], what: str) -> Path:
