@@ -217,7 +217,9 @@ def build_plant_mapping(
         dataset_root: The registered dataset whose captures are mapped.
         plant_registry: The name of a plant registry already registered under this project by
             ``register_plant_registry``.
-        dates: Optional subset of the dataset's captures to map (default: all of them).
+        dates: Optional subset of the dataset's captures to map (default: all of them). A date the
+            dataset lists no capture of, by exact name, is refused naming it and the captures it
+            lists.
         match_radius: ``{value, rationale}``, the radius (meters) every date's captures are
             matched within and how it is known. Omitted, each date's radius is the largest
             horizontal positioning error its photographs' EXIF reports; a date whose positioned
