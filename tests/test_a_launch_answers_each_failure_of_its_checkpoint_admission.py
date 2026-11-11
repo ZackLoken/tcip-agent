@@ -189,10 +189,10 @@ def test_a_checkpoint_the_process_may_not_read_answers_400_naming_the_checkpoint
     before = jobs()
     with read_denied(checkpoint):
         answer = launch(checkpoint)
+        assert answer.status_code == 400, answer.text
         with pytest.raises(ReadRefusedError) as refused:
             registered_bytes(checkpoint, project=tmp_path)
 
-    assert answer.status_code == 400, answer.text
     assert answer.json()["detail"] == str(refused.value)
-    assert str(checkpoint) in answer.json()["detail"]
+    assert answer.json()["detail"].startswith(f"checkpoint {checkpoint}: ")
     assert jobs() == before
