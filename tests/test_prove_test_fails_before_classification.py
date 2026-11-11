@@ -7,6 +7,7 @@ sits in, a second commit with the fix and the guard test) and runs the real scri
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -108,8 +109,7 @@ def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert "REFUSED" in result.stdout
-    assert "fixture-shaped" in result.stdout
-    assert "1 failed on an error other than the assertion" in result.stdout
+    assert CALL_PHASE_SENTENCE in result.stdout
     assert "[fixture]" in result.stdout
 
 
@@ -154,7 +154,8 @@ def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert "REFUSED" in result.stdout
-    assert "fixture-shaped" in result.stdout
+    assert FIXTURE_SENTENCE in result.stdout
+    assert CALL_PHASE_SENTENCE not in result.stdout
 
 
 def test_an_assertion_failure_guards(tmp_path: Path) -> None:
@@ -269,8 +270,305 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert "REFUSED" in result.stdout
-    assert "fixture-shaped" in result.stdout
+    assert FIXTURE_SENTENCE in result.stdout
     assert "[fixture]" in result.stdout
+
+
+# ── a test's own code raising TypeError ──────────────────────────────────────
+
+
+def _fn(params: str, returns: str = "1") -> str:
+    return f"def f({params}):\n    return {returns}\n"
+
+
+# Each wrong call is a real call: the baseline's callable lacks what the head's has, and the test's
+# call fits the head, so the TypeError is the interpreter's own message for that baseline.
+WRONG_CALLS = {
+    "unexpected keyword": (
+        _fn("a, b"),
+        _fn("a, b, color=None"),
+        "f(1, 2, color='red')",
+    ),
+    "positional missing": (_fn("a, b"), _fn("a, b=0"), "f(1)"),
+    "keyword-only missing": (_fn("a, *, key"), _fn("a, *, key=None"), "f(1)"),
+    "too many positional": (_fn("a, b"), _fn("a, b, c"), "f(1, 2, 3)"),
+    "too many positional with defaults": (
+        _fn("a, b=0"),
+        _fn("a, b=0, c=0"),
+        "f(1, 2, 3)",
+    ),
+    "too many positional with a keyword-only given": (
+        _fn("a, *, key=0"),
+        _fn("a, b=0, *, key=0"),
+        "f(1, 2, key=3)",
+    ),
+    "argument given twice": (_fn("a, b=0"), _fn("b, *, a=0"), "f(5, a=1)"),
+    "positional-only given by keyword": (_fn("a, /"), _fn("a"), "f(a=1)"),
+    "class without an initializer": (
+        "class f:\n    pass\n",
+        "class f:\n    def __init__(self, size):\n        self.size = size\n",
+        "f(3)",
+    ),
+    "C callable given too many": ("f = len\n", _fn("*args"), "f([1], [2])"),
+    "C callable given too few": ("f = len\n", _fn("*args"), "f()"),
+    "C callable given a keyword": (
+        "f = len\n",
+        _fn("value, key=None"),
+        "f([1], key=1)",
+    ),
+}
+
+# TypeErrors raised in the test's own body that no call made: the baseline returned None where the
+# head returns something the test then uses.
+NOT_WRONG_CALLS = {
+    "None subscripted": (
+        _fn("", "None"),
+        _fn("", "{'color': 'red'}"),
+        "f()['color'] == 'red'",
+    ),
+    "None called": (_fn("", "None"), _fn("", "lambda: 1"), "f()() == 1"),
+}
+
+CALL_PHASE_SENTENCE = (
+    "the test's own code raised a TypeError before its assertion"
+)
+FIXTURE_SENTENCE = "a fixture failed during setup"
+
+
+def _one_call_repo(
+    tmp_path: Path, baseline_source: str, head_source: str, expression: str
+) -> tuple[Path, str]:
+    """Build a scratch repository whose one test asserts ``expression`` against ``widgets``.
+
+    Returns the repository at its head and the baseline revision.
+    """
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", baseline_source)
+    baseline = _commit_all(repo, "the baseline's widgets")
+    _write(repo / "widgets.py", head_source)
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_the_call_fits_the_head():\n"
+        "    from widgets import f\n"
+        f"    assert {expression}\n",
+    )
+    _commit_all(repo, "the head's widgets")
+    return repo, baseline
+
+
+def _passes_at_head(repo: Path, test_file: str) -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            test_file,
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("kind", sorted(WRONG_CALLS))
+def test_a_wrong_call_in_the_test_body_is_refused_whatever_its_wording(
+    tmp_path: Path, kind: str
+) -> None:
+    """Each kind of wrong call the interpreter words differently is refused.
+
+    The test's call fits the head's signature and not the baseline's, so the baseline raises the
+    interpreter's own TypeError in the test body.
+    """
+    baseline_source, head_source, call = WRONG_CALLS[kind]
+    repo, baseline = _one_call_repo(
+        tmp_path, baseline_source, head_source, f"{call} is not None"
+    )
+    _passes_at_head(repo, "tests/test_widgets.py")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert CALL_PHASE_SENTENCE in result.stdout
+    assert "[fixture]" in result.stdout
+
+
+@pytest.mark.parametrize("kind", sorted(NOT_WRONG_CALLS))
+def test_a_type_error_that_no_call_made_is_refused_the_same_way(
+    tmp_path: Path, kind: str
+) -> None:
+    """A TypeError from using what the baseline returned is refused with the call-phase sentence.
+
+    The class and the place of the raise are all the tool reads, so it claims no cause.
+    """
+    baseline_source, head_source, expression = NOT_WRONG_CALLS[kind]
+    repo, baseline = _one_call_repo(
+        tmp_path, baseline_source, head_source, expression
+    )
+    _passes_at_head(repo, "tests/test_widgets.py")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert CALL_PHASE_SENTENCE in result.stdout
+    assert "[fixture]" in result.stdout
+
+
+def test_a_valid_call_whose_package_code_raises_type_error_guards(
+    tmp_path: Path,
+) -> None:
+    """A TypeError the code under test raises on a right call is still counted.
+
+    The crash frame sits in the package's file, outside tests/, so the code under test was reached.
+    """
+    repo, baseline = _one_call_repo(
+        tmp_path,
+        "def f(x):\n    return x + None\n",
+        "def f(x):\n    return x * 2\n",
+        "f(3) == 6",
+    )
+    _passes_at_head(repo, "tests/test_widgets.py")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "[behavioral]" in result.stdout
+    assert "TypeError" in result.stdout
+
+
+def test_a_refusal_for_a_wrong_call_does_not_say_redo_or_never_reached(
+    tmp_path: Path,
+) -> None:
+    """The refusal reports what was observed and neither asks for a rerun nor claims a cause."""
+    baseline_source, head_source, call = WRONG_CALLS["unexpected keyword"]
+    repo, baseline = _one_call_repo(
+        tmp_path, baseline_source, head_source, f"{call} is not None"
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert CALL_PHASE_SENTENCE in result.stdout
+    assert "not evidence either way" in result.stdout
+    assert "redo" not in result.stdout.lower()
+    assert "never reached" not in result.stdout.lower()
+
+
+def _why(result: subprocess.CompletedProcess) -> str:
+    return next(
+        line
+        for line in result.stdout.splitlines()
+        if line.startswith(("GUARDS:", "REFUSED:"))
+    )
+
+
+def test_a_run_mixing_an_assertion_failure_and_a_wrong_call_names_each_by_role(
+    tmp_path: Path,
+) -> None:
+    """The verdict names the assertion failure it rests on and the wrong call as not counted."""
+    repo = _scratch_repo(tmp_path)
+    _write(
+        repo / "widgets.py",
+        "def double(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "class Widget:\n"
+        "    def __init__(self, size):\n"
+        "        self.size = size\n",
+    )
+    baseline = _commit_all(repo, "double is a no-op, widget has no color")
+    _write(
+        repo / "widgets.py",
+        "def double(x):\n"
+        "    return x * 2\n"
+        "\n"
+        "\n"
+        "class Widget:\n"
+        "    def __init__(self, size, color=None):\n"
+        "        self.size = size\n"
+        "        self.color = color\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_double_doubles():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n"
+        "\n"
+        "\n"
+        "def test_widget_carries_a_color():\n"
+        "    from widgets import Widget\n"
+        "    assert Widget(size=3, color='red').color == 'red'\n",
+    )
+    _commit_all(repo, "double doubles, widget carries a color")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    counted, _, not_counted = _why(result).partition("not counted")
+    assert "test_double_doubles" in counted
+    assert "test_widget_carries_a_color" not in counted
+    assert "test_widget_carries_a_color" in not_counted
+    assert CALL_PHASE_SENTENCE in not_counted
+    assert "test_double_doubles" not in not_counted
+
+
+def test_a_run_mixing_a_setup_failure_and_a_wrong_call_names_each_with_its_own_sentence(
+    tmp_path: Path,
+) -> None:
+    """A setup failure and a call-phase TypeError each get the sentence for their own phase."""
+    repo = _scratch_repo(tmp_path)
+    _write(
+        repo / "widgets.py",
+        "class Widget:\n"
+        "    def __init__(self, size):\n"
+        "        self.size = size\n",
+    )
+    baseline = _commit_all(repo, "widget has no color")
+    _write(
+        repo / "widgets.py",
+        "class Widget:\n"
+        "    def __init__(self, size, color=None):\n"
+        "        self.size = size\n"
+        "        self.color = color\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def thing():\n"
+        "    from widgets import Widget\n"
+        "    return Widget(size=3, color='red')\n"
+        "\n"
+        "\n"
+        "def test_uses_thing(thing):\n"
+        "    assert thing.color == 'red'\n"
+        "\n"
+        "\n"
+        "def test_widget_carries_a_color():\n"
+        "    from widgets import Widget\n"
+        "    assert Widget(size=3, color='red').color == 'red'\n",
+    )
+    _commit_all(repo, "widget carries a color")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    clauses = _why(result).split("; ")
+    assert any(
+        "test_uses_thing" in c and FIXTURE_SENTENCE in c for c in clauses
+    )
+    assert any(
+        "test_widget_carries_a_color" in c and CALL_PHASE_SENTENCE in c
+        for c in clauses
+    )
 
 
 # ── --baseline-from-working-tree ────────────────────────────────────────────
