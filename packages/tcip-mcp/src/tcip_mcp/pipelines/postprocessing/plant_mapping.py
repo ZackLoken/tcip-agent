@@ -1605,13 +1605,14 @@ def build_mapping(
     ingested under a mapped date is a capture the identity sees; its
     :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates.
 
-    Raises :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when a stated date
-    is not one the dataset lists a capture of (matched by exact name), naming those dates and the
-    captures it lists; when the captures scanned hold no image at all; and with
-    :func:`ungeoreferenced_capture_message` (naming any capture PIL could not open before the
-    position clause) when every capture that was read carries no position this door reads.
+    Raises ``ValueError`` for a stated date the dataset lists no capture of
+    (:func:`~tcip_mcp.dataset_layout.require_listed_captures`). Raises
+    :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when the captures scanned
+    hold no image at all, and with :func:`ungeoreferenced_capture_message` (naming any capture PIL
+    could not open before the position clause) when every capture that was read carries no
+    position this door reads.
     """
-    from tcip_mcp.dataset_layout import image_root, list_dates
+    from tcip_mcp.dataset_layout import image_root, require_listed_captures
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
         scan_captures,
@@ -1619,13 +1620,7 @@ def build_mapping(
 
     images = image_root(dataset_root)
     if dates is not None:
-        listed = list_dates(dataset_root)
-        unlisted = [d for d in dict.fromkeys(dates) if d not in listed]
-        if unlisted:
-            raise UngeoreferencedCaptureError(
-                f"the dataset lists no capture of {unlisted} under {images}, which lists "
-                f"{listed}; state dates from that list, or ingest the missing dates' images first"
-            )
+        require_listed_captures(dataset_root, dates)
     assignments: dict[str, list[Assignment]] = {}
     radii: dict[str, MatchRadius] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
