@@ -320,7 +320,7 @@ class NoOneRootError(ValueError):
     """No one dataset root was established for the sources or buckets a caller named."""
 
 
-def _one_root(roots: Iterable[Path], what: str) -> Path:
+def one_root(roots: Iterable[Path], what: str) -> Path:
     """Return the one dataset root among ``roots``, keyed by its canonical spelling.
 
     None, or more than one, refuses (:class:`NoOneRootError`) naming ``what`` and the roots.
@@ -352,7 +352,7 @@ def source_root(sources: Iterable[str | Path], *, what: str) -> Path:
             )
         return root
 
-    return _one_root(map(root_of, sources), what)
+    return one_root(map(root_of, sources), what)
 
 
 def registered_source_root(
