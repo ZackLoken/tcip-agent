@@ -217,8 +217,8 @@ const CROP_CHANGE_CONSEQUENCE =
   "orthomosaic count is checked against the registry it names when it is delivered.";
 
 /** The selected dataset root's identity as its document reads, registered from here at a crop of
- *  the served vocabulary; a registered crop changes only after a confirmation listing the mappings
- *  built over the dataset with each one's plant registry crop. */
+ *  the served vocabulary; a registered crop changes only after a confirmation listing the open
+ *  project's mappings built over the dataset with each one's plant registry crop. */
 function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const user = useStore((s) => s.user);
   const [read, setRead] = useState<RootIdentity | null>(null);
@@ -330,7 +330,7 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
           <div className="flex flex-col gap-3 text-[13px]">
             <p>{`Current crop: ${state.identity.crop}. Chosen crop: ${crop}.`}</p>
             <p className="text-tcip-muted">{CROP_CHANGE_CONSEQUENCE}</p>
-            <ul aria-label="Mappings over this dataset">
+            <ul aria-label="The open project's mappings over this dataset">
               {state.mappings.placed.map((m) => (
                 <li key={m.name}>
                   {`${m.name}: plant registry ${m.plant_registry}, ${m.registry.kind === CROP ? `crop ${m.registry.crop}` : m.registry.refusal}`}
@@ -341,7 +341,9 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
               ))}
             </ul>
             {state.mappings.placed.length + state.mappings.unplaced.length === 0 && (
-              <p className="text-tcip-muted">No plant mapping is built over this dataset.</p>
+              <p className="text-tcip-muted">
+                No plant mapping of the open project is built over this dataset.
+              </p>
             )}
             <div className="flex gap-2">
               <button
