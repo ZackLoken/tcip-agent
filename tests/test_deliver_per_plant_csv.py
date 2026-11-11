@@ -16,7 +16,7 @@ import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx, csv_rows
-from tests._mapping_fixtures import COUNT_CROP, PLOTS, write_plots_csv
+from tests._mapping_fixtures import COUNT_CROP, write_plots_csv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -321,48 +321,6 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(
     )
 
     assert "different dataset" in res["error"]
-    assert not (tmp_path / "o.csv").exists()
-
-
-def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A mapping with no capture for a delivered date refuses on the record's own evidence.
-
-    The mapping is recorded with no capture at all for that date.
-    """
-    from tests.test_ungeoreferenced_capture_refusal import (
-        DATE,
-        _delivery_scene,
-        _persist_synthetic_mapping,
-    )
-
-    _, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
-    plant_csv = write_plots_csv(tmp_path / "plants.csv")
-    _persist_synthetic_mapping(
-        tmp_path,
-        dataset_root,
-        "valley",
-        plant_csvs=[
-            {
-                "path": str(plant_csv),
-                "sha256": "0" * 64,
-                "n_plants": len(PLOTS),
-            }
-        ],
-        assignments={DATE: []},
-    )
-
-    res = _deliver(
-        tmp_path,
-        _results(DATE, ("P1", 3)),
-        ["P1"],
-        dataset_root,
-        list(preds_by_date.values()),
-        plant_mapping="valley",
-    )
-
-    assert "recorded no capture at all" in res["error"]
     assert not (tmp_path / "o.csv").exists()
 
 
@@ -1592,6 +1550,10 @@ EMPTY = "2026-04-01"
 """A date whose capture folder the tests make and leave holding no image."""
 INGEST_FIRST = "ingest the missing dates' images first"
 """The step of the build's refusal of a date the dataset lists no capture of."""
+HOLDS_NO_IMAGE_STEP = (
+    "ingest those dates' images, or state the dates that hold one"
+)
+"""The step of the build's refusal of a stated date whose capture holds no image."""
 
 
 @pytest.mark.parametrize(
@@ -1636,20 +1598,100 @@ def test_a_build_asked_for_a_date_the_dataset_lists_no_capture_of_refuses_naming
     assert audit_rows(tmp_path) == logged
 
 
-def test_a_build_asked_for_dates_holding_no_image_names_the_captures_it_scanned(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "dates",
+    [[EMPTY], [FIRST, EMPTY]],
+    ids=["holding_no_image_alone", "beside_a_date_holding_one"],
+)
+def test_a_build_asked_for_a_date_holding_no_image_refuses_naming_it_alone(
+    tmp_path: Path, dates: list[str]
 ) -> None:
-    """A build over only dates whose folders hold no image refuses naming those captures.
+    """A build stating a date whose folder holds no image refuses, naming that date alone.
 
-    The scene's other dates hold images, so the sentence is about the scanned captures alone.
+    The sentence names the date with no image and not the stated date that holds one, ends with
+    the step, and no mapping is stored.
     """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
+
     dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
     image_dir(dataset_root, EMPTY).mkdir(parents=True)
 
-    refused = _build(tmp_path, dataset_root, registry, [EMPTY])
+    refused = _build(tmp_path, dataset_root, registry, dates)
+
+    assert "error" in refused, refused
+    assert f"no capture of {[EMPTY]} under" in refused["error"], refused
+    assert "holds an image" in refused["error"], refused
+    assert FIRST not in refused["error"], refused
+    assert refused["error"].endswith(HOLDS_NO_IMAGE_STEP), refused
+    assert load_mapping(tmp_path, "valley") is None
+
+
+def test_a_build_with_no_dates_stated_over_no_date_holding_an_image_refuses(
+    tmp_path: Path,
+) -> None:
+    """A build stating no dates, over a dataset whose one listed folder holds no image, refuses.
+
+    The sentence names the folder's date and says no capture of it holds an image.
+    """
+    image_dir(tmp_path / "ds", EMPTY).mkdir(parents=True)
+    dataset_root, registry = _registered(tmp_path, TWO_PLANTS, {})
+
+    refused = _build(tmp_path, dataset_root, registry, None)
 
     assert f"no capture of {[EMPTY]} under" in refused["error"], refused
     assert "holds an image" in refused["error"], refused
+
+
+def _built_through_the_server(
+    project: Path, dataset_root: Path, registry: str
+) -> JsonValue:
+    """Call ``build_plant_mapping`` through the server for ``valley``, no dates stated."""
+    from tcip_mcp.server import binding_for
+    from tests._server_calls import called_through_the_server
+
+    return called_through_the_server(
+        "build_plant_mapping",
+        {
+            "name": "valley",
+            "dataset_root": str(dataset_root),
+            "plant_registry": registry,
+        },
+        bound=binding_for(project),
+    )
+
+
+def _leave_no_image(folder: Path) -> None:
+    """Make ``folder`` holding no image: nothing at all."""
+    folder.mkdir(parents=True)
+
+
+def _leave_an_unreadable_manifest(folder: Path) -> None:
+    """Make ``folder`` holding no image: one band-group manifest that will not read."""
+    folder.mkdir(parents=True)
+    (folder / "broken.bandgroup").write_text("not json", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "leave",
+    [_leave_no_image, _leave_an_unreadable_manifest],
+    ids=["an_empty_folder", "an_unreadable_manifest_alone"],
+)
+def test_a_build_with_no_dates_stated_leaves_out_a_date_holding_no_image(
+    tmp_path: Path, leave: Callable[[Path], None]
+) -> None:
+    """A build stating no dates covers the dates holding an image and names the one left out.
+
+    The listed folder holding no image, empty or holding only a manifest that will not read, has
+    no entry in the answer's ``per_date`` and is named in its ``dates_without_images``.
+    """
+    dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
+    leave(image_dir(dataset_root, EMPTY))
+
+    built = _built_through_the_server(tmp_path, dataset_root, registry)
+
+    assert isinstance(built, dict) and "dates_without_images" in built, built
+    assert built["dates_without_images"] == [EMPTY]
+    assert list(built["per_date"]) == [FIRST, SECOND]
 
 
 def test_the_build_and_the_label_import_refuse_an_unlisted_date_in_one_sentence(
@@ -1684,14 +1726,12 @@ def test_the_build_and_the_label_import_refuse_an_unlisted_date_in_one_sentence(
     [
         ([FIRST], [FIRST]),
         ([FIRST, SECOND], [FIRST, SECOND]),
-        (None, [FIRST, SECOND, EMPTY]),
-        ([FIRST, EMPTY], [FIRST, EMPTY]),
+        (None, [FIRST, SECOND]),
     ],
     ids=[
         "a_listed_date",
         "listed_dates",
         "no_dates_stated",
-        "beside_an_empty_folder",
     ],
 )
 def test_a_build_over_dates_the_dataset_lists_covers_them(
@@ -1699,17 +1739,62 @@ def test_a_build_over_dates_the_dataset_lists_covers_them(
 ) -> None:
     """A build over listed dates, or over none stated, succeeds covering exactly those dates.
 
-    A listed folder holding no image is covered, served with no images.
+    With none stated, it covers every listed date holding an image.
     """
     dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
-    image_dir(dataset_root, EMPTY).mkdir(parents=True)
 
     built = _build(tmp_path, dataset_root, registry, dates)
 
     assert "error" not in built, built
     assert list(built["per_date"]) == covered
-    if EMPTY in covered:
-        assert built["per_date"][EMPTY]["n_images"] == 0
+
+
+def test_a_result_on_a_date_emptied_by_a_stated_date_meets_the_not_covered_step(
+    tmp_path: Path,
+) -> None:
+    """A date whose one image moved away is left out of a rebuild and refused as not covered.
+
+    Through the server, ``state_capture_date`` moves the date's only image to another date; the
+    rebuild with no dates stated names the emptied date as left out, and the per-plant door given
+    a result on it refuses that result as on a date the mapping does not cover, with that step.
+    """
+    from tcip_mcp.server import binding_for
+    from tests._server_calls import called_through_the_server
+
+    emptied, stated = "2026-03-10", "2026-03-12"
+    dataset_root, registry = _registered(
+        tmp_path, TWO_PLANTS, {**CAPTURES, emptied: {"x": TWO_PLANTS["P1"]}}
+    )
+    assert "error" not in _build(tmp_path, dataset_root, registry, None)
+    moved = called_through_the_server(
+        "state_capture_date",
+        {
+            "images": [str(image_dir(dataset_root, emptied) / "x.jpg")],
+            "date": stated,
+            "rationale": "the field book dates this walk",
+        },
+        bound=binding_for(tmp_path),
+    )
+    assert isinstance(moved, dict) and moved["date"] == stated, moved
+
+    rebuilt = _built_through_the_server(tmp_path, dataset_root, registry)
+
+    assert isinstance(rebuilt, dict) and "dates_without_images" in rebuilt
+    assert rebuilt["dates_without_images"] == [emptied], rebuilt
+    assert emptied not in rebuilt["per_date"], rebuilt
+    refused = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path,
+            dataset_root,
+            _both(tmp_path, dataset_root),
+            _rows(*READ, (emptied, "x", 32)),
+        ),
+    )
+    assert isinstance(refused, dict), refused
+    assert _named_under(
+        refused["error"], ((NOT_COVERED, NOT_COVERED_STEP),)
+    ) == {NOT_COVERED: [f"{emptied}/x"]}
 
 
 def test_the_next_step_of_a_result_on_a_date_with_no_capture_leads_to_a_delivery(

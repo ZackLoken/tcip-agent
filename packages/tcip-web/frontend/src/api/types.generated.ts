@@ -548,12 +548,13 @@ export interface InferenceJobs {
   jobs: InferenceJob[];
 }
 
-export interface ServedMapping {
+export interface ServedBuild {
   name: string;
   per_date: Record<string, DateCounts>;
   images_unattributed: number;
   unreadable: Record<string, string[]>;
   match_radius: Record<string, MatchRadius>;
+  dates_without_images: string[];
 }
 
 export interface BuildMappingPayload {
@@ -564,6 +565,14 @@ export interface BuildMappingPayload {
   match_radius: StatedRadius | null;
   supersede: boolean;
   user: string;
+}
+
+export interface ServedMapping {
+  name: string;
+  per_date: Record<string, DateCounts>;
+  images_unattributed: number;
+  unreadable: Record<string, string[]>;
+  match_radius: Record<string, MatchRadius>;
 }
 
 export interface LoadMappingPayload {

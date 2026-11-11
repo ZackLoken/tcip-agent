@@ -11,6 +11,7 @@ import {
   REFUSED,
   REGISTERED,
   REGISTRY_REFUSED,
+  type ServedBuild,
   type ServedMapping,
 } from "@/api/types.generated";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
@@ -261,6 +262,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
     mapping_one_placed: ONE_PLACED,
     mapping_stated: STATED,
     mapping_unpositioned: UNPOSITIONED,
+    mapping_left_out: LEFT_OUT,
     mapping_loaded: LOADED,
   } = RESULTS_ANSWERS;
 
@@ -274,7 +276,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
     fireEvent.click(screen.getByRole("button", { name: "Build" }));
   }
 
-  async function buildAnswering(mapping: ServedMapping) {
+  async function buildAnswering(mapping: ServedBuild) {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue(mapping);
 
     render(<SetupTab />);
@@ -387,6 +389,25 @@ describe("SetupTab plant-mapping build: match radius", () => {
     expect(await linesHolding("unmatched, no distances")).toHaveLength(
       Object.values(UNPOSITIONED.per_date).filter((d) => d.avg_distance_m === null).length,
     );
+  });
+
+  it("names the dates a build left out for holding no image", async () => {
+    await buildAnswering(LEFT_OUT);
+
+    expect(LEFT_OUT.dates_without_images).not.toHaveLength(0);
+    expect(
+      await screen.findByText(
+        `Left out for holding no image: ${LEFT_OUT.dates_without_images.join(", ")}.`,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no left-out line when a build left out no date", async () => {
+    await buildAnswering(BUILT);
+
+    expect(BUILT.dates_without_images).toHaveLength(0);
+    expect(await linesHolding(firstDateLine(BUILT))).not.toHaveLength(0);
+    expect(screen.queryByText(/Left out for holding no image/)).not.toBeInTheDocument();
   });
 
   /** The summary line of `mapping`'s first date. */

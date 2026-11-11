@@ -117,12 +117,12 @@ class BuildMappingPayload(BaseModel):
 @router.post("/plant_mapping/build")
 def build_plant_mapping(
     payload: BuildMappingPayload,
-) -> plant_mapping.ServedMapping:
+) -> plant_mapping.ServedBuild:
     """Build and persist the open project's plant mapping, answering it as served.
 
     The build is :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`'s,
     from a ``dataset_root`` confined to the project, by the person ``user`` names, answered as
-    ``MappingBuild.served`` states it.
+    ``BuiltMapping.served`` states it.
 
     A refusal answers 400, an unknown registry 404, a rebuild a delivery event still cites 409
     unless ``supersede``, and a receipt that could not be written 409.

@@ -14,6 +14,7 @@ import {
   REFUSED,
   REGISTERED,
   type RootIdentity,
+  type ServedBuild,
   type ServedMapping,
   UNREGISTERED,
 } from "@/api/types.generated";
@@ -43,7 +44,8 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const [radiusRationale, setRadiusRationale] = useState("");
   // Off by default: a rebuild a delivery event still cites answers 409 unless this is sent true.
   const [supersedeMapping, setSupersedeMapping] = useState(false);
-  const [mapping, setMapping] = useState<ServedMapping | null>(null);
+  // A build answers the dates it left out beside the served view; a loaded mapping does not.
+  const [mapping, setMapping] = useState<ServedMapping | ServedBuild | null>(null);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
 
@@ -202,6 +204,9 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
               {`${d}: ${s.n_mapped} of ${s.n_images} mapped, ${s.n_unattributed} unmatched, ${s.avg_distance_m === null ? "no distances" : `avg ${s.avg_distance_m.toFixed(1)} m`}${d in mapping.match_radius ? `, ${radiusPhrase(mapping.match_radius[d])}` : ""}`}
             </div>
           ))}
+          {"dates_without_images" in mapping && mapping.dates_without_images.length > 0 && (
+            <div className="mt-1">{`Left out for holding no image: ${mapping.dates_without_images.join(", ")}.`}</div>
+          )}
           {mapping.images_unattributed > 0 && (
             <div className="mt-1">{`${mapping.images_unattributed} ${mapping.images_unattributed === 1 ? "capture" : "captures"} matched no plant.`}</div>
           )}

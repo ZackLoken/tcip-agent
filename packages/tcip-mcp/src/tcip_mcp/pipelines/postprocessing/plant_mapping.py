@@ -196,7 +196,7 @@ class DateCounts(BaseModel):
 
 
 class ServedMapping(BaseModel):
-    """A persisted plant mapping as its build and load doors answer it.
+    """A persisted plant mapping as its load door answers it, and the view a build answer extends.
 
     It holds its ``name``, the counts of every date it walked, the images naming no plant over
     all of them (:meth:`MappingBuild.unattributed`), the captures PIL could not open per date and
@@ -208,6 +208,30 @@ class ServedMapping(BaseModel):
     images_unattributed: int
     unreadable: dict[str, list[str]]
     match_radius: dict[str, MatchRadius]
+
+
+class ServedBuild(ServedMapping):
+    """A plant mapping as its build doors answer it: the served view plus what the build left out.
+
+    ``dates_without_images`` names each listed date the build's scan found holding no image, in
+    list order, empty when it left none out; it is never part of the stored record.
+    """
+
+    dates_without_images: list[str]
+
+
+class BuiltMapping(NamedTuple):
+    """One build and the listed dates it left out for holding no image."""
+
+    build: MappingBuild
+    dates_without_images: list[str]
+
+    def served(self) -> ServedBuild:
+        """Return the build's served view with the dates it left out."""
+        return ServedBuild(
+            **dict(self.build.served()),
+            dates_without_images=self.dates_without_images,
+        )
 
 
 class MappingVerification(NamedTuple):
@@ -1587,7 +1611,7 @@ def build_mapping(
     plant_registry: PlantRegistryReference,
     dates: list[str] | None = None,
     match_radius: StatedRadius | None = None,
-) -> MappingBuild:
+) -> BuiltMapping:
     """Build one project's named plant mapping: per-date assignments plus their provenance.
 
     The provenance binds the record to the inputs it was built from.
@@ -1603,14 +1627,16 @@ def build_mapping(
     (:func:`~tcip_mcp.pipelines.image_utils.scan_captures`), each enumerated through
     ``image_utils.list_logical_images``, so a band raster or a band group
     ingested under a mapped date is a capture the identity sees; its
-    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates.
+    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates. A date whose
+    enumeration is empty holds no image: with no ``dates`` stated it is left out of the build and
+    returned beside it.
 
     Raises ``ValueError`` for a stated date the dataset lists no capture of
     (:func:`~tcip_mcp.dataset_layout.require_listed_captures`). Raises
-    :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when the captures scanned
-    hold no image at all, and with :func:`ungeoreferenced_capture_message` (naming any capture PIL
-    could not open before the position clause) when every capture that was read carries no
-    position this door reads.
+    :class:`UngeoreferencedCaptureError` naming the dataset's image tree: for each stated date that
+    holds no image, naming those dates and the step; when no scanned date holds an image; and with
+    :func:`ungeoreferenced_capture_message` (naming any capture PIL could not open before the
+    position clause) when every capture that was read carries no position this door reads.
     """
     from tcip_mcp.dataset_layout import image_root, require_listed_captures
     from tcip_mcp.pipelines.image_utils import (
@@ -1621,16 +1647,25 @@ def build_mapping(
     images = image_root(dataset_root)
     if dates is not None:
         require_listed_captures(dataset_root, dates)
+    captures = scan_captures(dataset_root, list_logical_images, dates)
+    walked = {date: logical for date, logical in captures.items() if logical}
+    without_images = [date for date in captures if date not in walked]
+    if not walked or (dates is not None and without_images):
+        held_none = (
+            f"no capture of {without_images} under {images} holds an image"
+        )
+        raise UngeoreferencedCaptureError(
+            held_none
+            if dates is None
+            else f"{held_none}; ingest those dates' images, or state the dates that hold one"
+        )
     assignments: dict[str, list[Assignment]] = {}
     radii: dict[str, MatchRadius] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
     unreadable: dict[str, list[str]] = {}
-    n_stamps = 0
     n_positioned = 0
-    captures = scan_captures(dataset_root, list_logical_images, dates)
-    for date, logical in captures.items():
+    for date, logical in walked.items():
         stamps = _read_date_stamps(logical, date)
-        n_stamps += len(stamps)
         n_positioned += sum(1 for s in stamps if s.position is not None)
         capture_digests_by_date[date] = capture_digests(stamps)
         unreadable[date] = sorted(
@@ -1641,23 +1676,19 @@ def build_mapping(
             radii[date] = radius
         assignments[date] = assign_plants(stamps, plants, radius=radius)
 
-    if n_stamps == 0:
-        raise UngeoreferencedCaptureError(
-            f"no capture of {list(captures)} under {images} holds an image"
-        )
     if n_positioned == 0:
         all_unreadable = sorted(
             {name for names in unreadable.values() for name in names}
         )
         raise UngeoreferencedCaptureError(
             ungeoreferenced_capture_message(
-                list(captures), str(images), all_unreadable
+                list(walked), str(images), all_unreadable
             )
         )
 
     from tcip_mcp.registry_paths import stored_path
 
-    return MappingBuild(
+    build = MappingBuild(
         name=name,
         dataset_root=stored_path(dataset_root, project),
         dataset_id=dataset_id,
@@ -1669,6 +1700,7 @@ def build_mapping(
         unreadable=unreadable,
         assignments=assignments,
     )
+    return BuiltMapping(build, without_images)
 
 
 PLANT_MAPPING_STORE = "plant_mapping"
@@ -1829,13 +1861,13 @@ def build_plant_mapping(
     match_radius: StatedRadius | None = None,
     supersede: bool = False,
     actor: str | None,
-) -> MappingBuild:
+) -> BuiltMapping:
     """Map the captures of ``dataset_root`` to a registry's plants and persist the mapping.
 
     ``dataset_root`` is an established location and the registry is ``project``'s
     ``plant_registry`` (:func:`build_mapping`); the mapping is persisted under ``name`` by
     ``actor`` (:func:`persist_mapping`, whose receipt is the act's one audit line), and the build
-    is returned.
+    is returned with the dates it left out for holding no image.
 
     Raises ``ValueError`` for a name the key refuses, for a root with no dataset identity
     record (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming
@@ -1854,7 +1886,7 @@ def build_plant_mapping(
         registry_name=registry["name"],
         registry_crop=registry["crop"],
     )
-    build = build_mapping(
+    built = build_mapping(
         dataset_root,
         registered_plants(registry, project),
         name=name,
@@ -1866,8 +1898,8 @@ def build_plant_mapping(
         dates=dates,
         match_radius=match_radius,
     )
-    persist_mapping(build, project, supersede=supersede, actor=actor)
-    return build
+    persist_mapping(built.build, project, supersede=supersede, actor=actor)
+    return built
 
 
 # Process-local memo of each project's log cursor and every plant_mapping_built
@@ -2306,8 +2338,8 @@ def resolve_delivery_mapping(
     (:func:`require_agreeing_crops`).
 
     A delivery whose delivered dates attribute nothing (:func:`assignment_is_attributed` false for
-    every one of them, a date recorded with no capture at all included) refuses on the record's own
-    evidence, before ``verify_mapping_inputs`` re-reads anything.
+    every one of them) refuses on the record's own evidence, before ``verify_mapping_inputs``
+    re-reads anything.
 
     Returns the loaded build and :func:`verify_mapping_inputs`'s verification; raises
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
@@ -2352,19 +2384,7 @@ def resolve_delivery_mapping(
     delivered_assignments = [
         a for date in buckets for a in mapping_build.assignments.get(date, [])
     ]
-    if not delivered_assignments or not any(
-        assignment_is_attributed(a) for a in delivered_assignments
-    ):
-        # A no-capture-at-all date is named below only inside this nothing-attributed scope.
-        empty_dates = sorted(
-            d for d in buckets if not mapping_build.assignments.get(d)
-        )
-        if empty_dates:
-            raise MappingDeliveryError(
-                f"the mapping {name!r} recorded no capture at all for date(s) {empty_dates}: a "
-                "date with no capture cannot be delivered; rebuild the mapping, or drop the "
-                "date(s)"
-            )
+    if not any(assignment_is_attributed(a) for a in delivered_assignments):
         # Refused on the record's own evidence, before verify_mapping_inputs reads any capture.
         registry = registry_or_refusal(mapping_build, project)
         if isinstance(registry, str):

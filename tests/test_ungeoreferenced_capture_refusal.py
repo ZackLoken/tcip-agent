@@ -80,11 +80,13 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
 ) -> None:
     """A plant-mapping build over captures that carry no position is refused.
 
-    The build answers an error naming the plant-tag mechanism and persists no mapping.
+    The build answers an error naming the plant-tag mechanism and the date it read, not a listed
+    folder holding no image beside it, and persists no mapping.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     _write_ungeoreferenced_image(image_dir(dataset_root, DATE) / "P1_a.jpg")
+    image_dir(dataset_root, "2026-02-25").mkdir()
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
@@ -349,37 +351,6 @@ def _assert_all_doors_refuse(
     assert expected_fragment in resp.json()["detail"]
 
 
-def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
-    tmp_path: Path,
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project, dataset_root, preds_by_date = _delivery_scene(
-        tmp_path, monkeypatch
-    )
-    plant_csv = tmp_path / "plants.csv"
-    write_plant_csv(plant_csv, PLANTS)
-    plant_csvs = [
-        RegistryCsv(path=str(plant_csv), sha256="0" * 64, n_plants=len(PLANTS))
-    ]
-    _persist_synthetic_mapping(
-        tmp_path,
-        dataset_root,
-        "valley",
-        plant_csvs=plant_csvs,
-        assignments={DATE: []},
-    )
-
-    _assert_all_doors_refuse(
-        client,
-        project,
-        dataset_root,
-        preds_by_date,
-        "valley",
-        "recorded no capture at all",
-    )
-
-
 def test_delivery_refuses_naming_the_plant_registry_when_it_holds_no_plant(
     tmp_path: Path,
     client: TestClient,
@@ -624,14 +595,14 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     assert pm["dates_delivered"] == [dates[0]]
 
 
-def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one(
+def test_a_date_left_out_for_holding_no_image_leaves_the_attributed_date_delivering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A date recorded with no capture still delivers beside an attributed one.
+    """A build beside a listed folder holding no image leaves it out and still delivers.
 
-    A mapping recording one date with no capture at all beside a fully attributed one still
-    delivers the attributed date's bucket, and the delivery names the attributed date alone.
+    With no dates stated, the build names the folder's date as left out, and the attributed
+    date's bucket delivers, the delivery naming that date alone.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -645,11 +616,11 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
         name="valley",
         dataset_root=str(dataset_root),
         plant_registry=registry,
-        dates=[DATE, empty_date],
         actor=None,
     )
     assert "error" not in build_res, build_res
-    assert build_res["per_date"][empty_date]["n_images"] == 0
+    assert build_res["dates_without_images"] == [empty_date]
+    assert list(build_res["per_date"]) == [DATE]
 
     _seed_currant_bloom_trait(tmp_path)
     pm = _delivered_disclosure(tmp_path, dataset_root, preds_by_date)
