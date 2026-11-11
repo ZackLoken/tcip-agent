@@ -272,18 +272,21 @@ def test_a_delivered_date_the_mapping_does_not_cover_refuses(
         datetime(2026, 3, 1, 9, 30),
     )
 
-    res = _deliver(
+    res = _called(
         tmp_path,
-        _results(date, ("P1", 1)),
-        ["P1"],
-        dataset_root,
-        [
-            _bucket(tmp_path, dataset_root, date, {"P1": 1}),
-            _bucket(tmp_path, dataset_root, uncovered, {"P1": 1}),
-        ],
-        plant_mapping="valley",
+        _arguments_over(
+            tmp_path,
+            dataset_root,
+            [
+                _bucket(tmp_path, dataset_root, date, {"P1": 1}),
+                _bucket(tmp_path, dataset_root, uncovered, {"P1": 1}),
+            ],
+            _rows((date, "P1", 1)),
+            ("P1",),
+        ),
     )
 
+    assert isinstance(res, dict), res
     assert "does not cover" in res["error"] and uncovered in res["error"]
     assert (
         "ingest any of those dates' captures the dataset lacks, rebuild the mapping to cover "
