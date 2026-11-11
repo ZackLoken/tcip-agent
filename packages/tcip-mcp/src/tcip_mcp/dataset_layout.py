@@ -298,14 +298,21 @@ def require_dataset_identity(dataset_root: str | Path) -> DatasetRecord:
     return identity
 
 
+class NoOneRootError(ValueError):
+    """No one dataset root was established for the sources or buckets a caller named.
+
+    That is a source under no dataset image tree, or sources or buckets under more than one root.
+    """
+
+
 def _one_root(roots: Iterable[Path], what: str) -> Path:
     """Return the one dataset root among ``roots``, keyed by its canonical spelling.
 
-    None, or more than one, refuses (``ValueError``) naming ``what`` and the roots.
+    None, or more than one, refuses (:class:`NoOneRootError`) naming ``what`` and the roots.
     """
     found = {tcip_store.canonical_path(root): root for root in roots}
     if len(found) != 1:
-        raise ValueError(
+        raise NoOneRootError(
             f"{what} lie under {sorted(found) or 'no'} dataset root(s), and they "
             "belong to one."
         )
@@ -316,15 +323,15 @@ def source_root(sources: Iterable[str | Path], *, what: str) -> Path:
     """Return the one dataset root every source image of ``sources`` lies under.
 
     Each source's root is :func:`dataset_root_of` its directory: the capture's, or the image
-    tree's for a source in no capture. ``what`` names the sources in each refusal (``ValueError``):
+    tree's for a source in no capture. ``what`` names the sources in each :class:`NoOneRootError`:
     a source under no dataset image tree, and sources under more than one root. A directory
-    neither or both roots claim refuses as :func:`_capture` does.
+    neither or both roots claim refuses as :func:`_capture` does, a plain ``ValueError``.
     """
 
     def root_of(source: str | Path) -> Path:
         root = dataset_root_of(Path(source).parent)
         if root is None:
-            raise ValueError(
+            raise NoOneRootError(
                 f"{source} lies under no dataset image tree, and one dataset root is "
                 f"required for {what}."
             )
