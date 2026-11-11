@@ -4,11 +4,13 @@ All are produced by the platform itself.
 
 In a scratch session (``tools/fixture_session.py``), the project ``valley``, created through
 ``tests._web_fixtures.named_project`` and opened through the picker's route, holds three dataset
-roots. ``mapped`` is registered and mapped under ``valley`` against a plant registry of its crop
-(``tests._mapping_fixtures.map_captures``); ``fresh`` holds one image and no identity; ``damaged``
-is registered and its identity document then rewritten so its model refuses it (fault injection,
+roots. ``mapped`` is registered and read (``unmapped``), mapped under ``valley`` against a plant
+registry of its crop (``tests._mapping_fixtures.map_captures``) and read (``mapped``), then mapped
+twice more, one mapping record and one registry record damaged (:func:`_damaged_mappings`), and
+read (``mapped_damaged``); ``fresh`` holds one image and no identity; ``damaged`` is registered
+and its identity document then rewritten so its model refuses it (fault injection,
 ``tests.test_a_refused_record_reads_as_its_readers_sentence._rewritten``).
-``GET /api/dataset/identity`` is answered for each (``unregistered``, ``mapped``, ``refused``),
+``GET /api/dataset/identity`` is answered for the other two (``unregistered``, ``refused``),
 then ``POST /api/dataset/register`` registers ``fresh`` (``registered``), refuses a crop the
 vocabulary does not hold (``unknown_crop``), restores ``damaged``'s id (``repaired``), refuses a
 change of ``mapped``'s crop that names no stored crop (``crop_unconfirmed``) and makes it with
@@ -49,6 +51,43 @@ platform's encoder writes differently."""
 
 DATE = "2026-05-02"
 """The scene's one capture date."""
+
+
+def _damaged_mappings(project: Path, root: Path) -> None:
+    """Build two more mappings of ``project`` over ``root``, then damage one record of each.
+
+    ``valley-east`` is built against ``reg``, the registry ``valley`` names, and its stored record
+    is damaged so it will not decode (fault injection,
+    ``tests._record_damage_fixtures.damage_record``); ``valley-north`` is built against ``north``,
+    registered from the same plant CSV, whose stored record is then rewritten so its model refuses
+    it (fault injection, through the store's own writer).
+    """
+    import tcip_store
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_mapping_key,
+        plant_registry_key,
+    )
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests._mapping_fixtures import register_plant_registry_for
+    from tests._record_damage_fixtures import damage_record
+
+    north = register_plant_registry_for(
+        project, [project / "valley_plants.csv"], name="north"
+    )
+    for name, registry in (("valley-east", "reg"), ("valley-north", north)):
+        built = build_plant_mapping(
+            project,
+            name=name,
+            dataset_root=str(root),
+            plant_registry=registry,
+            actor=None,
+        )
+        assert "error" not in built, built
+    damage_record(plant_mapping_key(project, "valley-east"), b"{not json")
+    key = plant_registry_key(project, north)
+    record = tcip_store.read(key)
+    assert isinstance(record, dict), record
+    tcip_store.replace(key, {**record, "crop": 5})
 
 
 def produce() -> dict[str, JsonValue]:
@@ -107,7 +146,13 @@ def produce() -> dict[str, JsonValue]:
             )
 
         mapped = valley.root / "mapped"
+        mapped.mkdir()
+        register_dataset_at(valley.root, mapped, crop=CROP)
+        unmapped = identity(mapped)
         map_captures(valley.root, mapped, [DATE])
+        mapped_read = identity(mapped)
+        _damaged_mappings(valley.root, mapped)
+        mapped_damaged = identity(mapped)
         fresh = imaged("fresh")
         damaged = imaged("damaged")
         damaged_id = register_dataset_at(valley.root, damaged, crop=CROP)
@@ -115,7 +160,9 @@ def produce() -> dict[str, JsonValue]:
 
         answers = {
             "unregistered": identity(fresh),
-            "mapped": identity(mapped),
+            "unmapped": unmapped,
+            "mapped": mapped_read,
+            "mapped_damaged": mapped_damaged,
             "refused": identity(damaged),
             "unknown_crop": register(fresh, "no-such-crop", 400),
             "registered": register(fresh, CROP),
