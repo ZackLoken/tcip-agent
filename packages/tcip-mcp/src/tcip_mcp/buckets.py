@@ -222,10 +222,10 @@ def require_delivered_dataset(
     a bucket recording another dataset than its root's identity names refuse (``ValueError``); the
     last names the bucket, its root, the id it records and the id of its root.
     """
-    from tcip_mcp.dataset_layout import _one_root, require_dataset_identity
+    from tcip_mcp.dataset_layout import one_root, require_dataset_identity
 
     delivered = list(buckets)
-    root = _one_root((b.root for b in delivered), "a delivery's buckets")
+    root = one_root((b.root for b in delivered), "a delivery's buckets")
     identity = require_dataset_identity(root)
     for bucket in delivered:
         if bucket.dataset_id != identity.id:
