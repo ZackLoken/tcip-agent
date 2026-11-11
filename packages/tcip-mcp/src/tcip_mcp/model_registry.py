@@ -48,6 +48,7 @@ from tcip_store import (
     Key,
     ReadRefusedError,
     finite_number,
+    unreadable,
     validated,
 )
 
@@ -544,20 +545,24 @@ def registered_bytes(
     directory, or a path beneath a regular file), :class:`UnregisteredCheckpointError` naming the
     path, the digest and the root searched when no entry names that digest, and each refusal
     :func:`registered_entries` raises.
-    An operating-system error inspecting or reading the file propagates as itself.
+    An operating-system error inspecting or reading the file, other than its having no file,
+    raises ``tcip_store.ReadRefusedError`` (``Unreadable``) naming the checkpoint and its path.
     """
     ckpt = Path(checkpoint_path)
     root = str(project)
-    try:
-        mode: int | None = ckpt.stat().st_mode
-    except (FileNotFoundError, NotADirectoryError):
-        mode = None
-    try:
-        data = (
-            ckpt.read_bytes() if mode is not None and S_ISREG(mode) else None
-        )
-    except FileNotFoundError:
-        data = None
+    with unreadable(f"checkpoint {ckpt}", OSError):
+        try:
+            mode: int | None = ckpt.stat().st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            mode = None
+        try:
+            data = (
+                ckpt.read_bytes()
+                if mode is not None and S_ISREG(mode)
+                else None
+            )
+        except FileNotFoundError:
+            data = None
     if data is None:
         raise CheckpointNotFoundError(f"Checkpoint not found: {ckpt}")
     digest = _sha256_of_bytes(data)

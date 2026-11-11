@@ -7,6 +7,8 @@ registered through ``register_model``.
 
 from __future__ import annotations
 
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -29,6 +31,8 @@ from tests._training_values import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from pydantic import JsonValue
     from torch import Tensor
 
@@ -632,6 +636,68 @@ def register_checkpoint(
     from tcip_mcp.tools.model_tools import register_model
 
     register_model(project_root, name=name, checkpoint_path=path, actor=None)
+
+
+def _skipped_unless_denied(operation: Callable[[], object], what: str) -> None:
+    """Skip the test unless ``operation`` is denied to this process (``PermissionError``).
+
+    A POSIX superuser, or a platform that does not make ``what`` impossible, is not denied.
+    """
+    try:
+        operation()
+    except PermissionError:
+        return
+    pytest.skip(
+        f"this process is not denied {what} by the means this fixture has"
+    )
+
+
+@contextmanager
+def read_denied(path: Path) -> Iterator[None]:
+    """Hold ``path`` so this process may not read it, by the operating system's own means.
+
+    On Windows a byte-range lock over the whole file, held by another handle, denies a read; on
+    any other platform the file's read permission is removed. The test is skipped when the read
+    is not denied anyway.
+    """
+    if sys.platform == "win32":
+        import msvcrt
+
+        size = path.stat().st_size
+        with open(path, "rb") as held:
+            msvcrt.locking(held.fileno(), msvcrt.LK_NBLCK, size)
+            try:
+                _skipped_unless_denied(path.read_bytes, f"a read of {path}")
+                yield
+            finally:
+                held.seek(0)
+                msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, size)
+        return
+    mode = path.stat().st_mode
+    path.chmod(0)
+    try:
+        _skipped_unless_denied(path.read_bytes, f"a read of {path}")
+        yield
+    finally:
+        path.chmod(mode)
+
+
+@contextmanager
+def unsearchable(path: Path) -> Iterator[None]:
+    """Hold ``path``'s parent directory so this process may not search it.
+
+    The directory's permissions are removed, so inspecting ``path`` is denied; they are restored
+    on exit. The test is skipped when the inspection is not denied anyway (a POSIX superuser, or
+    a platform that gives a directory no search permission to remove).
+    """
+    directory = path.parent
+    mode = directory.stat().st_mode
+    directory.chmod(0)
+    try:
+        _skipped_unless_denied(path.stat, f"an inspection of {path}")
+        yield
+    finally:
+        directory.chmod(mode)
 
 
 _PROJECT_CHECKPOINTS: dict[str, str] = {}
