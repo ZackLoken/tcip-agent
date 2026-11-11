@@ -32,8 +32,6 @@ from tests.test_results_mapping_summary_and_audit_anchoring import (
 )
 
 if TYPE_CHECKING:
-    from typing import NoReturn
-
     from tests._chain_fixtures import Series
 
 
@@ -56,7 +54,8 @@ def test_the_workspace_is_admitted_and_a_sibling_outside_it_is_refused_with_no_e
     inside.parent.mkdir(parents=True)
     inside.write_bytes(b"x")
     assert assert_path_allowed(str(inside)) == inside.resolve()
-    assert allowed_roots()[0] == tmp_path.parent
+    roots, _unread = allowed_roots()
+    assert roots[0] == tmp_path.parent
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(outside / "leak.jpg"))
 
@@ -111,7 +110,7 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     project = new_project(tmp_path).root
     register_dataset_at(project, project, crop="currant")
 
-    roots = allowed_roots()
+    roots, _unread = allowed_roots()
 
     assert all(root.is_absolute() for root in roots)
     assert project in roots
@@ -164,7 +163,8 @@ def test_a_root_listed_under_two_spellings_is_admitted_once(
     image_root(project).mkdir(exist_ok=True)
     store.configure(store.workspace, (image_root(project) / "..",))
 
-    assert sum(root.samefile(project) for root in allowed_roots()) == 1
+    roots, _unread = allowed_roots()
+    assert sum(root.samefile(project) for root in roots) == 1
 
 
 def test_a_path_that_does_not_exist_yet_is_judged_by_its_nearest_existing_ancestor(
@@ -189,23 +189,6 @@ def test_containment_is_by_identity_so_a_case_variant_spelling_is_the_same_direc
     inside.write_bytes(b"x")
     variant = Path(str(inside).upper())
     assert assert_path_allowed(str(variant)).samefile(inside)
-
-
-def test_a_registry_that_will_not_decode_raises_rather_than_admitting_nothing(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tcip_mcp.tools import project_tools
-    from tcip_web.paths import allowed_roots
-
-    new_project(tmp_path)
-
-    def broken(_root: str | Path) -> NoReturn:
-        raise tcip_store.DecodeError("registry bytes are not a document")
-
-    monkeypatch.setattr(project_tools, "read_datasets", broken)
-    with pytest.raises(RuntimeError, match="dataset registry of project"):
-        allowed_roots()
 
 
 # ── dataset, sessions, review, annotate: the choke points ─────────────────
