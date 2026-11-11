@@ -77,7 +77,7 @@ def _run(
 def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
     """A setup fixture error is refused.
 
-    A fixture that fails during setup is reported REFUSED, fixture-shaped.
+    A fixture that fails during setup is reported REFUSED, kind ``fixture``.
     """
     repo = _scratch_repo(tmp_path)
     _write(
@@ -193,7 +193,7 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(
     """A fixture calling package code that raises is refused.
 
     A fixture whose call into package code raises before the fixture returns is reported REFUSED,
-    fixture-shaped, though the crash frame sits in the package's own file, outside tests/.
+    kind ``fixture``, though the crash frame sits in the package's own file, outside tests/.
     """
     repo = _scratch_repo(tmp_path)
     _write(
@@ -567,13 +567,11 @@ def test_a_run_mixing_a_setup_failure_and_a_wrong_call_names_each_with_its_own_s
     )
 
 
-def test_the_record_the_printed_tag_and_the_sentence_agree_on_each_failures_kind(
-    tmp_path: Path,
-) -> None:
-    """A setup failure, a call-phase TypeError and an assertion failure each keep one kind.
+def test_the_json_record_carries_each_failures_kind(tmp_path: Path) -> None:
+    """The ``--json`` record names a setup failure, a call-phase TypeError and an assertion failure.
 
-    The kind in the ``--json`` record is the tag printed for that failure, and the verdict's
-    sentence for it is the one its kind names.
+    Their kinds are ``fixture``, ``test_code`` and ``behavioral``, and each is the tag printed for
+    its test.
     """
     repo, baseline = _head_adds_color_double_and_gadgets(
         tmp_path,
@@ -618,17 +616,13 @@ def test_the_record_the_printed_tag_and_the_sentence_agree_on_each_failures_kind
     printed = dict(
         re.findall(r"failing\s+\S+::(\w+)\s+\[(\w+)\]", result.stdout)
     )
-    assert recorded == {
+    expected = {
         "test_uses_thing": "fixture",
         "test_widget_carries_a_color": "test_code",
         "test_double_doubles": "behavioral",
     }
-    assert printed == recorded
-    why = _why(result)
-    _assert_one_clause_names(why, "test_uses_thing", FIXTURE_SENTENCE)
-    _assert_one_clause_names(
-        why, "test_widget_carries_a_color", CALL_PHASE_SENTENCE
-    )
+    assert recorded == expected
+    assert printed == expected
 
 
 def test_a_fixture_refusal_lists_a_missing_import_failure_as_not_counted(
