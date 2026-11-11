@@ -15,6 +15,7 @@ export const ROUTES = {
   getAnnotateScorers: "/api/annotate/scorers",
   getAnnotateStagings: "/api/annotate/stagings",
   getAnnotateStates: "/api/annotate/states",
+  getDatasetIdentity: "/api/dataset/identity",
   getDatasetTree: "/api/dataset/tree",
   getImages: "/api/images",
   getImagesBands: "/api/images/bands",
@@ -43,6 +44,7 @@ export const ROUTES = {
   postAnnotateQueueLaunch: "/api/annotate/queue/launch",
   postCanvasState: "/api/canvas/state",
   postDatasetNav: "/api/dataset/nav",
+  postDatasetRegister: "/api/dataset/register",
   postDatasetSelect: "/api/dataset/select",
   postImagesOverviews: "/api/images/overviews",
   postInferenceJobsByJobIdCancel: (jobId: string) =>

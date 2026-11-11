@@ -117,7 +117,15 @@ export const RASTER = "raster";
 
 export const READ = "read";
 
+export const REFUSED = "refused";
+
 export const LISTING = "listing";
+
+export const REGISTERED = "registered";
+
+export const CROP = "crop";
+
+export const REGISTRY_REFUSED = "registry_refused";
 
 export const REPEATED = "repeated";
 
@@ -170,6 +178,8 @@ export const UNLAUNCHABLE = "unlaunchable";
 export const UNREAD = "unread";
 
 export const UNREADABLE = "unreadable";
+
+export const UNREGISTERED = "unregistered";
 
 export const UNVALIDATED = "unvalidated";
 
@@ -228,6 +238,27 @@ export interface DatasetTree {
   buckets_by_date: Record<string, string[]>;
   label_problem: string | null;
   dataset_root: string;
+}
+
+export interface RootIdentity {
+  dataset_root: string;
+  identity: UnregisteredRoot | RegisteredRoot | RefusedIdentity;
+  crops: string[];
+}
+
+export interface RegisteredDataset {
+  crop: string;
+  id: string;
+  fingerprint: string | null;
+  dataset_root: string;
+  repaired: string | null;
+}
+
+export interface RegisterPayload {
+  dataset_root: string;
+  crop: string;
+  user: string;
+  confirmed_crop: string | null;
 }
 
 export interface SelectAnswer {
@@ -1126,6 +1157,23 @@ export interface DatasetIdentity {
   fingerprint: string | null;
 }
 
+export interface DatasetMapping {
+  name: string;
+  plant_registry: string;
+  registry: RegistryCrop | RegistryRefused;
+}
+
+export interface DatasetMappings {
+  placed: DatasetMapping[];
+  unplaced: UnplacedMapping[];
+}
+
+export interface DatasetRecord {
+  crop: string;
+  id: string;
+  fingerprint: string | null;
+}
+
 export interface DateCounts {
   n_images: number;
   n_unattributed: number;
@@ -1691,9 +1739,25 @@ export interface ReferenceSample {
   source_digest: string;
 }
 
+export interface RefusedIdentity {
+  kind: "refused";
+  reason: string;
+}
+
 export interface RefusedRead {
   where: string;
   refusal: ReadRefusal;
+}
+
+export interface RegisteredRoot {
+  kind: "registered";
+  identity: DatasetRecord;
+  mappings: DatasetMappings;
+}
+
+export interface RegistryCrop {
+  kind: "crop";
+  crop: string;
 }
 
 export interface RegistryEntry {
@@ -1704,6 +1768,11 @@ export interface RegistryEntry {
   metrics: Record<string, unknown>;
   tags: string[];
   origin: Origin;
+}
+
+export interface RegistryRefused {
+  kind: "registry_refused";
+  refusal: string;
 }
 
 export type RegistrySubjects = ByName_Subject__MinLen_min_length_1_;
@@ -2261,6 +2330,11 @@ export interface Unlaunchable {
   why: string;
 }
 
+export interface UnplacedMapping {
+  name: string;
+  refusal: string;
+}
+
 export interface UnreadEntry {
   kind: "unread";
   id: string;
@@ -2289,6 +2363,10 @@ export interface Unreadable {
 export interface UnreadableTrait {
   trait: string;
   reason: RefusedRead;
+}
+
+export interface UnregisteredRoot {
+  kind: "unregistered";
 }
 
 export interface UnvalidatedBucket {
