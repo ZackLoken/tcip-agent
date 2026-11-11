@@ -37,6 +37,9 @@ import {
   type SelectAnswer,
   type ServedProposals,
   type ProposeAnswer,
+  type RegisteredDataset,
+  type RegisterPayload,
+  type RootIdentity,
   type StretchMode,
   type ViewReads,
 } from "@/api/types.generated";
@@ -100,6 +103,12 @@ export const api = {
       getJson<DatasetTree>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
 
     select: (body: CaptureChoice) => postJson<SelectAnswer>(ROUTES.postDatasetSelect, body),
+
+    identity: (dataset_root: string) =>
+      getJson<RootIdentity>(`${ROUTES.getDatasetIdentity}?${q({ dataset_root })}`),
+
+    register: (body: RegisterPayload) =>
+      postJson<RegisteredDataset>(ROUTES.postDatasetRegister, body),
 
     // Persist the current image position so the agent (view_gui_state) sees the last
     // image the human looked at. Debounced by the caller; fire-and-forget on the FE side.

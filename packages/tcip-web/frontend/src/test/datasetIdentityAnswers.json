@@ -1,0 +1,66 @@
+{
+  "unregistered": {
+    "dataset_root": "/scratch/workspace/valley/fresh",
+    "identity": { "kind": "unregistered" },
+    "crops": ["black_locust", "chestnut", "currant", "elderberry", "hazelnut", "persimmon"]
+  },
+  "mapped": {
+    "dataset_root": "/scratch/workspace/valley/mapped",
+    "identity": {
+      "kind": "registered",
+      "identity": { "crop": "currant", "id": "<mapped dataset id>", "fingerprint": null },
+      "mappings": {
+        "placed": [
+          {
+            "name": "valley",
+            "plant_registry": "reg",
+            "registry": { "kind": "crop", "crop": "currant" }
+          }
+        ],
+        "unplaced": []
+      }
+    },
+    "crops": ["black_locust", "chestnut", "currant", "elderberry", "hazelnut", "persimmon"]
+  },
+  "refused": {
+    "dataset_root": "/scratch/workspace/valley/damaged",
+    "identity": {
+      "kind": "refused",
+      "reason": "the dataset identity at /scratch/workspace/valley/damaged/dataset.json: crop: Input should be a valid string"
+    },
+    "crops": ["black_locust", "chestnut", "currant", "elderberry", "hazelnut", "persimmon"]
+  },
+  "unknown_crop": {
+    "status": 400,
+    "body": {
+      "detail": "crop 'no-such-crop' is named by no trait in crops.yml, which names ['black_locust', 'chestnut', 'currant', 'elderberry', 'hazelnut', 'persimmon']"
+    }
+  },
+  "registered": {
+    "crop": "currant",
+    "id": "<fresh dataset id>",
+    "fingerprint": "<fingerprint n0>",
+    "dataset_root": "/scratch/workspace/valley/fresh",
+    "repaired": null
+  },
+  "repaired": {
+    "crop": "currant",
+    "id": "<damaged dataset id>",
+    "fingerprint": "<fingerprint n0>",
+    "dataset_root": "/scratch/workspace/valley/damaged",
+    "repaired": "the dataset identity at /scratch/workspace/valley/damaged/dataset.json: crop: Input should be a valid string; its id is restored: id '<damaged dataset id>' is cited by this project's registry at this path"
+  },
+  "crop_unconfirmed": {
+    "status": 409,
+    "body": {
+      "detail": "/scratch/workspace/valley/mapped is registered at crop 'currant'; registering it at 'hazelnut' changes its crop, which the request confirms by naming 'currant' as the crop shown"
+    }
+  },
+  "crop_changed": {
+    "crop": "hazelnut",
+    "id": "<mapped dataset id>",
+    "fingerprint": null,
+    "dataset_root": "/scratch/workspace/valley/mapped",
+    "repaired": null
+  }
+}
