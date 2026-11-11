@@ -704,7 +704,7 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
 ) -> None:
     """A stored selection whose samples lie under no one root refuses at its reads.
 
-    Each sample of a drawn selection names its own copy of its image outside any capture: in no
+    Each sample of a drawn selection names its own copy of its image: in no
     image tree, the first sample under one root's image tree and every other under a second's, or
     all in a capture named ``images`` that neither or both of its two readings' roots carry state
     for (``registered``, as the launch route's producer makes the layout), stored past the
