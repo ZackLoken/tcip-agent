@@ -59,9 +59,12 @@ or schema currently serves one, that implementation is replaceable and the guara
 
 - A test that guards a fix is observed failing without the fix, through
   `tools/prove_test_fails_before.py`, and the verdict is named: `GUARDS` is the only evidence, and
-  `VACUOUS`, `INDETERMINATE` and `REFUSED` are reported as what they are, never as coverage. Every
-  test constructs its input through the platform's own producer (an MCP tool, a pipeline function,
-  a route, the document writer), never a hand-built fixture standing in for one.
+  `VACUOUS`, `INDETERMINATE` and `REFUSED` are reported as what they are, never as coverage. A
+  guard whose run comes out `REFUSED` because its own code raised against the baseline, as a call
+  across a signature the change alters does, is reported with that verdict and, beside it, a check
+  that reaches the behavior, named as not evidence. Every test constructs its input through the
+  platform's own producer (an MCP tool, a pipeline function, a route, the document writer), never
+  a hand-built fixture standing in for one.
 - A shared fact has one implementation (the operating contract's "call one from the other") and
   ships an agreement test: two routes' own records compared against each other, not each
   against a fixture. The test guards that the routes still agree, and never licenses a second
