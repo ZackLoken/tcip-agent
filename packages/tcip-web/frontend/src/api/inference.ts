@@ -23,6 +23,7 @@ import {
   type PhenologyPayload,
   type RegisteredModels,
   type SavedExport,
+  type ServedBuild,
   type ServedMapping,
   type TraitsListing,
 } from "@/api/types.generated";
@@ -71,7 +72,7 @@ export const resultsApi = {
     postJson<ConfirmedRevision>(ROUTES.postResultsTraitsConfirm, body),
 
   buildPlantMapping: (body: BuildMappingPayload) =>
-    postJson<ServedMapping>(ROUTES.postResultsPlantMappingBuild, body),
+    postJson<ServedBuild>(ROUTES.postResultsPlantMappingBuild, body),
 
   // Refuses with 404 when nothing is stored under the name.
   loadPlantMapping: (body: LoadMappingPayload) =>
