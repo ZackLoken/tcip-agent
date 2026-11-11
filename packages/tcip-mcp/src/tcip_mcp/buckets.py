@@ -216,11 +216,11 @@ def require_delivered_dataset(
     """Require every bucket of ``buckets`` to record the dataset its root is.
 
     Returns the one root the buckets are published under and that root's identity record.
-    Buckets under more than one root or none, a root carrying no identity
+    Buckets under more than one root or none refuse
+    (:class:`~tcip_mcp.dataset_layout.NoOneRootError`); a root carrying no identity
     (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming ``register_dataset``) and
-    a bucket recording another dataset than its root's identity names all refuse
-    (``ValueError``); the last names the bucket, its root, the id it records and the id of its
-    root.
+    a bucket recording another dataset than its root's identity names refuse (``ValueError``); the
+    last names the bucket, its root, the id it records and the id of its root.
     """
     from tcip_mcp.dataset_layout import _one_root, require_dataset_identity
 

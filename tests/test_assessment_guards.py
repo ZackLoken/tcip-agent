@@ -447,6 +447,42 @@ def test_a_selection_of_a_capture_and_its_roots_image_tree_writes_and_reads_back
     assert read_selection(out, project=tmp_path) == mixed
 
 
+@pytest.mark.parametrize(
+    "registered",
+    [("root",), ("tree",)],
+    ids=["outer_root_carries_state", "inner_tree_carries_state"],
+)
+def test_a_selection_over_a_directory_named_images_writes_and_reads_back_with_one_root_registered(
+    tmp_path: Path, registered: tuple[str, ...]
+) -> None:
+    """A selection over a directory named ``images`` writes and reads back with one root registered.
+
+    Every sample of a drawn reference is re-pointed at a copy of its image in
+    ``<grove>/images/images``; with ``<grove>`` registered the directory is its capture ``images``,
+    and with ``<grove>/images`` registered it is that root's image tree. Either way the selection
+    writes through ``write_selection`` and reads back as written.
+    """
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        write_selection,
+    )
+    from tests.test_physical_scale_assessment import _reference
+    from tests.test_web_inference_launch_root import _capture_named_images
+
+    selection_dir, _csv_path = _reference(tmp_path)
+    relocated, _copies = _copied_elsewhere(
+        tmp_path,
+        selection_dir,
+        lambda i, name: Path("grove", "images", "images", f"{i}-{name}"),
+    )
+    _capture_named_images(tmp_path, registered=registered)
+    out = tmp_path / "relocated"
+
+    write_selection(out, relocated, project=tmp_path)
+
+    assert read_selection(out, project=tmp_path) == relocated
+
+
 def _assessed_with_no_checkpoint_file(
     project: Path, selection_dir: Path, *, confirmed: bool
 ) -> dict:
@@ -547,27 +583,18 @@ def test_an_assessment_reads_its_selection_before_its_checkpoint(
     assert "no selection recorded there" in refused["error"], refused
 
 
-def _relocated(
-    project: Path,
-    selection_dir: Path,
-    place: Callable[[int, str], Path],
-    out: Path,
-) -> list[Path]:
-    """Store at ``out`` the selection at ``selection_dir``, each sample's image copied elsewhere.
+def _copied_elsewhere(
+    project: Path, selection_dir: Path, place: Callable[[int, str], Path]
+) -> tuple[Selection, list[Path]]:
+    """Return the selection at ``selection_dir`` with each sample's image copied elsewhere.
 
     Sample ``i``'s image is copied to ``project / place(i, its file name)`` and the sample names
-    that copy as its source, every other field the drawn selection's own. The document is the
-    one ``stored_selection_document`` stores, written through the store past ``write_selection``,
-    a fault injected past the selection's writer. Returns the copies, in sample order.
+    that copy as its source, every other field the drawn selection's own. Returns the selection
+    and the copies, in sample order.
     """
     from dataclasses import replace
 
-    import tcip_store
-    from tcip_mcp.pipelines.data.selection import (
-        read_selection,
-        selection_key,
-        stored_selection_document,
-    )
+    from tcip_mcp.pipelines.data.selection import read_selection
 
     drawn = read_selection(selection_dir, project=project)
     copies = []
@@ -580,19 +607,51 @@ def _relocated(
         replace(s, source=str(c))
         for s, c in zip(drawn.samples, copies, strict=True)
     )
+    return replace(drawn, samples=relocated), copies
+
+
+def _relocated(
+    project: Path,
+    selection_dir: Path,
+    place: Callable[[int, str], Path],
+    out: Path,
+) -> list[Path]:
+    """Store at ``out`` the selection at ``selection_dir``, each sample's image copied elsewhere.
+
+    The selection is :func:`_copied_elsewhere`'s. The document is the one
+    ``stored_selection_document`` stores, written through the store past ``write_selection``, a
+    fault injected past the selection's writer. Returns the copies, in sample order.
+    """
+    import tcip_store
+    from tcip_mcp.pipelines.data.selection import (
+        selection_key,
+        stored_selection_document,
+    )
+
+    relocated, copies = _copied_elsewhere(project, selection_dir, place)
     tcip_store.replace(
-        selection_key(out),
-        stored_selection_document(replace(drawn, samples=relocated), project),
+        selection_key(out), stored_selection_document(relocated, project)
     )
     return copies
 
 
+def _layout_refusal(directory: Path) -> str:
+    """Return the sentence ``parse_capture_dir`` refuses the ambiguous ``directory`` with."""
+    from tcip_mcp.dataset_layout import parse_capture_dir
+
+    with pytest.raises(ValueError, match="register_dataset") as refused:
+        parse_capture_dir(directory)
+    return str(refused.value)
+
+
 @pytest.mark.parametrize(
-    ("place", "sentence"),
+    ("place", "sentence", "step", "registered"),
     [
         (
             lambda i, name: Path("loose", f"{i}-{name}"),
             lambda copies: unrooted_refusal(copies[0], "its samples"),
+            f" {NEXT_STEP}",
+            None,
         ),
         (
             lambda i, name: Path(
@@ -601,13 +660,33 @@ def _relocated(
             lambda copies: two_roots_refusal(
                 {c.parent.parent for c in copies}, "its samples"
             ),
+            f" {NEXT_STEP}",
+            None,
+        ),
+        (
+            lambda i, name: Path("grove", "images", "images", f"{i}-{name}"),
+            lambda copies: _layout_refusal(copies[0].parent),
+            "",
+            (),
+        ),
+        (
+            lambda i, name: Path("grove", "images", "images", f"{i}-{name}"),
+            lambda copies: _layout_refusal(copies[0].parent),
+            "",
+            ("root", "tree"),
         ),
     ],
-    ids=["under_no_image_tree", "under_two_image_trees"],
+    ids=[
+        "under_no_image_tree",
+        "under_two_image_trees",
+        "in_a_directory_neither_root_claims",
+        "in_a_directory_both_roots_claim",
+    ],
 )
 @pytest.mark.parametrize(
     "door",
     [
+        "read_selection",
         "assess_checkpoint",
         "calibrate_physical_scale",
         "bound_launch",
@@ -620,19 +699,28 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
     door: str,
     place: Callable[[int, str], Path],
     sentence: Callable[[list[Path]], str],
+    step: str,
+    registered: tuple[str, ...] | None,
 ) -> None:
-    """A stored selection whose samples lie under no image tree, or under two, refuses at its reads.
+    """A stored selection whose samples lie under no one root refuses at its reads.
 
     Each sample of a drawn selection names its own copy of its image outside any capture: in no
-    image tree, or the first sample under one root's image tree and every other under a second's,
-    stored past the selection's writer (:func:`_relocated`). Each reader answers the selection's
-    own refusal: its place, the one root reading's sentence for its samples and the draw_splits
-    step. Each reader is a tool called through a client: the two assessment doors answer it as
-    their error, ``preflight_config`` over a config bound to the selection (made over a detection
-    selection before it is moved) answers it among its ``issues`` and not ``valid``, and
-    ``diagnose_project`` answers it as an error finding over the project's ``splits``.
+    image tree, the first sample under one root's image tree and every other under a second's, or
+    all in a capture named ``images`` that neither or both of its two readings' roots carry state
+    for (``registered``, as the launch route's producer makes the layout), stored past the
+    selection's writer (:func:`_relocated`). Each reader answers the selection's own refusal: its
+    place and the sentence for its samples, followed by the draw_splits step for the first two,
+    which a redraw answers; the third and fourth name register_dataset instead and no draw_splits.
+    ``read_selection`` raises it; every other reader is a tool called through a client: the two
+    assessment doors answer it as their error, ``preflight_config`` over a config bound to the
+    selection (made over a detection selection before it is moved) answers it among its
+    ``issues`` and not ``valid``, and ``diagnose_project`` answers it as an error finding over the
+    project's ``splits``.
     """
-    from tcip_mcp.pipelines.data.selection import selection_place
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        selection_place,
+    )
     from tests._chain_fixtures import training_config
     from tests._server_calls import called_through_the_server
     from tests._verified_checkpoint_fixtures import unbuilt_source
@@ -646,6 +734,7 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
         _draw,
         _two_subject_two_date_dataset,
     )
+    from tests.test_web_inference_launch_root import _capture_named_images
 
     if door == "bound_launch":
         drawn = tmp_path / "drawn"
@@ -659,6 +748,8 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
         drawn, csv_path = _reference(tmp_path)
     selection_dir = tmp_path / "splits" / "relocated"
     copies = _relocated(tmp_path, drawn, place, selection_dir)
+    if registered is not None:
+        _capture_named_images(tmp_path, registered=registered)
     if door == "assess_checkpoint":
         served = called_through_the_server(
             door,
@@ -685,9 +776,11 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
         )
         assert isinstance(served, dict), served
         answer = served["error"]
-    expected = (
-        f"{selection_place(selection_dir)}: {sentence(copies)} {NEXT_STEP}"
-    )
+    elif door == "read_selection":
+        with pytest.raises(ValueError) as refused:
+            read_selection(selection_dir, project=tmp_path)
+        answer = str(refused.value)
+    expected = f"{selection_place(selection_dir)}: {sentence(copies)}{step}"
     if door == "bound_launch":
         launch["data"]["split"]["selection_dir"] = str(selection_dir)
         served = called_through_the_server(
@@ -707,6 +800,8 @@ def test_a_selection_whose_samples_lie_under_no_one_root_refuses_at_its_readers(
         assert answer == expected, answer
     assert isinstance(answer, str), answer
     assert "bucket" not in answer, answer
+    assert ("draw_splits" in answer) == bool(step), answer
+    assert ("register_dataset" in answer) == (not step), answer
 
 
 def test_an_assessments_reference_records_the_id_its_root_is_registered_under(
