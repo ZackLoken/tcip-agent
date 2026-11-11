@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 __all__ = [
+    "UnreadRegistryError",
     "allowed_optional",
     "allowed_path",
     "allowed_roots",
@@ -45,32 +46,45 @@ def image_roots_from_environment() -> tuple[Path, ...]:
     return roots
 
 
-def allowed_roots() -> list[Path]:
-    """Return every root a client-supplied path may resolve under.
+class UnreadRegistryError(ValueError):
+    """A path under no allowed root that read, while some project's dataset registry did not read.
 
-    These are the backend's workspace root, each workspace project and its registered dataset
-    roots, then the backend's additive image roots.
+    Its message names the path and, for each such project, why its registry did not read.
+    """
 
-    A project whose dataset registry will not decode raises.
+
+def allowed_roots() -> tuple[list[Path], list[str]]:
+    """Return every root a client-supplied path may resolve under, beside each registry unread.
+
+    The roots are the backend's workspace root, each workspace project and its registered dataset
+    roots, then the backend's additive image roots. A project whose registry does not read (a
+    store refusal, or a ``ValueError``: a value its model refuses or an entry whose path is
+    refused) contributes its own directory and none of its registered roots, and is named in the
+    second list by one sentence stating the project and the reader's refusal. An
+    operating-system error resolving an entry raises.
     """
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
     from tcip_mcp.workspace import project_dirs
-    from tcip_store import DecodeError
+    from tcip_store import StoreError
     from tcip_web.state import store
 
     roots: list[Path] = [store.workspace]
+    unread: list[str] = []
     for project in project_dirs(store.workspace):
         roots.append(project)
         try:
-            entries = read_datasets(project)
-        except DecodeError as exc:
-            raise RuntimeError(
-                f"the dataset registry of project {project} will not decode, so its registered "
-                f"roots cannot be admitted: {exc}"
-            ) from exc
-        roots.extend(dataset_entry_path(project, e) for e in entries)
+            registered = [
+                dataset_entry_path(project, e) for e in read_datasets(project)
+            ]
+        except (StoreError, ValueError) as exc:
+            unread.append(
+                f"the dataset registry of project {project} did not read: {exc}"
+            )
+            continue
+        roots.extend(registered)
     roots.extend(store.image_roots)
-    return list({canonical_path(root): root for root in roots}.values())
+    once = {canonical_path(root): root for root in roots}
+    return list(once.values()), unread
 
 
 def _existing_anchor(resolved: Path) -> Path | None:
@@ -137,16 +151,20 @@ def assert_path_allowed(path: str | Path) -> Path:
     """Locate ``path`` (:func:`_in_open_project`), ensure it sits under an allowed root, return it.
 
     A path that does not exist yet (a file about to be written) is judged by its nearest existing
-    ancestor. An ``.imports`` or ``.removed`` staging tree is never admitted, by name
-    (:func:`_excluded_by_name`). Raises :class:`ValueError` naming the roots checked on refusal,
-    and on any resolution or comparison error.
+    ancestor, against the roots that read (:func:`allowed_roots`). An ``.imports`` or
+    ``.removed`` staging tree is never admitted, by name (:func:`_excluded_by_name`). Raises
+    :class:`ValueError` on any resolution or comparison error and, naming the roots checked, on
+    refusal. A path with an existing ancestor and outside every staging tree that no root that
+    read contains, while some registry did not read, raises :class:`UnreadRegistryError`
+    instead, naming each such registry; any other path is refused as it is with every registry
+    read.
     """
     try:
         resolved = _in_open_project(path)
         anchor = _existing_anchor(resolved)
     except (OSError, RuntimeError) as exc:
         raise ValueError(f"path {path!s} cannot be examined: {exc}") from exc
-    roots = allowed_roots()
+    roots, unread = allowed_roots()
     if anchor is not None and not _excluded_by_name(resolved):
         for root in roots:
             try:
@@ -156,6 +174,10 @@ def assert_path_allowed(path: str | Path) -> Path:
                 raise ValueError(
                     f"path {resolved} could not be compared against {root}: {exc}"
                 ) from exc
+        if unread:
+            raise UnreadRegistryError(
+                f"path {resolved} is under no root that read; {'; '.join(unread)}"
+            )
     raise ValueError(
         f"path {resolved} is outside the allowed roots "
         f"({', '.join(str(r) for r in roots)}); register the dataset to a workspace project "
@@ -177,14 +199,20 @@ def resolved_path(path: str) -> Path:
 
 
 def allowed_path(path: str | Path) -> Path:
-    """Resolve an allowed path, translating refusal to HTTP 403.
+    """Resolve an allowed path, translating refusal to HTTP 403, or 409 beside an unread registry.
 
-    The path is admitted by :func:`assert_path_allowed`; its refusal is answered as 403 naming it.
+    The path is admitted by :func:`assert_path_allowed`; its refusal is answered as 403 naming it,
+    and a path refused beside an unread registry (:class:`UnreadRegistryError`) as the 409 of a
+    registry that could not be read (:func:`~tcip_web.routes._admission.registry_unreadable`).
     """
     from fastapi import HTTPException
 
+    from tcip_web.routes._admission import registry_unreadable
+
     try:
         return assert_path_allowed(path)
+    except UnreadRegistryError as exc:
+        raise registry_unreadable(exc) from exc
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
 
