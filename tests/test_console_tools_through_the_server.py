@@ -342,7 +342,7 @@ def test_every_console_tool_answers_through_the_server_as_its_command_prints(
     from mcp.types import TextContent
 
     from tcip_web.cli import main
-    from tests.test_agent_identity_records import results_through_handshake
+    from tests._server_calls import results_through_handshake
 
     cases = console_cases(project, monkeypatch)
     answers = results_through_handshake(
@@ -472,8 +472,7 @@ def test_a_value_outside_a_typed_parameter_is_refused_by_the_advertised_schema(
     import anyio
     from jsonschema import Draft202012Validator
 
-    from tests._server_calls import client_server
-    from tests.test_agent_identity_records import results_through_handshake
+    from tests._server_calls import client_server, results_through_handshake
 
     plant_draw = {
         "folder_path": "dataset",
@@ -598,7 +597,7 @@ def test_a_trait_named_for_scoring_is_resolved_by_the_tool_itself(
     trait's refusal.
     """
     from tests import _trait_fixtures as fx
-    from tests.test_agent_identity_records import results_through_handshake
+    from tests._server_calls import results_through_handshake
 
     (scored,) = [
         case.arguments

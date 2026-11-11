@@ -12,22 +12,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-import anyio
 import mcp.types as mcp_types
 import pytest
-from mcp.client.session import ClientSession
-from mcp.shared.memory import create_client_server_memory_streams
 
 from tcip_mcp import traits
 from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
-from tests._server_calls import client_server
-
-DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
+from tests._server_calls import DECLARED, results_through_handshake
 
 
 def _body(result: mcp_types.CallToolResult) -> dict:
@@ -56,49 +50,6 @@ def call_through_handshake(
         _body(result)
         for result in results_through_handshake(calls, declared, bound=bound)
     ]
-
-
-def results_through_handshake(
-    calls: list[tuple[str, dict]],
-    declared: mcp_types.Implementation = DECLARED,
-    *,
-    bound: BoundProject | None,
-) -> list[Any]:
-    """Make ``calls`` in order through a handshake as ``declared`` and return each call's result.
-
-    The real server runs in memory, built for ``bound`` (``None``: for no project). Each result
-    is returned as the server sent it, a refused call's error included.
-    """
-
-    async def run() -> list[Any]:
-        bodies: list[Any] = []
-        async with create_client_server_memory_streams() as (
-            client_streams,
-            server_streams,
-        ):
-            async with anyio.create_task_group() as tg:
-                # The run loop; MCPServer.run is stdio-only.
-                server = client_server(bound)._lowlevel_server
-
-                async def serve() -> None:
-                    await server.run(
-                        server_streams[0],
-                        server_streams[1],
-                        server.create_initialization_options(),
-                        raise_exceptions=True,
-                    )
-
-                tg.start_soon(serve)
-                async with ClientSession(
-                    client_streams[0], client_streams[1], client_info=declared
-                ) as session:
-                    await session.initialize()
-                    for name, arguments in calls:
-                        bodies.append(await session.call_tool(name, arguments))
-                tg.cancel_scope.cancel()
-        return bodies
-
-    return anyio.run(run)
 
 
 def _report_call(detail: str) -> tuple[str, dict]:

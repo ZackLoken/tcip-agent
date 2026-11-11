@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.shared.exceptions import MCPError
+from mcp.types import CallToolResult, InputRequiredResult
 
 from tcip_mcp import agent_identity
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
@@ -195,15 +197,48 @@ def _carrying_sentences(fn: Callable[..., Any]) -> Callable[..., Any]:
     return entry
 
 
+class _ListedArgumentsServer(MCPServer):
+    """The library's server, refusing a call that carries an argument its tool does not list."""
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Context[Any, Any] | None = None,
+    ) -> CallToolResult | InputRequiredResult:
+        """Call ``name`` as the library does, once its arguments are all ones the tool lists.
+
+        The listing is :meth:`list_tools`'s: the top-level properties of the tool's input schema.
+        A call naming an argument outside them raises a ``ToolError`` naming each such argument
+        and the ones the tool takes, and the tool does not run; a name no tool holds is the
+        library's own error.
+        """
+        for listed in await self.list_tools():
+            if listed.name != name:
+                continue
+            takes = list(listed.input_schema["properties"])
+            unlisted = [repr(key) for key in arguments if key not in takes]
+            if unlisted:
+                ending = (
+                    f"it takes {', '.join(takes)}"
+                    if takes
+                    else "it takes no argument"
+                )
+                raise ToolError(
+                    f"{name} does not take {', '.join(unlisted)}; {ending}"
+                )
+        return await super().call_tool(name, arguments, context)
+
+
 def build_server(session: Session) -> MCPServer:
     """Return a server registering every declared tool, each call acting in ``session``.
 
     Each call acts on the project ``session`` is bound to at that call and is made by its person
     (:class:`Session`). With no project bound, only the tools taking neither ``project`` nor
     ``bound`` can run, and from the first project the creation door creates, every tool acts on
-    that one.
+    that one. A call carrying an argument its tool does not list is refused before the tool runs.
     """
-    server = MCPServer(
+    server = _ListedArgumentsServer(
         "tcip-pipeline", lifespan=agent_identity.session_lifespan
     )
     # Records which harness connected, from the handshake, before any tool call is served.

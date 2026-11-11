@@ -349,8 +349,8 @@ def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_s
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tests._producer_fixtures import published_document
+    from tests._server_calls import results_through_handshake
     from tests._web_fixtures import bound_to
-    from tests.test_agent_identity_records import results_through_handshake
     from tests.test_canvas_liveview import _payload
 
     member = str(grouped_dataset.bands["Green"])
