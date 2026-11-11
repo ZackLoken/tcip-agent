@@ -49,6 +49,7 @@ DOORS = [
             "version": NoRegistry().model_dump(),
         },
     ),
+    ("/api/dataset/register", {"dataset_root": "d", "crop": "c"}),
     (
         "/api/results/plant_mapping/build",
         {"name": "valley", "dataset_root": "d", "plant_registry": "r"},

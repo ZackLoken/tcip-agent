@@ -125,6 +125,7 @@ SERVED_FIXTURES = (
     "generate_delivery_fixture",
     "generate_trait_fixture",
     "generate_project_fixture",
+    "generate_dataset_identity_fixture",
     "generate_tensorboard_fixture",
     "generate_open_fixture",
     "generate_training_fixture",

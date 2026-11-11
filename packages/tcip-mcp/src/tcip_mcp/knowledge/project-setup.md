@@ -128,7 +128,10 @@ next steps do. After it, `inspect_project` reports the capture dates and image c
 After ingest, `register_dataset(dataset_root, crop)` records the dataset's identity (a minted
 `id` plus a whole-dataset content fingerprint) in `<dataset_root>/dataset.json` and the project's
 dataset registry, so a later delivered number can be traced back to the exact data behind
-it. `crop` is required and is never inferred from the path or a slug.
+it. `crop` is required and is never inferred from the path or a slug. The user can register the
+selected dataset from the Setup tab too, through the same function, and change a registered
+dataset's crop there after a confirmation listing the open project's plant mappings built over
+it.
 
 ## 3. Translate the goal into a trait, task, and `subjects.json`
 
