@@ -58,9 +58,10 @@ def allowed_roots() -> tuple[list[Path], list[str]]:
 
     The roots are the backend's workspace root, each workspace project and its registered dataset
     roots, then the backend's additive image roots. A project whose registry does not read (a
-    store refusal, a value its model refuses, or an entry whose path is refused or cannot be
-    resolved) contributes its own directory and none of its registered roots, and is named in
-    the second list by one sentence stating the project and the reader's refusal.
+    store refusal, or a ``ValueError``: a value its model refuses or an entry whose path is
+    refused) contributes its own directory and none of its registered roots, and is named in the
+    second list by one sentence stating the project and the reader's refusal. An
+    operating-system error resolving an entry raises.
     """
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
     from tcip_mcp.workspace import project_dirs
@@ -75,7 +76,7 @@ def allowed_roots() -> tuple[list[Path], list[str]]:
             registered = [
                 dataset_entry_path(project, e) for e in read_datasets(project)
             ]
-        except (StoreError, ValueError, OSError) as exc:
+        except (StoreError, ValueError) as exc:
             unread.append(
                 f"the dataset registry of project {project} did not read: {exc}"
             )
