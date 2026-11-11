@@ -125,10 +125,17 @@ def _unopenable(project: Path) -> Iterator[str]:
 
 @contextmanager
 def _busy(project: Path) -> Iterator[str]:
-    """Hold ``project``'s store past a short wait; yield the store's busy phrase."""
+    """Hold ``project``'s store past a short wait; yield the store's busy phrase.
+
+    On leaving, the holder and the short-wait backend are closed and a new default backend is
+    bound.
+    """
     tcip_store.release_root(project)
-    with waiting(SHORT_WAIT_S), held_by_another_connection(project):
-        yield "was busy"
+    try:
+        with waiting(SHORT_WAIT_S), held_by_another_connection(project):
+            yield "was busy"
+    finally:
+        tcip_store.bind()
 
 
 DAMAGE = {
