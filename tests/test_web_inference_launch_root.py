@@ -195,13 +195,13 @@ ADMISSION_CASES = {
     "checkpoint_beneath_a_regular_file": (True, "beneath a file", None, 404),
     "identity_does_not_decode": (True, "registered", "identity", 400),
     "run_record_refused": (True, "registered", "run record", 400),
-    "checkpoint_read_denied": (True, "unreadable", None, 400),
+    "checkpoint_read_denied": (True, "registered", "checkpoint read", 400),
     "admitted": (True, "registered", None, 200),
 }
 """Each admission case by id: whether its root is registered, what its checkpoint is (one the
 registry does not name, one a run of the project completed, no file, a directory, a path beneath
-a regular file, one a run of the project completed that the process may not read), the record
-damaged after a legitimate write, and the launch's status."""
+a regular file), the fault applied after a legitimate write (a record damaged, or the checkpoint's
+read held denied), and the launch's status."""
 
 
 @pytest.mark.parametrize(
@@ -233,7 +233,6 @@ def test_the_launch_and_the_tool_answer_each_admission_case_alike(
     named = {
         "unregistered": lambda: checkpoint,
         "registered": lambda: Path(registered_checkpoint(tmp_path)),
-        "unreadable": lambda: Path(registered_checkpoint(tmp_path)),
         "missing": lambda: tmp_path / "absent.pt",
         "directory": lambda: tmp_path / "weights.pt",
         "beneath a file": lambda: checkpoint / "weights.pt",
@@ -245,9 +244,7 @@ def test_the_launch_and_the_tool_answer_each_admission_case_alike(
     if damaged == "run record":
         run_record_refused(tmp_path)
 
-    with (
-        read_denied(named) if checkpoint_is == "unreadable" else nullcontext()
-    ):
+    with read_denied(named) if damaged == "checkpoint read" else nullcontext():
         through_the_route = _launch(opened_client, root, capture, named)
         through_the_tool = called_through_the_server(
             "run_inference",
