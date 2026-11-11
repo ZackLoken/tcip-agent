@@ -1,4 +1,4 @@
-import type { RegisteredDataset, RootIdentity } from "@/api/types.generated";
+import type { AuditGapRefusal, RegisteredDataset, RootIdentity } from "@/api/types.generated";
 import produced from "@/test/datasetIdentityAnswers.json";
 import type { Refusal } from "@/test/refusals";
 
@@ -7,7 +7,7 @@ import type { Refusal } from "@/test/refusals";
  * served in one project: `fresh` read unregistered, `mapped` read registered with one mapping
  * over it, `damaged` read refused; `fresh` registered, a crop the vocabulary does not hold
  * refused, `damaged`'s id restored, a change of `mapped`'s crop refused unconfirmed and made
- * confirmed.
+ * confirmed, and a registration committed while its audit line failed (`unrecorded`).
  */
 export const IDENTITY_ANSWERS = produced as unknown as {
   unregistered: RootIdentity;
@@ -18,4 +18,5 @@ export const IDENTITY_ANSWERS = produced as unknown as {
   repaired: RegisteredDataset;
   crop_unconfirmed: Refusal<string>;
   crop_changed: RegisteredDataset;
+  unrecorded: Refusal<AuditGapRefusal>;
 };
