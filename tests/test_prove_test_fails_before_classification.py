@@ -7,6 +7,7 @@ sits in, a second commit with the fix and the guard test) and runs the real scri
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -55,7 +56,7 @@ def _commit_all(repo: Path, message: str) -> str:
 
 
 def _run(
-    repo: Path, test_file: str, baseline: str
+    repo: Path, test_file: str, baseline: str, *extra: str
 ) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
@@ -64,6 +65,7 @@ def _run(
             test_file,
             "--baseline",
             baseline,
+            *extra,
         ],
         cwd=str(repo),
         capture_output=True,
@@ -359,7 +361,7 @@ def test_a_wrong_call_in_the_test_body_is_refused_whatever_its_wording(
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "[fixture]" in result.stdout
+    assert "[test_code]" in result.stdout
     why = _why(result)
     assert CALL_PHASE_SENTENCE in why
     assert CAUSE_CLAUSE in why
@@ -387,7 +389,7 @@ def test_a_type_error_that_no_call_made_is_refused_the_same_way(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert CALL_PHASE_SENTENCE in result.stdout
-    assert "[fixture]" in result.stdout
+    assert "[test_code]" in result.stdout
 
 
 def test_a_valid_call_whose_package_code_raises_type_error_guards(
@@ -418,7 +420,7 @@ def test_a_type_error_raised_inside_a_library_by_package_code_guards(
     """A TypeError raised in a library frame under a right call is counted, not refused.
 
     The crash frame is the standard library's, which cannot be placed under the tests/ of the
-    baseline's tree, so the run is not said to have the test's own code raising.
+    materialized tree, so the run is not said to have the test's own code raising.
     """
     repo, baseline = _one_call_repo(
         tmp_path,
@@ -558,6 +560,70 @@ def test_a_run_mixing_a_setup_failure_and_a_wrong_call_names_each_with_its_own_s
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    _assert_one_clause_names(why, "test_uses_thing", FIXTURE_SENTENCE)
+    _assert_one_clause_names(
+        why, "test_widget_carries_a_color", CALL_PHASE_SENTENCE
+    )
+
+
+def test_the_record_the_printed_tag_and_the_sentence_agree_on_each_failures_kind(
+    tmp_path: Path,
+) -> None:
+    """A setup failure, a call-phase TypeError and an assertion failure each keep one kind.
+
+    The kind in the ``--json`` record is the tag printed for that failure, and the verdict's
+    sentence for it is the one its kind names.
+    """
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def thing():\n"
+        "    from widgets import Widget\n"
+        "    return Widget(size=3, color='red')\n"
+        "\n"
+        "\n"
+        "def test_uses_thing(thing):\n"
+        "    assert thing.color == 'red'\n"
+        "\n"
+        "\n"
+        "def test_widget_carries_a_color():\n"
+        "    from widgets import Widget\n"
+        "    assert Widget(size=3, color='red').color == 'red'\n"
+        "\n"
+        "\n"
+        "def test_double_doubles():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n",
+    )
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo,
+        "tests/test_widgets.py",
+        baseline,
+        "--json",
+        str(record_path),
+    )
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    recorded = {
+        f["nodeid"].rpartition("::")[2]: f["kind"]
+        for f in record["observed"]["failures"]
+    }
+    printed = dict(
+        re.findall(r"failing\s+\S+::(\w+)\s+\[(\w+)\]", result.stdout)
+    )
+    assert recorded == {
+        "test_uses_thing": "fixture",
+        "test_widget_carries_a_color": "test_code",
+        "test_double_doubles": "behavioral",
+    }
+    assert printed == recorded
     why = _why(result)
     _assert_one_clause_names(why, "test_uses_thing", FIXTURE_SENTENCE)
     _assert_one_clause_names(
