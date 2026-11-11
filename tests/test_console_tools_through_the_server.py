@@ -567,7 +567,7 @@ def test_a_value_outside_a_typed_parameter_is_refused_by_the_advertised_schema(
             },
         ),
     ]
-    tools = listed_tools(bound)
+    tools = listed_tools()
     refused = results_through_handshake(
         [(name, arguments) for name, _, arguments in refusals], bound=bound
     )

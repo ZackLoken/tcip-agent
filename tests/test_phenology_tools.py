@@ -32,7 +32,7 @@ def _served_tool_description() -> str:
     """Return the description the tool listing serves for ``build_plant_mapping``."""
     from tests._server_calls import listed_tools
 
-    served = listed_tools(None)["build_plant_mapping"].description
+    served = listed_tools()["build_plant_mapping"].description
     assert served is not None
     return served
 

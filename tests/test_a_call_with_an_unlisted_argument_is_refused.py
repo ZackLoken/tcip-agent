@@ -38,7 +38,7 @@ ROUTES = (DIRECT, WIRE)
 
 LISTED = {
     name: list(listed.input_schema["properties"])
-    for name, listed in listed_tools(None).items()
+    for name, listed in listed_tools().items()
 }
 """Every tool the server lists, with the argument names its schema lists."""
 
