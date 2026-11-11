@@ -486,7 +486,7 @@ class TestPushPanelDataTool:
         """The tool's advertised schema names the panels; the server refuses any other name."""
         from tests._server_calls import called_through_the_server, listed_tools
 
-        listed = listed_tools(bound)["push_panel_event"]
+        listed = listed_tools()["push_panel_event"]
         assert listed.input_schema["properties"]["panel"] == {
             "$ref": "#/$defs/Panel"
         }

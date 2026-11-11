@@ -116,7 +116,7 @@ def test_a_category_or_kind_outside_its_vocabulary_is_refused_at_the_mcp_door(
             {"kind": "reports", "category": "missing_tool"},
         ),
     ]
-    tools = listed_tools(bound)
+    tools = listed_tools()
     *refused, written, listed = results_through_handshake(
         [(name, arguments) for name, _, arguments in refusals] + admitted,
         bound=bound,

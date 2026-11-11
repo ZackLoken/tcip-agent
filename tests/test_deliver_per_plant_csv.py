@@ -1521,7 +1521,7 @@ def test_the_door_offers_the_plant_aggregate_kinds_and_refuses_the_mosaic_count(
 
     assert "validation error" in str(refused), refused
     assert "delivery_kind" in str(refused), refused
-    door = listed_tools(None)["deliver_per_plant_csv"]
+    door = listed_tools()["deliver_per_plant_csv"]
     assert door.input_schema["properties"]["delivery_kind"].get("enum") == [
         "per_plant_count_aggregate",
         "per_plant_ordinal_aggregate",

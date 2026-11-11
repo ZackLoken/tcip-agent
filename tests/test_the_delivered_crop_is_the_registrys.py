@@ -541,7 +541,7 @@ def test_neither_delivering_tool_nor_the_count_payload_takes_the_key(
     from tests._server_calls import listed_tools
     from tests.test_tcip_web_results_routes import COUNT_ROUTE
 
-    tools = listed_tools(None)
+    tools = listed_tools()
     refused = client.post(
         COUNT_ROUTE,
         json={
