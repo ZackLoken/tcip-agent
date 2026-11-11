@@ -228,18 +228,27 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
   // The sentence of an id the registration restored, kept across the reread that follows it.
   const [repaired, setRepaired] = useState<string | null>(null);
 
+  const readIdentity = useCallback(
+    (adopt: (answer: RootIdentity) => void) => {
+      if (!datasetRoot) return;
+      void api.dataset
+        .identity(datasetRoot)
+        .then((answer) => {
+          setRead(answer);
+          adopt(answer);
+        })
+        .catch((e: unknown) =>
+          useStore.getState().pushToast(`Could not read the dataset identity: ${messageOf(e)}`),
+        );
+    },
+    [datasetRoot],
+  );
+
   const refresh = useCallback(() => {
-    if (!datasetRoot) return;
-    void api.dataset
-      .identity(datasetRoot)
-      .then((answer) => {
-        setRead(answer);
-        setCrop(answer.identity.kind === REGISTERED ? answer.identity.identity.crop : "");
-      })
-      .catch((e: unknown) =>
-        useStore.getState().pushToast(`Could not read the dataset identity: ${messageOf(e)}`),
-      );
-  }, [datasetRoot]);
+    readIdentity((answer) =>
+      setCrop(answer.identity.kind === REGISTERED ? answer.identity.identity.crop : ""),
+    );
+  }, [readIdentity]);
 
   useEffect(() => {
     refresh();
@@ -313,7 +322,8 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
         ) : (
           <button
             className="tcip-btn-primary"
-            onClick={() => setConfirming(true)}
+            // Reread so the confirmation lists every mapping built since the panel last read.
+            onClick={() => readIdentity(() => setConfirming(true))}
             disabled={crop === stored || submitting}
           >
             Change crop
