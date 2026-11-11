@@ -153,9 +153,7 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
     )
     assert resp.status_code == 400
     assert "plant-tag mechanism" in resp.json()["detail"]
-    assert not (
-        tmp_path / ".tcip" / "state" / "plant_mappings" / "valley.json"
-    ).exists()
+    assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
 
 def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_an_empty_mapping(
@@ -189,9 +187,7 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     assert resp.status_code == 400
     assert f"no capture of {['2099-01-01']} under" in resp.json()["detail"]
     assert "holds an image" in resp.json()["detail"]
-    assert not (
-        tmp_path / ".tcip" / "state" / "plant_mappings" / "valley.json"
-    ).exists()
+    assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
 
 def test_build_route_refuses_a_date_the_dataset_lists_no_capture_of_naming_it(
