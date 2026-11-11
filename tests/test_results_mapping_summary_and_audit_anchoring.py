@@ -291,6 +291,82 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     assert not (tmp_path / ".tcip" / ".tcip").exists()
 
 
+LEFT_OUT = "2026-03-04"
+"""A date whose folder the tests make beside :func:`_capture_fixture`'s, holding no image."""
+
+
+@pytest.mark.parametrize(
+    "left_out", [[LEFT_OUT], []], ids=["a_date_left_out", "none_left_out"]
+)
+def test_the_route_and_the_tool_answer_the_dates_a_build_left_out_alike(
+    client: TestClient, tmp_path: Path, left_out: list[str]
+) -> None:
+    """The build route and the build tool on the server answer one build alike.
+
+    Each answers ``dates_without_images``, the listed dates holding no image, empty when none
+    is; beyond the mapping's name the two answers are the same.
+    """
+    from tcip_mcp.server import binding_for
+    from tests._server_calls import called_through_the_server
+
+    payload = _capture_fixture(tmp_path)
+    for date in left_out:
+        image_dir(tmp_path, date).mkdir()
+
+    resp = client.post("/api/results/plant_mapping/build", json=payload)
+    tool_answer = called_through_the_server(
+        "build_plant_mapping",
+        {
+            "name": "ridge",
+            "dataset_root": payload["dataset_root"],
+            "plant_registry": payload["plant_registry"],
+        },
+        bound=binding_for(tmp_path),
+    )
+
+    assert resp.status_code == 200, resp.text
+    route_answer = resp.json()
+    assert isinstance(tool_answer, dict), tool_answer
+    assert "dates_without_images" in route_answer, route_answer
+    assert "dates_without_images" in tool_answer, tool_answer
+    assert route_answer["dates_without_images"] == left_out
+    assert {**route_answer, "name": "ridge"} == tool_answer
+
+
+def test_a_date_a_build_left_out_is_in_no_stored_record_and_no_loaded_view(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A date the build left out is absent from the stored record and the mapping loaded again.
+
+    The record read through the store holds no ``dates_without_images`` and no entry for the date,
+    and the load route's view carries neither.
+    """
+    import tcip_store
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
+    payload = _capture_fixture(tmp_path)
+    image_dir(tmp_path, LEFT_OUT).mkdir()
+    built = client.post("/api/results/plant_mapping/build", json=payload)
+    assert built.status_code == 200, built.text
+
+    record = tcip_store.read(
+        plant_mapping.plant_mapping_key(tmp_path, payload["name"])
+    )
+    loaded = client.post(
+        "/api/results/plant_mapping/load", json={"name": payload["name"]}
+    )
+
+    assert isinstance(record, dict), record
+    assert "dates_without_images" not in record
+    assert all(
+        LEFT_OUT not in record[field]
+        for field in ("assignments", "capture_digests", "unreadable")
+    ), record
+    assert loaded.status_code == 200, loaded.text
+    assert "dates_without_images" not in loaded.json()
+    assert LEFT_OUT not in loaded.json()["per_date"]
+
+
 def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
     client: TestClient,
     tmp_path: Path,

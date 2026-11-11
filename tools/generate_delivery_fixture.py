@@ -28,8 +28,9 @@ names the citing event as ``<acknowledged_mapping event>`` (``fixture_session.no
 measurement of it, ``operationalization_refusal``; its mapping names, ``mapping_names``, and
 its first mapping loaded, ``mapping_loaded``; mappings built
 over its registry (``mapping_built``), over one placing only its first plant
-(``mapping_one_placed``), at a stated radius (``mapping_stated``) and, once a date of
-photographs carrying no position is added, over every date (``mapping_unpositioned``); in a
+(``mapping_one_placed``), at a stated radius (``mapping_stated``), once a date of
+photographs carrying no position is added, over every date (``mapping_unpositioned``), and once
+a capture folder holding no image is added, over every date again (``mapping_left_out``); in a
 project of its own, beside a plant open on every date, a measurement of each of three plants,
 one open but its first capture left without predictions
 (``test_plant_mapping_binding.UNREAD_P2``), one undetected and one closed on every date
@@ -130,6 +131,9 @@ and fails (read from the generator's own run, which asserts the failure)."""
 
 UNPOSITIONED_DATE = "2026-03-11"
 """A capture date whose photographs carry no position, added once the other mappings are built."""
+
+LEFT_OUT_DATE = "2026-03-25"
+"""A capture date whose folder holds no image, added last, a sample date."""
 
 STATED_RADIUS = "the receiver's spec sheet"
 """The reason the stated-radius mapping gives for its radius, a sample wording."""
@@ -508,6 +512,17 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         "build_plant_mapping",
         BuildMappingPayload(
             name="mapping-unpositioned",
+            dataset_root=str(dataset_root),
+            plant_registry=registry,
+            user=ACTOR,
+        ),
+        200,
+    )
+    image_dir(dataset_root, LEFT_OUT_DATE).mkdir()
+    answers["mapping_left_out"] = browsed(
+        "build_plant_mapping",
+        BuildMappingPayload(
+            name="mapping-left-out",
             dataset_root=str(dataset_root),
             plant_registry=registry,
             user=ACTOR,

@@ -185,7 +185,8 @@ def mapping_over(
     """Return ``build_mapping``'s build ``name`` of ``dataset_root`` against ``plant_csvs``' plants.
 
     It is ``project``'s, of the dataset ``ds-1``, under a registry reference no registration
-    names, over ``dates`` within ``match_radius`` as ``build_mapping`` takes them.
+    names, over ``dates`` within ``match_radius`` as ``build_mapping`` takes them; the dates it
+    left out are not returned.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         PlantRegistryReference,
@@ -193,7 +194,7 @@ def mapping_over(
         read_plant_csvs,
     )
 
-    return build_mapping(
+    built = build_mapping(
         dataset_root,
         read_plant_csvs(plant_csvs),
         name=name,
@@ -205,6 +206,7 @@ def mapping_over(
         dates=dates,
         match_radius=match_radius,
     )
+    return built.build
 
 
 def plant_positions(plants: Sequence[str]) -> dict[str, tuple[float, float]]:

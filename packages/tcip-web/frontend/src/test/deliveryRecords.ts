@@ -14,6 +14,7 @@ import {
   type RefusedRead,
   type RegisteredModels,
   type SavedExport,
+  type ServedBuild,
   type ServedDeliveryEvent,
   type ServedMapping,
 } from "@/api/types.generated";
@@ -115,7 +116,8 @@ export const REGISTERED_MODELS = produced.registered_models as unknown as Regist
  *  mapping a delivery cites, of a measurement of a trait confirmed with no phenology
  *  operationalization, and of a per-plant count export over an unassessed bucket; the phenology
  *  project's mapping names, its mapping loaded and its mappings built (placing every plant,
- *  placing one, at a stated radius, and over a date whose photographs carry no position); the
+ *  placing one, at a stated radius, over a date whose photographs carry no position, and beside
+ *  a capture folder holding no image, which it left out); the
  *  measurements of three plants, each alone, whose milestone rows read incomplete, unobserved and
  *  right-censored, in that order; and an assessed series' project's deliveries,
  *  none, and its first plant measured validated, the series' reference photographs attributed
@@ -137,10 +139,11 @@ export const RESULTS_ANSWERS = produced.answers as unknown as {
   count_delivery_refusal: Refusal<DeliveryRefusal>;
   mapping_names: MappingNames;
   mapping_loaded: ServedMapping;
-  mapping_built: ServedMapping;
-  mapping_one_placed: ServedMapping;
-  mapping_stated: ServedMapping;
-  mapping_unpositioned: ServedMapping;
+  mapping_built: ServedBuild;
+  mapping_one_placed: ServedBuild;
+  mapping_stated: ServedBuild;
+  mapping_unpositioned: ServedBuild;
+  mapping_left_out: ServedBuild;
   milestones: [PhenologyAnswer, PhenologyAnswer, PhenologyAnswer];
   no_deliveries: DeliveryEvents;
   phenology_validated: PhenologyAnswer;
