@@ -98,6 +98,7 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     )
     assert "error" in res
     assert "plant-tag mechanism" in res["error"]
+    assert f"no capture of {[DATE]} under" in res["error"]
     assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
 
@@ -164,7 +165,7 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
 ) -> None:
     """The build route refuses a selected date with no captures.
 
-    The route answers 400 saying there is no capture under the selected root.
+    The route answers 400 saying no capture of that date under the selected root holds an image.
     """
     from tcip_web.state import store
 
@@ -186,10 +187,45 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
         },
     )
     assert resp.status_code == 400
-    assert "no capture under" in resp.json()["detail"]
+    assert f"no capture of {['2099-01-01']} under" in resp.json()["detail"]
+    assert "holds an image" in resp.json()["detail"]
     assert not (
         tmp_path / ".tcip" / "state" / "plant_mappings" / "valley.json"
     ).exists()
+
+
+def test_build_route_refuses_a_date_the_dataset_lists_no_capture_of_naming_it(
+    tmp_path: Path,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The build route refuses a selected date with no capture folder, beside a listed one.
+
+    The route answers 400 carrying the sentence that names the date and the captures the dataset
+    lists, and persists no mapping.
+    """
+    from tcip_web.state import store
+
+    project = _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
+    asyncio.run(store.open_project(project))
+
+    resp = client.post(
+        "/api/results/plant_mapping/build",
+        json={
+            "name": "valley",
+            "dataset_root": str(dataset_root),
+            "plant_registry": registry,
+            "user": "tester",
+            "dates": [DATE, "2099-01-01"],
+        },
+    )
+    assert resp.status_code == 400
+    assert str(["2099-01-01"]) in resp.json()["detail"]
+    assert str([DATE]) in resp.json()["detail"]
+    assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
 
 # ── delivery: three sentences, by the record's own evidence ────────────────
@@ -401,7 +437,7 @@ def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_
         dataset_root,
         preds_by_date,
         "valley",
-        "plant-tag mechanism",
+        f"no capture of {[DATE]} under mapping 'valley'",
     )
 
 

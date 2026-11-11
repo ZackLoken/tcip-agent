@@ -225,6 +225,24 @@ def list_dates(dataset_root: str | Path) -> list[str]:
     )
 
 
+def require_listed_captures(
+    dataset_root: str | Path, captures: Iterable[str]
+) -> None:
+    """Refuse each of ``captures`` that :func:`list_dates` does not list, matched by exact name.
+
+    Raises ``ValueError`` naming the unlisted captures, the image tree, the captures it lists and
+    the step: state captures from that list, or ingest the missing dates' images first.
+    """
+    listed = list_dates(dataset_root)
+    unlisted = [c for c in dict.fromkeys(captures) if c not in listed]
+    if unlisted:
+        raise ValueError(
+            f"the dataset lists no capture of {unlisted} under {image_root(dataset_root)}, which "
+            f"lists {listed}; state captures from that list, or ingest the missing dates' images "
+            "first"
+        )
+
+
 def subjects_path(dataset_root: str | Path) -> Path:
     """Return ``<dataset_root>/subjects.json``, the registry that decodes the dataset's labels."""
     return Path(dataset_root, SUBJECTS_FILENAME)
