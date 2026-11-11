@@ -4,14 +4,12 @@ The inference launch and the review-queue launch admit a checkpoint through the 
 read (``registered_bytes``). A checkpoint path that is a directory, or that lies beneath a regular
 file, answers 404 with that read's sentence; a run record that will not read answers 400 with the
 refused read's sentence; a registry index that will not decode answers 409 as an unreadable
-registry with the store's sentence; and a checkpoint the process may not read answers 409 with the
-operating system's own error, naming no registry.
+registry with the store's sentence; and a checkpoint the process may not read answers 400 with the
+refused read's sentence, naming the checkpoint and its path.
 """
 
 from __future__ import annotations
 
-import sys
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,6 +17,7 @@ import pytest
 from tests._record_damage_fixtures import damage_record
 from tests._verified_checkpoint_fixtures import (
     produced_checkpoint,
+    read_denied,
     register_checkpoint,
 )
 from tests.test_review_priority_queue import QUEUE, select
@@ -31,7 +30,7 @@ from tests.test_web_inference_launch_root import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable
     from pathlib import Path
 
     from fastapi.testclient import TestClient
@@ -72,33 +71,6 @@ def _registered(project: Path) -> Path:
     checkpoint = produced_checkpoint(project / "m.pt", "launch root")
     register_checkpoint(project, str(checkpoint), name="admission")
     return checkpoint
-
-
-@contextmanager
-def _unreadable(path: Path) -> Iterator[None]:
-    """Hold ``path`` so this process may not read it, by the operating system's own means.
-
-    On Windows a byte-range lock over the whole file, held by another handle, denies a read; on
-    any other platform the file's read permission is removed.
-    """
-    if sys.platform == "win32":
-        import msvcrt
-
-        size = path.stat().st_size
-        with open(path, "rb") as held:
-            msvcrt.locking(held.fileno(), msvcrt.LK_NBLCK, size)
-            try:
-                yield
-            finally:
-                held.seek(0)
-                msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, size)
-        return
-    mode = path.stat().st_mode
-    path.chmod(0)
-    try:
-        yield
-    finally:
-        path.chmod(mode)
 
 
 @pytest.mark.parametrize("door", DOORS)
@@ -200,34 +172,27 @@ def test_a_registry_index_that_will_not_decode_answers_409_as_an_unreadable_regi
 
 
 @pytest.mark.parametrize("door", DOORS)
-def test_a_checkpoint_the_process_may_not_read_answers_409_with_the_read_s_own_error(
+def test_a_checkpoint_the_process_may_not_read_answers_400_naming_the_checkpoint(
     opened_client: TestClient, tmp_path: Path, door: str
 ) -> None:
-    """A registered checkpoint the operating system denies a read of answers 409 with its error.
+    """A registered checkpoint the operating system denies a read of answers 400, no job.
 
-    The answer carries the error ``registered_bytes`` raises under the same denial and names no
-    registry. Skipped where the platform lets this process read the file anyway (a POSIX
-    superuser).
+    The answer carries the refusal ``registered_bytes`` raises under the same denial, naming the
+    checkpoint and its path. Skipped where the platform lets this process read the file anyway (a
+    POSIX superuser).
     """
     from tcip_mcp.model_registry import registered_bytes
+    from tcip_store import ReadRefusedError
 
     launch, jobs = _door(door, opened_client, tmp_path)
     checkpoint = _registered(tmp_path)
     before = jobs()
-    with _unreadable(checkpoint):
-        try:
-            registered_bytes(checkpoint, project=tmp_path)
-        except PermissionError as exc:
-            denied = exc
-        else:
-            pytest.skip(
-                f"this process reads {checkpoint} with its read permission removed, as a "
-                "POSIX superuser does"
-            )
-
+    with read_denied(checkpoint):
         answer = launch(checkpoint)
+        with pytest.raises(ReadRefusedError) as refused:
+            registered_bytes(checkpoint, project=tmp_path)
 
-    assert answer.status_code == 409, answer.text
-    assert answer.json()["detail"] == f"could not read: {denied}"
-    assert "registry" not in answer.json()["detail"]
+    assert answer.status_code == 400, answer.text
+    assert answer.json()["detail"] == str(refused.value)
+    assert str(checkpoint) in answer.json()["detail"]
     assert jobs() == before

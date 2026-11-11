@@ -12,6 +12,7 @@ a pass that publishes its bucket.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,8 +41,10 @@ from tests._server_calls import called_through_the_server
 from tests._verified_checkpoint_fixtures import (
     SAMPLE_DETECTOR_PASS,
     produced_checkpoint,
+    read_denied,
     register_checkpoint,
     registered_checkpoint,
+    unsearchable,
 )
 from tests._web_fixtures import bound_to
 from tests.test_a_refused_record_reads_as_its_readers_sentence import (
@@ -192,11 +195,12 @@ ADMISSION_CASES = {
     "checkpoint_beneath_a_regular_file": (True, "beneath a file", None, 404),
     "identity_does_not_decode": (True, "registered", "identity", 400),
     "run_record_refused": (True, "registered", "run record", 400),
+    "checkpoint_read_denied": (True, "unreadable", None, 400),
     "admitted": (True, "registered", None, 200),
 }
 """Each admission case by id: whether its root is registered, what its checkpoint is (one the
 registry does not name, one a run of the project completed, no file, a directory, a path beneath
-a regular file), the record
+a regular file, one a run of the project completed that the process may not read), the record
 damaged after a legitimate write, and the launch's status."""
 
 
@@ -229,6 +233,7 @@ def test_the_launch_and_the_tool_answer_each_admission_case_alike(
     named = {
         "unregistered": lambda: checkpoint,
         "registered": lambda: Path(registered_checkpoint(tmp_path)),
+        "unreadable": lambda: Path(registered_checkpoint(tmp_path)),
         "missing": lambda: tmp_path / "absent.pt",
         "directory": lambda: tmp_path / "weights.pt",
         "beneath a file": lambda: checkpoint / "weights.pt",
@@ -240,18 +245,21 @@ def test_the_launch_and_the_tool_answer_each_admission_case_alike(
     if damaged == "run record":
         run_record_refused(tmp_path)
 
-    through_the_route = _launch(opened_client, root, capture, named)
-    through_the_tool = called_through_the_server(
-        "run_inference",
-        {
-            "checkpoint_path": str(named),
-            "images_dir": str(image_dir(root, capture)),
-            "bucket": f"run/{capture}",
-            "stated": STATED,
-            "dry_run": True,
-        },
-        bound=bound_to(opened),
-    )
+    with (
+        read_denied(named) if checkpoint_is == "unreadable" else nullcontext()
+    ):
+        through_the_route = _launch(opened_client, root, capture, named)
+        through_the_tool = called_through_the_server(
+            "run_inference",
+            {
+                "checkpoint_path": str(named),
+                "images_dir": str(image_dir(root, capture)),
+                "bucket": f"run/{capture}",
+                "stated": STATED,
+                "dry_run": True,
+            },
+            bound=bound_to(opened),
+        )
 
     assert through_the_route.status_code == status, through_the_route.text
     assert isinstance(through_the_tool, dict), through_the_tool
@@ -264,6 +272,43 @@ def test_the_launch_and_the_tool_answer_each_admission_case_alike(
         assert through_the_tool == {
             "error": through_the_route.json()["detail"]
         }
+
+
+def test_the_tool_answers_a_checkpoint_in_a_directory_the_process_may_not_search_naming_it(
+    opened: OpenProject, tmp_path: Path
+) -> None:
+    """A registered checkpoint whose directory the operating system denies a search of is named.
+
+    ``registered_bytes`` refuses an inspection the operating system denies, naming the checkpoint
+    and its path, and ``run_inference`` answers that sentence as its error. The checkpoint lies in
+    a directory of its own, since the project's own directory cannot be made unsearchable.
+    Skipped where the platform lets this process inspect the checkpoint anyway (a POSIX
+    superuser, or a platform that gives a directory no search permission to remove).
+    """
+    from tcip_mcp.model_registry import registered_bytes
+
+    root = _registered_root(tmp_path)
+    checkpoint = produced_checkpoint(
+        tmp_path / "weights" / "m.pt", "launch root"
+    )
+    register_checkpoint(tmp_path, str(checkpoint), name="inspection")
+    with unsearchable(checkpoint):
+        with pytest.raises(tcip_store.ReadRefusedError) as refused:
+            registered_bytes(checkpoint, project=tmp_path)
+        through_the_tool = called_through_the_server(
+            "run_inference",
+            {
+                "checkpoint_path": str(checkpoint),
+                "images_dir": str(image_dir(root, DATE)),
+                "bucket": f"run/{DATE}",
+                "stated": STATED,
+                "dry_run": True,
+            },
+            bound=bound_to(opened),
+        )
+
+    assert through_the_tool == {"error": str(refused.value)}
+    assert str(checkpoint) in str(refused.value)
 
 
 def test_a_launch_names_a_missing_capture_before_the_root_and_the_root_before_the_checkpoint(

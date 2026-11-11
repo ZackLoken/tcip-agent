@@ -58,7 +58,7 @@ def _load_or_refuse(
     Returns the verified checkpoint at the established location ``checkpoint_path``
     (``model_registry.load_registered_checkpoint``), or the ``{"error": ...}`` of each refusal
     that load raises: no file at the location, a checkpoint ``project``'s registry names no entry
-    for, or a project record that will not read.
+    for, a project record that will not read, or a checkpoint the operating system refuses.
     """
     from tcip_mcp.model_registry import (
         CheckpointNotFoundError,
