@@ -4,6 +4,15 @@
     "identity": { "kind": "unregistered" },
     "crops": ["black_locust", "chestnut", "currant", "elderberry", "hazelnut", "persimmon"]
   },
+  "unmapped": {
+    "dataset_root": "/scratch/workspace/valley/mapped",
+    "identity": {
+      "kind": "registered",
+      "identity": { "crop": "currant", "id": "<mapped dataset id>", "fingerprint": null },
+      "mappings": { "placed": [], "unplaced": [] }
+    },
+    "crops": ["black_locust", "chestnut", "currant", "elderberry", "hazelnut", "persimmon"]
+  },
   "mapped": {
     "dataset_root": "/scratch/workspace/valley/mapped",
     "identity": {
@@ -18,6 +27,37 @@
           }
         ],
         "unplaced": []
+      }
+    },
+    "crops": ["black_locust", "chestnut", "currant", "elderberry", "hazelnut", "persimmon"]
+  },
+  "mapped_damaged": {
+    "dataset_root": "/scratch/workspace/valley/mapped",
+    "identity": {
+      "kind": "registered",
+      "identity": { "crop": "currant", "id": "<mapped dataset id>", "fingerprint": null },
+      "mappings": {
+        "placed": [
+          {
+            "name": "valley",
+            "plant_registry": "reg",
+            "registry": { "kind": "crop", "crop": "currant" }
+          },
+          {
+            "name": "valley-north",
+            "plant_registry": "north",
+            "registry": {
+              "kind": "registry_refused",
+              "refusal": "plant registry 'north' under /scratch/workspace/valley: crop: Input should be a valid string"
+            }
+          }
+        ],
+        "unplaced": [
+          {
+            "name": "valley-east",
+            "refusal": "plant mapping 'valley-east' under /scratch/workspace/valley: plant_mapping['valley-east'] under /scratch/workspace/valley/.tcip/state exists but does not decode: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+          }
+        ]
       }
     },
     "crops": ["black_locust", "chestnut", "currant", "elderberry", "hazelnut", "persimmon"]
