@@ -575,6 +575,11 @@ def quoted_plant(plant: str) -> str:
     return repr(plant)
 
 
+def quoted_plants(plants: Iterable[str]) -> str:
+    """Return ``plants`` as a refusal names several: each quoted, joined with ``", "``."""
+    return ", ".join(quoted_plant(plant) for plant in plants)
+
+
 def admission(
     mapping: MappingResolution,
     plants: Container[str],
@@ -2233,6 +2238,7 @@ def verify_mapping_inputs(
                         "since its assignment would differ"
                     )
                 lat, lon = s.position
+                plant = quoted_plant(cast(str, row.plant_id))
                 distances = [
                     WGS84.inv(lon, lat, p.lon, p.lat)[2]
                     for p in verified_plants
@@ -2240,14 +2246,14 @@ def verify_mapping_inputs(
                 ]
                 if not distances:
                     raise MappingDeliveryError(
-                        f"{s.name} (date {date}) was assigned plant {row.plant_id!r}, which no "
+                        f"{s.name} (date {date}) was assigned plant {plant}, which no "
                         f"plant CSV of registry {registry['name']!r} names: this mapping was "
                         "not built over its registry's registered bytes; rebuild"
                     )
                 if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
                     raise MappingDeliveryError(
                         f"{s.name} (date {date}) has moved since this mapping was built: "
-                        f"no plant named {row.plant_id!r} is {row.distance_m} m away now; "
+                        f"no plant named {plant} is {row.distance_m} m away now; "
                         "rebuild, since its assignment would differ"
                     )
 
@@ -2461,7 +2467,7 @@ def plant_mapping_disclosure(
     unmapped = sorted(set(plants) - assigned)
     if unmapped:
         raise MappingDeliveryError(
-            f"plant(s) {unmapped} are assigned to no plot by mapping "
+            f"plant(s) {quoted_plants(unmapped)} are assigned to no plot by mapping "
             f"{name!r} on the delivered dates."
         )
     return MappingResolution(

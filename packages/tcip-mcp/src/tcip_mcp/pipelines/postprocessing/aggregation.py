@@ -412,6 +412,8 @@ def deliver_per_plant_aggregate(
     and ``acknowledgment_id``, as :func:`deliver_plant_values` delivers them; returns what was
     delivered.
     """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import quoted_plants
+
     meaning = plant_value_meaning(
         project,
         delivery_kind=delivery_kind,
@@ -429,9 +431,9 @@ def deliver_per_plant_aggregate(
     none_valued = [p for p, s in by_plant.items() if s["value"] is None]
     if none_valued:
         raise ValueError(
-            f"plant(s) {none_valued} carry no {delivered_phenotype!r} observation: a "
-            "missing measurement never ships as an empty cell; leave them out of "
-            "the population."
+            f"plant(s) {quoted_plants(none_valued)} carry no {delivered_phenotype!r} "
+            "observation: a missing measurement never ships as an empty cell; leave them "
+            "out of the population."
         )
     return deliver_plant_values(
         project,
