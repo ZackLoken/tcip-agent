@@ -539,6 +539,48 @@ def test_a_registered_plant_csv_gone_or_rewritten_refuses_the_delivery_naming_it
     assert not (tmp_path / "o.csv").exists()
 
 
+def test_a_missing_plant_csv_is_the_registration_doors_sentence_inside_the_deliverys(
+    tmp_path: Path,
+) -> None:
+    """The registration door and the delivery door answer a missing plant CSV in one sentence.
+
+    The CSV is registered and a mapping built over it, then removed. The same missing path goes to
+    the registration door and is delivered over: the registration's whole answer stands in the
+    delivery's, between the delivery's prefix and its remedy.
+    """
+    from tcip_mcp.tools.phenology_tools import register_plant_registry
+
+    dataset_root, date = _mapped(tmp_path)
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
+    plant_csv = tmp_path / PLANT_CSV
+    plant_csv.unlink()
+
+    registration = register_plant_registry(
+        tmp_path,
+        name="again",
+        csv_paths=[str(plant_csv)],
+        crop=COUNT_CROP,
+        site="orchard block",
+        actor=None,
+    )
+    delivery = _deliver(
+        tmp_path,
+        _results(date, ("P1", 1)),
+        ["P1"],
+        dataset_root,
+        [bucket],
+        plant_mapping="valley",
+    )
+
+    match registration:
+        case {"error": str() as refusal}:
+            assert delivery["error"].startswith(
+                f"mapping 'valley': {refusal}: restore the registered bytes"
+            ), (registration, delivery)
+        case _:
+            raise AssertionError(registration)
+
+
 # ── each result counts toward the plant the mapping assigned its image ──
 
 FIRST, SECOND = "2026-02-11", "2026-02-25"

@@ -124,9 +124,36 @@ def test_refuses_a_missing_file(tmp_path: Path) -> None:
 
     match res:
         case {"error": str() as error}:
-            assert "plant CSV" in error
+            assert (
+                error == f"plant CSV(s) not found: {tmp_path / 'missing.csv'}"
+            )
         case _:
             raise AssertionError(res)
+
+
+def test_a_missing_file_is_named_by_its_path_with_each_backslash_once(
+    tmp_path: Path,
+) -> None:
+    """A missing file whose name holds a backslash is named by the path as resolved.
+
+    The name carries the backslash itself, so the path holds one on every host.
+    """
+    from tcip_mcp.registry_paths import located
+
+    name = "plants\\missing.csv"
+
+    res = register_plant_registry(
+        tmp_path,
+        name="valley",
+        csv_paths=[name],
+        crop="currant",
+        site="orchard",
+        actor=None,
+    )
+
+    assert res == {
+        "error": f"plant CSV(s) not found: {located(name, tmp_path)}"
+    }
 
 
 def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
