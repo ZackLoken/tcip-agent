@@ -348,6 +348,126 @@ def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(
     assert not (tmp_path / "o.csv").exists()
 
 
+THREE_PLANTS = {**TWO_PLANTS, "P3": (43.19690, -90.056000)}
+"""Three plants registered, of which a delivery's captures may reach only the first."""
+
+
+@pytest.mark.parametrize(
+    ("population", "named"),
+    [(("P1", "P2"), "'P2'"), (("P1", "P2", "P3"), "'P2', 'P3'")],
+    ids=["one_plant", "two_plants"],
+)
+def test_population_plants_assigned_on_no_delivered_date_are_named_quoted_and_joined(
+    tmp_path: Path, population: tuple[str, ...], named: str
+) -> None:
+    """Each population plant the mapping assigns on no delivered date is named quoted.
+
+    The plants are joined with ``", "`` in sorted order, in no list's brackets.
+    """
+    dataset_root, date = _mapped(
+        tmp_path, THREE_PLANTS, {DATE: {"P1": THREE_PLANTS["P1"]}}
+    )
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
+
+    res = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path,
+            dataset_root,
+            [bucket],
+            _rows((date, "P1", 1)),
+            population,
+        ),
+    )
+
+    assert isinstance(res, dict), res
+    assert f"plant(s) {named} are assigned to no plot" in res["error"], res
+    assert not (tmp_path / "o.csv").exists()
+
+
+def test_a_capture_that_moved_since_the_mapping_was_built_refuses_naming_its_plant_quoted(
+    tmp_path: Path,
+) -> None:
+    """A read capture whose position moved off its recorded distance refuses, its plant quoted."""
+    from tests._image_fixtures import write_geo_image
+    from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M
+
+    dataset_root, date = _mapped(tmp_path)
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
+    lat, lon = ONE_PLANT["P1"]
+    write_geo_image(
+        image_dir(dataset_root, date) / "P1.jpg",
+        lat + 0.0005,
+        lon,
+        datetime(2026, 2, 11, 9, 30),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
+    )
+
+    res = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path, dataset_root, [bucket], _rows((date, "P1", 1)), ("P1",)
+        ),
+    )
+
+    assert isinstance(res, dict), res
+    assert "has moved since this mapping was built" in res["error"], res
+    assert "no plant named 'P1' is" in res["error"], res
+    assert not (tmp_path / "o.csv").exists()
+
+
+def test_a_mapping_assigning_a_plant_its_registry_does_not_name_refuses_naming_it_quoted(
+    tmp_path: Path,
+) -> None:
+    """A mapping assigning a plant no CSV of its registry names refuses, the plant quoted.
+
+    The mapping is built, through ``build_mapping`` and ``persist_mapping``, over the plants of a
+    CSV naming ``P1`` and ``P2`` while its registry's one CSV names ``P2`` alone.
+    """
+    from tcip_mcp.dataset_layout import require_dataset_identity
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PlantRegistryReference,
+        build_mapping,
+        load_registry,
+        persist_mapping,
+        read_plant_csvs,
+    )
+    from tests._mapping_fixtures import register_plant_registry_for
+
+    dataset_root, plant_csv = _scene(tmp_path, TWO_PLANTS, {DATE: TWO_PLANTS})
+    registry = load_registry(
+        tmp_path,
+        register_plant_registry_for(
+            tmp_path,
+            [write_plots_csv(tmp_path / "p2.csv", {"P2": TWO_PLANTS["P2"]})],
+            crop=COUNT_CROP,
+        ),
+    )
+    built = build_mapping(
+        dataset_root,
+        read_plant_csvs([plant_csv]),
+        name="valley",
+        dataset_id=require_dataset_identity(dataset_root).id,
+        project=tmp_path,
+        plant_registry=PlantRegistryReference(
+            name=registry["name"], digest=registry["digest"]
+        ),
+    )
+    persist_mapping(built.build, tmp_path, actor=None)
+    bucket = _bucket(tmp_path, dataset_root, DATE, {"P1": 1})
+
+    res = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path, dataset_root, [bucket], _rows((DATE, "P1", 1)), ("P1",)
+        ),
+    )
+
+    assert isinstance(res, dict), res
+    assert "was assigned plant 'P1', which no plant CSV" in res["error"], res
+    assert not (tmp_path / "o.csv").exists()
+
+
 def test_a_capture_added_since_the_mapping_was_built_refuses(
     tmp_path: Path,
 ) -> None:
@@ -1379,9 +1499,35 @@ def test_a_sub_population_leaving_out_a_plant_with_no_value_delivers_without_its
     )
 
     assert isinstance(refused, dict), refused
-    assert "carry no 'stem_count' observation" in refused["error"], refused
+    assert (
+        "plant(s) 'P2' carry no 'stem_count' observation" in refused["error"]
+    ), refused
     assert isinstance(answer, dict) and "error" not in answer, answer
     assert list(_by_plant(tmp_path)) == ["P1"]
+
+
+def test_two_plants_with_no_value_are_named_quoted_and_joined(
+    tmp_path: Path,
+) -> None:
+    """Every plant whose every image yields no value is named quoted, joined with ``", "``."""
+    dataset_root, _ = _mapped(tmp_path, TWO_PLANTS, CAPTURES)
+    unobserved = _rows(*((d, s, None) for d, s, _ in READ))
+
+    refused = _called(
+        tmp_path,
+        _arguments_over(
+            tmp_path,
+            dataset_root,
+            _both(tmp_path, dataset_root),
+            unobserved,
+        ),
+    )
+
+    assert isinstance(refused, dict), refused
+    assert (
+        "plant(s) 'P1', 'P2' carry no 'stem_count' observation"
+        in refused["error"]
+    ), refused
 
 
 def test_no_parameter_of_the_aggregate_or_the_door_names_a_results_plant() -> (
