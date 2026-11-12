@@ -667,8 +667,7 @@ def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
 def _failure_kind(entry: ObservedTest, tree: Path) -> FailureKind:
     """Return the kind of one failed test.
 
-    The kind is one of ``unreached``, ``timeout``, ``behavioral``, ``test_code`` or ``fixture``. An
-    errored test is classified the same way.
+    An errored test is classified the same way as a failed one.
 
     ``unreached``: the import never resolved, always; or a needed file was missing and the crash
     frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
@@ -726,23 +725,18 @@ def _not_counted(entry: ObservedTest) -> str:
 
 def _record_failure_kinds(observed: dict, tree: Path) -> None:
     """Write :func:`_failure_kind` under ``kind`` onto each failed or errored test's entry."""
-    tests: list[ObservedTest] = observed["tests"]
-    for t in tests:
-        if t["outcome"] in ("failed", "error"):
-            t["kind"] = _failure_kind(t, tree)
+    for t in _failures(observed):
+        t["kind"] = _failure_kind(t, tree)
 
 
 def _failures(observed: dict) -> list[ObservedTest]:
-    """Return the entries of ``observed["tests"]`` that carry a ``kind``."""
+    """Return the entries of ``observed["tests"]`` whose outcome is ``failed`` or ``error``."""
     tests: list[ObservedTest] = observed["tests"]
-    return [t for t in tests if "kind" in t]
+    return [t for t in tests if t["outcome"] in ("failed", "error")]
 
 
 def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
-    """Return the verdict and its sentence for ``observed``.
-
-    Reads the ``kind`` each failure carries (:func:`_record_failure_kinds`).
-    """
+    """Return the verdict and its sentence for ``observed``."""
     failed = _failures(observed)
     if observed.get("internal_error"):
         return (
@@ -770,7 +764,8 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
         )
     unreached = [t for t in failed if t["kind"] == "unreached"]
     timed_out = [t for t in failed if t["kind"] == "timeout"]
-    not_compared = [t for t in failed if t["kind"] in ("fixture", "test_code")]
+    not_compared_kinds: tuple[FailureKind, ...] = ("fixture", "test_code")
+    not_compared = [t for t in failed if t["kind"] in not_compared_kinds]
     behavioral = [t for t in failed if t["kind"] == "behavioral"]
     if timed_out:
         names = ", ".join(t["nodeid"] for t in timed_out)
