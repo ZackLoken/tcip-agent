@@ -274,7 +274,12 @@ def test_main_exits_zero_on_an_all_passing_half_and_one_otherwise(
     unreadable = cites.main(argv, fetch=lambda issue: "no premises here")
     unreadable_out = capsys.readouterr().out
 
-    assert (passed, passed_out) == (0, "PASS\n")
+    passed_lines = passed_out.splitlines()
+    assert passed == 0
+    assert len(passed_lines) == 1
+    assert passed_lines[0].startswith("PASS")
+    words = "a premise that backticks any name has one or more of them on its cited lines"
+    assert words in passed_lines[0]
     assert failed == 1
     assert failed_out.endswith("FAIL\n")
     assert "a.py:2-2" in failed_out

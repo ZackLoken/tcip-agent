@@ -13,8 +13,8 @@ Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>``, is r
 ``git show <commit>:<path>``. It fails when the path is absent at the commit or the range is past
 the file. Lines are counted on newline bytes alone, as git counts them. A premise whose backticked
 spans hold identifier tokens fails when none of them appears in the union of its cited ranges. A
-premise with no cite in the writer's form fails. Prints PASS, or each failing premise and FAIL,
-and exits 1 on FAIL or when no premise half can be read.
+premise with no cite in the writer's form fails. Prints PASS and the rule it applied, or each
+failing premise and FAIL, and exits 1 on FAIL or when no premise half can be read.
 """
 
 from __future__ import annotations
@@ -38,6 +38,11 @@ REPOSITORY_COMMIT = re.compile(
 PREMISE_LABEL = re.compile(r"^[-*]\s+\[(?P<label>[^\]]+)\]")
 CITE = re.compile(
     r"\bat\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
+)
+PASS_LINE = (
+    "PASS: each premise has one or more cites in the writer's form and every one resolves "
+    "at its commit, and a premise that backticks any name has one or more of them on its "
+    "cited lines."
 )
 BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
@@ -228,7 +233,7 @@ def main(
     *,
     fetch: Callable[[int], str] = fetch_issue,
 ) -> int:
-    """Print PASS, or each failing premise and FAIL; return 0 on PASS and 1 otherwise."""
+    """Return 0 when no premise of the issue's premise half fails, and 1 otherwise."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("issue", type=int)
     parser.add_argument(
@@ -250,7 +255,7 @@ def main(
         for line in half.premises
         for message in check_premise(line, half, checkouts, Path.cwd())
     ]
-    print("\n".join([*failures, "FAIL" if failures else "PASS"]))
+    print("\n".join([*failures, "FAIL" if failures else PASS_LINE]))
     return 1 if failures else 0
 
 
