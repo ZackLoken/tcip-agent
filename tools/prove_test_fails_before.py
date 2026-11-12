@@ -78,6 +78,7 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import Literal, NotRequired, TypedDict
 
 REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
@@ -92,6 +93,28 @@ GUARDS, VACUOUS, INDETERMINATE, REFUSED = (
     "REFUSED",
 )
 EXIT = {GUARDS: 0, VACUOUS: 1, INDETERMINATE: 2, REFUSED: 3}
+
+FailureKind = Literal[
+    "unreached", "timeout", "behavioral", "test_code", "fixture"
+]
+
+
+class ObservedTest(TypedDict):
+    """One test's entry of the outcome record the plugin writes, as this tool reads it.
+
+    The plugin writes the failure keys only for a failed or errored test, and the tool adds
+    ``kind`` to those.
+    """
+
+    nodeid: str
+    phase: str
+    outcome: str
+    headline: NotRequired[str]
+    crash_path: NotRequired[str | None]
+    crash_lineno: NotRequired[int | None]
+    exc_typename: NotRequired[str | None]
+    kind: NotRequired[FailureKind]
+
 
 PLUGIN_SOURCE = '''\
 """Record what pytest observed, so a caller reads outcomes instead of an exit code."""
@@ -641,7 +664,7 @@ def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
     return rel is not None and not _is_test_side(rel)
 
 
-def _failure_kind(entry: dict, tree: Path) -> str:
+def _failure_kind(entry: ObservedTest, tree: Path) -> FailureKind:
     """Return the kind of one failed test.
 
     The kind is one of ``unreached``, ``timeout``, ``behavioral``, ``test_code`` or ``fixture``. An
@@ -685,7 +708,7 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     return "behavioral"
 
 
-def _not_counted(entry: dict) -> str:
+def _not_counted(entry: ObservedTest) -> str:
     """Name a failure that is not counted, by its ``kind``.
 
     The kind is ``unreached``, ``test_code`` or ``fixture``. The sentence names the test, what was
@@ -703,14 +726,16 @@ def _not_counted(entry: dict) -> str:
 
 def _record_failure_kinds(observed: dict, tree: Path) -> None:
     """Write :func:`_failure_kind` under ``kind`` onto each failed or errored test's entry."""
-    for t in observed["tests"]:
+    tests: list[ObservedTest] = observed["tests"]
+    for t in tests:
         if t["outcome"] in ("failed", "error"):
             t["kind"] = _failure_kind(t, tree)
 
 
-def _failures(observed: dict) -> list[dict]:
+def _failures(observed: dict) -> list[ObservedTest]:
     """Return the entries of ``observed["tests"]`` that carry a ``kind``."""
-    return [t for t in observed["tests"] if "kind" in t]
+    tests: list[ObservedTest] = observed["tests"]
+    return [t for t in tests if "kind" in t]
 
 
 def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
