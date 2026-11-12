@@ -40,8 +40,9 @@ CITE = re.compile(
     r"\bat\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
 )
 PASS_LINE = (
-    "PASS: each premise has a cite that resolves at its commit, and a premise that "
-    "backticks any name has one or more of them on its cited lines."
+    "PASS: each premise has one or more cites in the writer's form and every one resolves "
+    "at its commit, and a premise that backticks any name has one or more of them on its "
+    "cited lines."
 )
 BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
@@ -232,7 +233,7 @@ def main(
     *,
     fetch: Callable[[int], str] = fetch_issue,
 ) -> int:
-    """Print PASS, or each failing premise and FAIL; return 0 on PASS and 1 otherwise."""
+    """Return 0 when no premise of the issue's premise half fails, and 1 otherwise."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("issue", type=int)
     parser.add_argument(
