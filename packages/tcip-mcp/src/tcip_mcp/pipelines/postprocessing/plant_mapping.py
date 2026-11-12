@@ -1279,6 +1279,15 @@ def require_agreeing_crops(
         )
 
 
+PLANT_CSV_NOT_FOUND = "plant CSV(s) not found"
+"""The phrase naming the plant CSVs that are not files, before ``named_paths`` lists them."""
+
+
+def named_paths(phrase: str, paths: Iterable[str]) -> str:
+    """Return ``phrase``, a colon, and the path strings ``paths`` joined with ``", "``."""
+    return f"{phrase}: {', '.join(paths)}"
+
+
 def registered_plants(
     registry: PlantRegistry, project: Path | str
 ) -> list[PlantRecord]:
@@ -1303,9 +1312,9 @@ def registered_plants(
             rewritten.append(entry["path"])
     if missing or rewritten:
         named = [
-            f"{what}: {', '.join(paths)}"
+            named_paths(what, paths)
             for what, paths in (
-                ("plant CSV(s) not found", missing),
+                (PLANT_CSV_NOT_FOUND, missing),
                 ("plant CSV(s) rewritten since registered", rewritten),
             )
             if paths

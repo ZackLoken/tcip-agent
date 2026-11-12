@@ -161,7 +161,11 @@ def register_plant_registry(
     paths = [located(p, project) for p in csv_paths]
     missing = [str(p) for p in paths if not p.is_file()]
     if missing:
-        return {"error": f"plant CSV(s) not found: {missing}"}
+        return {
+            "error": plant_mapping.named_paths(
+                plant_mapping.PLANT_CSV_NOT_FOUND, missing
+            )
+        }
 
     shapefile_suffixes = {".shp", ".shx", ".dbf", ".prj"}
     shapefile_paths = [
