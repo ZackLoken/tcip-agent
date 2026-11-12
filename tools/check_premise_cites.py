@@ -40,8 +40,8 @@ CITE = re.compile(
     r"\bat\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
 )
 PASS_LINE = (
-    "PASS: each premise has a cite that resolves at its commit, and one or more of its "
-    "backticked names is on its cited lines."
+    "PASS: each premise has a cite that resolves at its commit, and a premise that "
+    "backticks any name has one or more of them on its cited lines."
 )
 BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
