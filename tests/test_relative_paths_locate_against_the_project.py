@@ -563,7 +563,7 @@ def test_a_scoped_door_locates_its_callers_spelling_once(
     """A scoped audited door locates the dataset spelling it is handed once.
 
     The spelling ``ds`` is located once, and the audit row, filed in the dataset's own log,
-    keeps ``ds``.
+    keeps ``ds`` and the crop as its arguments and nothing else.
     """
     import tcip_mcp.audit as audit
     import tcip_mcp.registry_paths as registry_paths
@@ -589,8 +589,7 @@ def test_a_scoped_door_locates_its_callers_spelling_once(
 
     assert spellings.count("ds") == 1, spellings
     (row,) = audit_rows((project / "ds").resolve(), "register_dataset")
-    arguments = row["arguments"]
-    assert isinstance(arguments, dict) and arguments["dataset_root"] == "ds"
+    assert row["arguments"] == {"dataset_root": "ds", "crop": "chestnut"}
 
 
 def test_a_sweep_records_and_trains_on_the_location_it_admitted(

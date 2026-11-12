@@ -181,8 +181,21 @@ def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
         )
 
 
+def _registration_facts(answer: dict) -> dict[str, object]:
+    """Return the facts of ``register_dataset``'s ``answer`` its audit line carries.
+
+    They are the id written (``dataset_id``), ``minted``, and ``repaired``, ``None`` when the
+    answer holds no ``repaired``.
+    """
+    return {
+        "dataset_id": answer["id"],
+        "minted": answer["minted"],
+        "repaired": answer.get("repaired"),
+    }
+
+
 @tool()
-@audited(scope_arg="dataset_root")
+@audited(scope_arg="dataset_root", outcome=_registration_facts)
 def register_dataset(
     project: Path, dataset_root: str, crop: str, *, actor: str | None
 ) -> dict:
@@ -200,8 +213,12 @@ def register_dataset(
     (:func:`dataset_ids_citing`: the registry's entries at its path and the buckets under it), the
     answer's ``repaired`` stating what was absent or refused and what cites the id. A root cited
     by more than one id refuses, naming each id and what cites it; a refused document nothing
-    cites refuses; only an absent one nothing cites mints its id. A crop that is empty or that
-    ``crops.yml`` names for no trait refuses. A refusal writes nothing.
+    cites refuses; only an absent one nothing cites mints its id, the answer's ``minted`` true
+    only then. A crop that is empty or that ``crops.yml`` names for no trait refuses. A refusal
+    writes nothing.
+
+    The registration's audit line carries, beside its arguments, the id written
+    (``dataset_id``), ``minted``, and ``repaired`` when the answer holds it.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
@@ -230,6 +247,7 @@ def register_dataset(
     while True:
         stored = tcip_store.read_blob_versioned(ident_path, default=None)
         repaired = refused = None
+        minted = False
         try:
             existing_id = (
                 None
@@ -253,10 +271,9 @@ def register_dataset(
                     "error": f"{refused}; minting a fresh id over it would sever every record "
                     f"that cites the old one; {_identity_repair(cited)}"
                 }
-        entry = DatasetEntry(
-            id=mint_id() if existing_id is None else existing_id,
-            path=stored_path(root, project),
-        )
+        if existing_id is None:
+            existing_id, minted = mint_id(), True
+        entry = DatasetEntry(id=existing_id, path=stored_path(root, project))
         try:
             identity = DatasetRecord(
                 crop=crop, id=entry.id, fingerprint=fingerprint
@@ -278,6 +295,7 @@ def register_dataset(
     return {
         "dataset_root": str(root),
         **identity.model_dump(mode="json"),
+        "minted": minted,
         **({} if repaired is None else {"repaired": repaired}),
     }
 

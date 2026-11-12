@@ -81,6 +81,7 @@
     "id": "<fresh dataset id>",
     "fingerprint": "<fingerprint n0>",
     "dataset_root": "/scratch/workspace/valley/fresh",
+    "minted": true,
     "repaired": null
   },
   "repaired": {
@@ -88,6 +89,7 @@
     "id": "<damaged dataset id>",
     "fingerprint": "<fingerprint n0>",
     "dataset_root": "/scratch/workspace/valley/damaged",
+    "minted": false,
     "repaired": "the dataset identity at /scratch/workspace/valley/damaged/dataset.json: crop: Input should be a valid string; its id is restored: id '<damaged dataset id>' is cited by this project's registry at this path"
   },
   "crop_unconfirmed": {
@@ -101,6 +103,7 @@
     "id": "<mapped dataset id>",
     "fingerprint": null,
     "dataset_root": "/scratch/workspace/valley/mapped",
+    "minted": false,
     "repaired": null
   },
   "unrecorded": {
