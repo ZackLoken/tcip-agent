@@ -78,15 +78,16 @@ its name, stays the client's (the knowledge door acts on none, the project-creat
 alone), and a call naming an argument outside the tool's listed schema, a supplied one included,
 is refused before the tool runs; a tool that changes state is `@audited`, by that `actor`, unless
 the library function it calls records its own event with facts the decorator cannot carry (a
-digest, what was written), and then it is not decorated. The decorator writes no line for a call
-returning its error dict and an exception line for a call that raises. A read-only tool (a status
-poll, a listing, a document served back) leaves none, so the audit log records mutations and
-nothing else; a render under
-`.tcip/artifacts/viz/` is a derived view that can be regenerated, not a state change, and leaves
-none. `serve_domain_knowledge`'s `@tool(description=...)` composes its client-visible description
-from the knowledge corpus at import time rather than leaving it as the bare docstring. A mutating
-door only an operator runs (an operator-only command module in `cli/` calls it, as
-`archive_project`) keeps `@audited` without registering.
+digest, what was written), and then it is not decorated. The decorator carries the call's
+arguments and, on its `ok` line, the facts of the answer the door's `outcome` names; it writes no
+line for a call returning its error dict and an exception line for a call that raises. A
+read-only tool (a status poll, a listing, a document served back) leaves none, so the audit log
+records mutations and nothing else; a render under `.tcip/artifacts/viz/` is a derived view that
+can be regenerated, not a state change, and leaves none. `serve_domain_knowledge`'s
+`@tool(description=...)` composes its client-visible description from the knowledge corpus at
+import time rather than leaving it as the bare docstring. A mutating door only an operator runs
+(an operator-only command module in `cli/` calls it, as `archive_project`) keeps `@audited`
+without registering.
 
 ## Conventions specific to this package
 
