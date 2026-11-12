@@ -1543,3 +1543,30 @@ def test_a_missing_image_is_refused_before_any_family_launches(
     assert refused.value.code != 0
     assert "image not found" in capsys.readouterr().err
     assert launched == []
+
+
+def test_the_antigravity_launch_grants_commands_beside_the_sandbox(
+    tmp_path: Path,
+) -> None:
+    """The Antigravity argv carries the sandbox and a settings value allowing every command.
+
+    Without the grant a headless run runs or denies a command by the harness's own agent mode.
+    """
+    prompt_file = tmp_path / "p.txt"
+    prompt_file.write_text("question", encoding="utf-8")
+
+    argv, _ = cross_family_ask.build_agy(
+        prompt_file,
+        tmp_path,
+        tmp_path,
+        cross_family_ask.CONDITIONS["no-tools"],
+        "stub-model",
+        None,
+        5,
+    )
+
+    assert "--settings" in argv
+    assert "--sandbox" in argv
+    assert json.loads(argv[argv.index("--settings") + 1]) == {
+        "permissions": {"allow": ["command(*)"]}
+    }
