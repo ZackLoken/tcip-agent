@@ -8,9 +8,12 @@ Conditions control what the harness could reach, not what it was asked. An attac
 one family-specific preface line ahead of the question, since each harness takes an image
 differently.
 
-Antigravity in headless mode auto-denies shell commands, so a prompt sent to it must be
-answerable by file reads alone, with any material to review given as files inside the
-working tree it is pointed at.
+The Antigravity launch grants every command inside the harness's sandbox. A launch without the
+grant runs or denies a command by the harness's own agent mode: at harness 1.5.7 it was denied
+with the default mode saved and run under Auto mode, which a headless run with no saved mode
+starts in. Measured at 1.5.7 with the grant: a command that reads ran, a write inside the added
+directory and a write under the user's Documents were denied, a write and a delete under the
+system temp tree outside the added directory succeeded, and a network lookup failed.
 
 Runs on the standard library alone, in a Python whose UTF-8 mode is on (the project environment
 sets ``PYTHONUTF8``), and is invoked as ``python tools/cross_family_ask.py``.
@@ -61,6 +64,9 @@ AGY = resolve_harness(
     "agy", "TCIP_AGY_BIN", LOCAL_APP_DATA / "agy/bin/agy.exe"
 )
 CLAUDE = resolve_harness("claude", "TCIP_CLAUDE_BIN")
+
+# The allow rule measured to let a headless Antigravity command run when no agent mode does.
+AGY_COMMAND_GRANT = json.dumps({"permissions": {"allow": ["command(*)"]}})
 
 
 def load_tcip_mcp_config() -> dict:
@@ -420,9 +426,10 @@ def build_agy(
 ) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Antigravity invocation; return its argv and no final-message file.
 
-    The prompt file's text is passed as ``--print``, with JSON output, the sandbox, a print
-    timeout of ``timeout`` seconds and ``cwd`` added; ``condition`` is not read, so a run's MCP
-    servers are whatever the harness's own configuration names, and ``effort`` is not read.
+    The prompt file's text is passed as ``--print``, with JSON output, the sandbox, a settings
+    value granting every command, a print timeout of ``timeout`` seconds and ``cwd`` added;
+    ``condition`` is not read, so a run's MCP servers are whatever the harness's own
+    configuration names, and ``effort`` is not read.
     """
     argv = [
         str(AGY),
@@ -431,6 +438,8 @@ def build_agy(
         "--output-format",
         "json",
         "--sandbox",
+        "--settings",
+        AGY_COMMAND_GRANT,
         "--print-timeout",
         f"{timeout}s",
         "--add-dir",
