@@ -1280,7 +1280,7 @@ def require_agreeing_crops(
 
 
 PLANT_CSV_NOT_FOUND = "plant CSV(s) not found"
-"""The phrase a refusal of a plant CSV that is not a file on disk begins with."""
+"""The phrase naming the plant CSVs that are not files, before ``named_paths`` lists them."""
 
 
 def named_paths(phrase: str, paths: Iterable[str]) -> str:
