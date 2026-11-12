@@ -146,6 +146,41 @@ def test_an_assertion_failure_guards(tmp_path: Path) -> None:
     assert "[behavioral]" in result.stdout
 
 
+@pytest.mark.parametrize("spelling", ["relative", "absolute"])
+def test_a_test_file_taken_from_test_rev_guards_by_either_spelling(
+    tmp_path: Path, spelling: str
+) -> None:
+    """A test file taken from ``--test-rev`` scores GUARDS named relative or absolute.
+
+    The scratch repository's head no longer holds the test file, so the verdict can only come
+    from the file at the fix commit; the repo-relative and the absolute spelling report it alike.
+    """
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    test_path = repo / "tests" / "test_widgets.py"
+    _write(
+        test_path,
+        "def test_double_doubles():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n",
+    )
+    fix = _commit_all(repo, "double actually doubles")
+
+    test_path.unlink()
+    _commit_all(repo, "remove the test")
+
+    named = (
+        "tests/test_widgets.py" if spelling == "relative" else str(test_path)
+    )
+    result = _run(repo, named, baseline, "--test-rev", fix)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "GUARDS" in result.stdout
+
+
 def test_a_value_error_raised_from_code_under_test_guards(
     tmp_path: Path,
 ) -> None:
