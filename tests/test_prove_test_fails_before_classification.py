@@ -573,7 +573,7 @@ def test_the_json_record_carries_each_failures_kind(tmp_path: Path) -> None:
     """The ``--json`` record names a setup failure, a call-phase TypeError and an assertion failure.
 
     Their kinds are ``fixture``, ``test_code`` and ``behavioral``, and each is the tag printed for
-    its test.
+    its test. The GUARDS sentence lists the setup failure among the not-counted.
     """
     repo, baseline = _head_adds_color_double_and_gadgets(
         tmp_path,
@@ -625,6 +625,8 @@ def test_the_json_record_carries_each_failures_kind(tmp_path: Path) -> None:
     }
     assert recorded == expected
     assert printed == expected
+    _, _, not_counted = _why(result).partition("not counted")
+    _assert_one_clause_names(not_counted, "test_uses_thing", FIXTURE_SENTENCE)
 
 
 def test_a_fixture_refusal_lists_a_missing_import_failure_as_not_counted(
