@@ -79,24 +79,8 @@ def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
 
     A fixture that fails during setup is reported REFUSED, kind ``fixture``.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(
-        repo / "widgets.py",
-        "class Widget:\n"
-        "    def __init__(self, size):\n"
-        "        self.size = size\n",
-    )
-    baseline = _commit_all(repo, "widget carries no color")
-
-    _write(
-        repo / "widgets.py",
-        "class Widget:\n"
-        "    def __init__(self, size, color=None):\n"
-        "        self.size = size\n"
-        "        self.color = color\n",
-    )
-    _write(
-        repo / "tests" / "test_widgets.py",
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
         "import pytest\n"
         "\n"
         "\n"
@@ -109,7 +93,6 @@ def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
         "def test_uses_thing(thing):\n"
         "    assert thing.color == 'red'\n",
     )
-    _commit_all(repo, "widget carries a color")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -556,23 +539,8 @@ def test_a_run_mixing_a_setup_failure_and_a_wrong_call_names_each_with_its_own_s
     tmp_path: Path,
 ) -> None:
     """A setup failure and a call-phase TypeError each get the sentence for their own phase."""
-    repo = _scratch_repo(tmp_path)
-    _write(
-        repo / "widgets.py",
-        "class Widget:\n"
-        "    def __init__(self, size):\n"
-        "        self.size = size\n",
-    )
-    baseline = _commit_all(repo, "widget has no color")
-    _write(
-        repo / "widgets.py",
-        "class Widget:\n"
-        "    def __init__(self, size, color=None):\n"
-        "        self.size = size\n"
-        "        self.color = color\n",
-    )
-    _write(
-        repo / "tests" / "test_widgets.py",
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
         "import pytest\n"
         "\n"
         "\n"
@@ -590,7 +558,6 @@ def test_a_run_mixing_a_setup_failure_and_a_wrong_call_names_each_with_its_own_s
         "    from widgets import Widget\n"
         "    assert Widget(size=3, color='red').color == 'red'\n",
     )
-    _commit_all(repo, "widget carries a color")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -606,7 +573,7 @@ def test_the_json_record_carries_each_failures_kind(tmp_path: Path) -> None:
     """The ``--json`` record names a setup failure, a call-phase TypeError and an assertion failure.
 
     Their kinds are ``fixture``, ``test_code`` and ``behavioral``, and each is the tag printed for
-    its test.
+    its test. The GUARDS sentence lists the setup failure among the not-counted.
     """
     repo, baseline = _head_adds_color_double_and_gadgets(
         tmp_path,
@@ -658,6 +625,8 @@ def test_the_json_record_carries_each_failures_kind(tmp_path: Path) -> None:
     }
     assert recorded == expected
     assert printed == expected
+    _, _, not_counted = _why(result).partition("not counted")
+    _assert_one_clause_names(not_counted, "test_uses_thing", FIXTURE_SENTENCE)
 
 
 def test_a_fixture_refusal_lists_a_missing_import_failure_as_not_counted(

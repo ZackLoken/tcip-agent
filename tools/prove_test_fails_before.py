@@ -78,6 +78,7 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import Literal, NotRequired, TypedDict
 
 REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
@@ -92,6 +93,28 @@ GUARDS, VACUOUS, INDETERMINATE, REFUSED = (
     "REFUSED",
 )
 EXIT = {GUARDS: 0, VACUOUS: 1, INDETERMINATE: 2, REFUSED: 3}
+
+FailureKind = Literal[
+    "unreached", "timeout", "behavioral", "test_code", "fixture"
+]
+
+
+class ObservedTest(TypedDict):
+    """One test's entry of the outcome record the plugin writes, as this tool reads it.
+
+    The plugin writes the failure keys only for a failed or errored test, and the tool adds
+    ``kind`` to those.
+    """
+
+    nodeid: str
+    phase: str
+    outcome: str
+    headline: NotRequired[str]
+    crash_path: NotRequired[str | None]
+    crash_lineno: NotRequired[int | None]
+    exc_typename: NotRequired[str | None]
+    kind: NotRequired[FailureKind]
+
 
 PLUGIN_SOURCE = '''\
 """Record what pytest observed, so a caller reads outcomes instead of an exit code."""
@@ -231,12 +254,12 @@ def git_output(*args: str) -> str:
 
 
 def _is_test_side(path: str) -> bool:
-    """Return whether ``path``, with either slash, lies under ``tests/``.
+    """Return whether the forward-slash ``path`` lies under ``tests/``.
 
     A path under ``tests/`` is the test side: the tool overlays it from the current tree, so a diff
     in it is not the change under test.
     """
-    return path.replace("\\", "/").startswith(f"{TEST_TREE}/")
+    return path.startswith(f"{TEST_TREE}/")
 
 
 def _uncommitted_paths() -> list[str]:
@@ -641,11 +664,10 @@ def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
     return rel is not None and not _is_test_side(rel)
 
 
-def _failure_kind(entry: dict, tree: Path) -> str:
+def _failure_kind(entry: ObservedTest, tree: Path) -> FailureKind:
     """Return the kind of one failed test.
 
-    The kind is one of ``unreached``, ``timeout``, ``behavioral``, ``test_code`` or ``fixture``. An
-    errored test is classified the same way.
+    An errored test is classified the same way as a failed one.
 
     ``unreached``: the import never resolved, always; or a needed file was missing and the crash
     frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
@@ -685,7 +707,7 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     return "behavioral"
 
 
-def _not_counted(entry: dict) -> str:
+def _not_counted(entry: ObservedTest) -> str:
     """Name a failure that is not counted, by its ``kind``.
 
     The kind is ``unreached``, ``test_code`` or ``fixture``. The sentence names the test, what was
@@ -701,22 +723,21 @@ def _not_counted(entry: dict) -> str:
     return f"{where}: a fixture failed during {entry['phase']} ({headline})"
 
 
-def _kinded_failures(observed: dict, tree: Path) -> list[dict]:
-    """Return each failed or errored test's entry with its :func:`_failure_kind` under ``kind``."""
-    return [
-        {**t, "kind": _failure_kind(t, tree)}
-        for t in observed["tests"]
-        if t["outcome"] in ("failed", "error")
-    ]
+def _record_failure_kinds(observed: dict, tree: Path) -> None:
+    """Write :func:`_failure_kind` under ``kind`` onto each failed or errored test's entry."""
+    for t in _failures(observed):
+        t["kind"] = _failure_kind(t, tree)
 
 
-def _classify(
-    observed: dict, baseline_precedes: bool, failed: list[dict]
-) -> tuple[str, str]:
-    """Return the verdict and its sentence for ``observed``.
+def _failures(observed: dict) -> list[ObservedTest]:
+    """Return the entries of ``observed["tests"]`` whose outcome is ``failed`` or ``error``."""
+    tests: list[ObservedTest] = observed["tests"]
+    return [t for t in tests if t["outcome"] in ("failed", "error")]
 
-    ``failed`` is :func:`_kinded_failures` of ``observed``.
-    """
+
+def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
+    """Return the verdict and its sentence for ``observed``."""
+    failed = _failures(observed)
     if observed.get("internal_error"):
         return (
             REFUSED,
@@ -743,7 +764,8 @@ def _classify(
         )
     unreached = [t for t in failed if t["kind"] == "unreached"]
     timed_out = [t for t in failed if t["kind"] == "timeout"]
-    not_compared = [t for t in failed if t["kind"] in ("fixture", "test_code")]
+    not_compared_kinds: tuple[FailureKind, ...] = ("fixture", "test_code")
+    not_compared = [t for t in failed if t["kind"] in not_compared_kinds]
     behavioral = [t for t in failed if t["kind"] == "behavioral"]
     if timed_out:
         names = ", ".join(t["nodeid"] for t in timed_out)
@@ -1035,7 +1057,7 @@ def main() -> int:
 
         # _failure_kind resolves crash_path against tree, so it runs before the materialized tree
         # is removed below.
-        failed = _kinded_failures(observed, tree)
+        _record_failure_kinds(observed, tree)
         record["observed"] = {
             "collected": observed["collected"],
             "counts": {
@@ -1051,10 +1073,10 @@ def main() -> int:
                     "crash_path": t.get("crash_path"),
                     "crash_lineno": t.get("crash_lineno"),
                 }
-                for t in failed
+                for t in _failures(observed)
             ],
         }
-        verdict, why = _classify(observed, baseline_precedes, failed)
+        verdict, why = _classify(observed, baseline_precedes)
         record.update(verdict=verdict, why=why)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
