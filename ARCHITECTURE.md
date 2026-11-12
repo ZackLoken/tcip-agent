@@ -537,10 +537,11 @@ script-invoked doors demoted from them) except a door whose libraries record eac
 `propose_trait`, `save_annotations`, `write_subject_registry`, `run_hyperparameter_search`, and the
 three assessment doors `assess_checkpoint`, `assess_reserved_regions` and
 `calibrate_physical_scale`, whose assessment leaves its library's line): bare, the project's own
-log; `@audited(scope_arg=...)`, the decorator's one keyword, names the argument carrying a dataset
-or project location, located against the project (`registry_paths.located`) and resolved to its
-root by `dataset_scope_of` (`audit.py`). One door declares one: `register_dataset`
-(`tools/project_tools.py`, `scope_arg="dataset_root"`). A resolution that answers "no dataset"
+log; `@audited(scope_arg=...)` names the argument carrying a dataset or project location, located
+against the project (`registry_paths.located`) and resolved to its root by `dataset_scope_of`
+(`audit.py`), and `@audited(outcome=...)` names the facts of the door's answer its `ok` line
+carries. One door declares both: `register_dataset` (`tools/project_tools.py`,
+`scope_arg="dataset_root"`, `outcome=_registration_facts`). A resolution that answers "no dataset"
 leaves the entry in the project's own log; a resolver that raises refuses the call rather than
 filing it there.
 

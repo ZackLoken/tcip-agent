@@ -117,6 +117,7 @@ def test_an_unregistered_root_is_registered_by_the_person_the_request_names(
     assert answer == {
         "dataset_root": str(root),
         **identity.model_dump(mode="json"),
+        "minted": True,
         "repaired": None,
     }
     assert identity.crop == CROP
@@ -190,7 +191,8 @@ def test_a_registration_over_an_unreadable_bucket_answers_the_bucket_readers_ref
     """The refusal names the bucket; the identity and the registry are unchanged.
 
     The root's identity document is removed, so the registration reads the root's citations, and
-    the root's audit log gains the call's ``exception`` line.
+    the root's audit log gains the call's ``exception`` line, carrying none of the facts an answer
+    gives a registration's line.
     """
     from tests.test_registering_a_dataset_restores_or_refuses import (
         _damaged_bucket,
@@ -209,6 +211,7 @@ def test_a_registration_over_an_unreadable_bucket_answers_the_bucket_readers_ref
     (raised,) = audit_rows(root, "register_dataset")[len(lines) :]
     assert raised["status"] == "exception"
     assert raised["actor"] == actor(PERSON)
+    assert not {"dataset_id", "minted", "repaired"} & set(raised), raised
 
 
 def test_a_root_whose_document_is_gone_takes_back_its_id_and_says_so(
@@ -231,16 +234,28 @@ def test_a_root_whose_document_is_gone_takes_back_its_id_and_says_so(
 def test_a_damaged_document_one_id_cites_is_restored(
     opened_client: TestClient, opened_project: Path
 ) -> None:
-    """A document its model refuses at a registered root takes back the registry's id."""
+    """A document its model refuses at a registered root takes back the registry's id.
+
+    The registration's line, by the person, carries the id, that it was not minted, and the
+    answer's ``repaired`` sentence.
+    """
     root = _imaged(opened_project / "ds")
     registered = register_dataset_at(opened_project, root, crop=CROP)
     _rewritten(dataset_identity_path(root), {"crop": 5})
+    lines = audit_rows(root, "register_dataset")
 
     resp = _register(opened_client, root)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["id"] == registered
-    assert str(dataset_identity_path(root)) in resp.json()["repaired"]
+    answer = resp.json()
+    assert answer["id"] == registered
+    assert answer.get("minted") is False, answer
+    assert str(dataset_identity_path(root)) in answer["repaired"]
+    (line,) = audit_rows(root, "register_dataset")[len(lines) :]
+    assert line["actor"] == actor(PERSON)
+    assert line.get("dataset_id") == registered, line
+    assert line.get("minted") is False, line
+    assert line.get("repaired") == answer["repaired"]
 
 
 def test_a_damaged_document_nothing_cites_refuses_and_stays(

@@ -1,8 +1,8 @@
 """The audit log: one append-only store under a dataset root or a project root.
 
 The log's key is :func:`audit_log_key`. :func:`audited` records a decorated door's calls
-(timestamp, tool name, arguments, status and duration); :func:`record_event_or_raise` records for
-code that is not a door.
+(timestamp, tool name, arguments, status and duration, and the facts of its answer its
+``outcome`` names); :func:`record_event_or_raise` records for code that is not a door.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import functools
 import inspect
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, overload
@@ -182,13 +182,8 @@ def audit_line(
     one. A key of ``extra`` the line declares as a field of its own is no extra fact and is
     dropped. An argument with no JSON form refuses (``pydantic.ValidationError``).
     """
-    return AuditLine.model_validate(
+    return _validated_line(
         {
-            **{
-                k: v
-                for k, v in (extra or {}).items()
-                if k not in AuditLine.model_fields
-            },
             **dict(
                 agent_identity.current() or agent_identity.RecordedIdentity()
             ),
@@ -197,6 +192,27 @@ def audit_line(
             "arguments": _redact(arguments) if arguments else {},
             "status": status,
             "actor": actor,
+        },
+        extra,
+    )
+
+
+def _validated_line(
+    fields: dict[str, Any], extra: Mapping[str, object] | None
+) -> AuditLine:
+    """Return ``fields`` validated as an :class:`AuditLine` carrying ``extra`` as its extra facts.
+
+    A key of ``extra`` the line declares as a field of its own is dropped. A value with no JSON
+    form refuses (``pydantic.ValidationError``).
+    """
+    return AuditLine.model_validate(
+        {
+            **{
+                k: v
+                for k, v in (extra or {}).items()
+                if k not in AuditLine.model_fields
+            },
+            **fields,
         }
     )
 
@@ -252,12 +268,15 @@ def dataset_scope_of(value: Path) -> Path | None:
 def audited[Door: Callable[..., Any]](fn: Door) -> Door: ...
 @overload
 def audited[Door: Callable[..., Any]](
-    *, scope_arg: str | None = None
+    *,
+    scope_arg: str | None = None,
+    outcome: Callable[[Any], Mapping[str, object]] | None = None,
 ) -> Callable[[Door], Door]: ...
 def audited(
     fn: Callable | None = None,
     *,
     scope_arg: str | None = None,
+    outcome: Callable[[Any], Mapping[str, object]] | None = None,
 ) -> Callable:
     """Decorate a door so each call that acts leaves one audit line.
 
@@ -269,10 +288,14 @@ def audited(
     (:func:`~tcip_mcp.registry_paths.located`), and the entry keeps the caller's spelling.
     ``project`` and ``workspace`` are not recorded as arguments, the rest are recorded as their
     JSON form taken before the body runs (:class:`AuditLine`), so an argument with no JSON form
-    refuses the call unrun, and an ``actor`` parameter is recorded as the entry's actor. A
-    failed append after a return raises :class:`MutationCommittedWithoutAuditLineError`; after a
-    raise the body's exception propagates and the failed append is logged. A declared scope that
-    cannot be resolved refuses the call.
+    refuses the call unrun, and an ``actor`` parameter is recorded as the entry's actor. With
+    ``outcome``, an ``ok`` entry also carries, beside the arguments, the facts ``outcome`` returns
+    for the door's answer, as extra facts (:func:`audit_line`), ``outcome`` called once for a call
+    that returns its answer and never for one returning its error dict or raising. A failed
+    append after a return, or an ``outcome`` that raises or returns a fact with no JSON form,
+    raises :class:`MutationCommittedWithoutAuditLineError` and appends nothing; after a raise the
+    body's exception propagates and the failed append is logged. A declared scope that cannot be
+    resolved refuses the call.
     """
 
     def decorate(func: Callable) -> Callable:
@@ -306,19 +329,28 @@ def audited(
             if scope_arg and where is not None:
                 bound.arguments[scope_arg] = where = located(where, project)
 
-            def record(status: str, error: str | None = None) -> None:
-                """Resolve the scope, stamp the outcome, and append. Raises what it cannot do."""
+            def record(
+                status: str,
+                error: str | None = None,
+                facts: Mapping[str, object] | None = None,
+            ) -> None:
+                """Resolve the scope, stamp the outcome and its facts, and append.
+
+                Raises what it cannot do.
+                """
                 # Resolved after the body, so a tool that creates the dataset it names is
                 # recorded in that dataset's own log rather than the project's.
                 scope = dataset_scope_of(where) if where is not None else None
-                line = begun.model_copy(
-                    update={
+                line = _validated_line(
+                    {
+                        **begun.model_dump(),
                         "status": status,
                         "error": error,
                         "duration_ms": round(
                             (time.monotonic() - t0) * 1000, 1
                         ),
-                    }
+                    },
+                    facts,
                 )
                 append(
                     audit_log_key(scope if scope is not None else project),
@@ -343,7 +375,9 @@ def audited(
             if isinstance(result, dict) and result.get("error") is not None:
                 return result  # a refusal returned as the error dict every tool returns: no act
             try:
-                record("ok")
+                record(
+                    "ok", facts=None if outcome is None else outcome(result)
+                )
             except Exception as exc:
                 logger.warning(
                     "Failed to write the audit entry for %s",

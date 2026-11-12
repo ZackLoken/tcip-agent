@@ -251,6 +251,7 @@ export interface RegisteredDataset {
   id: string;
   fingerprint: string | null;
   dataset_root: string;
+  minted: boolean;
   repaired: string | null;
 }
 

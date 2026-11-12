@@ -215,11 +215,12 @@ class RegisterPayload(BaseModel):
 class RegisteredDataset(DatasetRecord):
     """The identity a registration wrote at ``dataset_root``.
 
-    ``repaired`` is ``register_dataset``'s sentence naming the id it restored, ``None`` when it
-    kept or minted one.
+    ``minted`` is whether ``register_dataset`` minted the id; ``repaired`` is its sentence naming
+    the id it restored, ``None`` when it kept or minted one.
     """
 
     dataset_root: str
+    minted: bool
     repaired: str | None = None
 
 
