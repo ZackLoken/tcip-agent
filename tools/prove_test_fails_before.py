@@ -231,12 +231,12 @@ def git_output(*args: str) -> str:
 
 
 def _is_test_side(path: str) -> bool:
-    """Return whether ``path``, with either slash, lies under ``tests/``.
+    """Return whether the forward-slash ``path`` lies under ``tests/``.
 
     A path under ``tests/`` is the test side: the tool overlays it from the current tree, so a diff
     in it is not the change under test.
     """
-    return path.replace("\\", "/").startswith(f"{TEST_TREE}/")
+    return path.startswith(f"{TEST_TREE}/")
 
 
 def _uncommitted_paths() -> list[str]:
