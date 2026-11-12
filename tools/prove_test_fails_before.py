@@ -701,22 +701,24 @@ def _not_counted(entry: dict) -> str:
     return f"{where}: a fixture failed during {entry['phase']} ({headline})"
 
 
-def _kinded_failures(observed: dict, tree: Path) -> list[dict]:
-    """Return each failed or errored test's entry with its :func:`_failure_kind` under ``kind``."""
-    return [
-        {**t, "kind": _failure_kind(t, tree)}
-        for t in observed["tests"]
-        if t["outcome"] in ("failed", "error")
-    ]
+def _record_failure_kinds(observed: dict, tree: Path) -> None:
+    """Write :func:`_failure_kind` under ``kind`` onto each failed or errored test's entry."""
+    for t in observed["tests"]:
+        if t["outcome"] in ("failed", "error"):
+            t["kind"] = _failure_kind(t, tree)
 
 
-def _classify(
-    observed: dict, baseline_precedes: bool, failed: list[dict]
-) -> tuple[str, str]:
+def _failures(observed: dict) -> list[dict]:
+    """Return the entries of ``observed["tests"]`` that carry a ``kind``."""
+    return [t for t in observed["tests"] if "kind" in t]
+
+
+def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
     """Return the verdict and its sentence for ``observed``.
 
-    ``failed`` is :func:`_kinded_failures` of ``observed``.
+    Reads the ``kind`` each failure carries (:func:`_record_failure_kinds`).
     """
+    failed = _failures(observed)
     if observed.get("internal_error"):
         return (
             REFUSED,
@@ -1035,7 +1037,7 @@ def main() -> int:
 
         # _failure_kind resolves crash_path against tree, so it runs before the materialized tree
         # is removed below.
-        failed = _kinded_failures(observed, tree)
+        _record_failure_kinds(observed, tree)
         record["observed"] = {
             "collected": observed["collected"],
             "counts": {
@@ -1051,10 +1053,10 @@ def main() -> int:
                     "crash_path": t.get("crash_path"),
                     "crash_lineno": t.get("crash_lineno"),
                 }
-                for t in failed
+                for t in _failures(observed)
             ],
         }
-        verdict, why = _classify(observed, baseline_precedes, failed)
+        verdict, why = _classify(observed, baseline_precedes)
         record.update(verdict=verdict, why=why)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
