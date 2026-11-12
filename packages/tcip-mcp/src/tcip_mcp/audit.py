@@ -1,8 +1,8 @@
 """The audit log: one append-only store under a dataset root or a project root.
 
 The log's key is :func:`audit_log_key`. :func:`audited` records a decorated door's calls
-(timestamp, tool name, arguments, status and duration); :func:`record_event_or_raise` records for
-code that is not a door.
+(timestamp, tool name, arguments, status and duration, and the facts of its answer its
+``outcome`` names); :func:`record_event_or_raise` records for code that is not a door.
 """
 
 from __future__ import annotations
@@ -290,11 +290,12 @@ def audited(
     JSON form taken before the body runs (:class:`AuditLine`), so an argument with no JSON form
     refuses the call unrun, and an ``actor`` parameter is recorded as the entry's actor. With
     ``outcome``, an ``ok`` entry also carries, beside the arguments, the facts ``outcome`` returns
-    for the door's answer, as extra facts (:func:`audit_line`), ``outcome`` called once per ``ok``
-    entry and never otherwise. A failed append after a return, or an ``outcome`` that raises or
-    returns a fact with no JSON form, raises :class:`MutationCommittedWithoutAuditLineError` and
-    appends nothing; after a raise the body's exception propagates and the failed append is
-    logged. A declared scope that cannot be resolved refuses the call.
+    for the door's answer, as extra facts (:func:`audit_line`), ``outcome`` called once for a call
+    that returns its answer and never for one returning its error dict or raising. A failed
+    append after a return, or an ``outcome`` that raises or returns a fact with no JSON form,
+    raises :class:`MutationCommittedWithoutAuditLineError` and appends nothing; after a raise the
+    body's exception propagates and the failed append is logged. A declared scope that cannot be
+    resolved refuses the call.
     """
 
     def decorate(func: Callable) -> Callable:

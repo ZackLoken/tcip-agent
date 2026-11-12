@@ -77,8 +77,8 @@ one way a session gains them; `None` is an MCP client's person), so any other pa
 its name, stays the client's (the knowledge door acts on none, the project-creation door on `actor`
 alone), and a call naming an argument outside the tool's listed schema, a supplied one included,
 is refused before the tool runs; a tool that changes state is `@audited`, by that `actor`, unless
-the library function it calls records its own event with facts the decorator cannot carry (a
-digest, what was written), and then it is not decorated. The decorator carries the call's
+the library function it calls records its own event with facts the door's answer does not hold,
+and then it is not decorated. The decorator carries the call's
 arguments and, on its `ok` line, the facts of the answer the door's `outcome` names; it writes no
 line for a call returning its error dict and an exception line for a call that raises. A
 read-only tool (a status poll, a listing, a document served back) leaves none, so the audit log
