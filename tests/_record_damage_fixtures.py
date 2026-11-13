@@ -1,6 +1,7 @@
 """Corrupting a stored record or log entry, or a root's whole database.
 
-Bytes that will not decode are put behind a key in the database, or over the database file.
+Bytes that will not decode, or that decode and are refused, are put behind a key in the database,
+or over the database file.
 """
 
 from __future__ import annotations
@@ -19,6 +20,12 @@ if TYPE_CHECKING:
 
 NON_DATABASE = b"not a database, only bytes under its name" * 100
 """Bytes that fail the store's identity check."""
+
+REFUSED_DOCUMENT = b'{"frame": "not a label document"}'
+"""Bytes that decode as JSON and that the label-document reader refuses."""
+
+UNDECODABLE = b"{not valid json"
+"""Bytes that do not decode as JSON."""
 
 
 @contextmanager
@@ -93,5 +100,5 @@ def damage_last_log_entry(key: ts.Key) -> str:
     entry.
     """
     past = ts.read_log(key).cursor
-    damage_log_entry(key, -1, b"{not valid json")
+    damage_log_entry(key, -1, UNDECODABLE)
     return past

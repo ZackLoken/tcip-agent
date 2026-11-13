@@ -570,11 +570,11 @@ def test_doctor_warns_on_an_unconfirmed_latest_revision(
 def test_doctor_reports_an_undecodable_trait_record_without_aborting(
     tmp_path: Path,
 ) -> None:
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, _images = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
-    damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
+    damage_record(traits.trait_key(root, "leaf"), UNDECODABLE)
 
     found = _diagnosed(root)
 
@@ -812,7 +812,7 @@ def test_a_registry_that_will_not_read_hides_no_bucket_that_will_not(
         load_registered_checkpoint,
         registry_index_key,
     )
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, images = _layout_project(tmp_path, "2026-03-04")
     damaged = _reviewed_bucket(root, images, ("IMG_P",))
@@ -827,7 +827,7 @@ def test_a_registry_that_will_not_read_hides_no_bucket_that_will_not(
         ("IMG_Q",),
         load_registered_checkpoint(checkpoint, project=root).producer,
     )
-    damage_record(registry_index_key(root), b"{not valid json")
+    damage_record(registry_index_key(root), UNDECODABLE)
 
     found = _diagnosed(root)
 
@@ -844,11 +844,11 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(
 ) -> None:
     """A project record that stops decoding after the server started is an error finding."""
     from tcip_mcp.project_record import project_record_key
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, _images = _layout_project(tmp_path, "2026-03-04")
     bound = binding_for(root)
-    damage_record(project_record_key(str(root)), b"{not valid json")
+    damage_record(project_record_key(str(root)), UNDECODABLE)
 
     found = _answered(bound)
 

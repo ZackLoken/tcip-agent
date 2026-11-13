@@ -18,12 +18,12 @@ import pytest
 from tcip_mcp.dataset_layout import label_key_of
 from tests import _trait_fixtures as fx
 from tests._mapping_fixtures import POSITION_ERROR_M
-from tests._record_damage_fixtures import damage_record
-from tests._server_calls import called_through_the_server
-from tests.test_a_raised_refusal_reaches_the_agent_with_its_sentence import (
+from tests._record_damage_fixtures import (
     REFUSED_DOCUMENT,
     UNDECODABLE,
+    damage_record,
 )
+from tests._server_calls import called_through_the_server
 from tests.test_orthomosaic_tools import (
     _canopy_setup,
     _plant_registry,

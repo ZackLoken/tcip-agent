@@ -543,7 +543,7 @@ def test_list_reports_the_record_across_four_project_states(
     from tcip_mcp.project_record import project_record_key
     from tcip_store.file_backend import database_file
     from tcip_web.routes.projects import ReadProject, UnreadProject
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
     from tests._web_fixtures import INVARIANCES
 
     recorded = _make_project(workspace_dir, "currant_bud_recorded").root
@@ -552,7 +552,7 @@ def test_list_reports_the_record_across_four_project_states(
     (recordless / ".tcip").mkdir(parents=True)
 
     undecodable = _make_project(workspace_dir, "currant_bud_undecodable").root
-    damage_record(project_record_key(str(undecodable)), b"{not valid json")
+    damage_record(project_record_key(str(undecodable)), UNDECODABLE)
 
     invalid = _make_project(workspace_dir, "currant_bud_invalid").root
     key = project_record_key(str(invalid))
