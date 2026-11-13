@@ -1620,7 +1620,7 @@ def build_mapping(
     plants: list[PlantRecord],
     *,
     name: str,
-    dataset_id: str,
+    dataset_id: DatasetId,
     project: Path | str,
     plant_registry: PlantRegistryReference,
     dates: list[str] | None = None,
