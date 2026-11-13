@@ -163,10 +163,10 @@ def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_
 
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tests._producer_fixtures import image_label_key
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     images_dir = _multiband_detection_fixture(tmp_path)
-    damage_record(image_label_key(images_dir / "a.tif"), b"{not json")
+    damage_record(image_label_key(images_dir / "a.tif"), UNDECODABLE)
 
     with pytest.raises(UnreadableLabelDocumentError):
         dataset_over(

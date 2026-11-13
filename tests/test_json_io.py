@@ -793,11 +793,11 @@ def test_a_record_that_does_not_decode_raises_the_one_unreadable_refusal(
     tmp_path: Path,
 ) -> None:
     from tests._producer_fixtures import store_labels
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     store_labels(_labeled_image(tmp_path), document_payload([], 640, 480))
     key = _key(tmp_path)
-    damage_record(key, b"not json {][")
+    damage_record(key, UNDECODABLE)
 
     with pytest.raises(UnreadableLabelDocumentError, match="does not decode"):
         _read(key)

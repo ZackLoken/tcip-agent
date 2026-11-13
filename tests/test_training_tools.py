@@ -428,11 +428,12 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._producer_fixtures import staged_layout
+    from tests._record_damage_fixtures import UNDECODABLE
 
     imgs = image_dir(tmp_path, UNDATED_BUCKET)
     _bud_image(imgs / "ann.jpg")
     _bud_image(imgs / "bad.jpg")
-    _damaged(imgs / "bad.jpg", b"{not json")
+    _damaged(imgs / "bad.jpg", UNDECODABLE)
 
     data_cfg = {
         "images_dir": str(imgs),
@@ -745,9 +746,10 @@ def test_preflight_reserved_regions_report_an_unreadable_label_by_name(
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._record_damage_fixtures import UNDECODABLE
 
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
-    _damaged(images_dir / "mosaic.png", b"{not json")
+    _damaged(images_dir / "mosaic.png", UNDECODABLE)
     cfg = training_config(
         tmp_path,
         weights_statistics(BUILT_DETECTOR),

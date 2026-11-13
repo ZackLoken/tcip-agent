@@ -43,6 +43,7 @@ from tests._busy_store_fixtures import (
     waiting,
 )
 from tests._record_damage_fixtures import (
+    UNDECODABLE,
     damage_log_entry,
     damage_record,
     unopenable_database,
@@ -865,7 +866,7 @@ def test_absence_and_corruption_are_different_answers(store: Harness) -> None:
 
     ts.replace(key, {"n": 1})
     assert ts.read(key) == {"n": 1}
-    damage_record(key, b"{not json at all")
+    damage_record(key, UNDECODABLE)
     with pytest.raises(ts.DecodeError):
         ts.read(key, default={"fallback": True})
 

@@ -20,6 +20,7 @@ from tests._producer_fixtures import (
     kept,
     write_image,
 )
+from tests._record_damage_fixtures import UNDECODABLE
 from tests._training_values import IOU_THRESHOLD, TRIAGE_WEIGHTS
 
 if TYPE_CHECKING:
@@ -108,7 +109,7 @@ def viz_bucket(viz_dataset: WrittenDataset) -> WrittenDataset:
     return viz_dataset
 
 
-def _damage(key: Key, stored: bytes = b"{not json") -> None:
+def _damage(key: Key, stored: bytes = UNDECODABLE) -> None:
     """Replace the record ``key`` names in the store by ``stored``."""
     from tests._record_damage_fixtures import damage_record
 

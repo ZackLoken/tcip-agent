@@ -77,10 +77,10 @@ def _stored(image: Path) -> list[Annotation]:
 
 def _unreadable(image: Path) -> None:
     """Write a label document for ``image`` whose stored bytes no longer decode."""
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     _write_gt(image, [(1, 1, 3, 3)])
-    damage_record(image_label_key(image), b"not json {][")
+    damage_record(image_label_key(image), UNDECODABLE)
 
 
 def _write_pred(

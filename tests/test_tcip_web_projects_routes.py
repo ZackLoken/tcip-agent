@@ -171,7 +171,7 @@ def test_projects_report_a_label_problem_and_still_list(
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import image_label_key, label_image
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     proj = _make_project(
         workspace_dir,
@@ -183,7 +183,7 @@ def test_projects_report_a_label_problem_and_still_list(
     label_image(
         bad, [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8
     )
-    damage_record(image_label_key(bad), b"not json {][")
+    damage_record(image_label_key(bad), UNDECODABLE)
 
     resp = client.get("/api/projects")
     assert resp.status_code == 200

@@ -37,12 +37,11 @@ def _label(root: Path, stem: str, annotations: list[Annotation]) -> None:
 
 def _unreadable(root: Path, stem: str) -> None:
     """Write a label document of image ``stem`` of capture :data:`DATE` that no longer decodes."""
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     _label(root, stem, [box_annotation(1, 1, 2, 2)])
     damage_record(
-        image_label_key(image_dir(root, DATE) / f"{stem}.jpg"),
-        b"not json {][",
+        image_label_key(image_dir(root, DATE) / f"{stem}.jpg"), UNDECODABLE
     )
 
 

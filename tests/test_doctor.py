@@ -858,10 +858,10 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(
 
 def _unreadable_label(image: Path) -> None:
     """Write a label document for ``image`` and damage its stored bytes so they do not decode."""
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     label_image(image, [], 32, 32)
-    damage_record(image_label_key(image), b"not json {][")
+    damage_record(image_label_key(image), UNDECODABLE)
 
 
 def test_doctor_flags_an_unreadable_label(tmp_path: Path) -> None:

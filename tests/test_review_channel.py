@@ -105,9 +105,9 @@ def _no_ground_truth(root: Path) -> bool:
 
 def _damage(root: Path, bucket: str, stem: str) -> None:
     """Damage ``stem``'s published document in ``bucket`` so its stored bytes do not decode."""
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
-    damage_record(prediction_key(root, bucket, stem), b"{not json")
+    damage_record(prediction_key(root, bucket, stem), UNDECODABLE)
 
 
 def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(

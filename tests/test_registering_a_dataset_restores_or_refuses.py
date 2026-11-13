@@ -284,11 +284,11 @@ def test_the_check_of_a_refused_identity_at_a_root_cited_by_two_ids_names_them_a
 def _damaged_bucket(project: Path) -> tuple[Path, str]:
     """Return a registered root and the name of its one bucket, whose record will not decode."""
     from tcip_mcp.dataset_layout import bucket_key
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root = project / "ds"
     (name,) = _published(project, root, "first/2026-01-01")
-    damage_record(bucket_key(root, name), b"{not json")
+    damage_record(bucket_key(root, name), UNDECODABLE)
     return root, name
 
 
