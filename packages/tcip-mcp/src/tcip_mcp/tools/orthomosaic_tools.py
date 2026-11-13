@@ -277,8 +277,8 @@ def _segment_counts(
     ``CanopySegmentDisclosure`` and each registry plant that regime leaves uncounted, with why.
     The canopy document is the raster's own label document
     (:func:`~tcip_mcp.dataset_layout.label_key_of`). Refuses (``ValueError``) a raster with no
-    canopy document, advising its authoring, and a stored one that could not be read, with the
-    reader's sentence alone.
+    canopy document, advising its authoring, and a canopy document that could not be read, naming
+    the reader's refusal and giving no authoring advice.
     """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,

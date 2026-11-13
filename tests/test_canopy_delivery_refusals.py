@@ -1,10 +1,11 @@
 """The canopy delivery tells an absent canopy document from one that could not be read.
 
-Each scene is ``test_orthomosaic_tools``'s canopy scene: a raster bucket published through the
-platform, a registry registered through it, and the canopy boundaries written by the platform's
-own label writer, then damaged where the case is a stored record that will not read
-(``tests._record_damage_fixtures``). The tool cases call ``deliver_orthomosaic_plant_counts``
-through the server; the route case posts to the count route.
+Each tool case's scene is ``test_orthomosaic_tools``'s canopy scene, the route case's the route
+tests' (``test_tcip_web_results_routes._orthomosaic``, where the project is the dataset root).
+Each is a raster bucket published through the platform, a registry registered through it, and the
+canopy boundaries written by the platform's own label writer, then damaged where the case is a
+stored record that will not read (``tests._record_damage_fixtures``). The tool cases call
+``deliver_orthomosaic_plant_counts`` through the server; the route case posts to the count route.
 """
 
 from __future__ import annotations
