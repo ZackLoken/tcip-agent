@@ -161,6 +161,26 @@ describe("ResultsTab unreadable trait visibility", () => {
   });
 });
 
+describe("ResultsTab plant mapping picker", () => {
+  it("shows the reason in place of the picker when the mapping listing is refused", async () => {
+    vi.spyOn(resultsApi, "listPlantMappings").mockRejectedValue(new Error("mappings refused"));
+
+    render(<ResultsTab />);
+
+    expect(await screen.findByText(/mappings refused/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Phenology" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Choose a mapping" })).not.toBeInTheDocument();
+  });
+
+  it("offers the listed names when the mapping listing answers", async () => {
+    render(<ResultsTab />);
+
+    const [name] = RESULTS_ANSWERS.mapping_names.names;
+    expect(await screen.findByRole("option", { name })).toBeInTheDocument();
+    expect(screen.queryByText(/Could not load the plant mappings/)).not.toBeInTheDocument();
+  });
+});
+
 describe("ResultsTab evidence gate", () => {
   async function renderAndCompute() {
     render(<ResultsTab />);

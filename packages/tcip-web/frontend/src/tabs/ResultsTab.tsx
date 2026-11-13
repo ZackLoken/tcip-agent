@@ -81,6 +81,7 @@ export function ResultsTab() {
   // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");
   const [mappings, setMappings] = useState<MappingNames | null>(null);
+  const [mappingsError, setMappingsError] = useState<string | null>(null);
 
   // Dataset tree (dates + the buckets published over each) drives the structured per-date picker
   // below.
@@ -172,8 +173,14 @@ export function ResultsTab() {
     if (!projectRoot) return;
     void resultsApi
       .listPlantMappings()
-      .then(setMappings)
-      .catch(() => setMappings(null));
+      .then((res) => {
+        setMappings(res);
+        setMappingsError(null);
+      })
+      .catch((e) => {
+        setMappings(null);
+        setMappingsError(`Could not load the plant mappings: ${messageOf(e)}`);
+      });
   }, [projectRoot]);
 
   useEffect(() => {
@@ -687,19 +694,23 @@ export function ResultsTab() {
                 <label className="tcip-label" htmlFor="phenology-mapping">
                   Plant mapping
                 </label>
-                <select
-                  id="phenology-mapping"
-                  className="tcip-select"
-                  value={mappingName}
-                  onChange={(e) => setMappingName(e.target.value)}
-                >
-                  <option value="">Choose a mapping</option>
-                  {(mappings?.names ?? []).map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                {mappingsError ? (
+                  <div className="tcip-problem">{mappingsError}</div>
+                ) : (
+                  <select
+                    id="phenology-mapping"
+                    className="tcip-select"
+                    value={mappingName}
+                    onChange={(e) => setMappingName(e.target.value)}
+                  >
+                    <option value="">Choose a mapping</option>
+                    {(mappings?.names ?? []).map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <label className="tcip-label" htmlFor="phenology-plants">
                   Plants
                 </label>
