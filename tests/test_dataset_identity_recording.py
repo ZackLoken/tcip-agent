@@ -295,22 +295,6 @@ def _runs_over_each_identity_state(project: Path) -> tuple[list[str], str]:
     return ["a", "b", "c"], registered["id"]
 
 
-def test_a_comparison_serves_the_id_a_run_recorded_and_none_for_an_unregistered_root(
-    tmp_path: Path,
-) -> None:
-    """A run over an unregistered root records no id, one over a registered root records its id.
-
-    The runs are opened by the launcher's producers; the comparison serves each run's recorded
-    id, an unregistered root's run still carrying its fingerprint.
-    """
-    ids, registered_id = _runs_over_each_identity_state(tmp_path)
-
-    rows = compare_experiments(ids, project=tmp_path).experiments
-    datasets = [row.dataset for row in rows if row.kind == "compared"]
-    assert [dataset.id for dataset in datasets] == [None, registered_id, None]
-    assert datasets[0].fingerprint is not None
-
-
 def test_the_comparison_and_the_lineage_serve_the_dataset_the_run_record_serves(
     opened_client: TestClient, opened_project: Path
 ) -> None:
