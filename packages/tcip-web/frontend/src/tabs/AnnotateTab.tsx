@@ -983,6 +983,7 @@ export function AnnotateTab() {
     mountedRef.current = true;
     return () => {
       flushLeaving();
+      postHeldContributions();
       mountedRef.current = false; // the departing save may still land, but adopts nothing
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

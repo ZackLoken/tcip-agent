@@ -291,6 +291,25 @@ describe("AnnotateTab session contributions", () => {
     expect(useStore.getState().heldContributions).toEqual([]);
   });
 
+  it("posts the open visit when the tab unmounts, and retires it once accepted", async () => {
+    useStore.setState({ user: "jordan" });
+    const view = render(<AnnotateTab />);
+    await waitFor(() =>
+      expect(useStore.getState().sessionTracking.currentImageName).toBe(IMG1_NAME),
+    );
+    expect(sessionsApi.imageEvent).not.toHaveBeenCalled();
+
+    view.unmount();
+    await flush();
+
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
+      image_name: IMG1_NAME,
+      user: "jordan",
+    });
+    expect(useStore.getState().heldContributions).toEqual([]);
+  });
+
   it("records the session an accepted visit landed in, by the project and the answered stamp", async () => {
     useStore.setState({ user: "jordan" });
     await leaveFirstImage();
