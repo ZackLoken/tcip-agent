@@ -46,7 +46,9 @@ export function ProjectBreadcrumb() {
         setListingError(null);
       })
       .catch((e: unknown) => {
-        if (!canceled) setListingError(messageOf(e));
+        if (canceled) return;
+        setListing(null);
+        setListingError(messageOf(e));
       });
     return () => {
       canceled = true;

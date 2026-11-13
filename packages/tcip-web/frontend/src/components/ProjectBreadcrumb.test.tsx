@@ -193,6 +193,29 @@ describe("footer open state", () => {
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
   });
 
+  it("offers no dates from an earlier listing when the listing after a date switch is refused", async () => {
+    vi.mocked(api.projects.list)
+      .mockResolvedValueOnce(PROJECT_FIXTURES.picker_open)
+      .mockRejectedValue(new Error("relisting refused"));
+    // A fresh object, as each parse of the open route's answer is.
+    vi.mocked(api.projects.open).mockResolvedValue(structuredClone(openedAs(VALLEY)));
+    vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
+    render(<ProjectBreadcrumb />);
+    fireEvent.click(screen.getByTitle("Switch date"));
+    fireEvent.click(await screen.findByText(LATER));
+    await screen.findByText(/relisting refused/);
+
+    fireEvent.click(screen.getByTitle("Switch date"));
+
+    expect(screen.getAllByText(/relisting refused/)).toHaveLength(2);
+    const shown = useStore.getState().gui.dataset?.date;
+    const others = VALLEY.tree.captures.filter(({ name }) => name !== shown);
+    expect(others).not.toHaveLength(0);
+    for (const { name } of others) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+  });
+
   it("reads no project open only once nothing is open", () => {
     useStore.setState((st) => ({ gui: { ...st.gui, dataset: null }, openProject: null }));
     render(<ProjectBreadcrumb />);
