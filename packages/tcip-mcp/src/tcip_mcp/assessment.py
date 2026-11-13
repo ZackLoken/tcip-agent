@@ -456,7 +456,7 @@ def _selection_reference(
     samples: list[Sample],
     digest_of: dict[str, str],
     retained: list[RetainedFile],
-    dataset_id: str,
+    dataset_id: DatasetId,
 ) -> SelectionReference:
     """Return what an assessment measured of the selection at ``selection_dir``.
 
@@ -474,7 +474,7 @@ def _selection_reference(
 
 def _reference_sides(
     project: Path, selection_dir: str
-) -> tuple[Selection, list[Sample], list[Sample], str]:
+) -> tuple[Selection, list[Sample], list[Sample], DatasetId]:
     """Return the selection at ``selection_dir``, its calibration and holdout sides and dataset id.
 
     The id is the identity id of the one dataset root every sample of the selection lies under
