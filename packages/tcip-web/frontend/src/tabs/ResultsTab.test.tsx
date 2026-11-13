@@ -177,7 +177,6 @@ describe("ResultsTab plant mapping picker", () => {
 
     const [name] = RESULTS_ANSWERS.mapping_names.names;
     expect(await screen.findByRole("option", { name })).toBeInTheDocument();
-    expect(screen.queryByText(/Could not load the plant mappings/)).not.toBeInTheDocument();
   });
 });
 

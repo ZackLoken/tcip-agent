@@ -23,7 +23,6 @@ import {
   type DeliveryRefusal,
   type ExportCountCsvPayload,
   type ExportCsvPayload,
-  type MappingNames,
   OPERATIONALIZATION,
   type OperationalizationRefusal,
   type PhenologyAnswer,
@@ -36,6 +35,7 @@ import {
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { TabHeading } from "@/components/TabHeading";
+import { useMappingNames } from "@/hooks/useMappingNames";
 import { deliveredDatesLine } from "@/lib/disclosureLines";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { bucketsForDate } from "@/lib/openProject";
@@ -80,8 +80,7 @@ export function ResultsTab() {
 
   // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");
-  const [mappings, setMappings] = useState<MappingNames | null>(null);
-  const [mappingsError, setMappingsError] = useState<string | null>(null);
+  const { mappings, error: mappingsError } = useMappingNames(projectRoot);
 
   // Dataset tree (dates + the buckets published over each) drives the structured per-date picker
   // below.
@@ -166,20 +165,6 @@ export function ResultsTab() {
       .catch((e) => {
         setTraitsListing(null);
         setTraitError(`Could not load this project's registered traits: ${messageOf(e)}`);
-      });
-  }, [projectRoot]);
-
-  useEffect(() => {
-    if (!projectRoot) return;
-    void resultsApi
-      .listPlantMappings()
-      .then((res) => {
-        setMappings(res);
-        setMappingsError(null);
-      })
-      .catch((e) => {
-        setMappings(null);
-        setMappingsError(`Could not load the plant mappings: ${messageOf(e)}`);
       });
   }, [projectRoot]);
 
