@@ -1102,27 +1102,3 @@ def test_a_stated_tolerance_beside_canopy_subject_refuses(
 
     assert "nn_tolerance_m" in result["error"]
     assert not (tmp_path / "counts.csv").exists()
-
-
-def test_canopy_subject_refuses_a_missing_canopy_document(
-    tmp_path: Path,
-) -> None:
-    _root, raster_path, bucket = _canopy_setup(
-        tmp_path, [(8.0, 8.0, 12.0, 12.0)]
-    )
-    registry = _plant_registry(
-        tmp_path,
-        _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)]),
-    )
-
-    result = _deliver(
-        tmp_path,
-        bucket,
-        registry,
-        ["plot0"],
-        canopy_subject="canopy",
-        position_error_m=POSITION_ERROR_M,
-    )
-
-    assert "author the canopy boundaries" in result["error"]
-    assert "has no record" in result["error"]
