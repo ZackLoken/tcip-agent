@@ -17,6 +17,7 @@ import {
   UNREAD,
   type UnreadSelectionChoice,
 } from "@/api/types.generated";
+import { ErrorRetry } from "@/components/ErrorRetry";
 
 /** Shown in place of the partition choices when the listing found none. */
 export const NO_OTHER_PARTITION =
@@ -77,7 +78,7 @@ export interface LaunchPickerProps {
     /** Set when the rows themselves failed to load: rendered in place of emptyMessage, with
      * onRetry as its Retry control, the way the runs list reports its own load failure. */
     error?: string;
-    onRetry?: () => void;
+    onRetry: () => void;
   };
   /** Called once a row transitions into the selected state (never on deselection), so a caller
    * can fetch that row's own Data choices lazily instead of prefetching every row's on open. */
@@ -126,16 +127,7 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
       <div>
         <div className="tcip-heading mb-1">{list.title}</div>
         {list.error ? (
-          <div className="text-[13px] tcip-problem">
-            {list.error}{" "}
-            <button
-              type="button"
-              className="tcip-btn text-[13px] ml-1"
-              onClick={() => list.onRetry?.()}
-            >
-              Retry
-            </button>
-          </div>
+          <ErrorRetry message={list.error} onRetry={list.onRetry} className="text-[13px]" />
         ) : list.rows.length === 0 ? (
           <div className="text-[13px] text-tcip-muted">{list.emptyMessage}</div>
         ) : (

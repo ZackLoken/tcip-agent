@@ -16,6 +16,7 @@ import {
   NOTHING_STATED,
   type Stated,
 } from "@/api/types.generated";
+import { ErrorRetry } from "@/components/ErrorRetry";
 import { ModelPicker } from "@/components/ModelPicker";
 import { TabHeading } from "@/components/TabHeading";
 import { unended } from "@/hooks/jobPoll";
@@ -361,14 +362,7 @@ export function InferenceTab() {
         <ModelPicker id="inference-model-select" value={model} onChange={setModel} />
 
         <div className="tcip-label mb-1">Dates</div>
-        {datesError && (
-          <div className="tcip-problem mb-1">
-            {datesError}{" "}
-            <button className="tcip-btn ml-1" onClick={refreshDates}>
-              Retry
-            </button>
-          </div>
-        )}
+        {datesError && <ErrorRetry message={datesError} onRetry={refreshDates} className="mb-1" />}
         {!datasetRoot ? (
           <p className="text-tcip-muted mb-3">No project is open.</p>
         ) : dates.length === 0 ? (
@@ -402,12 +396,7 @@ export function InferenceTab() {
           Assessment
         </label>
         {assessmentsError && (
-          <div className="tcip-problem mb-1">
-            {assessmentsError}{" "}
-            <button className="tcip-btn ml-1" onClick={refreshAssessments}>
-              Retry
-            </button>
-          </div>
+          <ErrorRetry message={assessmentsError} onRetry={refreshAssessments} className="mb-1" />
         )}
         <select
           id="inference-assessment"
@@ -522,12 +511,7 @@ export function InferenceTab() {
       <div className="p-4 overflow-auto">
         <div className="tcip-heading mb-3">Jobs</div>
         {jobsError && (
-          <div className="tcip-problem mb-2">
-            {jobsError}{" "}
-            <button className="tcip-btn ml-1" onClick={() => void refreshJobs()}>
-              Retry
-            </button>
-          </div>
+          <ErrorRetry message={jobsError} onRetry={() => void refreshJobs()} className="mb-2" />
         )}
         {listedJobs.length === 0 ? (
           !jobsError && <div className="text-tcip-muted">No jobs.</div>

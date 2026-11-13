@@ -15,6 +15,7 @@ import {
   TRIAL,
 } from "@/api/types.generated";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
+import { ErrorRetry } from "@/components/ErrorRetry";
 import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
@@ -657,12 +658,11 @@ export function TrainingTab() {
         )}
 
         {runsError && (
-          <div className="text-[13px] tcip-problem mb-2">
-            {runsError}{" "}
-            <button className="tcip-btn text-[13px] ml-1" onClick={() => void refreshRuns()}>
-              Retry
-            </button>
-          </div>
+          <ErrorRetry
+            message={runsError}
+            onRetry={() => void refreshRuns()}
+            className="text-[13px] mb-2"
+          />
         )}
         {empty && !runsError && <RunMonitorEmpty>No runs.</RunMonitorEmpty>}
         <ul className="space-y-1">
