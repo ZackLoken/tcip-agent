@@ -256,6 +256,16 @@ describe("SetupTab trait revisions", () => {
   });
 });
 
+function fillAndBuild() {
+  fireEvent.change(screen.getByLabelText("Mapping"), {
+    target: { value: "valley-2026" },
+  });
+  fireEvent.change(screen.getByLabelText("Plant registry"), {
+    target: { value: "valley-plants" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Build" }));
+}
+
 describe("SetupTab plant-mapping build: match radius", () => {
   const {
     mapping_built: BUILT,
@@ -265,16 +275,6 @@ describe("SetupTab plant-mapping build: match radius", () => {
     mapping_left_out: LEFT_OUT,
     mapping_loaded: LOADED,
   } = RESULTS_ANSWERS;
-
-  function fillAndBuild() {
-    fireEvent.change(screen.getByLabelText("Mapping"), {
-      target: { value: "valley-2026" },
-    });
-    fireEvent.change(screen.getByLabelText("Plant registry"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
-  }
 
   async function buildAnswering(mapping: ServedBuild) {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue(mapping);
@@ -463,11 +463,7 @@ describe("SetupTab plant-mapping listing", () => {
 
     render(<SetupTab />);
     expect(await screen.findByText(/mappings refused/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: "valley-2026" } });
-    fireEvent.change(screen.getByLabelText("Plant registry"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    fillAndBuild();
 
     await waitFor(() => expect(screen.queryByText(/mappings refused/)).not.toBeInTheDocument());
   });
