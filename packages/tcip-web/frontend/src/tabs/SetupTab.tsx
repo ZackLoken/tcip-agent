@@ -39,6 +39,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   // Every mapping name already persisted under the open project, for the picker below; a name
   // typed here that isn't in the list is a new mapping this build will create.
   const [mappings, setMappings] = useState<MappingNames | null>(null);
+  const [mappingsProblem, setMappingsProblem] = useState<string | null>(null);
   const [plantRegistry, setPlantRegistry] = useState("");
   const [statedRadius, setStatedRadius] = useState<number | "">("");
   const [radiusRationale, setRadiusRationale] = useState("");
@@ -52,8 +53,14 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const refreshMappingNames = useCallback(() => {
     void resultsApi
       .listPlantMappings()
-      .then(setMappings)
-      .catch(() => setMappings(null));
+      .then((res) => {
+        setMappings(res);
+        setMappingsProblem(null);
+      })
+      .catch((e: unknown) => {
+        setMappings(null);
+        setMappingsProblem(`Could not load the plant mappings: ${messageOf(e)}`);
+      });
   }, []);
 
   useEffect(() => {
@@ -132,11 +139,15 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
             }}
             list="plant-mapping-names"
           />
-          <datalist id="plant-mapping-names">
-            {(mappings?.names ?? []).map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
+          {mappingsProblem ? (
+            <div className="tcip-problem">{mappingsProblem}</div>
+          ) : (
+            <datalist id="plant-mapping-names">
+              {(mappings?.names ?? []).map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          )}
         </div>
         <div className="flex flex-col gap-1">
           <label className="tcip-label" htmlFor="plant-registry-name">
