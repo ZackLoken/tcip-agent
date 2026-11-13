@@ -366,7 +366,9 @@ def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
     A path with no dataset address to stage under runs no engine and writes no staging record;
     the same image under a dataset's images/ tree still proposes and stages.
     """
+    import tcip_store as ts
     from tcip_mcp.tools.proposal_tools import (
+        PROPOSAL_STAGING_STORE,
         ProposedCandidates,
         propose_annotations,
     )
@@ -381,7 +383,7 @@ def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
     assert isinstance(refused, dict) and "images/ tree" in refused["error"], (
         refused
     )
-    assert not (tmp_path / ".tcip" / "state" / "proposals").exists()
+    assert ts.keys(PROPOSAL_STAGING_STORE, str(tmp_path)) == []
 
     placed = image_dir(tmp_path, "2026-01-01") / "placed.jpg"
     _make_image(placed)

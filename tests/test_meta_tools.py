@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -424,9 +423,10 @@ def test_a_report_that_is_not_a_json_object_will_not_decode(
         read_memory(FrictionReport, str(tmp_path), "unreadable")
 
 
-def test_load_reports_recent_first_and_respects_limit(tmp_path: Path) -> None:
-    # Each report is stamped from the clock, whose tick is coarser than these calls, so the writes
-    # are spaced far enough apart to state four different times rather than one.
+def test_load_reports_recent_first_and_respects_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clock(monkeypatch, 4)
     for i in range(4):
         report_friction(
             tmp_path,
@@ -434,7 +434,6 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path) -> None:
             detail=f"r{i}",
             actor=None,
         )
-        time.sleep(0.05)
 
     result = load_project_memory(tmp_path, MemoryKind.reports, limit=2)
     assert result["total_available"] == 4
