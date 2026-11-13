@@ -447,12 +447,12 @@ def test_the_delivery_gate_answers_409_carrying_the_readers_refusal_of_an_undeco
     mapping's place before the store's decode sentence.
     """
     from tests._mapping_fixtures import map_captures
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     _init(tmp_path)
     map_captures(tmp_path, tmp_path / "ds", [DATES[0]], name="valley")
     damage_record(
-        plant_mapping.plant_mapping_key(tmp_path, "valley"), b"{not valid json"
+        plant_mapping.plant_mapping_key(tmp_path, "valley"), UNDECODABLE
     )
 
     with pytest.raises(plant_mapping.MappingDeliveryError) as gated:

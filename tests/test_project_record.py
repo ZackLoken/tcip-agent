@@ -175,10 +175,10 @@ def test_create_record_refuses_an_undecodable_record_with_the_stores_sentence(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.project_record import create_record, project_record_key
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
-    damage_record(project_record_key(tmp_path), b"{not valid json")
+    damage_record(project_record_key(tmp_path), UNDECODABLE)
 
     with pytest.raises(ts.ReadRefusedError, match="does not decode"):
         create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
@@ -351,10 +351,10 @@ def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
         project_record_key,
         record_or_problem,
     )
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
-    damage_record(project_record_key(tmp_path), b"{not valid json")
+    damage_record(project_record_key(tmp_path), UNDECODABLE)
 
     reading = record_or_problem(tmp_path)
 

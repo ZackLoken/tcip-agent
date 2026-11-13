@@ -32,7 +32,11 @@ from tests._busy_store_fixtures import (
     seconds_given_up_after,
     waiting,
 )
-from tests._record_damage_fixtures import damage_record, unopenable_database
+from tests._record_damage_fixtures import (
+    UNDECODABLE,
+    damage_record,
+    unopenable_database,
+)
 from tests._server_calls import called_through_the_server
 from tests._web_fixtures import INVARIANCES
 
@@ -1219,7 +1223,7 @@ def test_initialize_project_refuses_an_undecodable_record(
     from tcip_mcp.project_record import project_record_key
 
     record = _initialized(tmp_path)
-    damage_record(project_record_key(tmp_path), b"{not valid json")
+    damage_record(project_record_key(tmp_path), UNDECODABLE)
 
     result = initialize_project(
         str(tmp_path),

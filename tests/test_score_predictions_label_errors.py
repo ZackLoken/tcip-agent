@@ -71,12 +71,12 @@ def _published(
 def test_score_predictions_single_image_reports_an_unreadable_gt(
     tmp_path: Path,
 ) -> None:
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg")
     label_image(img, ONE_BUD, 100, 80)
     register_dataset_at(tmp_path, tmp_path, crop=CROP)
-    damage_record(image_label_key(img), b"{not json")
+    damage_record(image_label_key(img), UNDECODABLE)
     _published(tmp_path, "baseline", img)
 
     res = score_predictions(tmp_path, str(img), "baseline", *SCORED_AT)
@@ -88,13 +88,13 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(
 def test_score_predictions_folder_reports_an_unreadable_prediction(
     tmp_path: Path,
 ) -> None:
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     images = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     image = write_image(images / "IMG_0000.jpg")
     label_image(image, ONE_BUD, 100, 80)
     bucket = _published(tmp_path, "baseline", image)
-    damage_record(bucket.document_key("IMG_0000"), b"{not json")
+    damage_record(bucket.document_key("IMG_0000"), UNDECODABLE)
 
     res = score_predictions(tmp_path, str(images), "baseline", *SCORED_AT)
 

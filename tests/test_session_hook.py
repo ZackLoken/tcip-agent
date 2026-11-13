@@ -434,15 +434,15 @@ def test_the_orientation_lists_the_first_findings_the_tool_answers(
     """
     from tcip_mcp import traits
     from tests import _trait_fixtures as fx
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
+    from tests._server_calls import call_through_handshake
     from tests._web_fixtures import bound_to
-    from tests.test_agent_identity_records import call_through_handshake
 
     root = opened.root
     registry_over(root, registry_of("bud"))
     write_image(image_dir(root, "2026-03-04") / "IMG_U.JPG", (8, 8))
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
-    damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
+    damage_record(traits.trait_key(root, "leaf"), UNDECODABLE)
     fx.propose(root, fx.entry("burr_size", ("leaf_length",)))
     (answered,) = call_through_handshake(
         [(diagnose_project.__name__, {})], bound=bound_to(opened)

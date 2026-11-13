@@ -21,19 +21,17 @@ import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir, label_key_of
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import label_image, write_image
-from tests._record_damage_fixtures import damage_record
+from tests._record_damage_fixtures import (
+    REFUSED_DOCUMENT,
+    UNDECODABLE,
+    damage_record,
+)
 from tests._server_calls import results_through_handshake
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from tcip_mcp.workspace import BoundProject
-
-REFUSED_DOCUMENT = b'{"frame": "not a label document"}'
-"""Bytes that decode as JSON and that the label-document reader refuses."""
-
-UNDECODABLE = b"{not valid json"
-"""Bytes that do not decode as JSON."""
 
 
 def _text(result: object) -> str:

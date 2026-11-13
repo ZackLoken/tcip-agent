@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests._record_damage_fixtures import damage_record
+from tests._record_damage_fixtures import UNDECODABLE, damage_record
 from tests._verified_checkpoint_fixtures import (
     produced_checkpoint,
     read_denied,
@@ -159,7 +159,7 @@ def test_a_registry_index_that_will_not_decode_answers_409_as_an_unreadable_regi
 
     launch, jobs = _door(door, opened_client, tmp_path)
     checkpoint = _registered(tmp_path)
-    damage_record(registry_index_key(tmp_path), b"{ not json")
+    damage_record(registry_index_key(tmp_path), UNDECODABLE)
     with pytest.raises(tcip_store.DecodeError) as undecoded:
         read_registry_index(tmp_path)
     before = jobs()

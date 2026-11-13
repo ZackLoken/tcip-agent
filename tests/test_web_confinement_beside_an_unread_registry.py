@@ -27,7 +27,11 @@ from tcip_web.state import store
 from tests._busy_store_fixtures import locked_by_another_holder
 from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import register_dataset_at, write_image
-from tests._record_damage_fixtures import damage_record, unopenable_database
+from tests._record_damage_fixtures import (
+    UNDECODABLE,
+    damage_record,
+    unopenable_database,
+)
 from tests._web_fixtures import new_project, open_new_project
 
 if TYPE_CHECKING:
@@ -101,7 +105,7 @@ def _refusal(project: Path) -> str:
 @contextmanager
 def _undecodable(project: Path) -> Iterator[str]:
     """Put bytes that will not decode in ``project``'s registry; yield the reader's refusal."""
-    damage_record(dataset_registry_key(project), b"{not json")
+    damage_record(dataset_registry_key(project), UNDECODABLE)
     yield _refusal(project)
 
 

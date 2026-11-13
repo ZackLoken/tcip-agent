@@ -252,14 +252,13 @@ def test_an_unreadable_prediction_document_is_reported_by_name(
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import prediction_key
     from tests._chain_fixtures import attributed_series
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     date = sorted(series.buckets)[1]
     stem = f"PLANT_A_{date}_0"
     damage_record(
-        prediction_key(series.root, series.buckets[date], stem),
-        b"not json {][",
+        prediction_key(series.root, series.buckets[date], stem), UNDECODABLE
     )
 
     res = deliver_milestones(

@@ -20,7 +20,11 @@ from tcip_mcp.tools.meta_tools import (
     memory_key,
     report_friction,
 )
-from tests._record_damage_fixtures import damage_record, unopenable_database
+from tests._record_damage_fixtures import (
+    UNDECODABLE,
+    damage_record,
+    unopenable_database,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -91,7 +95,7 @@ def test_an_undecodable_record_raises_the_stores_sentence_naming_its_key(
 ) -> None:
     """A record whose bytes do not decode refuses with the store's sentence, naming its key."""
     key = _reported(project)
-    damage_record(key, b"{not valid json")
+    damage_record(key, UNDECODABLE)
 
     with pytest.raises(tcip_store.ReadRefusedError) as refused:
         tcip_store.read_record(tcip_store.read, key, FrictionReport, PLACE)
@@ -155,8 +159,8 @@ def test_an_undecodable_memory_record_and_flags_record_answer_one_refusal_at_the
         ),
     )
     flags = flag_key(image_label_key(image))
-    damage_record(report, b"{not valid json")
-    damage_record(flags, b"{not valid json")
+    damage_record(report, UNDECODABLE)
+    damage_record(flags, UNDECODABLE)
 
     memory = load_project_memory(opened_project, MemoryKind.reports)
     loaded = client.get(
@@ -216,7 +220,7 @@ def test_a_confirmation_over_an_undecodable_trait_record_answers_the_readers_sen
 
     revision = traits.read_trait("bud_opening", opened_project).latest
     key = traits.trait_key(opened_project, "bud_opening")
-    damage_record(key, b"{not valid json")
+    damage_record(key, UNDECODABLE)
 
     with pytest.raises(tcip_store.ReadRefusedError) as refused:
         traits.read_trait("bud_opening", opened_project)

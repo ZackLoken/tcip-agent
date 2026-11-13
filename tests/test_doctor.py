@@ -41,14 +41,13 @@ def _answered(bound: BoundProject) -> list[tuple[str, str]]:
 
     The call is asserted to be answered, never refused.
     """
-    from tests._server_calls import results_through_handshake
-    from tests.test_agent_identity_records import _body
+    from tests._server_calls import body_of, results_through_handshake
 
     (result,) = results_through_handshake(
         [("diagnose_project", {})], bound=bound
     )
     assert not result.is_error, result
-    return [(level, message) for level, message in _body(result)["findings"]]
+    return [(level, message) for level, message in body_of(result)["findings"]]
 
 
 def _diagnosed(root: Path) -> list[tuple[str, str]]:
@@ -570,11 +569,11 @@ def test_doctor_warns_on_an_unconfirmed_latest_revision(
 def test_doctor_reports_an_undecodable_trait_record_without_aborting(
     tmp_path: Path,
 ) -> None:
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, _images = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
-    damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
+    damage_record(traits.trait_key(root, "leaf"), UNDECODABLE)
 
     found = _diagnosed(root)
 
@@ -812,7 +811,7 @@ def test_a_registry_that_will_not_read_hides_no_bucket_that_will_not(
         load_registered_checkpoint,
         registry_index_key,
     )
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, images = _layout_project(tmp_path, "2026-03-04")
     damaged = _reviewed_bucket(root, images, ("IMG_P",))
@@ -827,7 +826,7 @@ def test_a_registry_that_will_not_read_hides_no_bucket_that_will_not(
         ("IMG_Q",),
         load_registered_checkpoint(checkpoint, project=root).producer,
     )
-    damage_record(registry_index_key(root), b"{not valid json")
+    damage_record(registry_index_key(root), UNDECODABLE)
 
     found = _diagnosed(root)
 
@@ -844,11 +843,11 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(
 ) -> None:
     """A project record that stops decoding after the server started is an error finding."""
     from tcip_mcp.project_record import project_record_key
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, _images = _layout_project(tmp_path, "2026-03-04")
     bound = binding_for(root)
-    damage_record(project_record_key(str(root)), b"{not valid json")
+    damage_record(project_record_key(str(root)), UNDECODABLE)
 
     found = _answered(bound)
 
@@ -859,10 +858,10 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(
 
 def _unreadable_label(image: Path) -> None:
     """Write a label document for ``image`` and damage its stored bytes so they do not decode."""
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     label_image(image, [], 32, 32)
-    damage_record(image_label_key(image), b"not json {][")
+    damage_record(image_label_key(image), UNDECODABLE)
 
 
 def test_doctor_flags_an_unreadable_label(tmp_path: Path) -> None:

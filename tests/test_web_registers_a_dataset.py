@@ -130,8 +130,8 @@ def test_the_agents_check_reads_back_what_the_route_registered(
     opened_client: TestClient, opened: OpenProject
 ) -> None:
     """``check_dataset_identity`` through the server answers the crop and id the route gave."""
+    from tests._server_calls import call_through_handshake
     from tests._web_fixtures import bound_to
-    from tests.test_agent_identity_records import call_through_handshake
 
     root = _imaged(opened.root / "ds")
     registered = _register(opened_client, root).json()
@@ -482,10 +482,10 @@ def test_a_mapping_or_registry_that_will_not_read_is_listed_with_its_refusal(
         plant_mapping_key,
         plant_registry_key,
     )
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, _dataset_id = _mapped(opened_project)
-    damage_record(plant_mapping_key(opened_project, "east"), b"{not json")
+    damage_record(plant_mapping_key(opened_project, "east"), UNDECODABLE)
     key = plant_registry_key(opened_project, "reg")
     record = tcip_store.read(key)
     assert isinstance(record, dict), record
@@ -517,11 +517,11 @@ def test_a_registry_whose_bytes_will_not_decode_stands_as_its_mappings_refusal(
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_registry_key,
     )
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     root, _dataset_id = _mapped(opened_project)
     key = plant_registry_key(opened_project, "reg")
-    damage_record(key, b"{not json")
+    damage_record(key, UNDECODABLE)
     with pytest.raises(tcip_store.DecodeError) as refusal:
         tcip_store.read(key)
 

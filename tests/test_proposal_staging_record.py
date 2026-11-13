@@ -359,12 +359,13 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
 
 def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A proposal outside a dataset tree refuses, naming where a run is staged.
 
-    A path with no dataset address to stage under runs no engine and writes no staging record;
-    the same image under a dataset's images/ tree still proposes and stages.
+    A path with no dataset address to stage under runs no engine, the one named failing the test
+    that reaches it, and writes no staging record; the same image under a dataset's images/ tree
+    still proposes and stages through :data:`STUB_ENGINE`. Both calls resolve their engine by its
+    own name.
     """
     import tcip_store as ts
     from tcip_mcp.tools.proposal_tools import (
@@ -375,10 +376,9 @@ def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
 
     loose = tmp_path / "loose.jpg"
     _make_image(loose)
-    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
 
     refused = propose_annotations(
-        tmp_path, image_path=str(loose), engine="stub", actor=None
+        tmp_path, image_path=str(loose), engine=UNRUNNABLE_ENGINE, actor=None
     )
     assert isinstance(refused, dict) and "images/ tree" in refused["error"], (
         refused
@@ -388,7 +388,7 @@ def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
     placed = image_dir(tmp_path, "2026-01-01") / "placed.jpg"
     _make_image(placed)
     proposed = propose_annotations(
-        tmp_path, image_path=str(placed), engine="stub", actor=None
+        tmp_path, image_path=str(placed), engine=STUB_ENGINE, actor=None
     )
     assert (
         isinstance(proposed, ProposedCandidates)

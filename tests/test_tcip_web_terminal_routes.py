@@ -2959,9 +2959,9 @@ def test_the_orientation_of_a_project_whose_record_will_not_read_states_why(
     unreadable kind and the store's sentence that the record does not decode.
     """
     from tcip_mcp.project_record import project_record_key
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
-    damage_record(project_record_key(str(opened.root)), b"{not valid json")
+    damage_record(project_record_key(str(opened.root)), UNDECODABLE)
 
     created = client.post("/api/terminal/sessions", json=LAUNCH)
 

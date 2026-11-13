@@ -91,11 +91,9 @@ def test_list_traits_names_a_record_that_will_not_decode_by_the_stores_sentence(
     that are not JSON; it is listed under ``unreadable`` with an ``unreadable`` reason.
     """
     from tcip_mcp import traits
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
-    damage_record(
-        traits.trait_key(opened_project, "bud_opening"), b"{not valid json"
-    )
+    damage_record(traits.trait_key(opened_project, "bud_opening"), UNDECODABLE)
 
     resp = client.get("/api/results/traits")
 
@@ -1159,14 +1157,13 @@ def test_loading_a_plant_mapping_whose_record_will_not_decode_answers_the_reader
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tests._mapping_fixtures import map_captures
-    from tests._record_damage_fixtures import damage_record
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     map_captures(
         opened_project, opened_project / "ds", ["2026-02-11"], name="valley"
     )
     damage_record(
-        plant_mapping.plant_mapping_key(opened_project, "valley"),
-        b"{not valid json",
+        plant_mapping.plant_mapping_key(opened_project, "valley"), UNDECODABLE
     )
 
     resp = client.post(

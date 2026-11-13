@@ -39,11 +39,11 @@ def _label(
 
 
 def _unreadable(root: Path, date: str, stem: str) -> None:
-    """Write an empty ``bush`` label document for ``stem``; overwrite it with ``{not json``."""
-    from tests._record_damage_fixtures import damage_record
+    """Write an empty ``bush`` label document for ``stem``; overwrite it with undecodable bytes."""
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
 
     _label(root, "bush", date, "segment", stem, 0)
-    damage_record(label_key(root, date, stem), b"{not json")
+    damage_record(label_key(root, date, stem), UNDECODABLE)
 
 
 def test_focus_annotate_lands_on_first_annotated_polygon_frame(
