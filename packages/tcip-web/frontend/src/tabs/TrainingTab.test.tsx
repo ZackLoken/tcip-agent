@@ -851,6 +851,35 @@ describe("TrainingTab launch picker", () => {
     await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
     expect(await within(picker).findByText("No runs.")).toBeInTheDocument();
   });
+
+  it("shows one failed-listing error and one Retry on the whole screen while the picker is open", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockRejectedValue(new Error("network error"));
+
+    render(<TrainingTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
+
+    expect(await screen.findAllByText("Could not load training runs: network error")).toHaveLength(
+      1,
+    );
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+  });
+
+  it("shows one failed-listing error and one Retry with the picker closed, and Retry lists again", async () => {
+    const listRuns = vi
+      .spyOn(trainingApi, "listRuns")
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValue({ runs: [], sweeps: [] });
+
+    render(<TrainingTab />);
+
+    expect(await screen.findAllByText("Could not load training runs: network error")).toHaveLength(
+      1,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("No runs.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
 });
 
 describe("TrainingTab compare", () => {

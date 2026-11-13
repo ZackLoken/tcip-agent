@@ -657,7 +657,7 @@ export function TrainingTab() {
           </div>
         )}
 
-        {runsError && (
+        {runsError && !pickerOpen && (
           <ErrorRetry
             message={runsError}
             onRetry={() => void refreshRuns()}
