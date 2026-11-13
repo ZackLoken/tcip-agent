@@ -435,8 +435,8 @@ def test_the_orientation_lists_the_first_findings_the_tool_answers(
     from tcip_mcp import traits
     from tests import _trait_fixtures as fx
     from tests._record_damage_fixtures import UNDECODABLE, damage_record
+    from tests._server_calls import call_through_handshake
     from tests._web_fixtures import bound_to
-    from tests.test_agent_identity_records import call_through_handshake
 
     root = opened.root
     registry_over(root, registry_of("bud"))

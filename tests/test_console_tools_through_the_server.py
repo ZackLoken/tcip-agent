@@ -321,10 +321,10 @@ def read(text: str) -> object:
 
 def _body(result: mcp_types.CallToolResult) -> dict:
     """Return the tool's own answer to a call the server did not refuse."""
-    from tests.test_agent_identity_records import _body as body
+    from tests._server_calls import body_of
 
     assert not result.is_error, result
-    return body(result)
+    return body_of(result)
 
 
 def test_every_console_tool_answers_through_the_server_as_its_command_prints(

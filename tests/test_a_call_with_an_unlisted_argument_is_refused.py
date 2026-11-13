@@ -8,7 +8,6 @@ record; a call carrying listed arguments alone answers as it always has.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +23,7 @@ from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
 from tests._server_calls import (
     called_through_the_server,
+    decoded_answer,
     listed_tools,
     results_through_handshake,
 )
@@ -62,7 +62,7 @@ def _call(
     assert isinstance(block, TextContent), block
     if result.is_error:
         return True, block.text
-    return False, json.loads(block.text)
+    return False, decoded_answer(result)
 
 
 def _sentence(tool: str, unlisted: list[str], takes: list[str]) -> str:

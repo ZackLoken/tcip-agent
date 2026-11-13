@@ -344,12 +344,10 @@ def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_s
     the sentence ``resolve_image_path`` raises for the band, as it answers a path that is not a
     file, and each serves the group's manifest.
     """
-    import json
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tests._producer_fixtures import published_document
-    from tests._server_calls import results_through_handshake
+    from tests._server_calls import decoded_answer, results_through_handshake
     from tests._web_fixtures import bound_to
     from tests.test_canvas_liveview import _payload
 
@@ -399,7 +397,7 @@ def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_s
             bound=bound_to(opened),
         )
         assert not any(result.is_error for result in results), results
-        return [json.loads(result.content[0].text) for result in results]
+        return [decoded_answer(result) for result in results]
 
     assert answers(member) == [{"error": str(refused.value)}] * 5
     served = answers(str(grouped_dataset.manifest))

@@ -111,14 +111,12 @@ def test_the_annotation_doors_answer_a_photograph_that_will_not_decode_with_the_
     ``read_annotations`` and ``save_annotations`` are called through the server over a one-byte
     ``.jpg``; each answers the error ``image_path_dimensions`` raises for it.
     """
-    import json
-
     import pytest
 
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
     from tests._producer_fixtures import stub_images
-    from tests._server_calls import results_through_handshake
+    from tests._server_calls import decoded_answer, results_through_handshake
 
     (stub,) = stub_images(image_dir(project, "2026-04-01"), ["a_1.jpg"])
     with pytest.raises(OSError) as refused:
@@ -133,6 +131,6 @@ def test_the_annotation_doors_answer_a_photograph_that_will_not_decode_with_the_
     )
 
     assert not any(result.is_error for result in results), results
-    assert [json.loads(result.content[0].text) for result in results] == [
+    assert [decoded_answer(result) for result in results] == [
         {"error": str(refused.value)}
     ] * 2

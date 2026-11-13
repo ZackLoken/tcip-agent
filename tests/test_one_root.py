@@ -129,10 +129,9 @@ def _creation(path: Path, display_name: str) -> tuple[str, dict]:
 def test_a_server_for_no_project_acts_on_the_project_it_creates(
     tmp_path: Path,
 ) -> None:
-    import json
-
     from tcip_mcp import dataset_layout
     from tests._producer_fixtures import write_image
+    from tests._server_calls import decoded_answer
 
     source = tmp_path / "raw"
     write_image(source / "IMG_0001.jpg", (8, 8))
@@ -148,7 +147,8 @@ def test_a_server_for_no_project_acts_on_the_project_it_creates(
 
     assert not created.is_error, created
     assert not ingested.is_error, ingested
-    answer = json.loads(created.content[0].text)
+    answer = decoded_answer(created)
+    assert isinstance(answer, dict)
     assert answer["session_project"] == str(target.resolve())
     copied = dataset_layout.image_root(target).rglob("*.jpg")
     assert [p.name for p in copied] == ["IMG_0001.jpg"]
@@ -157,7 +157,7 @@ def test_a_server_for_no_project_acts_on_the_project_it_creates(
 def test_a_server_for_a_project_stays_on_it_after_creating_another(
     tmp_path: Path,
 ) -> None:
-    import json
+    from tests._server_calls import decoded_answer
 
     ws = tmp_path.parent
     started = named_project(ws / "valley_block", "Valley block")
@@ -169,9 +169,9 @@ def test_a_server_for_a_project_stays_on_it_after_creating_another(
 
     assert not created.is_error, created
     assert not reported.is_error, reported
-    assert json.loads(created.content[0].text)["session_project"] == str(
-        started.root
-    )
+    answer = decoded_answer(created)
+    assert isinstance(answer, dict)
+    assert answer["session_project"] == str(started.root)
     assert [
         row["arguments"]["detail"]
         for row in audit_rows(started.root, "report_friction")

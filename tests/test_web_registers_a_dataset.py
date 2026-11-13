@@ -130,8 +130,8 @@ def test_the_agents_check_reads_back_what_the_route_registered(
     opened_client: TestClient, opened: OpenProject
 ) -> None:
     """``check_dataset_identity`` through the server answers the crop and id the route gave."""
+    from tests._server_calls import call_through_handshake
     from tests._web_fixtures import bound_to
-    from tests.test_agent_identity_records import call_through_handshake
 
     root = _imaged(opened.root / "ds")
     registered = _register(opened_client, root).json()

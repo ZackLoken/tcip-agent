@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -39,6 +40,15 @@ def listed_tools() -> dict[str, mcp_types.Tool]:
     return {tool.name: tool for tool in tool_listing()}
 
 
+def decoded_answer(result: mcp_types.CallToolResult) -> JsonValue:
+    """Return the JSON document in the one text block of ``result``, a call the server answered.
+
+    Raises when the result holds other than one block.
+    """
+    (content,) = result.content
+    return json.loads(content.text)
+
+
 def called_through_the_server(
     tool: str, arguments: dict, *, bound: BoundProject | None = None
 ) -> JsonValue:
@@ -49,7 +59,6 @@ def called_through_the_server(
     when it is admitted.
     """
     import asyncio
-    import json
 
     from mcp.server.mcpserver.exceptions import ToolError
 
@@ -57,8 +66,7 @@ def called_through_the_server(
         result = asyncio.run(client_server(bound).call_tool(tool, arguments))
     except ToolError as exc:
         return str(exc)
-    (content,) = result.content
-    return json.loads(content.text)
+    return decoded_answer(result)
 
 
 def results_through_handshake(
@@ -102,3 +110,37 @@ def results_through_handshake(
         return bodies
 
     return anyio.run(run)
+
+
+def body_of(result: mcp_types.CallToolResult) -> dict:
+    """Return the tool's own return value, as the server serialized it.
+
+    The structured content is read first, a tool's own dict as it stands and any other return
+    value under its ``result`` key; a result without structured content is its text block decoded
+    (:func:`decoded_answer`).
+    """
+    if (
+        isinstance(result.structured_content, dict)
+        and "result" not in result.structured_content
+    ):
+        return result.structured_content
+    if isinstance(result.structured_content, dict):
+        return result.structured_content["result"]
+    return decoded_answer(result)
+
+
+def call_through_handshake(
+    calls: list[tuple[str, dict]],
+    declared: mcp_types.Implementation = DECLARED,
+    *,
+    bound: BoundProject | None,
+) -> list[dict]:
+    """Make ``calls`` in order through a handshake as ``declared`` and return each tool's value.
+
+    The real server runs in memory for ``bound`` (:func:`results_through_handshake`); each value is
+    the call's result read by :func:`body_of`.
+    """
+    return [
+        body_of(result)
+        for result in results_through_handshake(calls, declared, bound=bound)
+    ]

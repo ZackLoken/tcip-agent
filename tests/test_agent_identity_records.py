@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import mcp.types as mcp_types
 import pytest
 
 from tcip_mcp import traits
@@ -21,35 +20,7 @@ from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
-from tests._server_calls import DECLARED, results_through_handshake
-
-
-def _body(result: mcp_types.CallToolResult) -> dict:
-    """Return the tool's own return value, as the server serialized it."""
-    if (
-        isinstance(result.structured_content, dict)
-        and "result" not in result.structured_content
-    ):
-        return result.structured_content
-    if isinstance(result.structured_content, dict):
-        return result.structured_content["result"]
-    return json.loads(result.content[0].text)
-
-
-def call_through_handshake(
-    calls: list[tuple[str, dict]],
-    declared: mcp_types.Implementation = DECLARED,
-    *,
-    bound: BoundProject | None,
-) -> list[dict]:
-    """Make ``calls`` in order through a handshake as ``declared`` and return each tool's value.
-
-    The real server runs in memory for ``bound``.
-    """
-    return [
-        _body(result)
-        for result in results_through_handshake(calls, declared, bound=bound)
-    ]
+from tests._server_calls import call_through_handshake
 
 
 def _report_call(detail: str) -> tuple[str, dict]:
