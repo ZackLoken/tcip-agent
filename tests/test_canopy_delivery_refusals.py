@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key_of
+from tcip_mcp.dataset_layout import label_key_of
 from tests import _trait_fixtures as fx
 from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._record_damage_fixtures import damage_record
@@ -191,7 +191,9 @@ def test_the_count_route_refuses_an_undecodable_canopy_document_with_the_stores_
     )
 
     bucket, registry = _orthomosaic(tmp_path)
-    raster_path = image_dir(tmp_path, UNDATED_BUCKET) / "mosaic.tif"
+    raster = bucket.raster(tmp_path)
+    assert raster is not None
+    raster_path = Path(raster)
     _write_canopy_document(raster_path, CANOPY_BOXES)
     damage_record(label_key_of(str(raster_path)), UNDECODABLE)
     sentence = _reader_sentence(raster_path)
