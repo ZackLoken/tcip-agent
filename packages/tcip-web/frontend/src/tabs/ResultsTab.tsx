@@ -23,7 +23,6 @@ import {
   type DeliveryRefusal,
   type ExportCountCsvPayload,
   type ExportCsvPayload,
-  type MappingNames,
   OPERATIONALIZATION,
   type OperationalizationRefusal,
   type PhenologyAnswer,
@@ -36,6 +35,7 @@ import {
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { TabHeading } from "@/components/TabHeading";
+import { useMappingNames } from "@/hooks/useMappingNames";
 import { deliveredDatesLine } from "@/lib/disclosureLines";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { bucketsForDate } from "@/lib/openProject";
@@ -80,7 +80,7 @@ export function ResultsTab() {
 
   // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");
-  const [mappings, setMappings] = useState<MappingNames | null>(null);
+  const { mappings, error: mappingsError } = useMappingNames(projectRoot);
 
   // Dataset tree (dates + the buckets published over each) drives the structured per-date picker
   // below.
@@ -166,14 +166,6 @@ export function ResultsTab() {
         setTraitsListing(null);
         setTraitError(`Could not load this project's registered traits: ${messageOf(e)}`);
       });
-  }, [projectRoot]);
-
-  useEffect(() => {
-    if (!projectRoot) return;
-    void resultsApi
-      .listPlantMappings()
-      .then(setMappings)
-      .catch(() => setMappings(null));
   }, [projectRoot]);
 
   useEffect(() => {
@@ -687,19 +679,23 @@ export function ResultsTab() {
                 <label className="tcip-label" htmlFor="phenology-mapping">
                   Plant mapping
                 </label>
-                <select
-                  id="phenology-mapping"
-                  className="tcip-select"
-                  value={mappingName}
-                  onChange={(e) => setMappingName(e.target.value)}
-                >
-                  <option value="">Choose a mapping</option>
-                  {(mappings?.names ?? []).map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                {mappingsError ? (
+                  <div className="tcip-problem">{mappingsError}</div>
+                ) : (
+                  <select
+                    id="phenology-mapping"
+                    className="tcip-select"
+                    value={mappingName}
+                    onChange={(e) => setMappingName(e.target.value)}
+                  >
+                    <option value="">Choose a mapping</option>
+                    {(mappings?.names ?? []).map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <label className="tcip-label" htmlFor="phenology-plants">
                   Plants
                 </label>

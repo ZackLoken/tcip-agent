@@ -8,7 +8,6 @@ import {
   type AuditGapRefusal,
   type CaptureInvariances,
   CROP,
-  type MappingNames,
   type MatchRadius,
   READ,
   REFUSED,
@@ -21,9 +20,10 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
+import { useMappingNames } from "@/hooks/useMappingNames";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
 import { useStore } from "@/store";
-import { selectDatasetRoot } from "@/store/slices/gui";
+import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
 
 // A date's match radius as the breeder reads it, from the record's own source.
 function radiusPhrase(radius: MatchRadius): string {
@@ -38,7 +38,12 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const [mappingName, setMappingName] = useState("");
   // Every mapping name already persisted under the open project, for the picker below; a name
   // typed here that isn't in the list is a new mapping this build will create.
-  const [mappings, setMappings] = useState<MappingNames | null>(null);
+  const projectRoot = useStore(selectProjectRoot);
+  const {
+    mappings,
+    error: mappingsProblem,
+    refresh: refreshMappingNames,
+  } = useMappingNames(projectRoot);
   const [plantRegistry, setPlantRegistry] = useState("");
   const [statedRadius, setStatedRadius] = useState<number | "">("");
   const [radiusRationale, setRadiusRationale] = useState("");
@@ -48,17 +53,6 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const [mapping, setMapping] = useState<ServedMapping | ServedBuild | null>(null);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
-
-  const refreshMappingNames = useCallback(() => {
-    void resultsApi
-      .listPlantMappings()
-      .then(setMappings)
-      .catch(() => setMappings(null));
-  }, []);
-
-  useEffect(() => {
-    refreshMappingNames();
-  }, [refreshMappingNames]);
 
   // Selecting an already-built mapping by name shows its own summary and radii, the same way a
   // fresh build does.
@@ -132,11 +126,15 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
             }}
             list="plant-mapping-names"
           />
-          <datalist id="plant-mapping-names">
-            {(mappings?.names ?? []).map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
+          {mappingsProblem ? (
+            <div className="tcip-problem">{mappingsProblem}</div>
+          ) : (
+            <datalist id="plant-mapping-names">
+              {(mappings?.names ?? []).map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          )}
         </div>
         <div className="flex flex-col gap-1">
           <label className="tcip-label" htmlFor="plant-registry-name">

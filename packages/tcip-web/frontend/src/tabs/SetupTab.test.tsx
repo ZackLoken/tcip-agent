@@ -256,6 +256,16 @@ describe("SetupTab trait revisions", () => {
   });
 });
 
+function fillAndBuild() {
+  fireEvent.change(screen.getByLabelText("Mapping"), {
+    target: { value: "valley-2026" },
+  });
+  fireEvent.change(screen.getByLabelText("Plant registry"), {
+    target: { value: "valley-plants" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Build" }));
+}
+
 describe("SetupTab plant-mapping build: match radius", () => {
   const {
     mapping_built: BUILT,
@@ -265,16 +275,6 @@ describe("SetupTab plant-mapping build: match radius", () => {
     mapping_left_out: LEFT_OUT,
     mapping_loaded: LOADED,
   } = RESULTS_ANSWERS;
-
-  function fillAndBuild() {
-    fireEvent.change(screen.getByLabelText("Mapping"), {
-      target: { value: "valley-2026" },
-    });
-    fireEvent.change(screen.getByLabelText("Plant registry"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
-  }
 
   async function buildAnswering(mapping: ServedBuild) {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue(mapping);
@@ -445,6 +445,27 @@ describe("SetupTab plant-mapping build: match radius", () => {
 
     expect(screen.queryByText(new RegExp(firstDateLine(LOADED)))).not.toBeInTheDocument();
     expect(screen.queryByText(/radius \d/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SetupTab plant-mapping listing", () => {
+  it("shows the reason in the mapping panel when the listing is refused", async () => {
+    vi.spyOn(resultsApi, "listPlantMappings").mockRejectedValue(new Error("mappings refused"));
+
+    render(<SetupTab />);
+
+    expect(await screen.findByText(/mappings refused/)).toBeInTheDocument();
+  });
+
+  it("clears the reason when the listing after a build answers", async () => {
+    vi.spyOn(resultsApi, "listPlantMappings").mockRejectedValueOnce(new Error("mappings refused"));
+    vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue(RESULTS_ANSWERS.mapping_built);
+
+    render(<SetupTab />);
+    expect(await screen.findByText(/mappings refused/)).toBeInTheDocument();
+    fillAndBuild();
+
+    await waitFor(() => expect(screen.queryByText(/mappings refused/)).not.toBeInTheDocument());
   });
 });
 
