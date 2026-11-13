@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { messageOf } from "@/api/http";
 import { resultsApi } from "@/api/inference";
 import type { Listed, RegisteredModels } from "@/api/types.generated";
+import { ErrorRetry } from "@/components/ErrorRetry";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
 
@@ -48,14 +49,7 @@ export function ModelPicker({
       <label className="tcip-label mb-1" htmlFor={id}>
         Model
       </label>
-      {error && (
-        <div className="tcip-problem mb-1">
-          {error}{" "}
-          <button className="tcip-btn ml-1" onClick={refresh}>
-            Retry
-          </button>
-        </div>
-      )}
+      {error && <ErrorRetry message={error} onRetry={refresh} className="mb-1" />}
       {models.length > 0 ? (
         <select
           id={id}

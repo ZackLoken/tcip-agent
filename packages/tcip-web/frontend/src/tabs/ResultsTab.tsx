@@ -34,6 +34,7 @@ import {
   type TraitsListing,
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
+import { ErrorRetry } from "@/components/ErrorRetry";
 import { TabHeading } from "@/components/TabHeading";
 import { useMappingNames } from "@/hooks/useMappingNames";
 import { deliveredDatesLine } from "@/lib/disclosureLines";
@@ -622,12 +623,7 @@ export function ResultsTab() {
               <div className="flex flex-col gap-1">
                 <div className="tcip-label">Predictions by date</div>
                 {datesError && (
-                  <div className="tcip-problem mb-1">
-                    {datesError}{" "}
-                    <button className="tcip-btn ml-1" onClick={refreshDatasetTree}>
-                      Retry
-                    </button>
-                  </div>
+                  <ErrorRetry message={datesError} onRetry={refreshDatasetTree} className="mb-1" />
                 )}
                 {!datesError && tree?.label_problem && (
                   <div className="tcip-problem mb-1">{tree.label_problem}</div>

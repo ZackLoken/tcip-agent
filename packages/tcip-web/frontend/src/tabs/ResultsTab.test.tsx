@@ -105,6 +105,26 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     expect(screen.getByText(troubled.captures[0].name)).toBeInTheDocument();
   });
 
+  it("shows a failed dates read with one Retry, which reads the tree again", async () => {
+    const tree = vi
+      .spyOn(api.dataset, "tree")
+      .mockRejectedValueOnce(new Error("dates down"))
+      .mockResolvedValue(DATASET_TREES.ds);
+    const message = "Could not load this dataset's dates: dates down";
+
+    render(<ResultsTab />);
+
+    const block = await screen.findByText(message);
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+    expect(screen.queryByText("No dates with images.")).not.toBeInTheDocument();
+
+    fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText(DS_DATE)).toBeInTheDocument();
+    expect(tree).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+  });
+
   it("dropping a date to '(skip)' excludes it from the computed predictions map", async () => {
     mockDatasetTree();
     const measurementSpy = vi

@@ -52,6 +52,7 @@ describe("LaunchPicker", () => {
           title: "Configs in this project",
           emptyMessage: "No config exists in this project yet.",
           rows: [],
+          onRetry: vi.fn(),
         }}
       />,
     );
@@ -73,7 +74,12 @@ describe("LaunchPicker", () => {
   function renderRow(overrides: Partial<LaunchPickerRow>) {
     render(
       <LaunchPicker
-        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row(overrides)] }}
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [row(overrides)],
+          onRetry: vi.fn(),
+        }}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -82,7 +88,12 @@ describe("LaunchPicker", () => {
   it("reveals the Start action and its branch line only once a row is selected", () => {
     render(
       <LaunchPicker
-        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row()] }}
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [row()],
+          onRetry: vi.fn(),
+        }}
       />,
     );
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
@@ -219,7 +230,12 @@ describe("LaunchPicker", () => {
   it("carries aria-expanded, not aria-pressed, on a row's own disclosure toggle", () => {
     render(
       <LaunchPicker
-        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row()] }}
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [row()],
+          onRetry: vi.fn(),
+        }}
       />,
     );
     const toggle = screen.getByText("exp-1").closest("button") as HTMLElement;
@@ -262,6 +278,7 @@ describe("LaunchPicker", () => {
           title: "Configs in this project",
           emptyMessage: "none",
           rows: [row(), row({ key: "exp-2", content: <span>exp-2</span> })],
+          onRetry: vi.fn(),
         }}
         onSelect={onSelect}
       />,
