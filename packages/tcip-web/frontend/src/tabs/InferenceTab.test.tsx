@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api } from "@/api/client";
 import { inferenceApi, openInferenceStream, resultsApi } from "@/api/inference";
 import { type InferenceJob, type InferenceJobs, NOTHING_STATED } from "@/api/types.generated";
 import { useStore } from "@/store";
@@ -590,6 +591,46 @@ describe("InferenceTab model select", () => {
     render(<InferenceTab />);
 
     expect(await screen.findByRole("combobox", { name: "Model" })).toBeInTheDocument();
+  });
+});
+
+describe("InferenceTab load errors", () => {
+  it("shows each failed read's error with its own Retry, which reads that one again", async () => {
+    const tree = vi
+      .spyOn(api.dataset, "tree")
+      .mockRejectedValueOnce(new Error("dates down"))
+      .mockResolvedValue(DATASET_TREES.ds);
+    const assessments = vi
+      .spyOn(resultsApi, "assessments")
+      .mockRejectedValueOnce(new Error("assessments down"))
+      .mockResolvedValue(PRODUCED_ASSESSMENTS);
+    const listJobs = vi
+      .spyOn(inferenceApi, "listJobs")
+      .mockRejectedValueOnce(new Error("jobs down"))
+      .mockResolvedValue(RUNNING);
+    const models = vi
+      .spyOn(resultsApi, "registeredModels")
+      .mockRejectedValueOnce(new Error("models down"))
+      .mockResolvedValue(REGISTERED_MODELS);
+
+    render(<InferenceTab />);
+
+    const reads = [
+      { message: "Could not load this dataset's dates: dates down", read: tree },
+      { message: "Could not load assessments: assessments down", read: assessments },
+      { message: "Could not load inference jobs: jobs down", read: listJobs },
+      { message: "Could not load registered models: models down", read: models },
+    ];
+    for (const { message, read } of reads) {
+      const block = await screen.findByText(message);
+      expect(screen.getAllByText(message)).toHaveLength(1);
+      expect(read).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(screen.queryByText(message)).not.toBeInTheDocument());
+      expect(read).toHaveBeenCalledTimes(2);
+    }
   });
 });
 

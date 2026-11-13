@@ -868,7 +868,7 @@ describe("TrainingTab launch picker", () => {
     const listRuns = vi
       .spyOn(trainingApi, "listRuns")
       .mockRejectedValueOnce(new Error("network error"))
-      .mockResolvedValue({ runs: [], sweeps: [] });
+      .mockResolvedValue(TRAINING_LISTING);
 
     render(<TrainingTab />);
 
@@ -877,7 +877,7 @@ describe("TrainingTab launch picker", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("No runs.")).toBeInTheDocument();
+    expect(await screen.findByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 });
