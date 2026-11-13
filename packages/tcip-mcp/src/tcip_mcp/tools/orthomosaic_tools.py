@@ -276,12 +276,13 @@ def _segment_counts(
     standing only with ``position_error_m`` of clearance. Returns the counts, the
     ``CanopySegmentDisclosure`` and each registry plant that regime leaves uncounted, with why.
     The canopy document is the raster's own label document
-    (:func:`~tcip_mcp.dataset_layout.label_key_of`).
+    (:func:`~tcip_mcp.dataset_layout.label_key_of`). Refuses (``ValueError``) a raster with no
+    canopy document, advising its authoring, and a stored one that could not be read, with the
+    reader's sentence alone.
     """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
-        document_at,
-        read_stored,
+        read_document_versioned,
     )
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.delivery_events_schema import (
@@ -298,18 +299,23 @@ def _segment_counts(
         load_canopy_segments,
         tie_segments_to_plants,
     )
+    from tcip_store import Version
 
     stem = Path(raster_path).stem
     key = label_key_of(raster_path)
     try:
-        stored = read_stored(key)
+        document, version = read_document_versioned(key)
     except UnreadableLabelDocumentError as exc:
         raise ValueError(
             f"canopy_subject delivery refused: the canopy boundaries for "
-            f"{canopy_subject!r} on the raster {stem!r} do not read (author the "
-            f"canopy boundaries where none exist): {exc}"
+            f"{canopy_subject!r} on the raster {stem!r} could not be read: {exc}"
         ) from exc
-    document, version = document_at(key, stored), stored.version
+    if version == Version.ABSENT:
+        raise ValueError(
+            f"canopy_subject delivery refused: no canopy boundaries are stored for "
+            f"{canopy_subject!r} on the raster {stem!r}; author the canopy "
+            "boundaries, then deliver again."
+        )
     segments = load_canopy_segments(
         document,
         subject=canopy_subject,
