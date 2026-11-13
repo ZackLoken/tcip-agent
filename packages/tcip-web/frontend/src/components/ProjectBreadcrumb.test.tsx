@@ -173,6 +173,26 @@ describe("footer open state", () => {
     expect(screen.getByRole("button", { name: "Loading…" })).toBeInTheDocument();
   });
 
+  it("shows the reason in place of the project name when the listing is refused", async () => {
+    openOn(VALLEY, false);
+    vi.mocked(api.projects.list).mockRejectedValue(new Error("listing refused"));
+    render(<ProjectBreadcrumb />);
+    expect(await screen.findByText(/listing refused/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Loading…" })).not.toBeInTheDocument();
+  });
+
+  it("shows the reason in the recent and date menus when the listing is refused", async () => {
+    vi.mocked(api.projects.list).mockRejectedValue(new Error("listing refused"));
+    render(<ProjectBreadcrumb />);
+    await screen.findByText(/listing refused/);
+    fireEvent.click(screen.getByTitle("Recent projects"));
+    expect(screen.queryByText(/no recent projects/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/listing refused/)).toHaveLength(2);
+    fireEvent.click(screen.getByTitle("Switch date"));
+    expect(screen.getAllByText(/listing refused/)).toHaveLength(2);
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
+
   it("reads no project open only once nothing is open", () => {
     useStore.setState((st) => ({ gui: { ...st.gui, dataset: null }, openProject: null }));
     render(<ProjectBreadcrumb />);

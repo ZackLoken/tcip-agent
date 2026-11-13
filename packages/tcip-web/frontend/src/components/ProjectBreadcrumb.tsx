@@ -26,10 +26,10 @@ export function ProjectBreadcrumb() {
   const clearDataset = useStore((s) => s.clearDataset);
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
-  const pushToast = useStore((s) => s.pushToast);
 
   const [menu, setMenu] = useState<null | "project" | "date">(null);
   const [listing, setListing] = useState<ProjectsListing | null>(null);
+  const [listingError, setListingError] = useState<string | null>(null);
   const busy = useStore((s) => s.opening !== null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -41,15 +41,17 @@ export function ProjectBreadcrumb() {
     api.projects
       .list()
       .then((r) => {
-        if (!canceled) setListing(r);
+        if (canceled) return;
+        setListing(r);
+        setListingError(null);
       })
-      .catch(() => {
-        if (!canceled) pushToast("Could not load the project list.");
+      .catch((e: unknown) => {
+        if (!canceled) setListingError(messageOf(e));
       });
     return () => {
       canceled = true;
     };
-  }, [openProject, pushToast]);
+  }, [openProject]);
 
   // Close the menu on an outside click.
   useEffect(() => {
@@ -101,6 +103,7 @@ export function ProjectBreadcrumb() {
   } catch (e) {
     recentProblem = messageOf(e);
   }
+  const recentRowProblem = recentProblem ?? listingError;
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -114,7 +117,7 @@ export function ProjectBreadcrumb() {
         title="Recent projects"
         className="max-w-[16rem] truncate font-mono hover:text-tcip-fg transition-colors"
       >
-        {current?.record.display_name ?? "Loading…"}
+        {listingError ?? current?.record.display_name ?? "Loading…"}
       </button>
       <span className="mx-1.5 text-tcip-border">|</span>
       {dataset ? (
@@ -141,8 +144,8 @@ export function ProjectBreadcrumb() {
 
       {menu === "project" && (
         <Dropdown title="Recent projects">
-          {recentProblem ? (
-            <EmptyRow text={recentProblem} />
+          {recentRowProblem ? (
+            <EmptyRow text={recentRowProblem} />
           ) : recent.length === 0 ? (
             <EmptyRow text="No recent projects" />
           ) : (
@@ -164,7 +167,7 @@ export function ProjectBreadcrumb() {
       {menu === "date" && dataset && (
         <Dropdown title="Switch date">
           {!current ? (
-            <EmptyRow text="Loading…" />
+            <EmptyRow text={listingError ?? "Loading…"} />
           ) : (
             current.tree.captures.map(({ name }) => (
               <MenuButton
