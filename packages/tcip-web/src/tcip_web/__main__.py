@@ -27,13 +27,10 @@ def main() -> None:
     from tcip_mcp.workspace import workspace_from_environment
 
     workspace = workspace_from_environment()
-    instance = bind()
+    bind()
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
     port = free_port(requested)
     record_backend_port(workspace, port)
-    # The app's import below binds its own instance; this one holds only the port write's
-    # connection and is closed so the process ends up holding one backend's connections.
-    instance.close()
     from tcip_web.app import app
     from tcip_web.paths import image_roots_from_environment
     from tcip_web.state import store

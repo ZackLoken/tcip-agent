@@ -118,7 +118,6 @@ def store(tmp_path: Path) -> Iterator[Harness]:
                 proc.kill()
                 proc.wait(timeout=30)
         ts.unbind()
-        backend.close()
 
 
 # ── process lifecycle ───────────────────────────────────────────────────────────
@@ -364,6 +363,55 @@ def test_closing_a_backend_leaves_its_log_and_a_new_backend_reads_every_record(
         assert {key: ts.read(key) for key in written} == written
     finally:
         fresh.close()
+
+
+def _held_connections(backend: SqliteBackend) -> list[sqlite3.Connection]:
+    held = list(backend._connections.values())
+    assert held
+    return held
+
+
+def test_binding_a_second_backend_closes_the_first_and_the_second_reads_its_record(
+    store: Harness,
+) -> None:
+    """``bind`` closes the backend it replaces, and the new backend reads what the old wrote."""
+    key = store.key(LWW, "replaced")
+    ts.replace(key, {"n": 1})
+    held = _held_connections(store.backend)
+
+    ts.bind(make_backend())
+
+    for conn in held:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("select 1")
+    assert ts.read(key) == {"n": 1}
+
+
+def test_unbinding_closes_the_backend_it_drops(store: Harness) -> None:
+    """``unbind`` closes the bound backend's connections."""
+    ts.replace(store.key(LWW, "dropped"), {"n": 1})
+    held = _held_connections(store.backend)
+
+    ts.unbind()
+
+    for conn in held:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("select 1")
+
+
+def test_binding_the_backend_already_bound_closes_nothing(
+    store: Harness,
+) -> None:
+    """``bind`` of the bound backend leaves its connections open and its records readable."""
+    key = store.key(LWW, "rebound")
+    ts.replace(key, {"n": 1})
+    held = _held_connections(store.backend)
+
+    ts.bind(store.backend)
+
+    for conn in held:
+        conn.execute("select 1")
+    assert ts.read(key) == {"n": 1}
 
 
 def test_the_store_s_backup_leaves_its_source_s_log_as_it_was(
