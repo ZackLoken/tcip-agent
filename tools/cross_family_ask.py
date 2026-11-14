@@ -7,8 +7,11 @@ harness was and how long it took.
 Conditions control what the harness could reach, not what it was asked. An attached image adds
 one family-specific preface line ahead of the question, since each harness takes an image
 differently. The ``browser-only`` condition is a cold reader's: Claude alone, from an empty
-working directory, with one headless browser server, no built-in tool, no added directory, the
-project's settings alone and none of this process's ``CLAUDE`` variables.
+working directory, with one headless browser server, no built-in tool, no added directory, in
+restricted mode, which loads no user, project or local settings file and, measured at harness
+2.1.325, no instruction file or memory, and without the variables the in-app terminal withholds
+from its children. Restricted mode does not withhold the account's email address, which still
+reaches the reader, nor, from a working directory inside a repository, its git status.
 
 The Antigravity launch grants every command inside the harness's sandbox. A launch without the
 grant runs or denies a command by the harness's own agent mode: at harness 1.5.7 it was denied
@@ -17,7 +20,8 @@ starts in. Measured at 1.5.7 with the grant: a command that reads ran, a write i
 directory and a write under the user's Documents were denied, a write and a delete under the
 system temp tree outside the added directory succeeded, and a network lookup failed.
 
-Runs on the standard library alone, in a Python whose UTF-8 mode is on (the project environment
+Runs on the standard library alone, except that a ``browser-only`` launch reads the withheld
+variables from ``tcip_web.terminal``, in a Python whose UTF-8 mode is on (the project environment
 sets ``PYTHONUTF8``), and is invoked as ``python tools/cross_family_ask.py``.
 """
 
@@ -110,8 +114,9 @@ CONDITIONS = {
     },
     "browser-only": {
         "description": (
-            "A cold reader: a headless browser and nothing else, no built-in tool, no "
-            "repository and no user settings, launched from an empty folder. Claude alone."
+            "A cold reader, Claude alone: one headless browser server, no built-in tool, no "
+            "added directory, restricted mode (no settings file loaded), launched from an "
+            "empty folder. The account's email address still reaches it."
         ),
         "mcp": "browser",
         "guidance": False,
@@ -136,10 +141,6 @@ lists at that version."""
 
 BROWSER_DENIED_TOOL = f"mcp__{BROWSER_SERVER_NAME}__browser_run_code_unsafe"
 """The browser server's one tool that runs code outside the page, denied to the reader."""
-
-WITHHELD_ENV_PREFIX = "CLAUDE"
-"""The prefix of the variables a browser-condition launch does not inherit, every one a Claude
-Code session sets."""
 
 DEFAULT_TIMEOUT_S = 1800
 """Seconds a run is given before it is cut off, unless the command line names another."""
@@ -378,7 +379,7 @@ def build_claude(
 
     The prompt goes on stdin and the MCP config is strict. Under a ``browser`` condition the
     config holds :data:`BROWSER_SERVER` alone, whose tools but :data:`BROWSER_DENIED_TOOL` are
-    allowed, with no built-in tool and the project's settings alone. Otherwise the run is in plan
+    allowed, with no built-in tool, in restricted mode. Otherwise the run is in plan
     permission mode with ``cwd`` added, and the config holds the ``tcip`` server block under a
     ``tcip`` condition and no server otherwise. Returns the argv and no final-message file.
     """
@@ -401,8 +402,7 @@ def build_claude(
     argv += ["--mcp-config", str(cfg), "--strict-mcp-config"]
     if condition["mcp"] == "browser":
         argv += [
-            "--setting-sources",
-            "project",
+            "--restricted",
             "--tools",
             "",
             "--allowedTools",
@@ -645,7 +645,7 @@ def refuse_unsupported(
 ) -> None:
     """Refuse (``SystemExit``) a ``browser`` condition for a family but claude or a cwd in use.
 
-    ``cwd`` must be an empty directory there, so the reader starts where no instruction lies.
+    ``cwd`` must be an empty directory there, so the reader starts beside no file.
     """
     if CONDITIONS[condition_name]["mcp"] != "browser":
         return
@@ -701,7 +701,8 @@ def run_one(
     The family, its model and its effort are ``launch``'s (:func:`resolve_launch`). The run's
     directory under ``out_root`` receives the prompt, the argv, stdout, stderr, the extracted
     response and ``meta.json``. The harness runs through :func:`launch_harness`, under a
-    ``browser`` condition without the variables :data:`WITHHELD_ENV_PREFIX` names. Refuses what
+    ``browser`` condition without the variables the in-app terminal withholds from its children
+    (``tcip_web.terminal.WITHHELD_ENV_PREFIXES``). Refuses what
     :func:`refuse_unsupported` refuses before anything is written or launched.
     """
     family = launch.family
@@ -733,15 +734,15 @@ def run_one(
 
     (run_dir / "argv.txt").write_text("\n".join(argv), encoding="utf-8")
 
-    env = (
-        {
+    env: dict[str, str] | None = None
+    if condition["mcp"] == "browser":
+        from tcip_web.terminal import WITHHELD_ENV_PREFIXES
+
+        env = {
             k: v
             for k, v in os.environ.items()
-            if not k.upper().startswith(WITHHELD_ENV_PREFIX)
+            if not k.startswith(WITHHELD_ENV_PREFIXES)
         }
-        if condition["mcp"] == "browser"
-        else None
-    )
     started = now()
     clock = datetime.datetime.now()
     stdout: str | bytes

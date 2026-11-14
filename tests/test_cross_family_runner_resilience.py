@@ -1629,6 +1629,11 @@ def test_each_earlier_condition_builds_the_claude_launch_it_built(
         "--model",
         "opus",
     ]
+    written = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
+    if condition == "no-tools":
+        assert written == {"mcpServers": {}}
+    else:
+        assert written == cross_family_ask.load_tcip_mcp_config()
 
 
 def test_the_browser_only_launch_carries_one_browser_server_and_no_repository(
@@ -1636,8 +1641,9 @@ def test_the_browser_only_launch_carries_one_browser_server_and_no_repository(
 ) -> None:
     """The browser-only argv: one headless, in-memory browser server and no built-in tool.
 
-    Its MCP configuration is strict, its settings are the project's alone, it allows that
-    server's tools, and it carries neither the added directory nor plan mode.
+    Its MCP configuration is strict, it runs in restricted mode, it allows that server's tools
+    but the one that runs code outside the page, and it carries neither the added directory, plan
+    mode nor a setting-source list.
     """
     argv, _ = cross_family_ask.build_claude(
         tmp_path / "p.txt",
@@ -1655,9 +1661,14 @@ def test_the_browser_only_launch_carries_one_browser_server_and_no_repository(
     assert any(arg.startswith("@playwright/mcp@") for arg in server["args"])
     assert argv[argv.index("--mcp-config") + 1] == str(tmp_path / "mcp.json")
     assert "--strict-mcp-config" in argv
-    assert argv[argv.index("--setting-sources") + 1] == "project"
+    assert "--restricted" in argv
+    assert "--setting-sources" not in argv
     assert argv[argv.index("--tools") + 1] == ""
     assert argv[argv.index("--allowedTools") + 1] == f"mcp__{name}"
+    assert (
+        argv[argv.index("--disallowedTools") + 1]
+        == f"mcp__{name}__browser_run_code_unsafe"
+    )
     assert "--add-dir" not in argv
     assert "--permission-mode" not in argv
 
@@ -1665,7 +1676,11 @@ def test_the_browser_only_launch_carries_one_browser_server_and_no_repository(
 def test_the_browser_only_reader_launches_from_an_empty_folder_with_no_claude_variable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The reader's launch drops every CLAUDE variable; the run records the condition."""
+    """The reader's launch drops what the in-app terminal withholds; the run records the condition.
+
+    Two variables a Claude Code session sets and ``PYTHONPATH`` are absent from the launch's
+    environment; ``PATH`` is kept.
+    """
     seen: list[dict] = []
     monkeypatch.setattr(
         cross_family_ask, "launch_harness", _recording_launch(seen)
@@ -1675,6 +1690,7 @@ def test_the_browser_only_reader_launches_from_an_empty_folder_with_no_claude_va
     )
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
     empty = tmp_path / "empty"
     empty.mkdir()
 
@@ -1690,7 +1706,9 @@ def test_the_browser_only_reader_launches_from_an_empty_folder_with_no_claude_va
 
     (launched,) = seen
     assert launched["cwd"] == empty
-    assert not [k for k in launched["env"] if k.upper().startswith("CLAUDE")]
+    assert not {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "PYTHONPATH"} & set(
+        launched["env"]
+    )
     assert "PATH" in {k.upper() for k in launched["env"]}
     assert meta["condition"] == "browser-only"
     assert meta["mcp"] == "browser"
