@@ -18,6 +18,11 @@ section instead.
 - `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
   answers; its module docstring and `--help` say which families it runs, under which conditions,
   and what each run records.
+- `cold_walkthrough.py` - serves the built web app over a harness root's scratch workspace through
+  `serve_capture_app.py`, runs one cold reader through `cross_family_ask.py`'s `browser-only`
+  condition, told a goal file's text and the page's address alone, and records the walk in its own
+  folder; run as `python -m tools.cold_walkthrough`. Its module docstring says how the caller
+  builds the scratch project.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
   for "how many domain tools exist," since the count drifts as tools are added/renamed.
 - `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)
