@@ -1,7 +1,8 @@
 """Helpers for tests that start the web backend as its own process over a scratch harness root.
 
 They run ``tools/serve_capture_app.py``'s command line as its users do, find the backends still
-running over a harness root, and ask a running backend which workspace it serves.
+running over a harness root, ask a running backend which workspace it serves, and stand in for
+the reader's launch at the runner's seam, ``cross_family_ask.launch_harness``.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import os
 import subprocess
 import sys
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 import psutil
@@ -91,3 +93,39 @@ def answered_workspace(port: int) -> str:
     url = f"http://{LOOPBACK_HOST}:{port}/api/projects"
     with urllib.request.urlopen(url, timeout=10) as resp:
         return str(json.load(resp)["workspace"])
+
+
+def recording_launch(
+    seen: list[dict], code: int = 0, during: Callable[[], None] | None = None
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Return a stand-in for the runner's harness launch that records each call.
+
+    Each record holds the argv, the prompt on stdin, the working directory, its entries at launch
+    and the environment. ``during``, when given, runs next, as the reader would while it runs, and
+    may raise in place of an answer; the stand-in then answers "a stand-in report" with ``code``.
+    """
+
+    def launch(
+        argv: list[str],
+        stdin: str | None,
+        timeout: int,
+        cwd: Path,
+        env: dict[str, str] | None,
+    ) -> subprocess.CompletedProcess[str]:
+        seen.append(
+            {
+                "argv": argv,
+                "stdin": stdin,
+                "cwd": cwd,
+                "entries": list(cwd.iterdir()),
+                "env": env,
+            }
+        )
+        if during is not None:
+            during()
+        answer = json.dumps({"result": "a stand-in report"})
+        return subprocess.CompletedProcess(
+            argv, code, stdout=answer, stderr=""
+        )
+
+    return launch

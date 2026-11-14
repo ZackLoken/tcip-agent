@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NoReturn
 import pytest
 
 from tcip_web import terminal
+from tests._scratch_server_fixtures import recording_launch
 from tests._web_fixtures import backend_session
 from tools import cross_family_ask
 
@@ -1577,26 +1578,6 @@ def test_the_antigravity_launch_grants_commands_beside_the_sandbox(
 # ── the browser-only condition: a cold reader with a browser alone ──────────
 
 
-def _recording_launch(
-    seen: list[dict], code: int = 0
-) -> Callable[..., subprocess.CompletedProcess[str]]:
-    """Return a stand-in for the runner's harness launch recording each call's arguments."""
-
-    def launch(
-        argv: list[str],
-        stdin: str | None,
-        timeout: int,
-        cwd: Path,
-        env: dict[str, str] | None,
-    ) -> subprocess.CompletedProcess[str]:
-        seen.append({"argv": argv, "stdin": stdin, "cwd": cwd, "env": env})
-        return subprocess.CompletedProcess(
-            argv, code, stdout=json.dumps({"result": "a report"}), stderr=""
-        )
-
-    return launch
-
-
 @pytest.mark.parametrize(
     "condition", ["as-shipped", "guidance-equalized", "no-tools"]
 )
@@ -1685,7 +1666,7 @@ def test_the_browser_only_reader_launches_from_an_empty_folder_with_no_claude_va
     """
     seen: list[dict] = []
     monkeypatch.setattr(
-        cross_family_ask, "launch_harness", _recording_launch(seen)
+        cross_family_ask, "launch_harness", recording_launch(seen)
     )
     monkeypatch.setattr(
         cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
@@ -1729,7 +1710,7 @@ def test_the_browser_only_reader_and_the_in_app_terminals_child_inherit_one_envi
     """
     seen: list[dict] = []
     monkeypatch.setattr(
-        cross_family_ask, "launch_harness", _recording_launch(seen)
+        cross_family_ask, "launch_harness", recording_launch(seen)
     )
     monkeypatch.setattr(
         cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
@@ -1769,7 +1750,7 @@ def test_browser_only_is_refused_for_any_family_but_claude_before_a_launch(
 ) -> None:
     seen: list[dict] = []
     monkeypatch.setattr(
-        cross_family_ask, "launch_harness", _recording_launch(seen)
+        cross_family_ask, "launch_harness", recording_launch(seen)
     )
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -1793,7 +1774,7 @@ def test_browser_only_is_refused_from_a_working_directory_holding_a_file(
 ) -> None:
     seen: list[dict] = []
     monkeypatch.setattr(
-        cross_family_ask, "launch_harness", _recording_launch(seen)
+        cross_family_ask, "launch_harness", recording_launch(seen)
     )
     (tmp_path / "CLAUDE.md").write_text("an instruction", encoding="utf-8")
 
@@ -1815,7 +1796,7 @@ def test_the_command_refuses_browser_only_for_codex_before_claude_launches(
 ) -> None:
     seen: list[dict] = []
     monkeypatch.setattr(
-        cross_family_ask, "launch_harness", _recording_launch(seen)
+        cross_family_ask, "launch_harness", recording_launch(seen)
     )
     monkeypatch.setattr(
         cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"

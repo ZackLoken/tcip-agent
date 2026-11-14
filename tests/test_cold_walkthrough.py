@@ -1,10 +1,10 @@
 """tools/cold_walkthrough.py: one cold reader walks the served app toward a goal, and is recorded.
 
-Each test starts a real backend over a scratch harness root holding a project made by
-``initialize_project``, through the serving tool, so each runs on Windows alone. The reader's
-launch is the one thing replaced, at the runner's seam. A walk needs the frontend's built page,
-which is not tracked, so the walk tests run where a build left one and the refusal test where
-none is.
+Each test marked ``ON_WINDOWS`` starts a real backend over a scratch harness root holding a
+project made by ``initialize_project``, through the serving tool, so it runs on Windows alone; the
+early refusal of a host the server cannot be stopped on runs everywhere. The reader's launch is the
+one thing replaced, at the runner's seam. A walk needs the frontend's built page, which is not
+tracked, so the walk tests run where a build left one and the no-page refusal test where none is.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -22,6 +22,8 @@ from tcip_web.app import STATIC_DIR, stale_bundle
 from tests._scratch_server_fixtures import (
     ON_WINDOWS,
     end_served_processes,
+    kill_recorded_server,
+    recording_launch,
     served_processes,
 )
 from tests._web_fixtures import new_project
@@ -32,7 +34,6 @@ NEEDS_PAGE = pytest.mark.skipif(
     not BUILT,
     reason=f"no built page in {STATIC_DIR}; the frontend's build makes one",
 )
-pytestmark = ON_WINDOWS
 
 
 @pytest.fixture
@@ -56,37 +57,6 @@ def goal(tmp_path: Path) -> Path:
     return path
 
 
-def _stand_in(
-    seen: list[dict], code: int
-) -> Callable[..., subprocess.CompletedProcess[str]]:
-    """Return a reader launch that answers "a stand-in report" with ``code``, recording each call.
-
-    Each record holds the argv, the prompt, and the working directory's entries at launch.
-    """
-
-    def launch(
-        argv: list[str],
-        stdin: str | None,
-        timeout: int,
-        cwd: Path,
-        env: dict[str, str] | None,
-    ) -> subprocess.CompletedProcess[str]:
-        seen.append(
-            {
-                "argv": argv,
-                "stdin": stdin,
-                "cwd": cwd,
-                "entries": list(cwd.iterdir()),
-            }
-        )
-        answer = json.dumps({"result": "a stand-in report"})
-        return subprocess.CompletedProcess(
-            argv, code, stdout=answer, stderr=""
-        )
-
-    return launch
-
-
 def _records(out: Path) -> list[dict]:
     """Return every walk's ``walkthrough.json`` under ``out`` with the folder it sits in."""
     return [
@@ -95,6 +65,23 @@ def _records(out: Path) -> list[dict]:
     ]
 
 
+def _launch_broke() -> NoReturn:
+    """Fail as a reader's launch can that the runner does not catch."""
+    raise RuntimeError("the reader's launch broke")
+
+
+def test_a_walk_on_a_host_it_cannot_stop_on_is_refused_before_anything_is_made(
+    tmp_path: Path, goal: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(serve_capture_app.sys, "platform", "linux")
+    out = tmp_path / "walks"
+
+    with pytest.raises(SystemExit, match="Windows-only"):
+        cold_walkthrough.walk(goal, tmp_path / "harness", out)
+    assert not out.exists()
+
+
+@ON_WINDOWS
 @NEEDS_PAGE
 def test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop(
     harness: Path,
@@ -109,7 +96,9 @@ def test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop(
     and the reader's answer; no backend is left.
     """
     seen: list[dict] = []
-    monkeypatch.setattr(cross_family_ask, "launch_harness", _stand_in(seen, 0))
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", recording_launch(seen)
+    )
     out = tmp_path_factory.mktemp("walks")
 
     assert cold_walkthrough.walk(goal, harness, out) == 0
@@ -149,6 +138,7 @@ def test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop(
     assert served_processes(harness) == []
 
 
+@ON_WINDOWS
 @NEEDS_PAGE
 def test_a_reader_that_fails_is_recorded_with_its_fault_and_a_failed_walk(
     harness: Path,
@@ -156,7 +146,9 @@ def test_a_reader_that_fails_is_recorded_with_its_fault_and_a_failed_walk(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cross_family_ask, "launch_harness", _stand_in([], 1))
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", recording_launch([], 1)
+    )
     out = tmp_path_factory.mktemp("walks")
 
     assert cold_walkthrough.walk(goal, harness, out) != 0
@@ -167,6 +159,85 @@ def test_a_reader_that_fails_is_recorded_with_its_fault_and_a_failed_walk(
     assert served_processes(harness) == []
 
 
+@ON_WINDOWS
+@NEEDS_PAGE
+def test_a_stop_that_fails_after_a_clean_walk_is_recorded_and_fails_the_walk(
+    harness: Path,
+    goal: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The served process ends while the reader runs, so the stop's kill finds nothing to end."""
+    ended: list[int] = []
+    monkeypatch.setattr(
+        cross_family_ask,
+        "launch_harness",
+        recording_launch(
+            [], during=lambda: ended.append(kill_recorded_server(harness))
+        ),
+    )
+    out = tmp_path_factory.mktemp("walks")
+
+    assert cold_walkthrough.walk(goal, harness, out) == 1
+
+    (record,) = _records(out)
+    assert record["reader_fault"] == ""
+    assert f"process {ended[0]}" in record["stop_refusal"]
+
+
+@ON_WINDOWS
+@NEEDS_PAGE
+def test_a_reader_launch_that_raises_stops_the_server_and_raises_its_failure(
+    harness: Path,
+    goal: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cross_family_ask,
+        "launch_harness",
+        recording_launch([], during=_launch_broke),
+    )
+
+    with pytest.raises(RuntimeError, match="launch broke"):
+        cold_walkthrough.walk(goal, harness, tmp_path_factory.mktemp("walks"))
+    assert served_processes(harness) == []
+    assert not (harness / serve_capture_app.SERVER_RECORD_FILENAME).exists()
+
+
+@ON_WINDOWS
+@NEEDS_PAGE
+def test_a_stop_that_fails_after_the_reader_raised_is_raised_chained_onto_that_failure(
+    harness: Path,
+    goal: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The served process ends and then the reader's launch raises; both failures reach the caller.
+
+    The stop's refusal names the process, keeps the server record, and carries the launch's
+    failure as its cause.
+    """
+    ended: list[int] = []
+
+    def end_then_break() -> NoReturn:
+        ended.append(kill_recorded_server(harness))
+        _launch_broke()
+
+    monkeypatch.setattr(
+        cross_family_ask,
+        "launch_harness",
+        recording_launch([], during=end_then_break),
+    )
+
+    with pytest.raises(SystemExit) as refused:
+        cold_walkthrough.walk(goal, harness, tmp_path_factory.mktemp("walks"))
+    assert f"process {ended[0]}" in str(refused.value)
+    assert isinstance(refused.value.__cause__, RuntimeError)
+    assert (harness / serve_capture_app.SERVER_RECORD_FILENAME).is_file()
+
+
+@ON_WINDOWS
 @NEEDS_PAGE
 def test_a_second_walk_over_the_same_root_writes_its_own_folder(
     harness: Path,
@@ -174,7 +245,9 @@ def test_a_second_walk_over_the_same_root_writes_its_own_folder(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cross_family_ask, "launch_harness", _stand_in([], 0))
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", recording_launch([])
+    )
     out = tmp_path_factory.mktemp("walks")
 
     assert cold_walkthrough.walk(goal, harness, out) == 0
@@ -184,6 +257,7 @@ def test_a_second_walk_over_the_same_root_writes_its_own_folder(
     assert first["folder"] != second["folder"]
 
 
+@ON_WINDOWS
 @pytest.mark.skipif(BUILT, reason=f"a built page is in {STATIC_DIR}")
 def test_a_root_whose_app_has_no_built_page_is_refused_after_its_server_stops(
     harness: Path,
@@ -192,7 +266,9 @@ def test_a_root_whose_app_has_no_built_page_is_refused_after_its_server_stops(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[dict] = []
-    monkeypatch.setattr(cross_family_ask, "launch_harness", _stand_in(seen, 0))
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", recording_launch(seen)
+    )
 
     with pytest.raises(SystemExit, match="answered 503, not the built page"):
         cold_walkthrough.walk(goal, harness, tmp_path_factory.mktemp("walks"))
