@@ -47,6 +47,10 @@ WORKSPACE_DIRNAME = "workspace"
 READY_TIMEOUT_S = 120.0
 """How long a start waits for its server to answer, the value this tool has always waited."""
 
+PROBE_TIMEOUT_S = 2.0
+"""How long one request to the served app waits, the value this tool's readiness probe has
+always used."""
+
 
 def refuse_unstoppable_host() -> None:
     """Refuse (``SystemExit``) a host other than Windows, where ``taskkill /T`` cannot run."""
@@ -155,7 +159,7 @@ def answers_for(port: int, workspace: Path) -> bool:
     """
     url = f"http://{LOOPBACK_HOST}:{port}/api/projects"
     try:
-        with urllib.request.urlopen(url, timeout=2) as resp:
+        with urllib.request.urlopen(url, timeout=PROBE_TIMEOUT_S) as resp:
             answered = json.load(resp)["workspace"]
     except OSError:
         return False
@@ -226,7 +230,8 @@ def start(
     """Launch the web app under ``root``, wait for it, and record its pid, port and workspace.
 
     ``port`` is the one asked for, ``None`` for one the operating system assigns; the port
-    recorded is the one the backend bound. Returns the record. Refuses a host other than Windows,
+    recorded is the one the backend bound, and a port an earlier start left recorded under the
+    workspace is removed before launching. Returns the record. Refuses a host other than Windows,
     an existing ``server_info.json`` under ``root``, what :func:`build_environ` refuses, and what
     :func:`_await_own_server` refuses, the last after ending the process tree it started.
     """

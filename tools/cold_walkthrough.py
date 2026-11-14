@@ -44,7 +44,9 @@ CONDITION = "browser-only"
 def _page_status(address: str) -> int:
     """Return the HTTP status the served page at ``address`` answers with."""
     try:
-        with urllib.request.urlopen(address, timeout=10) as resp:
+        with urllib.request.urlopen(
+            address, timeout=serve_capture_app.PROBE_TIMEOUT_S
+        ) as resp:
             return int(resp.status)
     except urllib.error.HTTPError as exc:
         return exc.code
@@ -52,10 +54,11 @@ def _page_status(address: str) -> int:
 
 def _stale_bundle(port: int) -> str | None:
     """Return the stale-bundle sentence of the first state snapshot the server on ``port`` sends."""
+    wait_s = serve_capture_app.PROBE_TIMEOUT_S
     with connect(
-        f"ws://{LOOPBACK_HOST}:{port}/ws/state", open_timeout=10
+        f"ws://{LOOPBACK_HOST}:{port}/ws/state", open_timeout=wait_s
     ) as ws:
-        snapshot = json.loads(ws.recv(timeout=10))
+        snapshot = json.loads(ws.recv(timeout=wait_s))
     return snapshot["bundle"]
 
 

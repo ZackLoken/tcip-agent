@@ -317,6 +317,30 @@ def test_a_port_another_backend_holds_is_never_taken_for_the_started_server(
 
 
 @ON_WINDOWS
+def test_a_used_root_starts_again_when_another_backend_holds_its_last_port(
+    harness: Path, make_root: Callable[[], Path]
+) -> None:
+    """The port a used root's workspace last recorded, now another backend's, is not its own.
+
+    The second backend holds the port the first start bound, which that start's record still
+    names after its stop.
+    """
+    last = started(str(harness), "--port", str(free_port(0)))["port"]
+    stopped(str(harness))
+    other = make_root()
+    assert started(str(other), "--port", str(last))["port"] == last
+
+    info = started(str(harness))
+
+    assert info["port"] != last
+    assert os.path.samefile(
+        answered_workspace(info["port"]), harness / "workspace"
+    )
+    stopped(str(harness))
+    stopped(str(other))
+
+
+@ON_WINDOWS
 def test_an_answer_for_another_workspace_is_refused_and_leaves_that_backend_running(
     harness: Path, make_root: Callable[[], Path]
 ) -> None:
