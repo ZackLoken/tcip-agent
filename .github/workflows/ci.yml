@@ -230,6 +230,71 @@ jobs:
             exit 1
           }
 
+  # The serving tool ends its server with taskkill /T, so its real-backend tests and the walks run
+  # only here; the no-page refusal runs before the frontend's build makes a page, the walks after.
+  scratch-server-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          conda-remove-defaults: "true"
+          environment-file: environment.yml
+          activate-environment: tcip-agent
+          auto-activate-base: false
+
+      - name: A walk over an app with no built page is refused
+        run: |
+          set -o pipefail
+          pytest tests/test_cold_walkthrough.py -v --timeout=300 | tee no-page-output.txt
+          node=tests/test_cold_walkthrough.py::test_a_root_whose_app_has_no_built_page_is_refused_after_its_server_stops
+          grep -qF "$node PASSED" no-page-output.txt || {
+            echo "the no-page refusal test did not pass (skipped or none selected)"
+            exit 1
+          }
+
+      - name: Install and build the frontend
+        working-directory: packages/tcip-web/frontend
+        run: |
+          npm ci --no-fund --no-audit
+          npm run build
+
+      - name: The serving tool's real backends and the walks over the built page
+        run: |
+          set -o pipefail
+          serving=tests/test_serve_capture_app.py
+          walks=tests/test_cold_walkthrough.py
+          pytest "$serving" "$walks" -v --timeout=300 | tee scratch-server-output.txt
+          nodes=(
+            "$serving::test_a_start_naming_no_port_serves_its_own_workspace_on_the_port_the_backend_recorded"
+            "$serving::test_a_start_naming_a_free_port_serves_its_own_workspace_there"
+            "$serving::test_a_port_another_backend_holds_is_never_taken_for_the_started_server"
+            "$serving::test_a_used_root_starts_again_when_another_backend_holds_its_last_port"
+            "$serving::test_an_answer_for_another_workspace_is_refused_and_leaves_that_backend_running"
+            "$serving::test_a_root_named_by_a_relative_path_serves_that_roots_workspace"
+            "$serving::test_a_start_whose_server_exits_early_leaves_no_process"
+            "$serving::test_a_start_that_times_out_ends_the_process_it_started"
+            "$serving::test_a_stop_whose_kill_fails_refuses_and_keeps_the_record"
+            "$serving::test_a_second_start_and_stop_over_a_used_root_succeed"
+            "$walks::test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop"
+            "$walks::test_a_reader_that_fails_is_recorded_with_its_fault_and_a_failed_walk"
+            "$walks::test_a_stop_that_fails_after_a_clean_walk_is_recorded_and_fails_the_walk"
+            "$walks::test_a_reader_launch_that_raises_stops_the_server_and_raises_its_failure"
+            "$walks::test_a_stop_that_fails_after_the_reader_raised_is_raised_chained_onto_that_failure"
+            "$walks::test_a_second_walk_over_the_same_root_writes_its_own_folder"
+          )
+          for node in "${nodes[@]}"; do
+            grep -qF "$node PASSED" scratch-server-output.txt || {
+              echo "$node did not pass (skipped or none selected)"
+              exit 1
+            }
+          done
+
   # The documented container path (packages/tcip-web/Dockerfile) is built and answers here, so a
   # broken image reaches CI before an adopter.
   docker:
