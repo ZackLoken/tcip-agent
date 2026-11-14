@@ -27,6 +27,7 @@ from pathlib import Path
 
 ROWS_BEFORE = 3000
 ROWS_AFTER = 1500
+MANUAL_WAIT_S = 180
 SMALL_COMMITS = 30
 ROWS_PER_SMALL_COMMIT = 30
 PAYLOAD = "x" * 1500
@@ -197,25 +198,43 @@ def holder(
             {"step": "outer disk made", "exit": code, "said": said[-300:]}
         )
 
-    code, said = diskpart(
-        [
-            f'create vdisk file="{vhd}" maximum=256 type=expandable',
-            select,
-            "attach vdisk",
-            "create partition primary",
-            "format fs=ntfs quick label=probe",
-            f"assign letter={letter}",
-        ],
-        work,
-    )
-    steps.append(
-        {"step": "create and attach", "exit": code, "said": said[-600:]}
-    )
-    if code != 0 or not db.parent.exists():
-        report["stopped"] = (
-            "the virtual disk could not be made; is this shell elevated?"
+    if removal == "manual":
+        db = Path(f"{letter}:/tcip-probe-664/store.db")
+        if not Path(f"{letter}:/").exists():
+            report["stopped"] = f"no volume is mounted at {letter}:"
+            return report
+        db.parent.mkdir(exist_ok=True)
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(db) + suffix).unlink(missing_ok=True)
+        steps.append(
+            {
+                "step": "volume in hand",
+                "said": powershell(
+                    f"Get-Volume -DriveLetter {letter} | "
+                    "Select-Object FileSystem, DriveType | Format-List"
+                )[1],
+            }
         )
-        return report
+    else:
+        code, said = diskpart(
+            [
+                f'create vdisk file="{vhd}" maximum=256 type=expandable',
+                select,
+                "attach vdisk",
+                "create partition primary",
+                "format fs=ntfs quick label=probe",
+                f"assign letter={letter}",
+            ],
+            work,
+        )
+        steps.append(
+            {"step": "create and attach", "exit": code, "said": said[-600:]}
+        )
+        if code != 0 or not db.parent.exists():
+            report["stopped"] = (
+                "the virtual disk could not be made; is this shell elevated?"
+            )
+            return report
 
     first = sqlite3.connect(
         str(db), isolation_level=None, check_same_thread=False
@@ -253,7 +272,25 @@ def holder(
         )
         time.sleep(2)
 
-    if removal == "offline":
+    def waited(present: bool, said: str) -> dict:
+        """Print what the person is asked to do and wait until the volume is there or gone."""
+        print(f"\n>>> {said}\n", flush=True)
+        deadline = time.monotonic() + MANUAL_WAIT_S
+        while Path(f"{letter}:/").exists() != present:
+            if time.monotonic() > deadline:
+                return {"step": said, "ok": False, "error": "not seen in time"}
+            time.sleep(0.5)
+        time.sleep(3)
+        return {"step": said, "ok": True}
+
+    if removal == "manual":
+        steps.append(waited(False, f"Pull the drive at {letter}: out now."))
+        steps.append(
+            waited(
+                True, f"Put the same drive back; it must return as {letter}:."
+            )
+        )
+    elif removal == "offline":
         number = f"(Get-DiskImage -ImagePath '{vhd}').Number"
         told(
             "disk taken offline with the connection open",
@@ -286,7 +323,7 @@ def holder(
             diskpart([select, "detach vdisk"], work),
         )
         told("attach again", diskpart([select, "attach vdisk"], work))
-    if not db.exists():
+    if removal != "manual" and not db.exists():
         code, said = diskpart(
             [select, "select partition 1", f"assign letter={letter}"], work
         )
@@ -403,8 +440,9 @@ def holder(
     )
     steps.append({"step": "files after the reopen", "files": state(db)})
 
-    code, said = diskpart([select, "detach vdisk"], work)
-    steps.append({"step": "detach at the end", "exit": code})
+    if removal != "manual":
+        code, said = diskpart([select, "detach vdisk"], work)
+        steps.append({"step": "detach at the end", "exit": code})
     return report
 
 
@@ -418,7 +456,9 @@ def main() -> int:
     )
     parser.add_argument("--no-checkpoint-on-close", action="store_true")
     parser.add_argument(
-        "--removal", choices=("detach", "offline", "nested"), default="detach"
+        "--removal",
+        choices=("detach", "offline", "nested", "manual"),
+        default="detach",
     )
     parser.add_argument("--outer-letter", default="O")
     parser.add_argument(
