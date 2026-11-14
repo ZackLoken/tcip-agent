@@ -3,9 +3,13 @@
     python -m tools.cold_walkthrough --goal <file> --root <harness root> --out <folder>
 
 The server is ``tools/serve_capture_app.py``'s, over ``<root>/workspace``; the reader is
-``tools/cross_family_ask.py``'s ``browser-only`` condition, run once from a new empty folder and
-told the goal file's text followed by the page's address, and nothing else. Each walk writes its
-own folder under ``<out>``, holding the reader's run and ``walkthrough.json``: the goal file's
+``tools/cross_family_ask.py``'s ``browser-only`` condition, run once from a new empty folder made
+under the system's temporary directory, apart from ``<out>``, and prompted with the goal file's
+text followed by the page's address. Its restricted mode loads no settings file, instruction
+file or memory, but the account's email address and the working directory still reach the
+reader, and a temporary directory inside a repository would hand it that repository's git
+status. Each walk writes its own folder under ``<out>``, holding the reader's run and
+``walkthrough.json``: the goal file's
 path and hash, the port, the workspace served, the stale-bundle sentence the server sent, the
 reader run's fault and whether the server was stopped. The command exits non-zero when the
 reader's run has a fault or the stop failed.
@@ -27,6 +31,7 @@ import datetime
 import hashlib
 import json
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -74,16 +79,18 @@ def _stop(root: Path) -> str | None:
 def walk(goal: Path, root: Path, out: Path) -> int:
     """Serve ``root``'s workspace, run one cold reader toward ``goal``, and record the walk.
 
-    The walk's folder is a new child of ``out``. Returns 1 when the reader's run has a fault or
-    the stop failed, else 0. Refuses what ``serve_capture_app.start`` refuses, and a root whose
-    app answers its page with anything but 200, after stopping its server.
+    The walk's folder is a new child of ``out``; the reader's working directory is a new empty
+    directory under the system's temporary directory. Returns 1 when the reader's run has a
+    fault or the stop failed, else 0. Refuses what ``serve_capture_app.start`` refuses, and a
+    root whose app answers its page with anything but 200, after stopping its server. When the
+    walk raises, a stop that refuses raises its refusal chained onto that failure.
     """
     serve_capture_app.refuse_unstoppable_host()
     goal_bytes = goal.read_bytes()
     walk_id = datetime.datetime.now().strftime("walk-%Y%m%dT%H%M%S%f")
     folder = out / walk_id
-    reader_cwd = folder / "reader"
-    reader_cwd.mkdir(parents=True)
+    folder.mkdir(parents=True)
+    reader_cwd = Path(tempfile.mkdtemp(prefix="cold-reader-"))
     server = serve_capture_app.start(root)
     address = f"http://{LOOPBACK_HOST}:{server['port']}/"
     try:
@@ -100,8 +107,13 @@ def walk(goal: Path, root: Path, out: Path) -> int:
                 cross_family_ask.resolve_launch("claude", None, None),
                 prompt_source=str(goal),
             )
-    finally:
-        refusal = _stop(root)
+    except BaseException as failure:
+        try:
+            serve_capture_app.stop(root)
+        except SystemExit as refused:
+            raise refused from failure
+        raise
+    refusal = _stop(root)
     if status != 200:
         raise SystemExit(
             f"{address} answered {status}, not the built page; a 503 there is a frontend "

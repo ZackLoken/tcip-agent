@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_web.app import STATIC_DIR
+from tcip_web.app import STATIC_DIR, stale_bundle
 from tests._scratch_server_fixtures import (
     ON_WINDOWS,
     end_served_processes,
@@ -72,7 +72,12 @@ def _stand_in(
         env: dict[str, str] | None,
     ) -> subprocess.CompletedProcess[str]:
         seen.append(
-            {"argv": argv, "stdin": stdin, "entries": list(cwd.iterdir())}
+            {
+                "argv": argv,
+                "stdin": stdin,
+                "cwd": cwd,
+                "entries": list(cwd.iterdir()),
+            }
         )
         answer = json.dumps({"result": "a stand-in report"})
         return subprocess.CompletedProcess(
@@ -97,10 +102,11 @@ def test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The reader is told the goal and the page's address alone, from an empty folder.
+    """The reader's prompt is the goal and the page's address, from an empty folder apart from out.
 
-    The record holds the goal's hash, the port, the workspace served and a stop that succeeded;
-    the run beside it holds the argv launched and the reader's answer; no backend is left.
+    The record holds the goal's hash, the port, the workspace served, the stale-bundle sentence
+    the app reports for this tree and a stop that succeeded; the run beside it holds the argv
+    launched and the reader's answer; no backend is left.
     """
     seen: list[dict] = []
     monkeypatch.setattr(cross_family_ask, "launch_harness", _stand_in(seen, 0))
@@ -123,6 +129,8 @@ def test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop(
         == f"{goal.read_text(encoding='utf-8').rstrip()}\n\n{address}\n"
     )
     assert launched["entries"] == []
+    assert not launched["cwd"].resolve().is_relative_to(out.resolve())
+    assert record["bundle"] == stale_bundle()
     assert (run / "argv.txt").read_text(
         encoding="utf-8"
     ).splitlines() == launched["argv"]
