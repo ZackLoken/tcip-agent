@@ -25,6 +25,7 @@ from tests._producer_fixtures import (
     kept,
     write_image,
 )
+from tests.proposal_stub import STUB_ENGINE
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -779,9 +780,6 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     assert len(audit_rows(tmp_path, "prediction_bucket_published")) == 1
     assert audit_rows(tmp_path, "stage_proposals") == []
 
-
-STUB_ENGINE = "tests.proposal_stub:factory"
-"""A dotted engine proposing one candidate box, ``tests.proposal_stub``'s."""
 
 UNRUNNABLE_ENGINE = "tests.test_proposal_staging_record:unrunnable_proposer"
 """A dotted engine whose pass fails the test that reaches it (:func:`unrunnable_proposer`)."""

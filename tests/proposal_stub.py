@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.proposal import Proposal
 
+STUB_ENGINE = "tests.proposal_stub:factory"
+"""The dotted engine name of :func:`factory`, an engine proposing one candidate box."""
+
 
 class StubProposer:
     """A proposer handing back one fixed candidate box, in the neutral proposal schema."""

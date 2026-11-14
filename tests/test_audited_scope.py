@@ -22,13 +22,12 @@ from tests._producer_fixtures import (
     register_dataset_at,
     write_image,
 )
+from tests.proposal_stub import STUB_ENGINE
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
 
 CAPTURE_DATE = "2024-05-01"
-STUB_ENGINE = "tests.proposal_stub:factory"
-"""The dotted proposal engine ``tests/proposal_stub.py`` defines."""
 
 
 @pytest.fixture
