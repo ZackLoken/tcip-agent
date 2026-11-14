@@ -25,6 +25,7 @@ from tcip_mcp.tools.project_tools import (
     register_dataset,
     upsert_dataset,
 )
+from tcip_store.file_backend import DATABASE_LOG
 from tests._busy_store_fixtures import (
     GAVE_UP_WITHIN_S,
     SHORT_WAIT_S,
@@ -1363,7 +1364,7 @@ def test_an_archive_of_an_open_database_carries_every_record_and_entry_it_holds(
     )
     before_dir = tmp_path / "before"
     before = dump_store(src, before_dir)
-    assert (src / ".tcip" / "store.db-wal").stat().st_size > 0
+    assert (src / ".tcip" / DATABASE_LOG).stat().st_size > 0
 
     assert "error" not in archive_project(
         src, ZipBundle(output_path=str(tmp_path / "export.zip"))
