@@ -27,6 +27,8 @@ from pathlib import Path
 
 ROWS_BEFORE = 3000
 ROWS_AFTER = 1500
+SMALL_COMMITS = 30
+ROWS_PER_SMALL_COMMIT = 30
 PAYLOAD = "x" * 1500
 
 
@@ -60,16 +62,18 @@ def state(db: Path) -> dict:
     }
 
 
+def raised(exc: BaseException) -> str:
+    """Return an exception's class, message and, for SQLite's, its extended error name."""
+    name = getattr(exc, "sqlite_errorname", None)
+    return f"{type(exc).__name__}: {exc}" + (f" [{name}]" if name else "")
+
+
 def attempt(label: str, action: Callable[[], object]) -> dict:
     """Run an action and return its value or the exception it raised, under a label."""
     try:
         return {"step": label, "ok": True, "value": action()}
     except Exception as exc:  # noqa: BLE001
-        return {
-            "step": label,
-            "ok": False,
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+        return {"step": label, "ok": False, "error": raised(exc)}
 
 
 def fresh_check(db: Path) -> dict:
@@ -104,12 +108,16 @@ def writer(db: Path) -> int:
     """Open the returned database, grow it, say so, and hold it open until told to leave."""
     conn = sqlite3.connect(str(db), isolation_level=None)
     said = {"quick_check": conn.execute("pragma quick_check").fetchone()[0]}
-    conn.execute("begin")
-    conn.executemany(
-        "insert into t(payload) values (?)",
-        [(PAYLOAD,) for _ in range(ROWS_AFTER)],
+    said["checkpoint"] = list(
+        conn.execute("pragma wal_checkpoint(TRUNCATE)").fetchone()
     )
-    conn.execute("commit")
+    for _ in range(SMALL_COMMITS):
+        conn.execute("begin")
+        conn.executemany(
+            "insert into t(payload) values (?)",
+            [(PAYLOAD,) for _ in range(ROWS_AFTER // SMALL_COMMITS)],
+        )
+        conn.execute("commit")
     said["page_count"] = conn.execute("pragma page_count").fetchone()[0]
     said["rows"] = conn.execute("select count(*) from t").fetchone()[0]
     print(json.dumps(said), flush=True)
@@ -183,7 +191,13 @@ def holder(
         [(PAYLOAD,) for _ in range(ROWS_BEFORE)],
     )
     first.execute("commit")
-    first.execute("insert into t(payload) values (?)", (PAYLOAD,))
+    for _ in range(SMALL_COMMITS):
+        first.execute("begin")
+        first.executemany(
+            "insert into t(payload) values (?)",
+            [(PAYLOAD,) for _ in range(ROWS_PER_SMALL_COMMIT)],
+        )
+        first.execute("commit")
     steps.append(
         {
             "step": "holder wrote before the removal",
@@ -253,7 +267,7 @@ def holder(
                 str(db), isolation_level=None, check_same_thread=False
             )
         except Exception as exc:  # noqa: BLE001
-            outcome["connect_error"] = f"{type(exc).__name__}: {exc}"
+            outcome["connect_error"] = raised(exc)
             steps.append(outcome)
             return
         try:
@@ -262,11 +276,11 @@ def holder(
                 "select count(*) from sqlite_master"
             ).fetchone()[0]
         except Exception as exc:  # noqa: BLE001
-            outcome["read_error"] = f"{type(exc).__name__}: {exc}"
+            outcome["read_error"] = raised(exc)
         try:
             conn.close()
         except Exception as exc:  # noqa: BLE001
-            outcome["close_error"] = f"{type(exc).__name__}: {exc}"
+            outcome["close_error"] = raised(exc)
         outcome["files_after_close"] = state(db)
         steps.append(outcome)
 
@@ -307,6 +321,20 @@ def holder(
     steps.append(
         {"step": "fresh process at the end", "value": fresh_check(db)}
     )
+
+    def reopened() -> int:
+        """Open the database again in this process, with every earlier connection closed."""
+        again = sqlite3.connect(str(db), isolation_level=None)
+        try:
+            configure(again, no_checkpoint)
+            return again.execute("select count(*) from t").fetchone()[0]
+        finally:
+            again.close()
+
+    steps.append(
+        attempt("holder reopens after closing every connection", reopened)
+    )
+    steps.append({"step": "files after the reopen", "files": state(db)})
 
     code, said = diskpart([select, "detach vdisk"], work)
     steps.append({"step": "detach at the end", "exit": code})
