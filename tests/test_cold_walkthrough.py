@@ -105,8 +105,8 @@ def test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop(
     """The reader's prompt is the goal and the page's address, from an empty folder apart from out.
 
     The record holds the goal's hash, the port, the workspace served, the stale-bundle sentence
-    the app reports for this tree and a stop that succeeded; the run beside it holds the argv
-    launched and the reader's answer; no backend is left.
+    the app reports for this tree and no stop refusal; the run beside it holds the argv launched
+    and the reader's answer; no backend is left.
     """
     seen: list[dict] = []
     monkeypatch.setattr(cross_family_ask, "launch_harness", _stand_in(seen, 0))
@@ -118,11 +118,20 @@ def test_a_walk_records_the_goal_the_server_the_readers_run_and_its_stop(
     (record,) = _records(out)
     run = record["folder"] / "browser-only" / "claude"
     address = f"http://127.0.0.1:{record['port']}/"
+    assert set(record) - {"folder"} == {
+        "goal",
+        "goal_sha256",
+        "port",
+        "workspace",
+        "bundle",
+        "reader_fault",
+        "stop_refusal",
+    }
     assert (
         record["goal_sha256"] == hashlib.sha256(goal.read_bytes()).hexdigest()
     )
     assert os.path.samefile(record["workspace"], harness / "workspace")
-    assert record["stopped"] is True
+    assert record["stop_refusal"] is None
     assert record["reader_fault"] == ""
     assert (
         launched["stdin"]
@@ -154,7 +163,7 @@ def test_a_reader_that_fails_is_recorded_with_its_fault_and_a_failed_walk(
 
     (record,) = _records(out)
     assert "exited 1" in record["reader_fault"]
-    assert record["stopped"] is True
+    assert record["stop_refusal"] is None
     assert served_processes(harness) == []
 
 

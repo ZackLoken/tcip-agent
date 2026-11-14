@@ -3,16 +3,15 @@
     python -m tools.cold_walkthrough --goal <file> --root <harness root> --out <folder>
 
 The server is ``tools/serve_capture_app.py``'s, over ``<root>/workspace``; the reader is
-``tools/cross_family_ask.py``'s ``browser-only`` condition, run once from a new empty folder made
-under the system's temporary directory, apart from ``<out>``, and prompted with the goal file's
-text followed by the page's address. Its restricted mode loads no settings file, instruction
-file or memory, but the account's email address and the working directory still reach the
-reader, and a temporary directory inside a repository would hand it that repository's git
-status. Each walk writes its own folder under ``<out>``, holding the reader's run and
-``walkthrough.json``: the goal file's
-path and hash, the port, the workspace served, the stale-bundle sentence the server sent, the
-reader run's fault and whether the server was stopped. The command exits non-zero when the
-reader's run has a fault or the stop failed.
+``tools/cross_family_ask.py``'s ``browser-only`` condition, whose module docstring states what
+its launch withholds and what still reaches the reader. It runs once from a new empty folder made
+under the system's temporary directory, apart from ``<out>``, prompted with the goal file's text
+followed by the page's address. A reader can open the application's own agent panel, which
+starts a real agent in the scratch workspace. Each walk writes its own folder under ``<out>``,
+holding the reader's run and ``walkthrough.json``: the goal file's path and hash, the port, the
+workspace served, the stale-bundle sentence the server sent, the reader run's fault and the
+stop's refusal, null when the server stopped. The command exits non-zero when the reader's run
+has a fault or the stop failed.
 
 The scratch project is the caller's to build under ``<root>/workspace`` with the platform's own
 commands, never a link to a person's project. Images go in by ``ingest_images`` with its default,
@@ -110,10 +109,9 @@ def walk(goal: Path, root: Path, out: Path) -> int:
                 prompt_source=str(goal),
             )
     except BaseException as failure:
-        try:
-            serve_capture_app.stop(root)
-        except SystemExit as refused:
-            raise refused from failure
+        refusal = _stop(root)
+        if refusal:
+            raise SystemExit(refusal) from failure
         raise
     refusal = _stop(root)
     if status != 200:
@@ -129,7 +127,6 @@ def walk(goal: Path, root: Path, out: Path) -> int:
         "workspace": str(workspace),
         "bundle": bundle,
         "reader_fault": meta["fault"],
-        "stopped": refusal is None,
         "stop_refusal": refusal,
     }
     (folder / "walkthrough.json").write_text(

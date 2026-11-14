@@ -8,10 +8,12 @@ Conditions control what the harness could reach, not what it was asked. An attac
 one family-specific preface line ahead of the question, since each harness takes an image
 differently. The ``browser-only`` condition is a cold reader's: Claude alone, from an empty
 working directory, with one headless browser server, no built-in tool, no added directory, in
-restricted mode, which loads no user, project or local settings file and, measured at harness
-2.1.325, no instruction file or memory, and without the variables the in-app terminal withholds
-from its children. Restricted mode does not withhold the account's email address, which still
-reaches the reader, nor, from a working directory inside a repository, its git status.
+restricted mode, and without the variables the in-app terminal withholds from its children.
+Restricted mode ignores the user, project and local settings files, while managed settings
+still apply (Claude Code's ``--help`` at 2.1.325), and, measured once at that version, it gave
+the reader no instruction file or memory. It does not withhold the account's email address,
+which still reaches the reader, nor, from a working directory inside a repository, that
+repository's git status.
 
 The Antigravity launch grants every command inside the harness's sandbox. A launch without the
 grant runs or denies a command by the harness's own agent mode: at harness 1.5.7 it was denied
@@ -114,9 +116,8 @@ CONDITIONS = {
     },
     "browser-only": {
         "description": (
-            "A cold reader, Claude alone: one headless browser server, no built-in tool, no "
-            "added directory, restricted mode (no settings file loaded), launched from an "
-            "empty folder. The account's email address still reaches it."
+            "A cold reader with a browser alone; this tool's module docstring states what its "
+            "launch withholds and what still reaches it."
         ),
         "mcp": "browser",
         "guidance": False,
