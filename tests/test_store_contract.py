@@ -357,12 +357,8 @@ def test_closing_a_backend_leaves_its_log_and_a_new_backend_reads_every_record(
     store.backend.close()
 
     assert log.is_file() and log.read_bytes() == before
-    fresh = make_backend()
-    ts.bind(fresh)
-    try:
-        assert {key: ts.read(key) for key in written} == written
-    finally:
-        fresh.close()
+    ts.bind(make_backend())
+    assert {key: ts.read(key) for key in written} == written
 
 
 def _held_connections(backend: SqliteBackend) -> list[sqlite3.Connection]:
@@ -408,6 +404,24 @@ def test_binding_the_backend_already_bound_closes_nothing(
     held = _held_connections(store.backend)
 
     ts.bind(store.backend)
+
+    for conn in held:
+        conn.execute("select 1")
+    assert ts.read(key) == {"n": 1}
+
+
+def test_a_bind_whose_backend_cannot_be_built_leaves_the_bound_backend_open(
+    store: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``bind`` refused as backend unavailable closes nothing and keeps the backend bound."""
+    key = store.key(LWW, "kept")
+    ts.replace(key, {"n": 1})
+    held = _held_connections(store.backend)
+
+    monkeypatch.setitem(sys.modules, "filelock", None)
+    with pytest.raises(ts.BackendUnavailableError):
+        ts.bind()
+    monkeypatch.undo()
 
     for conn in held:
         conn.execute("select 1")
