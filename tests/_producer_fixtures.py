@@ -812,16 +812,10 @@ def install_stub_proposer(
     The engine is installed by patching ``proposal.resolve_proposer``.
     """
     from tcip_mcp.pipelines import proposal
-    from tcip_mcp.pipelines.execution import NoPass
-
-    class StubProposer:
-        def propose(
-            self, image_path: str, **params: object
-        ) -> proposal.Proposal:
-            return proposal.Proposal(candidates, NoPass())
+    from tests.proposal_stub import StubProposer
 
     monkeypatch.setattr(
-        proposal, "resolve_proposer", lambda engine: StubProposer()
+        proposal, "resolve_proposer", lambda engine: StubProposer(candidates)
     )
 
 
