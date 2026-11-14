@@ -3290,23 +3290,30 @@ def test_a_fresh_process_resumes_from_the_log_alone_whether_or_not_an_end_was_wr
 
 def test_a_session_this_process_holds_is_never_read_as_ended(
     client: TestClient,
-    opened: OpenProject,
+    opened_project: Path,
     fake_rows: dict[str, pty_host.Provider],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A session running here, its start line and report written and no end, is never resumed.
+    """A session this backend still holds, its report written and no end, is never resumed.
 
-    A launch while it runs attaches to it, and the gate asked directly says it is held, a
-    resume fault.
+    Its process survives the person's End, which answers 503, and then exits. No reader runs
+    on the stub, so it stands in for the time between a process's exit and its unattended end.
+    The row's next launch starts a new conversation naming the held session, a resume fault.
     """
     row = fake_rows["claude"]
+    survivor = StubPty(survives=True)
+    wire_stub_spawn(monkeypatch, survivor)
     sid = _launch(client, row)["session_id"]
-    _wait_for(terminal_routes._SESSIONS[sid], "FAKE_TERMINAL_READY")
     _report(client, sid, "conv-1")
+    assert _end(client, sid).status_code == 503
+    survivor.exit()
+    wire_stub_spawn(monkeypatch, StubPty(survives=False))
 
-    assert _launch(client, row)["session_id"] == sid
-    held = terminal_routes.launch_resumes(row, opened, False)
-    assert _not_resumed(held.resumed, sid)
-    assert held.fault is True
+    fresh = _launch(client, row)
+
+    assert sid in terminal_routes._SESSIONS
+    assert _not_resumed(fresh["launched"]["resumed"], sid)
+    assert fresh["resume_fault"] is True
 
 
 def test_a_conversation_whose_hook_never_reported_is_not_resumed_a_fault(
@@ -3326,10 +3333,10 @@ def test_a_conversation_whose_hook_never_reported_is_not_resumed_a_fault(
     fresh = _launch(client, row)
 
     assert _not_resumed(fresh["launched"]["resumed"], sid)
-    assert fresh["resume_fault"] is True
     assert _launch(client, row) == fresh
     _, started = audit_rows(opened_project, "agent_terminal_started")
-    assert {**started["arguments"], "resume_fault": True} == fresh
+    assert fresh.pop("resume_fault") is True
+    assert started["arguments"] == fresh
 
 
 def test_antigravitys_row_is_never_resumed(
