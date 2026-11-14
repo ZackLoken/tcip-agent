@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -264,6 +265,9 @@ def holder(
             "files": state(db),
         }
     )
+    marker = db.with_name("kept_open.bin")
+    marker.write_bytes(b"kept open across the removal")
+    kept = os.open(str(marker), os.O_RDONLY | getattr(os, "O_BINARY", 0))
 
     def told(step: str, outcome: tuple[int, str]) -> None:
         """Record a removal or return command's exit code and the end of what it printed."""
@@ -339,6 +343,20 @@ def holder(
         {"step": "database present after the return", "value": db.exists()}
     )
 
+    steps.append(
+        attempt(
+            "file handle kept open is stat-ed after the return",
+            lambda: os.fstat(kept).st_size,
+        )
+    )
+    steps.append(
+        attempt(
+            "file handle kept open is read after the return",
+            lambda: (os.lseek(kept, 0, os.SEEK_SET), len(os.read(kept, 16)))[
+                1
+            ],
+        )
+    )
     steps.append(
         attempt(
             "old connection reads after the return",

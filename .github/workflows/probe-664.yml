@@ -37,14 +37,6 @@ jobs:
         if: always()
         run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/offline-kill" --letter W --writer-exit kill --removal offline
 
-      - name: Taken offline and brought online, writer closed cleanly
-        if: always()
-        run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/offline-clean" --letter X --writer-exit clean --removal offline
-
       - name: The disk's own backing removed and returned, writer killed
         if: always()
         run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/nested-kill" --letter Y --outer-letter P --writer-exit kill --removal nested
-
-      - name: The disk's own backing removed and returned, writer closed cleanly
-        if: always()
-        run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/nested-clean" --letter Z --outer-letter Q --writer-exit clean --removal nested
