@@ -5,8 +5,9 @@
  * translation layer. The terminal is recolored to the field-station palette via the ANSI
  * theme; the harness's own layout is untouched. Staged requests are submitted to the session for
  * its agent, and choosing another harness while an agent runs waits for that agent's hand-off
- * before the chosen one starts. Under the header the rail states what the launch answered about
- * its conversation and, while any are held, how many requests the backend holds for the agent.
+ * before the chosen one starts. Under the header the rail states why a launch resumed no
+ * conversation when that was a resume fault, until the person dismisses it, and, while any are
+ * held, how many requests the backend holds for the agent.
  */
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -20,9 +21,9 @@ import { committedOf, messageOf, StructuredRefusalError } from "@/api/http";
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import {
   ENDED,
+  NOT_RESUMED,
   TERMINAL_ENDED_CLOSE_CODE,
   type HandOffAnswer,
-  type LaunchedProgram,
   type ProviderStatus,
   type TerminalEnd,
   type TerminalFrame,
@@ -67,13 +68,6 @@ const PICKER_TITLE: Record<TerminalPhase, string> = {
 /** Whether the rail's agent is running in `phase`: live, or handing off before a switch. */
 function running(phase: TerminalPhase): boolean {
   return phase === "live" || phase === "handing-off";
-}
-
-/** What a launch answered about the conversation it continues, in words for the person. */
-function launchSaid(resumed: LaunchedProgram["resumed"]): string {
-  return resumed.kind === "resumed"
-    ? `Resumed conversation ${resumed.conversation} of session ${resumed.session}.`
-    : resumed.why;
 }
 
 /** The backend's count of the requests it holds, in words for the person. */
@@ -152,9 +146,9 @@ export function TerminalRail() {
   const phase = useStore((s) => s.terminalPhase);
   const setPhase = useStore((s) => s.setTerminalPhase);
   const [confirmingExit, setConfirmingExit] = useState(false);
-  // What the session's launch answered about its conversation, and how many requests the backend
+  // The launch's resume fault until dismissed or the launch ends, and how many requests the backend
   // holds for its agent, as the session's socket last said.
-  const [resumed, setResumed] = useState<LaunchedProgram["resumed"] | null>(null);
+  const [resumeFault, setResumeFault] = useState<string | null>(null);
   const [held, setHeld] = useState(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
@@ -186,10 +180,12 @@ export function TerminalRail() {
     });
   }, []);
 
-  /** Stop the socket and forget the session id, so the socket's next start launches an agent. */
+  /** Stop the socket and forget the session and what its launch answered, so the socket's next
+   *  start launches an agent. */
   const detach = useCallback(() => {
     socketRef.current?.stop();
     sessionRef.current = null;
+    setResumeFault(null);
     setHeld(0);
   }, []);
 
@@ -393,7 +389,10 @@ export function TerminalRail() {
             });
             if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
             sessionRef.current = created.session_id;
-            setResumed(created.launched.resumed);
+            const { resumed } = created.launched;
+            setResumeFault(
+              created.resume_fault && resumed.kind === NOT_RESUMED ? resumed.why : null,
+            );
             submitStaged();
           }
         } catch (e) {
@@ -654,10 +653,20 @@ export function TerminalRail() {
           )}
         </div>
       </div>
-      {running(phase) && resumed !== null && (
-        <p className="shrink-0 border-b border-tcip-border px-3 py-1 text-[12px] text-tcip-muted">
-          {launchSaid(resumed)}
-        </p>
+      {running(phase) && resumeFault !== null && (
+        <div className="shrink-0 flex items-baseline gap-3 border-b border-tcip-border px-3 py-1 text-[12px]">
+          <p className="flex-1 text-tcip-warn">{resumeFault}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setResumeFault(null);
+              termRef.current?.focus();
+            }}
+            className="shrink-0 rounded px-1 text-tcip-muted transition-colors hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
       {running(phase) && held > 0 && (
         <p className="shrink-0 border-b border-tcip-border px-3 py-1 text-[12px] text-tcip-warn">

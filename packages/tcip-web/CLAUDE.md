@@ -144,20 +144,22 @@ wrote there, never the repository's. Claude's row loads project settings only (`
 so neither the user's own settings, hooks and `CLAUDE.md` nor the developer's auto-memory reach
 the breeder's agent.
 
-Each launch records what it ran: create answers a `TerminalLaunch` (`LaunchedProgram`), and that
-answer is the launch's one `agent_terminal_started` line in the open project's audit log (none
-when no project is open). `session_start` is what records a report the session hook posts, and
+Each launch records what it ran: its `TerminalLaunch` (`LaunchedProgram`) is the launch's one
+`agent_terminal_started` line in the open project's audit log (none when no project is open), and
+create answers it with whether the launch met a resume fault beside it (`TerminalLaunchAnswer`),
+which no line records. `session_start` is what records a report the session hook posts, and
 what refuses one. A session holds one launch for its life, and its one end is
 `TerminalSession.end` in `routes/terminal.py`, whose `agent_terminal_ended` line (`TerminalEnded`)
-the end route answers from. Whether a launch resumes, and why not, is decided once, by
-`launch_resumes` over `recorded_session`; a session whose backend stopped without ending it is
-resumed so, and no end line is written for it, as is one whose person's End answered that its end
-line could not be written. A switch of harness while an agent runs is `hand_off_session`, and
-`TerminalSession.hand_off_state` is what answers for its hand-off: none asked, asked and not
-landed, or landed, the end line's `hand_off`. The session delivers the
-requests the rail submits under the condition `Provider` states, and its socket serves
-`TerminalServedFrame` (`TerminalOutputFrame` and `TerminalHeldFrame`, each frame's docstring its
-contract). Which agent harness the program is comes from the harness's own MCP
+the end route answers from. Whether a launch resumes, why not, and whether that reason is a fault
+(the last session never reported a conversation or is still held here, which the rail shows the
+person until they dismiss it) is decided once, by `launch_resumes` over `recorded_session`; a
+session whose backend stopped without ending it is resumed so, and no end line is written for it,
+as is one whose person's End answered that its end line could not be written. A switch of harness
+while an agent runs is `hand_off_session`, and `TerminalSession.hand_off_state` is what answers
+for its hand-off: none asked, asked and not landed, or landed, the end line's `hand_off`. The
+session delivers the requests the rail submits under the condition `Provider` states, and its
+socket serves `TerminalServedFrame` (`TerminalOutputFrame` and `TerminalHeldFrame`, each frame's
+docstring its contract). Which agent harness the program is comes from the harness's own MCP
 handshake, not from here. The child is
 spawned with `TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads
 it and stamps it on its own records as a declared correlation (`tcip_mcp.agent_identity`), beside

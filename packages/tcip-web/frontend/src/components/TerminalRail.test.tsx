@@ -91,6 +91,8 @@ vi.mock("@/api/terminal", () => ({
 import { terminalApi } from "@/api/terminal";
 import {
   LAUNCHABLE,
+  NOT_RESUMED,
+  RESUMED,
   TERMINAL_ENDED_CLOSE_CODE,
   type TerminalEnd,
   type TerminalServedFrame,
@@ -849,24 +851,91 @@ describe("TerminalRail", () => {
   });
 
   describe("what the launch and the backend state under the header", () => {
-    it("states why a launch resumed no conversation", async () => {
-      const { resumed } = TERMINAL_ANSWERS.row_launch.launched;
-      if (resumed.kind !== "not_resumed") throw new Error("the row launch resumed");
-      vi.mocked(terminalApi.createSession).mockResolvedValue(TERMINAL_ANSWERS.row_launch);
+    const { fault_launch: FAULT, fault_relaunch: FAULT_AGAIN } = TERMINAL_ANSWERS;
+
+    /** The sentence `launch` answered for its resume fault. */
+    function faultOf(launch: typeof FAULT): string {
+      const { resumed } = launch.launched;
+      if (!launch.resume_fault || resumed.kind !== NOT_RESUMED) throw new Error("no fault");
+      return resumed.why;
+    }
+
+    const dismiss = () => screen.queryByRole("button", { name: "Dismiss" });
+
+    it("states nothing for a row's first launch, which resumed nothing", async () => {
+      const { row_launch: first } = TERMINAL_ANSWERS;
+      const { resumed } = first.launched;
+      if (resumed.kind !== NOT_RESUMED) throw new Error("the row launch resumed");
+      vi.mocked(terminalApi.createSession).mockResolvedValue(first);
       render(<TerminalRail />);
-      expect(await screen.findByText(resumed.why)).toBeInTheDocument();
+      await openSocket();
+      expect(screen.queryByText(resumed.why)).not.toBeInTheDocument();
+      expect(dismiss()).not.toBeInTheDocument();
     });
 
-    it("states the conversation a launch resumed and the session it was in", async () => {
-      const { resumed } = TERMINAL_ANSWERS.resumed_launch.launched;
-      if (resumed.kind !== "resumed") throw new Error("the second row launch resumed nothing");
-      vi.mocked(terminalApi.createSession).mockResolvedValue(TERMINAL_ANSWERS.resumed_launch);
+    it("states nothing for a launch that resumed its conversation", async () => {
+      const { resumed_launch: continued } = TERMINAL_ANSWERS;
+      const { resumed } = continued.launched;
+      if (resumed.kind !== RESUMED) throw new Error("the second row launch resumed nothing");
+      vi.mocked(terminalApi.createSession).mockResolvedValue(continued);
       render(<TerminalRail />);
+      await openSocket();
       expect(
-        await screen.findByText(
-          (content) => content.includes(resumed.conversation) && content.includes(resumed.session),
-        ),
-      ).toBeInTheDocument();
+        screen.queryByText((content) => content.includes(resumed.conversation)),
+      ).not.toBeInTheDocument();
+      expect(dismiss()).not.toBeInTheDocument();
+    });
+
+    it("states a launch's resume fault until Dismiss removes it, across a reconnect and a reopen, and the next launch states its own", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        vi.mocked(terminalApi.createSession)
+          .mockResolvedValueOnce(FAULT)
+          .mockResolvedValueOnce(FAULT_AGAIN);
+        render(<TerminalRail />);
+        const ws = await openSocket();
+        expect(screen.getByText(faultOf(FAULT))).toBeInTheDocument();
+        const { focus } = termInstances[0];
+        const focused = focus.mock.calls.length;
+        fireEvent.click(dismiss()!);
+        expect(screen.queryByText(faultOf(FAULT))).not.toBeInTheDocument();
+        expect(focus).toHaveBeenCalledTimes(focused + 1);
+
+        act(() => ws.drop(1006));
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
+        await openSocket(1);
+        act(() => useStore.getState().setTerminalOpen(false));
+        act(() => useStore.getState().setTerminalOpen(true));
+        await openSocket(2);
+        expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText(faultOf(FAULT))).not.toBeInTheDocument();
+
+        exitAgent();
+        fireEvent.click(await screen.findByText("Start"));
+        expect(await screen.findByText(faultOf(FAULT_AGAIN))).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("an ended launch's fault is gone while the next create is pending, which states its own", async () => {
+      const next = Promise.withResolvers<typeof FAULT>();
+      vi.mocked(terminalApi.createSession)
+        .mockResolvedValueOnce(FAULT)
+        .mockReturnValueOnce(next.promise);
+      render(<TerminalRail />);
+      await openSocket();
+      expect(screen.getByText(faultOf(FAULT))).toBeInTheDocument();
+      exitAgent();
+      fireEvent.click(await screen.findByText("Start"));
+      await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
+      expect(screen.queryByText(faultOf(FAULT))).not.toBeInTheDocument();
+      expect(dismiss()).not.toBeInTheDocument();
+
+      await act(() => Promise.resolve(next.resolve(FAULT_AGAIN)));
+      expect(await screen.findByText(faultOf(FAULT_AGAIN))).toBeInTheDocument();
     });
 
     it("states the requests the backend holds while its count is above zero", async () => {
