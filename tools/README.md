@@ -16,7 +16,14 @@ section instead.
   exit code; its module docstring states what each means and how the baseline is chosen, and only
   `GUARDS` is evidence. `--test-rev` checks a guard claim already in the history.
 - `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
-  answers; its module docstring and `--help` say which families it runs and what each run records.
+  answers; its module docstring and `--help` say which families it runs, under which conditions,
+  and what each run records.
+- `cold_walkthrough.py` - serves the built web app over a harness root's scratch workspace through
+  `serve_capture_app.py`, runs one cold reader through `cross_family_ask.py`'s `browser-only`
+  condition, prompted with a goal file's text and the page's address from a new empty folder, and
+  records the walk in its own folder; run as `python -m tools.cold_walkthrough`. Its module
+  docstring says what reaches the reader besides the prompt and how the caller builds the scratch
+  project.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
   for "how many domain tools exist," since the count drifts as tools are added/renamed.
 - `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)
@@ -59,13 +66,16 @@ section instead.
   orphan check for a registered tool no surface names anywhere.
 - `verify_skill_traits.py` - flags any trait-like token in a crop/domain `SKILL.md` that isn't a
   real name in `crops.yml`, to catch fabricated trait names in skill prose.
-- `serve_capture_app.py` - starts and stops `python -m tcip_web` under a scratch environment for a
-  GUI capture harness: `start` sets `TCIP_WORKSPACE` beneath a caller-named harness root (refusing
-  one under the repository; refusing one that aliases the caller's own active `TCIP_WORKSPACE` in
-  either direction; refusing, when no `TCIP_WORKSPACE` is bound, a root that already looks like a
-  workspace itself), waits for the projects route to answer, and records pid and port; `stop` kills
-  the recorded process tree, Windows-only (`taskkill /T`), refusing outright on any other host.
-  Carries no project fixture, seed, or crop name; seeding a project is the capture script's own job.
+- `serve_capture_app.py` - starts and stops `python -m tcip_web` under a scratch environment:
+  `start` sets `TCIP_WORKSPACE` beneath a caller-named harness root (refusing one under the
+  repository; refusing one that aliases the caller's own active `TCIP_WORKSPACE` in either
+  direction; refusing, when no `TCIP_WORKSPACE` is bound, a root that already holds a project
+  outside its own workspace; refusing a workspace or project linked outside the root), on the port
+  named or one the operating system assigns, waits until the port the backend recorded answers for
+  that same workspace, and records pid, port and workspace, ending the process it started on any
+  failure; `stop` kills the recorded process tree and refuses, keeping the record, when the kill
+  fails. Windows-only (`taskkill /T`), refusing outright on any other host. Carries no project
+  fixture, seed, or crop name; seeding a project is its caller's job.
 - `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
   transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
   frontend's public assets.

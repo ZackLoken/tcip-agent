@@ -1570,3 +1570,238 @@ def test_the_antigravity_launch_grants_commands_beside_the_sandbox(
     assert json.loads(argv[argv.index("--settings") + 1]) == {
         "permissions": {"allow": ["command(*)"]}
     }
+
+
+# ── the browser-only condition: a cold reader with a browser alone ──────────
+
+
+def _recording_launch(
+    seen: list[dict], code: int = 0
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Return a stand-in for the runner's harness launch recording each call's arguments."""
+
+    def launch(
+        argv: list[str],
+        stdin: str | None,
+        timeout: int,
+        cwd: Path,
+        env: dict[str, str] | None,
+    ) -> subprocess.CompletedProcess[str]:
+        seen.append({"argv": argv, "stdin": stdin, "cwd": cwd, "env": env})
+        return subprocess.CompletedProcess(
+            argv, code, stdout=json.dumps({"result": "a report"}), stderr=""
+        )
+
+    return launch
+
+
+@pytest.mark.parametrize(
+    "condition", ["as-shipped", "guidance-equalized", "no-tools"]
+)
+def test_each_earlier_condition_builds_the_claude_launch_it_built(
+    tmp_path: Path, condition: str
+) -> None:
+    argv, _ = cross_family_ask.build_claude(
+        tmp_path / "p.txt",
+        tmp_path,
+        tmp_path,
+        cross_family_ask.CONDITIONS[condition],
+        "opus",
+        "high",
+        5,
+    )
+
+    assert argv == [
+        cross_family_ask.CLAUDE,
+        "--print",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "plan",
+        "--no-session-persistence",
+        "--add-dir",
+        str(tmp_path),
+        "--effort",
+        "high",
+        "--mcp-config",
+        str(tmp_path / "mcp.json"),
+        "--strict-mcp-config",
+        "--model",
+        "opus",
+    ]
+    written = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
+    if condition == "no-tools":
+        assert written == {"mcpServers": {}}
+    else:
+        assert written == cross_family_ask.load_tcip_mcp_config()
+
+
+def test_the_browser_only_launch_carries_one_browser_server_and_no_repository(
+    tmp_path: Path,
+) -> None:
+    """The browser-only argv: one headless, in-memory browser server and no built-in tool.
+
+    Its MCP configuration is strict, it runs in restricted mode, it allows that server's tools
+    but the one that runs code outside the page, and it carries neither the added directory, plan
+    mode nor a setting-source list.
+    """
+    argv, _ = cross_family_ask.build_claude(
+        tmp_path / "p.txt",
+        tmp_path,
+        tmp_path,
+        cross_family_ask.CONDITIONS["browser-only"],
+        "opus",
+        "high",
+        5,
+    )
+
+    config = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
+    ((name, server),) = config["mcpServers"].items()
+    assert {"--headless", "--isolated"} <= set(server["args"])
+    assert any(arg.startswith("@playwright/mcp@") for arg in server["args"])
+    assert argv[argv.index("--mcp-config") + 1] == str(tmp_path / "mcp.json")
+    assert "--strict-mcp-config" in argv
+    assert "--restricted" in argv
+    assert "--setting-sources" not in argv
+    assert argv[argv.index("--tools") + 1] == ""
+    assert argv[argv.index("--allowedTools") + 1] == f"mcp__{name}"
+    assert (
+        argv[argv.index("--disallowedTools") + 1]
+        == f"mcp__{name}__browser_run_code_unsafe"
+    )
+    assert "--add-dir" not in argv
+    assert "--permission-mode" not in argv
+
+
+def test_the_browser_only_reader_launches_from_an_empty_folder_with_no_claude_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reader's launch drops what the in-app terminal withholds; the run records the condition.
+
+    Two variables a Claude Code session sets and ``PYTHONPATH`` are absent from the launch's
+    environment; ``PATH`` is kept.
+    """
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", _recording_launch(seen)
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    meta = cross_family_ask.run_one(
+        "qid",
+        "browser-only",
+        "a goal",
+        empty,
+        tmp_path / "out",
+        5,
+        cross_family_ask.resolve_launch("claude", None, None),
+    )
+
+    (launched,) = seen
+    assert launched["cwd"] == empty
+    assert not {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "PYTHONPATH"} & set(
+        launched["env"]
+    )
+    assert "PATH" in {k.upper() for k in launched["env"]}
+    assert meta["condition"] == "browser-only"
+    assert meta["mcp"] == "browser"
+    assert meta["fault"] == ""
+
+
+@pytest.mark.parametrize(
+    ("family", "model"), [("codex", "stub-model"), ("antigravity", None)]
+)
+def test_browser_only_is_refused_for_any_family_but_claude_before_a_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    family: str,
+    model: str | None,
+) -> None:
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", _recording_launch(seen)
+    )
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    with pytest.raises(SystemExit, match="claude alone"):
+        cross_family_ask.run_one(
+            "qid",
+            "browser-only",
+            "a goal",
+            empty,
+            tmp_path / "out",
+            5,
+            cross_family_ask.resolve_launch(family, model, None),
+        )
+    assert seen == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_browser_only_is_refused_from_a_working_directory_holding_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", _recording_launch(seen)
+    )
+    (tmp_path / "CLAUDE.md").write_text("an instruction", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="not an empty directory"):
+        cross_family_ask.run_one(
+            "qid",
+            "browser-only",
+            "a goal",
+            tmp_path,
+            tmp_path / "out",
+            5,
+            cross_family_ask.resolve_launch("claude", None, None),
+        )
+    assert seen == []
+
+
+def test_the_command_refuses_browser_only_for_codex_before_claude_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", _recording_launch(seen)
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
+    )
+    (tmp_path / "q.txt").write_text("a goal", encoding="utf-8")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "cross_family_ask.py",
+            "--question-id",
+            "qid",
+            "--prompt-file",
+            str(tmp_path / "q.txt"),
+            "--condition",
+            "browser-only",
+            "--families",
+            "claude,codex",
+            "--model",
+            "stub-model",
+            "--cwd",
+            str(empty),
+            "--out",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="claude alone"):
+        cross_family_ask.main()
+    assert seen == []
