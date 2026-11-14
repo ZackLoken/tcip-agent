@@ -211,4 +211,4 @@ them.
   - A message is dismissable, and a message that tells the person nothing they would not assume is
     not shown.
   - A person can do everything in the application without the agent, and the agent can do
-    everything a person can.
+    everything a person can, except where the operating contract requires a person.
