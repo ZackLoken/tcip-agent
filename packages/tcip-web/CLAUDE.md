@@ -197,3 +197,18 @@ them.
 - The GUI follows minimalist design without dropping functionality: prefer nesting related actions
   into one structure (a menu, a split button, a grouped control) over adding sibling buttons, and
   combine existing buttons into nested structures where the grouping is natural.
+- What a person meets at the screen:
+  - A value the platform already holds is chosen or derived, never typed: a registry, a mapping, a
+    plant, a trait, a bucket.
+  - No fixed cap stands in for a form that works at the size of a real planting, which is thousands
+    of plants and thousands of images.
+  - A control says what it takes and what leaving it blank does, where the person is looking,
+    before any error.
+  - A refusal a person can meet is written to the person at the screen and names the next step
+    they can take there.
+  - An action that cannot lead to a delivery is refused where it is taken, never later at the
+    delivery.
+  - A message is dismissable, and a message that tells the person nothing they would not assume is
+    not shown.
+  - A person can do everything in the application without the agent, and the agent can do
+    everything a person can.
