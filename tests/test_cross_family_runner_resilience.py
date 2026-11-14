@@ -1704,9 +1704,9 @@ def test_the_browser_only_reader_and_the_in_app_terminals_child_inherit_one_envi
 ) -> None:
     """The runner's reader launch and the in-app terminal's ``spawn_env`` agree.
 
-    Each route's own answer is compared, under one environment holding a Claude Code session's
-    variable: the environment the runner hands the reader's launch, and the terminal child's less
-    the two variables the terminal sets for its own child.
+    Each route's own answer is compared, under one environment holding a variable of each
+    withheld kind: the environment the runner hands the reader's launch, and the terminal child's
+    less the two variables the terminal sets for its own child.
     """
     seen: list[dict] = []
     monkeypatch.setattr(
@@ -1715,7 +1715,13 @@ def test_the_browser_only_reader_and_the_in_app_terminals_child_inherit_one_envi
     monkeypatch.setattr(
         cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
-    monkeypatch.setenv("CLAUDECODE", "1")
+    for name in (
+        "CLAUDECODE",
+        "FORCE_PROMPT_CACHING_5M",
+        "DISABLE_PROMPT_CACHING_OPUS",
+        "PYTHONPATH",
+    ):
+        monkeypatch.setenv(name, "1")
     empty = tmp_path / "empty"
     empty.mkdir()
     (tmp_path / "workspace").mkdir()
