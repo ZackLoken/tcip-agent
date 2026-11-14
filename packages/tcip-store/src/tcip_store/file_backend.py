@@ -45,9 +45,14 @@ _LOCK_SUFFIX = ".lock"
 DATABASE_FILENAME = "store.db"
 """The database file a root's records and logs live in, under the root's ``.tcip`` directory."""
 
-_DATABASE_SIDECARS = frozenset(
-    {f"{DATABASE_FILENAME}-wal", f"{DATABASE_FILENAME}-shm"}
-)
+DATABASE_LOG = f"{DATABASE_FILENAME}-wal"
+"""The write-ahead log SQLite keeps beside a root's database, holding commits not yet in it."""
+
+_DATABASE_SIDECARS = {
+    DATABASE_LOG: "write-ahead log",
+    f"{DATABASE_FILENAME}-shm": "shared-memory index",
+}
+"""The files SQLite keeps beside a root's database, by name, each with what it is."""
 
 DEFAULT_LOCK_TIMEOUT_S = 30.0
 

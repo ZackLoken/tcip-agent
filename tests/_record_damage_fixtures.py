@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import tcip_store as ts
-from tcip_store.file_backend import database_file
+from tcip_store.file_backend import _DATABASE_SIDECARS, database_file
 from tcip_store.sqlite_backend import encode_parts
 
 if TYPE_CHECKING:
@@ -33,13 +33,17 @@ def unopenable_database(root: str | Path) -> Iterator[Path]:
     """Put :data:`NON_DATABASE` where ``root``'s database is, yield that path, and remove it after.
 
     The store's connections on ``root`` are released first and again on leaving, so a read inside
-    the block meets the identity check rather than a held connection. ``root``'s ``.tcip``
-    directory is made when it holds no database yet. After the block no database is there, and the
-    next write builds one.
+    the block meets the identity check rather than a held connection. The database's log and
+    shared-memory index are removed where the bytes go in, so the block stands for a database that
+    will not read with nothing left to recover it from, never a database replaced under a log that
+    stayed. ``root``'s ``.tcip`` directory is made when it holds no database yet. After the block
+    no database is there, and the next write builds one.
     """
     ts.release_root(root)
     path = database_file(str(root))
     path.parent.mkdir(parents=True, exist_ok=True)
+    for name in _DATABASE_SIDECARS:
+        path.with_name(name).unlink(missing_ok=True)
     path.write_bytes(NON_DATABASE)
     try:
         yield path

@@ -19,7 +19,7 @@ from tcip_mcp.tools.project_tools import (
     import_project,
 )
 from tcip_mcp.web_client import gui_snapshot_key
-from tcip_store.file_backend import lock_file_for
+from tcip_store.file_backend import DATABASE_LOG, lock_file_for
 from tests._chain_fixtures import BUILT_DETECTOR
 from tests._producer_fixtures import one_labeled_capture, register_dataset_at
 from tests._training_values import drawn_split
@@ -90,14 +90,14 @@ def test_import_refuses_a_member_named_as_a_database_sidecar(
     tmp_path: Path,
 ) -> None:
     zip_path = _hand_zip(
-        tmp_path / "bundle.zip", {".tcip/store.db-wal": b"not a log"}
+        tmp_path / "bundle.zip", {f".tcip/{DATABASE_LOG}": b"not a log"}
     )
     dest = tmp_path / "dest"
 
     result = import_project(str(zip_path), str(dest))
 
     assert "error" in result
-    assert "store.db-wal" in result["error"]
+    assert DATABASE_LOG in result["error"]
     assert not dest.exists()
 
 

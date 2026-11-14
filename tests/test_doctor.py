@@ -280,7 +280,7 @@ def test_diagnosing_a_rollback_journal_database_changes_and_locks_nothing(
 
     import tcip_store as ts
     from tcip_store import sqlite_backend
-    from tcip_store.file_backend import database_file
+    from tcip_store.file_backend import _DATABASE_SIDECARS, database_file
     from tests.test_store_contract import _journal_mode
 
     date = "2026-03-04"
@@ -316,12 +316,7 @@ def test_diagnosing_a_rollback_journal_database_changes_and_locks_nothing(
     assert db.read_bytes() == before
     assert _journal_mode(db) == "delete"
     assert not [
-        sibling
-        for sibling in (
-            db.with_name(f"{db.name}-wal"),
-            db.with_name(f"{db.name}-shm"),
-        )
-        if sibling.exists()
+        name for name in _DATABASE_SIDECARS if db.with_name(name).exists()
     ]
 
 
