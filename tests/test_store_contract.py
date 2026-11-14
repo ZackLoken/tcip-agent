@@ -7,6 +7,7 @@ the crash case) where they fail.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sqlite3
@@ -504,6 +505,31 @@ def test_a_second_creator_opens_the_first_s_database_beside_its_sidecars(
     assert ts.read(key) == {"by": "second"}
 
 
+def _refusing_setting(
+    refusal: str, made: list[sqlite3.Connection]
+) -> type[sqlite3.Connection]:
+    """Return a connection class on which the no-checkpoint setting will not hold.
+
+    ``refusal`` is ``raises`` (turning the setting on raises the driver's error) or ``reads back
+    off``. Every connection the class makes is appended to ``made``.
+    """
+
+    class Refusing(sqlite3.Connection):
+        def __init__(self, database: str, **_: object) -> None:
+            super().__init__(database)
+            made.append(self)
+
+        def setconfig(self, op: int, enable: bool = True, /) -> bool:
+            if refusal == "raises":
+                raise sqlite3.OperationalError("the setting is refused")
+            return super().setconfig(op, enable)
+
+        def getconfig(self, op: int, /) -> bool:
+            return refusal != "reads back off" and super().getconfig(op)
+
+    return Refusing
+
+
 @pytest.mark.parametrize("refusal", ["raises", "reads back off"])
 def test_a_connection_whose_close_could_checkpoint_is_refused_as_unavailable(
     store: Harness, refusal: str
@@ -520,21 +546,8 @@ def test_a_connection_whose_close_could_checkpoint_is_refused_as_unavailable(
     db = database_file(str(store.root))
     made: list[sqlite3.Connection] = []
 
-    class Refusing(sqlite3.Connection):
-        def __init__(self, database: str, **_: object) -> None:
-            super().__init__(database)
-            made.append(self)
-
-        def setconfig(self, op: int, enable: bool = True, /) -> bool:
-            if refusal == "raises":
-                raise sqlite3.OperationalError("the setting is refused")
-            return super().setconfig(op, enable)
-
-        def getconfig(self, op: int, /) -> bool:
-            return refusal != "reads back off" and super().getconfig(op)
-
     with pytest.raises(ts.BackendUnavailableError) as refused:
-        connect_published(db, factory=Refusing)
+        connect_published(db, factory=_refusing_setting(refusal, made))
 
     assert str(db) in str(refused.value)
     if refusal == "raises":
@@ -542,6 +555,37 @@ def test_a_connection_whose_close_could_checkpoint_is_refused_as_unavailable(
     (conn,) = made
     with pytest.raises(sqlite3.ProgrammingError):
         conn.execute("select 1")
+
+
+@pytest.mark.parametrize("refusal", ["raises", "reads back off"])
+def test_a_store_read_meets_an_unheld_no_checkpoint_setting_as_backend_unavailable(
+    store: Harness, refusal: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read whose connection will not hold the no-checkpoint setting is refused as unavailable.
+
+    The caller receives ``BackendUnavailableError`` naming the database, never the refused
+    database a driver error inside the read would map to.
+    """
+    from tcip_store import sqlite_backend
+
+    key = store.key(LWW, "published")
+    ts.replace(key, {"n": 1})
+    ts.release_root(store.root)
+    made: list[sqlite3.Connection] = []
+    monkeypatch.setattr(
+        sqlite_backend,
+        "connect_published",
+        functools.partial(
+            sqlite_backend.connect_published,
+            factory=_refusing_setting(refusal, made),
+        ),
+    )
+
+    with pytest.raises(ts.StoreError) as refused:
+        ts.read(key)
+
+    assert type(refused.value) is ts.BackendUnavailableError
+    assert str(database_file(str(store.root))) in str(refused.value)
 
 
 # ── atomicity ───────────────────────────────────────────────────────────────────
