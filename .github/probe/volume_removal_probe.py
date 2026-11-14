@@ -274,7 +274,7 @@ def holder(
 
     def waited(present: bool, said: str) -> dict:
         """Print what the person is asked to do and wait until the volume is there or gone."""
-        print(f"\n>>> {said}\n", flush=True)
+        print(f"\n>>> {said}\n", file=sys.stderr, flush=True)
         deadline = time.monotonic() + MANUAL_WAIT_S
         while Path(f"{letter}:/").exists() != present:
             if time.monotonic() > deadline:
