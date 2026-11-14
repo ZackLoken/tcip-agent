@@ -6,7 +6,9 @@ harness was and how long it took.
 
 Conditions control what the harness could reach, not what it was asked. An attached image adds
 one family-specific preface line ahead of the question, since each harness takes an image
-differently.
+differently. The ``browser-only`` condition is a cold reader's: Claude alone, from an empty
+working directory, with one headless browser server, no built-in tool, no added directory, the
+project's settings alone and none of this process's ``CLAUDE`` variables.
 
 The Antigravity launch grants every command inside the harness's sandbox. A launch without the
 grant runs or denies a command by the harness's own agent mode: at harness 1.5.7 it was denied
@@ -106,7 +108,41 @@ CONDITIONS = {
         "mcp": "none",
         "guidance": False,
     },
+    "browser-only": {
+        "description": (
+            "A cold reader: a headless browser and nothing else, no built-in tool, no "
+            "repository and no user settings, launched from an empty folder. Claude alone."
+        ),
+        "mcp": "browser",
+        "guidance": False,
+    },
 }
+
+BROWSER_SERVER_NAME = "playwright"
+BROWSER_SERVER = {
+    "command": "npx",
+    "args": [
+        "-y",
+        "@playwright/mcp@0.0.85",
+        "--headless",
+        "--isolated",
+        "--browser",
+        "msedge",
+    ],
+}
+"""The browser condition's one MCP server: the Playwright MCP server pinned at 0.0.85, headless,
+its profile kept in memory, driving the installed Edge; each option is one its own ``--help``
+lists at that version."""
+
+BROWSER_DENIED_TOOL = f"mcp__{BROWSER_SERVER_NAME}__browser_run_code_unsafe"
+"""The browser server's one tool that runs code outside the page, denied to the reader."""
+
+WITHHELD_ENV_PREFIX = "CLAUDE"
+"""The prefix of the variables a browser-condition launch does not inherit, every one a Claude
+Code session sets."""
+
+DEFAULT_TIMEOUT_S = 1800
+"""Seconds a run is given before it is cut off, unless the command line names another."""
 
 PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
@@ -340,35 +376,40 @@ def build_claude(
 ) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Claude Code invocation, writing its MCP config into ``run_dir``.
 
-    The prompt goes on stdin. The run is in plan permission mode with ``cwd`` added; the MCP
-    config holds the ``tcip`` server block under a ``tcip`` condition and no server otherwise.
-    Returns the argv and no final-message file.
+    The prompt goes on stdin and the MCP config is strict. Under a ``browser`` condition the
+    config holds :data:`BROWSER_SERVER` alone, whose tools but :data:`BROWSER_DENIED_TOOL` are
+    allowed, with no built-in tool and the project's settings alone. Otherwise the run is in plan
+    permission mode with ``cwd`` added, and the config holds the ``tcip`` server block under a
+    ``tcip`` condition and no server otherwise. Returns the argv and no final-message file.
     """
-    argv = [
-        CLAUDE,
-        "--print",
-        "--output-format",
-        "json",
-        "--permission-mode",
-        "plan",
-        "--no-session-persistence",
-        "--add-dir",
-        str(cwd),
-    ]
+    argv = [CLAUDE, "--print", "--output-format", "json"]
+    if condition["mcp"] != "browser":
+        argv += ["--permission-mode", "plan"]
+    argv += ["--no-session-persistence"]
+    if condition["mcp"] != "browser":
+        argv += ["--add-dir", str(cwd)]
     if effort:
         argv += ["--effort", effort]
     if condition["mcp"] == "tcip":
-        cfg = run_dir / "mcp.json"
-        cfg.write_text(
-            json.dumps(load_tcip_mcp_config(), indent=2), encoding="utf-8"
-        )
-        argv += ["--mcp-config", str(cfg), "--strict-mcp-config"]
+        servers = load_tcip_mcp_config()
+    elif condition["mcp"] == "browser":
+        servers = {"mcpServers": {BROWSER_SERVER_NAME: BROWSER_SERVER}}
     else:
-        cfg = run_dir / "mcp.json"
-        cfg.write_text(
-            json.dumps({"mcpServers": {}}, indent=2), encoding="utf-8"
-        )
-        argv += ["--mcp-config", str(cfg), "--strict-mcp-config"]
+        servers = {"mcpServers": {}}
+    cfg = run_dir / "mcp.json"
+    cfg.write_text(json.dumps(servers, indent=2), encoding="utf-8")
+    argv += ["--mcp-config", str(cfg), "--strict-mcp-config"]
+    if condition["mcp"] == "browser":
+        argv += [
+            "--setting-sources",
+            "project",
+            "--tools",
+            "",
+            "--allowedTools",
+            f"mcp__{BROWSER_SERVER_NAME}",
+            "--disallowedTools",
+            BROWSER_DENIED_TOOL,
+        ]
     if model:
         argv += ["--model", model]
     return argv, None
@@ -599,6 +640,51 @@ def extract_response(
     return stripped, "raw_stdout"
 
 
+def refuse_unsupported(
+    condition_name: str, family: str, cwd: pathlib.Path
+) -> None:
+    """Refuse (``SystemExit``) a ``browser`` condition for a family but claude or a cwd in use.
+
+    ``cwd`` must be an empty directory there, so the reader starts where no instruction lies.
+    """
+    if CONDITIONS[condition_name]["mcp"] != "browser":
+        return
+    if family != "claude":
+        raise SystemExit(
+            f"{condition_name} launches claude alone; {family} has no launch for it"
+        )
+    if not cwd.is_dir() or any(cwd.iterdir()):
+        raise SystemExit(
+            f"{condition_name} runs from an empty directory, and {cwd} is not an empty "
+            "directory"
+        )
+
+
+def launch_harness(
+    argv: list[str],
+    stdin: str | None,
+    timeout: int,
+    cwd: pathlib.Path,
+    env: dict[str, str] | None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one harness to its end and return what it printed.
+
+    ``stdin`` is its input, ``env`` its environment (``None`` for this process's own). Raises what
+    ``subprocess.run`` raises, ``TimeoutExpired`` past ``timeout`` seconds among them.
+    """
+    return subprocess.run(
+        argv,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=timeout,
+        cwd=str(cwd),
+        env=env,
+        check=False,
+    )
+
+
 def run_one(
     question_id: str,
     condition_name: str,
@@ -614,9 +700,12 @@ def run_one(
 
     The family, its model and its effort are ``launch``'s (:func:`resolve_launch`). The run's
     directory under ``out_root`` receives the prompt, the argv, stdout, stderr, the extracted
-    response and ``meta.json``.
+    response and ``meta.json``. The harness runs through :func:`launch_harness`, under a
+    ``browser`` condition without the variables :data:`WITHHELD_ENV_PREFIX` names. Refuses what
+    :func:`refuse_unsupported` refuses before anything is written or launched.
     """
     family = launch.family
+    refuse_unsupported(condition_name, family, cwd)
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
     # A prior meta.json here is this family's own earlier run under the same question and condition.
@@ -644,20 +733,26 @@ def run_one(
 
     (run_dir / "argv.txt").write_text("\n".join(argv), encoding="utf-8")
 
+    env = (
+        {
+            k: v
+            for k, v in os.environ.items()
+            if not k.upper().startswith(WITHHELD_ENV_PREFIX)
+        }
+        if condition["mcp"] == "browser"
+        else None
+    )
     started = now()
     clock = datetime.datetime.now()
     stdout: str | bytes
     stderr: str | bytes
     try:
-        completed = subprocess.run(
+        completed = launch_harness(
             argv,
-            input=body if family in STDIN_FAMILIES else None,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout,
-            cwd=str(cwd),
-            check=False,
+            body if family in STDIN_FAMILIES else None,
+            timeout,
+            cwd,
+            env,
         )
         stdout, stderr, code = (
             completed.stdout,
@@ -754,7 +849,7 @@ def main() -> int:
         required=True,
         help="Directory the runs are written under, as <out>/<question-id>/<condition>/.",
     )
-    parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S)
     parser.add_argument(
         "--model",
         default=None,
@@ -800,6 +895,8 @@ def main() -> int:
     unknown = [f for f in families if f not in BUILDERS]
     if unknown:
         parser.error(f"unknown families: {unknown}. Known: {sorted(BUILDERS)}")
+    for family in families:
+        refuse_unsupported(args.condition, family, args.cwd)
 
     family_prompt_files: dict[str, pathlib.Path] = {}
     for item in args.family_prompt:

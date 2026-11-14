@@ -16,7 +16,8 @@ section instead.
   exit code; its module docstring states what each means and how the baseline is chosen, and only
   `GUARDS` is evidence. `--test-rev` checks a guard claim already in the history.
 - `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
-  answers; its module docstring and `--help` say which families it runs and what each run records.
+  answers; its module docstring and `--help` say which families it runs, under which conditions,
+  and what each run records.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
   for "how many domain tools exist," since the count drifts as tools are added/renamed.
 - `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)
