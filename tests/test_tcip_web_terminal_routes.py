@@ -365,14 +365,15 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
 
     The fake program, standing as the row's executable, receives exactly the arguments the
     row renders, with no placeholder left in them, and the launch's record and audit line carry
-    that argv and the row's preparation. Each row registers the one session hook: Claude's in
-    exec form in its handed settings, whose permission lists are the shipped ones and name no
-    console command, Codex's as a shell line in its overrides, and Antigravity's as a shell line
-    naming the session's start route in the workspace's hooks file, beside allowing only the
-    tcip tools. Each row's preparation writes the operating contract, the knowledge document's
-    text, and every document's skill into the workspace where its harness reads them. With the
-    backend's ``PYTHONPATH`` and ``PWD`` naming the repository, no argument names it, the child
-    inherits no ``PYTHONPATH`` and its ``PWD`` is the workspace.
+    that argv and the row's preparation; the launch, the row's first, answers no resume fault,
+    and its audit line is its answer without that. Each row registers the one session hook:
+    Claude's in exec form in its handed settings, whose permission lists are the shipped ones and
+    name no console command, Codex's as a shell line in its overrides, and Antigravity's as a
+    shell line naming the session's start route in the workspace's hooks file, beside allowing
+    only the tcip tools. Each row's preparation writes the operating contract, the knowledge
+    document's text, and every document's skill into the workspace where its harness reads them.
+    With the backend's ``PYTHONPATH`` and ``PWD`` naming the repository, no argument names it, the
+    child inherits no ``PYTHONPATH`` and its ``PWD`` is the workspace.
     """
     from tcip_web.cli.session_hook import session_start_url
     from tcip_web.state import store
@@ -400,6 +401,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     created = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "provider": row.id}
     ).json()
+    assert created.pop("resume_fault") is False
     sid = created["session_id"]
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
@@ -2856,7 +2858,7 @@ def test_a_session_start_is_answered_the_orientation_of_the_sessions_own_project
     as :func:`orientation` tells it; a launch's answer names no orientation.
     """
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert set(created) == {"session_id", "launched"}
+    assert set(created) == {"session_id", "launched", "resume_fault"}
     other = named_project(opened.root.parent / "hill_block", "Hill block")
     resp = client.post(
         "/api/projects/open", json={"id": other.id, "user": "grower"}
@@ -3074,10 +3076,10 @@ def test_an_end_nobody_chose_then_a_launch_of_its_row_resumes_it_and_delivers_re
 ) -> None:
     """A launch of a row whose last end nobody chose resumes the conversation its hook reported.
 
-    Inside the row's cache lifetime the launch carries the row's resume argument and the id and
-    settings pinning the fullscreen renderer, whose alternate screen is the row's composer
-    marker, its start line names the conversation, and a request staged for it is delivered
-    alone.
+    Inside the row's cache lifetime the launch answers no resume fault, carries the row's resume
+    argument and the id and settings pinning the fullscreen renderer, whose alternate screen is
+    the row's composer marker, its start line names the conversation, and a request staged for
+    it is delivered alone.
     """
     row = fake_rows["claude"]
     _launch(client, row)
@@ -3087,6 +3089,7 @@ def test_an_end_nobody_chose_then_a_launch_of_its_row_resumes_it_and_delivers_re
 
     continued = {"kind": "resumed", "conversation": "conv-1", "session": first}
     assert resumed["launched"]["resumed"] == continued
+    assert resumed["resume_fault"] is False
     argv = resumed["launched"]["argv"]
     assert _resumes(argv, row, "conv-1")
     handed = json.loads(
@@ -3112,7 +3115,8 @@ def test_a_launch_past_the_lifetime_since_the_sessions_last_line_is_fresh(
     """A session resumes nothing once the row's lifetime passed the newest line it left.
 
     That line is its end line when its process exited, its hook's report when its backend left
-    it unended; the launch past the lifetime since it starts a new conversation, naming it.
+    it unended; the launch past the lifetime since it starts a new conversation, naming it, and
+    answers no resume fault.
     """
     from datetime import timedelta
 
@@ -3133,10 +3137,11 @@ def test_a_launch_past_the_lifetime_since_the_sessions_last_line_is_fresh(
     fresh = _launch(client, row)
 
     assert _not_resumed(fresh["launched"]["resumed"], sid)
+    assert fresh["resume_fault"] is False
     assert row.resume.argument not in fresh["launched"]["argv"]
 
 
-def test_a_launch_after_the_persons_exit_is_fresh(
+def test_a_launch_after_the_persons_exit_is_fresh_and_no_fault(
     client: TestClient,
     opened_project: Path,
     fake_rows: dict[str, pty_host.Provider],
@@ -3150,6 +3155,7 @@ def test_a_launch_after_the_persons_exit_is_fresh(
     fresh = _launch(client, row)
 
     assert _not_resumed(fresh["launched"]["resumed"], sid)
+    assert fresh["resume_fault"] is False
 
 
 def test_an_end_during_a_hand_off_leaves_the_conversation_to_resume(
@@ -3234,7 +3240,7 @@ from tcip_web.state import OpenProject
 tcip_store.bind()
 (row,) = [row for row in pty_host.PROVIDERS if row.id == sys.argv[1]]
 project = OpenProject(Path(sys.argv[2]), sys.argv[3])
-print(routes.launch_resumes(row, project, False).model_dump_json())
+print(routes.launch_resumes(row, project, False).resumed.model_dump_json())
 """
 """What a process that has never held a session resumes for a row and a project, printed."""
 
@@ -3284,29 +3290,41 @@ def test_a_fresh_process_resumes_from_the_log_alone_whether_or_not_an_end_was_wr
 
 def test_a_session_this_process_holds_is_never_read_as_ended(
     client: TestClient,
-    opened: OpenProject,
+    opened_project: Path,
     fake_rows: dict[str, pty_host.Provider],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A session running here, its start line and report written and no end, is never resumed.
+    """A session this backend still holds, its report written and no end, is never resumed.
 
-    A launch while it runs attaches to it, and the gate asked directly says it is held.
+    Its process survives the person's End, which answers 503, and then exits. No reader runs
+    on the stub, so it stands in for the time between a process's exit and its unattended end.
+    The row's next launch starts a new conversation naming the held session, a resume fault.
     """
     row = fake_rows["claude"]
+    survivor = StubPty(survives=True)
+    wire_stub_spawn(monkeypatch, survivor)
     sid = _launch(client, row)["session_id"]
-    _wait_for(terminal_routes._SESSIONS[sid], "FAKE_TERMINAL_READY")
     _report(client, sid, "conv-1")
+    assert _end(client, sid).status_code == 503
+    survivor.exit()
+    wire_stub_spawn(monkeypatch, StubPty(survives=False))
 
-    assert _launch(client, row)["session_id"] == sid
-    assert _not_resumed(
-        terminal_routes.launch_resumes(row, opened, False), sid
-    )
+    fresh = _launch(client, row)
+
+    assert sid in terminal_routes._SESSIONS
+    assert _not_resumed(fresh["launched"]["resumed"], sid)
+    assert fresh["resume_fault"] is True
 
 
-def test_a_conversation_whose_hook_never_reported_is_not_resumed(
+def test_a_conversation_whose_hook_never_reported_is_not_resumed_a_fault(
     client: TestClient,
     opened_project: Path,
     fake_rows: dict[str, pty_host.Provider],
 ) -> None:
+    """The next launch after a session whose hook never reported resumes nothing, a resume fault.
+
+    An attach to it answers the same, and its start line is its answer without the fault.
+    """
     row = fake_rows["claude"]
     _launch(client, row)
     sid = _talked_then_exited(client, None)
@@ -3315,6 +3333,10 @@ def test_a_conversation_whose_hook_never_reported_is_not_resumed(
     fresh = _launch(client, row)
 
     assert _not_resumed(fresh["launched"]["resumed"], sid)
+    assert _launch(client, row) == fresh
+    _, started = audit_rows(opened_project, "agent_terminal_started")
+    assert fresh.pop("resume_fault") is True
+    assert started["arguments"] == fresh
 
 
 def test_antigravitys_row_is_never_resumed(

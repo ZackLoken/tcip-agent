@@ -327,9 +327,10 @@ export interface TerminalStatus {
   providers: ProviderStatus[];
 }
 
-export interface TerminalLaunch {
+export interface TerminalLaunchAnswer {
   session_id: string;
   launched: LaunchedProgram;
+  resume_fault: boolean;
 }
 
 export interface CreateSessionRequest {

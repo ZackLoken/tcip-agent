@@ -23,7 +23,9 @@ type Launch = Awaited<ReturnType<typeof terminalApi.createSession>>;
  * a session's socket sent as it held a request until its agent took it (`held`); a row's first
  * launch in a project, which resumed nothing (`row_launch`), a report of its hook whose line could
  * not be written, which committed nothing (`start_audit_gap`), and its next after the backend's
- * shutdown, which resumed its conversation (`resumed_launch`); and the status with the third
+ * shutdown, which resumed its conversation (`resumed_launch`); a later launch of the row after a
+ * session whose hook reported nothing, which met a resume fault (`fault_launch`); and the status
+ * with the third
  * row's executable absent (`status_mixed`) and every row's (`status_absent`).
  */
 // A JSON import reads each literal as a string, which the literal unions admit only through
@@ -44,6 +46,7 @@ export const TERMINAL_ANSWERS = produced as unknown as {
   row_launch: Launch;
   start_audit_gap: Refusal<AuditGapRefusal & { committed: false; what: null }>;
   resumed_launch: Launch;
+  fault_launch: Launch;
   status_mixed: TerminalStatus;
   status_absent: TerminalStatus;
 };
