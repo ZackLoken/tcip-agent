@@ -1104,7 +1104,7 @@ class ShapefileUnreadableError(ValueError):
 
 
 class NoGeoreferencedPlantsError(Exception):
-    """A registration names a CSV that parsed no georeferenced, named plant.
+    """A registration names a CSV that parsed no georeferenced plant.
 
     ``paths`` lists every file that failed the parse.
     """
@@ -1340,13 +1340,19 @@ def parse_plant_registry_csvs(
     :func:`~tcip_mcp.registry_paths.stored_path`, the content digest over every parsed row and the
     total plant count, committing nothing.
 
-    Raises :class:`NoGeoreferencedPlantsError`, naming every file that parsed no georeferenced,
-    named plant or is not UTF-8 text (a binary file, a shapefile's own ``.shp``/``.shx``/``.dbf``
-    included).
+    Refuses every file in a sentence of its own, all in file order in one error: a file that
+    parsed no georeferenced plant or is not UTF-8 text (a binary file, a shapefile's own
+    ``.shp``/``.shx``/``.dbf`` included), and a file with a plant that fails
+    :func:`assignment_is_attributed`, giving how many of the plants it parsed have no id and the
+    column an id is read from. The error is :class:`NoGeoreferencedPlantsError` when any file
+    parsed no plant and ``ValueError`` otherwise.
     """
     from tcip_mcp.registry_paths import stored_path
 
+    column = PLANT_CSV_COLUMN_FOR_FIELD
+    needed = ", ".join(column[f] for f in ("plant_id", "lon", "lat"))
     failed: list[str] = []
+    refusals: list[str] = []
     csvs_meta: list[RegistryCsv] = []
     all_plants: list[PlantRecord] = []
     for p in csv_paths:
@@ -1357,6 +1363,17 @@ def parse_plant_registry_csvs(
             records = []
         if not records:
             failed.append(str(p))
+            refusals.append(
+                f"{p} parsed no georeferenced plant, or is not UTF-8 text (need columns "
+                f"{needed} with usable values); register only files that carry at least one."
+            )
+            continue
+        n_unnamed = sum(not assignment_is_attributed(r) for r in records)
+        if n_unnamed:
+            refusals.append(
+                f"{p}: {n_unnamed} of {len(records)} parsed plants have no id; an id is read "
+                f"from the column {column['plant_id']!r}, and every plant needs one."
+            )
             continue
         all_plants.extend(records)
         csvs_meta.append(
@@ -1367,12 +1384,9 @@ def parse_plant_registry_csvs(
             )
         )
     if failed:
-        raise NoGeoreferencedPlantsError(
-            f"{failed} parsed no georeferenced, named plant, or is not UTF-8 text (need columns "
-            "plant_id, WGS84_centroid_x, WGS84_centroid_y with usable values); register only "
-            "files that carry at least one",
-            paths=failed,
-        )
+        raise NoGeoreferencedPlantsError(" ".join(refusals), paths=failed)
+    if refusals:
+        raise ValueError(" ".join(refusals))
     return csvs_meta, registry_content_digest(all_plants), len(all_plants)
 
 
@@ -1387,14 +1401,15 @@ def register_plant_registry_record(
     """Register ``csv_paths`` under ``name`` in this project's plant registry; return the record.
 
     Parses every path through :func:`parse_plant_registry_csvs`
-    (:class:`NoGeoreferencedPlantsError` names the file that parsed no georeferenced, named
-    plant); the record (:class:`PlantRegistry`) holds those entries plus ``crop``, ``site``,
-    ``registered_at`` and the parsed content's digest, validated before it is written
-    (``pydantic.ValidationError``); a crop crops.yml names for no trait raises ``ValueError``. The
-    read-then-write is one transaction (:func:`tcip_store.transaction`, this store's own
-    ``concurrency="cas"``): a second registration under a taken name returns the existing record
-    unchanged when the crop and the digest match, and otherwise raises
-    :class:`PlantRegistryNameConflictError` naming the two crops, or else the two digests.
+    (:class:`NoGeoreferencedPlantsError` names the file that parsed no georeferenced plant, and
+    ``ValueError`` the file with a plant that has no id); the record (:class:`PlantRegistry`)
+    holds those entries plus ``crop``, ``site``, ``registered_at`` and the parsed content's
+    digest, validated before it is written (``pydantic.ValidationError``); a crop crops.yml names
+    for no trait raises ``ValueError``. The read-then-write is one transaction
+    (:func:`tcip_store.transaction`, this store's own ``concurrency="cas"``): a second
+    registration under a taken name returns the existing record unchanged when the crop and the
+    digest match, and otherwise raises :class:`PlantRegistryNameConflictError` naming the two
+    crops, or else the two digests.
     """
     from tcip_mcp.traits import require_registered_crop
 

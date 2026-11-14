@@ -172,13 +172,159 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
         actor=None,
     )
 
-    match res:
-        case {"error": str() as error}:
-            assert bad.name in error
-            assert good.name not in error
-        case _:
-            raise AssertionError(res)
+    assert res == {"error": _NO_PLANT_SENTENCE.format(file=_located(bad))}
     assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
+
+
+_NO_PLANT_SENTENCE = (
+    "{file} parsed no georeferenced plant, or is not UTF-8 text (need columns plant_id, "
+    "WGS84_centroid_x, WGS84_centroid_y with usable values); register only files that carry "
+    "at least one."
+)
+
+_NO_ID_SENTENCE = (
+    "{file}: {unnamed} of {parsed} parsed plants have no id; an id is read from the column "
+    "'plant_id', and every plant needs one."
+)
+
+
+def _located(path: Path) -> Path:
+    from tcip_mcp.registry_paths import located
+
+    return located(path, path.parent)
+
+
+def _write_text(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
+
+
+def _register(tmp_path: Path, *files: Path) -> dict:
+    return register_plant_registry(
+        tmp_path,
+        name="valley",
+        csv_paths=[str(f) for f in files],
+        crop="currant",
+        site="orchard",
+        actor=None,
+    )
+
+
+def _no_id_column_file(path: Path) -> Path:
+    return _write_text(
+        path,
+        "WGS84_centroid_x,WGS84_centroid_y,accession_name,plot_name,row_number,col_number\n"
+        "-90.0580,43.1967,acc-1,P1,1,1\n"
+        "-90.0581,43.1968,acc-2,P1,1,2\n"
+        "-90.0582,43.1969,acc-3,P2,2,1\n",
+    )
+
+
+def test_refuses_a_file_with_no_id_column_naming_the_file_the_counts_and_the_column(
+    tmp_path: Path,
+) -> None:
+    """A file with no ``plant_id`` column is refused whole at registration; nothing registers."""
+    plants = _no_id_column_file(tmp_path / "plants.csv")
+
+    res = _register(tmp_path, plants)
+
+    assert res == {
+        "error": _NO_ID_SENTENCE.format(
+            file=_located(plants), unnamed=3, parsed=3
+        )
+    }
+    assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
+
+
+def test_the_count_of_plants_without_an_id_is_of_parsed_plants(
+    tmp_path: Path,
+) -> None:
+    """A blank cell and a short row both count as no id; a row with no coordinates is not a plant.
+
+    The id column is last, so a short row keeps its coordinates and loses only its id.
+    """
+    plants = _write_text(
+        tmp_path / "plants.csv",
+        "WGS84_centroid_x,WGS84_centroid_y,accession_name,plant_id\n"
+        "-90.0580,43.1967,acc-1,A1\n"
+        "-90.0581,43.1968,acc-2,\n"
+        "-90.0582,43.1969,acc-3\n"
+        ",,acc-4,\n",
+    )
+
+    res = _register(tmp_path, plants)
+
+    assert res == {
+        "error": _NO_ID_SENTENCE.format(
+            file=_located(plants), unnamed=2, parsed=3
+        )
+    }
+
+
+def test_each_file_without_an_id_is_refused_in_its_own_sentence_and_nothing_registers(
+    tmp_path: Path,
+) -> None:
+    """Two failing files beside a whole one: a sentence each, with its own counts."""
+    good = write_plant_csv(tmp_path / "good.csv", PLANTS)
+    no_column = _no_id_column_file(tmp_path / "no_column.csv")
+    one_blank = _write_text(
+        tmp_path / "one_blank.csv",
+        "plant_id,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
+        "A1,acc-1,-90.0580,43.1967\n"
+        ",acc-2,-90.0581,43.1968\n",
+    )
+
+    res = _register(tmp_path, good, no_column, one_blank)
+
+    assert res == {
+        "error": " ".join(
+            [
+                _NO_ID_SENTENCE.format(
+                    file=_located(no_column), unnamed=3, parsed=3
+                ),
+                _NO_ID_SENTENCE.format(
+                    file=_located(one_blank), unnamed=1, parsed=2
+                ),
+            ]
+        )
+    }
+    assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
+
+
+def test_a_file_parsing_no_plant_beside_a_file_without_ids_is_refused_in_a_sentence_each(
+    tmp_path: Path,
+) -> None:
+    """A call with both kinds of failing file names every one, in file order."""
+    empty = write_plant_csv(tmp_path / "empty.csv", [])
+    no_column = _no_id_column_file(tmp_path / "no_column.csv")
+
+    res = _register(tmp_path, no_column, empty)
+
+    assert res == {
+        "error": " ".join(
+            [
+                _NO_ID_SENTENCE.format(
+                    file=_located(no_column), unnamed=3, parsed=3
+                ),
+                _NO_PLANT_SENTENCE.format(file=_located(empty)),
+            ]
+        )
+    }
+    assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
+
+
+def test_registers_several_files_whose_plants_all_have_an_id(
+    tmp_path: Path,
+) -> None:
+    """Several whole files register together as one registry (a legitimate call)."""
+    first = write_plant_csv(tmp_path / "first.csv", PLANTS[:1])
+    second = write_plant_csv(tmp_path / "second.csv", PLANTS[1:])
+
+    res = _register(tmp_path, first, second)
+
+    assert "error" not in res, res
+    assert res["n_plants"] == len(PLANTS)
+    assert [c["n_plants"] for c in res["csvs"]] == [1, 1]
 
 
 def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(
