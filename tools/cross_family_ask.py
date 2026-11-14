@@ -116,8 +116,8 @@ CONDITIONS = {
     },
     "browser-only": {
         "description": (
-            "A cold reader with a browser alone; this tool's module docstring states what its "
-            "launch withholds and what still reaches it."
+            "A cold reader with a browser alone; tools/cross_family_ask.py's module docstring "
+            "states what its launch withholds and what still reaches it."
         ),
         "mcp": "browser",
         "guidance": False,
