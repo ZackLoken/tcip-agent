@@ -1,0 +1,37 @@
+name: probe-664
+
+# A probe for issue 664 on a branch that never merges: the hosted Windows runner is elevated,
+# so it can remove and return a volume under an open database.
+on:
+  push:
+    branches: ["probe/664-**"]
+
+jobs:
+  volume-removal:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Writer killed, the holder's close left as SQLite's default
+        if: always()
+        shell: pwsh
+        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\kill-default" --letter V --writer-exit kill
+
+      - name: Writer closed cleanly, the holder's close left as SQLite's default
+        if: always()
+        shell: pwsh
+        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\clean-default" --letter W --writer-exit clean
+
+      - name: Writer killed, the holder's connections told not to checkpoint on close
+        if: always()
+        shell: pwsh
+        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\kill-no-checkpoint" --letter X --writer-exit kill --no-checkpoint-on-close
+
+      - name: Writer closed cleanly, the holder's connections told not to checkpoint on close
+        if: always()
+        shell: pwsh
+        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\clean-no-checkpoint" --letter Y --writer-exit clean --no-checkpoint-on-close
