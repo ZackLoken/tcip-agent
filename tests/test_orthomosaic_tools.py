@@ -795,30 +795,22 @@ def test_a_plant_outside_the_raster_is_named_and_an_edge_detection_is_not_given_
     )
 
 
-@pytest.mark.parametrize(
-    "rows, message",
-    [
-        (
-            [("plotA", 10.0, 10.0), ("plotA", 50.0, 50.0)],
-            "duplicate plant_id",
-        ),
-        ([("", 10.0, 10.0)], "blank plant_id"),
-    ],
-    ids=["duplicate", "blank"],
-)
-def test_a_registry_naming_a_plant_twice_or_not_at_all_refuses(
-    tmp_path: Path, rows: list[tuple[str, float, float]], message: str
-) -> None:
+def test_a_registry_naming_a_plant_twice_refuses(tmp_path: Path) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     registry = _plant_registry(
-        tmp_path, _plants_csv_at(tmp_path, raster_path, rows)
+        tmp_path,
+        _plants_csv_at(
+            tmp_path,
+            raster_path,
+            [("plotA", 10.0, 10.0), ("plotA", 50.0, 50.0)],
+        ),
     )
 
     result = _deliver(tmp_path, bucket, registry, ["plotA"])
 
-    assert message in result["error"]
+    assert "duplicate plant_id" in result["error"]
     assert not (tmp_path / "counts.csv").exists()
 
 

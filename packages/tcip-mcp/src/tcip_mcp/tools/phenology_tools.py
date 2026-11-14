@@ -131,9 +131,10 @@ def register_plant_registry(
     """Register a plant-locations CSV set under a name in this project, by ``actor``.
 
     Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses
-    naming any file that parses to no georeferenced, named plant. The stored, frozen,
-    project-scoped record holds each file's ``{path, sha256, n_plants}``, ``crop``, ``site``,
-    ``registered_at``, and a content digest over every parsed row.
+    naming any file that parses to no georeferenced plant, and any file with a plant that has no
+    ``plant_id``. The stored, frozen, project-scoped record holds each file's
+    ``{path, sha256, n_plants}``, ``crop``, ``site``, ``registered_at``, and a content digest over
+    every parsed row.
 
     A second registration under a taken ``name`` is read before it writes (this store's own
     ``concurrency="cas"``): it refuses naming both crops when its crop differs, returns the
@@ -151,7 +152,9 @@ def register_plant_registry(
 
     Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
     (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with :func:`shp_to_plant_csv`), naming
-    any file that parsed no georeferenced, named plant or is not UTF-8 text, naming a crop that is
+    any file that parsed no georeferenced plant or is not UTF-8 text, naming any file with a
+    plant that has no ``plant_id`` (how many of its parsed plants, and the column an id is read
+    from), naming a crop that is
     empty or that ``crops.yml`` names for no trait, and naming a name conflict's two crops or two
     digests or a name outside ``NAME_SEGMENT``. This does not require a project record.
 
