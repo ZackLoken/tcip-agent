@@ -5,9 +5,9 @@
  * translation layer. The terminal is recolored to the field-station palette via the ANSI
  * theme; the harness's own layout is untouched. Staged requests are submitted to the session for
  * its agent, and choosing another harness while an agent runs waits for that agent's hand-off
- * before the chosen one starts. Under the header the rail states why a launch resumed no
- * conversation when that was a resume fault, until the person dismisses it, and, while any are
- * held, how many requests the backend holds for the agent.
+ * before the chosen one starts. Under the header the rail states that the last conversation could
+ * not be continued when a launch met a resume fault, until the person dismisses it, and, while any
+ * are held, how many requests the backend holds for the agent.
  */
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -21,7 +21,6 @@ import { committedOf, messageOf, StructuredRefusalError } from "@/api/http";
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import {
   ENDED,
-  NOT_RESUMED,
   TERMINAL_ENDED_CLOSE_CODE,
   type HandOffAnswer,
   type ProviderStatus,
@@ -69,6 +68,9 @@ const PICKER_TITLE: Record<TerminalPhase, string> = {
 function running(phase: TerminalPhase): boolean {
   return phase === "live" || phase === "handing-off";
 }
+
+/** What the rail tells the person when a launch met a resume fault. */
+const RESUME_FAULT_SAID = "The last conversation could not be continued, so this is a new one.";
 
 /** The backend's count of the requests it holds, in words for the person. */
 function heldSaid(count: number): string {
@@ -148,7 +150,7 @@ export function TerminalRail() {
   const [confirmingExit, setConfirmingExit] = useState(false);
   // The launch's resume fault until dismissed or the launch ends, and how many requests the backend
   // holds for its agent, as the session's socket last said.
-  const [resumeFault, setResumeFault] = useState<string | null>(null);
+  const [resumeFault, setResumeFault] = useState(false);
   const [held, setHeld] = useState(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
@@ -185,7 +187,7 @@ export function TerminalRail() {
   const detach = useCallback(() => {
     socketRef.current?.stop();
     sessionRef.current = null;
-    setResumeFault(null);
+    setResumeFault(false);
     setHeld(0);
   }, []);
 
@@ -389,10 +391,7 @@ export function TerminalRail() {
             });
             if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
             sessionRef.current = created.session_id;
-            const { resumed } = created.launched;
-            setResumeFault(
-              created.resume_fault && resumed.kind === NOT_RESUMED ? resumed.why : null,
-            );
+            setResumeFault(created.resume_fault);
             submitStaged();
           }
         } catch (e) {
@@ -653,13 +652,14 @@ export function TerminalRail() {
           )}
         </div>
       </div>
-      {running(phase) && resumeFault !== null && (
+      {running(phase) && resumeFault && (
         <div className="shrink-0 flex items-baseline gap-3 border-b border-tcip-border px-3 py-1 text-[12px]">
-          <p className="flex-1 text-tcip-warn">{resumeFault}</p>
+          <p className="flex-1 text-tcip-warn">{RESUME_FAULT_SAID}</p>
           <button
             type="button"
+            aria-label="Dismiss the note that the last conversation could not be continued"
             onClick={() => {
-              setResumeFault(null);
+              setResumeFault(false);
               termRef.current?.focus();
             }}
             className="shrink-0 rounded px-1 text-tcip-muted transition-colors hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
