@@ -39,7 +39,7 @@ from pathlib import Path
 from websockets.sync.client import connect
 
 import tcip_store
-from tcip_mcp.web_client import LOOPBACK_HOST
+from tcip_mcp.web_client import LOOPBACK_HOST, backend_url
 from tools import cross_family_ask, serve_capture_app
 
 CONDITION = "browser-only"
@@ -92,8 +92,10 @@ def walk(goal: Path, root: Path, out: Path) -> int:
     folder.mkdir(parents=True)
     reader_cwd = Path(tempfile.mkdtemp(prefix="cold-reader-"))
     server = serve_capture_app.start(root)
-    address = f"http://{LOOPBACK_HOST}:{server['port']}/"
+    workspace = serve_capture_app.served_workspace(root)
     try:
+        address = backend_url(workspace, "/")
+        tcip_store.release_root(workspace)
         status = _page_status(address)
         if status == 200:
             bundle = _stale_bundle(server["port"])
@@ -124,7 +126,7 @@ def walk(goal: Path, root: Path, out: Path) -> int:
         "goal": str(goal),
         "goal_sha256": hashlib.sha256(goal_bytes).hexdigest(),
         "port": server["port"],
-        "workspace": server["workspace"],
+        "workspace": str(workspace),
         "bundle": bundle,
         "reader_fault": meta["fault"],
         "stopped": refusal is None,

@@ -3,7 +3,7 @@
 ``start`` launches ``python -m tcip_web`` with ``TCIP_WORKSPACE`` pointed at the ``workspace``
 directory of a caller-named harness root, on the port named or one the operating system assigns.
 It is ready when the port the backend recorded under that workspace answers for that same
-directory while the process it started still runs; it then records pid, port and workspace in
+directory while the process it started still runs; it then records pid and port in
 ``server_info.json`` under the root. A start that fails anywhere after the process exists ends
 that process tree before it refuses. ``stop`` kills the recorded process tree and removes the
 record, and keeps the record and refuses when the kill fails.
@@ -32,9 +32,9 @@ from pathlib import Path
 
 import tcip_store
 from tcip_mcp.web_client import (
-    LOOPBACK_HOST,
     NoBackendPortError,
     backend_port_key,
+    backend_url,
     resolve_web_port,
 )
 from tcip_mcp.workspace import project_dirs
@@ -43,6 +43,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 WORKSPACE_DIRNAME = "workspace"
 """The harness root's child the scratch server serves as its workspace."""
+
+SERVER_LOG_FILENAME = "server.log"
+"""The harness root's file the server's output is appended to."""
+
+SERVER_RECORD_FILENAME = "server_info.json"
+"""The harness root's record of the running server, its pid and port."""
 
 READY_TIMEOUT_S = 120.0
 """How long a start waits for its server to answer, the value this tool has always waited."""
@@ -128,20 +134,24 @@ def _refuse_links_outside(root: Path) -> None:
             )
 
 
+def served_workspace(root: Path) -> Path:
+    """Return the resolved workspace directory a server started under ``root`` serves."""
+    return (root.resolve() / WORKSPACE_DIRNAME).resolve()
+
+
 def build_environ(root: Path, port: int | None) -> dict[str, str]:
     """Return the environment the web app, ``python -m tcip_web``, is launched under.
 
-    It names the scratch workspace beneath the resolved ``root``, the port to bind (``0``, one
-    the operating system assigns, for ``None``), unbuffered output, and the repository root
-    prefixed onto ``PYTHONPATH``, and drops ``TCIP_IMAGE_ROOTS``. Refuses an unsafe root and a
-    workspace or project linked outside it before building anything.
+    It names :func:`served_workspace`, the port to bind (``0``, one the operating system
+    assigns, for ``None``), unbuffered output, and the repository root prefixed onto
+    ``PYTHONPATH``, and drops ``TCIP_IMAGE_ROOTS``. Refuses an unsafe root and a workspace or
+    project linked outside it before building anything.
     """
     _refuse_unsafe_root(root)
-    resolved = root.resolve()
-    _refuse_links_outside(resolved)
+    _refuse_links_outside(root.resolve())
     env = dict(os.environ)
     env.pop("TCIP_IMAGE_ROOTS", None)
-    env["TCIP_WORKSPACE"] = str(resolved / WORKSPACE_DIRNAME)
+    env["TCIP_WORKSPACE"] = str(served_workspace(root))
     env["TCIP_WEB_PORT"] = str(0 if port is None else port)
     env["PYTHONUNBUFFERED"] = "1"
     existing = env.get("PYTHONPATH", "")
@@ -151,13 +161,17 @@ def build_environ(root: Path, port: int | None) -> dict[str, str]:
     return env
 
 
-def answers_for(port: int, workspace: Path) -> bool:
-    """Return whether the backend on ``port`` answers its projects route for ``workspace``.
+def answers_for(workspace: Path) -> bool:
+    """Return whether the backend recorded under ``workspace`` answers its projects route for it.
 
-    Returns ``False`` while nothing answers there. Refuses (``SystemExit``) an answer naming
-    another directory, compared by ``os.path.samefile``.
+    The address is ``backend_url``'s. Returns ``False`` while no port is recorded or nothing
+    answers there. Refuses (``SystemExit``) an answer naming another directory, compared by
+    ``os.path.samefile``.
     """
-    url = f"http://{LOOPBACK_HOST}:{port}/api/projects"
+    try:
+        url = backend_url(workspace, "/api/projects")
+    except NoBackendPortError:
+        return False
     try:
         with urllib.request.urlopen(url, timeout=PROBE_TIMEOUT_S) as resp:
             answered = json.load(resp)["workspace"]
@@ -165,7 +179,7 @@ def answers_for(port: int, workspace: Path) -> bool:
         return False
     if not os.path.samefile(answered, workspace):
         raise SystemExit(
-            f"the backend on port {port} answers for {answered}, not {workspace}"
+            f"the backend at {url} answers for {answered}, not {workspace}"
         )
     return True
 
@@ -184,16 +198,8 @@ def _await_own_server(
             raise SystemExit(
                 f"server exited early with {proc.returncode}; see {log_path}"
             )
-        try:
-            port = resolve_web_port(workspace)
-        except NoBackendPortError:
-            port = None
-        if (
-            port is not None
-            and answers_for(port, workspace)
-            and proc.poll() is None
-        ):
-            return port
+        if answers_for(workspace) and proc.poll() is None:
+            return resolve_web_port(workspace)
         time.sleep(0.5)
     raise SystemExit(
         f"server {proc.pid} did not answer for {workspace} within {timeout_s} s; "
@@ -227,27 +233,27 @@ def _end(proc: subprocess.Popen) -> None:
 def start(
     root: Path, port: int | None = None, timeout_s: float = READY_TIMEOUT_S
 ) -> dict:
-    """Launch the web app under ``root``, wait for it, and record its pid, port and workspace.
+    """Launch the web app under ``root``, wait for it, and record its pid and port.
 
     ``port`` is the one asked for, ``None`` for one the operating system assigns; the port
     recorded is the one the backend bound, and a port an earlier start left recorded under the
     workspace is removed before launching. Returns the record. Refuses a host other than Windows,
-    an existing ``server_info.json`` under ``root``, what :func:`build_environ` refuses, and what
-    :func:`record_when_ready` refuses, the last after ending the process tree it started.
+    an existing :data:`SERVER_RECORD_FILENAME` under ``root``, what :func:`build_environ`
+    refuses, and what :func:`record_when_ready` refuses, the last after ending the process tree
+    it started.
     """
     refuse_unstoppable_host()
     root = root.resolve()
-    info_path = root / "server_info.json"
+    info_path = root / SERVER_RECORD_FILENAME
     if info_path.exists():
         raise SystemExit(f"{info_path} exists; stop first")
     env = build_environ(root, port)
-    workspace = Path(env["TCIP_WORKSPACE"])
+    workspace = served_workspace(root)
     workspace.mkdir(parents=True, exist_ok=True)
-    workspace = workspace.resolve()
     port_key = backend_port_key(workspace)
     if tcip_store.exists(port_key):
         tcip_store.delete(port_key)
-    with open(root / "server.log", "a", encoding="utf-8") as log:
+    with open(root / SERVER_LOG_FILENAME, "a", encoding="utf-8") as log:
         proc = subprocess.Popen(
             [sys.executable, "-m", "tcip_web"],
             env=env,
@@ -261,18 +267,18 @@ def start(
 def record_when_ready(
     proc: subprocess.Popen, root: Path, workspace: Path, timeout_s: float
 ) -> dict:
-    """Write and return ``root``'s ``server_info.json`` once ``proc`` serves ``workspace``.
+    """Write and return the server's record under ``root`` once ``proc`` serves ``workspace``.
 
-    The record holds the pid, the port :func:`_await_own_server` reads and the workspace.
-    Anything that fails on the way, a refusal of that function or the write, ends ``proc``'s
-    tree before it is raised.
+    The record, :data:`SERVER_RECORD_FILENAME`, holds the pid and the port
+    :func:`_await_own_server` reads. Anything that fails on
+    the way, a refusal of that function or the write, ends ``proc``'s tree before it is raised.
     """
     try:
         bound = _await_own_server(
-            proc, workspace, root / "server.log", timeout_s
+            proc, workspace, root / SERVER_LOG_FILENAME, timeout_s
         )
-        info = {"pid": proc.pid, "port": bound, "workspace": str(workspace)}
-        (root / "server_info.json").write_text(
+        info = {"pid": proc.pid, "port": bound}
+        (root / SERVER_RECORD_FILENAME).write_text(
             json.dumps(info), encoding="utf-8"
         )
     except BaseException:
@@ -290,9 +296,9 @@ def stop(root: Path) -> None:
     fails, naming the process.
     """
     refuse_unstoppable_host()
-    info_path = root / "server_info.json"
+    info_path = root / SERVER_RECORD_FILENAME
     if not info_path.is_file():
-        raise SystemExit(f"no server_info.json under {root}")
+        raise SystemExit(f"no {SERVER_RECORD_FILENAME} under {root}")
     info = json.loads(info_path.read_text(encoding="utf-8"))
     killed = _kill_tree(info["pid"])
     if killed.returncode != 0:

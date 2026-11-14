@@ -7,14 +7,12 @@ since the tool ends one with ``taskkill /T``; each ends whatever backend it left
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING
 
-import psutil
 import pytest
 
 from tcip_mcp.web_client import (
@@ -26,6 +24,7 @@ from tests._scratch_server_fixtures import (
     ON_WINDOWS,
     answered_workspace,
     end_served_processes,
+    kill_recorded_server,
     serve,
     served_processes,
     started,
@@ -192,11 +191,13 @@ def test_stop_is_not_refused_for_platform_on_windows(
 ) -> None:
     """On a Windows host, stop passes the platform check and reaches its real work.
 
-    It reaches the missing server_info.json refusal.
+    It reaches the missing server record's refusal.
     """
     monkeypatch.setattr(serve_capture_app.sys, "platform", "win32")
 
-    with pytest.raises(SystemExit, match="no server_info.json"):
+    with pytest.raises(
+        SystemExit, match=f"no {serve_capture_app.SERVER_RECORD_FILENAME}"
+    ):
         serve_capture_app.stop(tmp_path)
 
 
@@ -266,7 +267,7 @@ def test_start_refuses_a_host_it_cannot_stop_on_before_starting_anything(
 
     with pytest.raises(SystemExit, match="Windows-only"):
         serve_capture_app.start(harness, free_port(0))
-    assert not (harness / "server.log").exists()
+    assert not (harness / serve_capture_app.SERVER_LOG_FILENAME).exists()
     assert served_processes(harness) == []
 
 
@@ -277,6 +278,7 @@ def test_a_start_naming_no_port_serves_its_own_workspace_on_the_port_the_backend
     info = started(str(harness))
     workspace = harness / "workspace"
 
+    assert set(info) == {"pid", "port"}
     assert info["port"] == resolve_web_port(workspace)
     assert os.path.samefile(answered_workspace(info["port"]), workspace)
     stopped(str(harness))
@@ -349,7 +351,7 @@ def test_an_answer_for_another_workspace_is_refused_and_leaves_that_backend_runn
     """A recorded port another backend answers on is refused, and the waited-on process ended.
 
     The workspace's record names a second real backend's port, written by the backend's own
-    writer; the process waited on is the test's own. No ``server_info.json`` is written, and the
+    writer; the process waited on is the test's own. No server record is written, and the
     second backend still answers for its own workspace.
     """
     other = make_root()
@@ -364,7 +366,7 @@ def test_an_answer_for_another_workspace_is_refused_and_leaves_that_backend_runn
     with pytest.raises(SystemExit, match="answers for"):
         serve_capture_app.record_when_ready(waited, harness, workspace, 60)
     assert waited.poll() is not None
-    assert not (harness / "server_info.json").exists()
+    assert not (harness / serve_capture_app.SERVER_RECORD_FILENAME).exists()
     assert os.path.samefile(answered_workspace(taken), other / "workspace")
     stopped(str(other))
 
@@ -393,7 +395,7 @@ def test_a_start_whose_server_exits_early_leaves_no_process(
     assert done.returncode != 0
     assert "exited early" in done.stderr
     assert served_processes(harness) == []
-    assert not (harness / "server_info.json").exists()
+    assert not (harness / serve_capture_app.SERVER_RECORD_FILENAME).exists()
 
 
 @ON_WINDOWS
@@ -403,7 +405,7 @@ def test_a_start_that_times_out_ends_the_process_it_started(
     with pytest.raises(SystemExit, match="did not answer"):
         serve_capture_app.start(harness, None, timeout_s=0)
     assert served_processes(harness) == []
-    assert not (harness / "server_info.json").exists()
+    assert not (harness / serve_capture_app.SERVER_RECORD_FILENAME).exists()
 
 
 @ON_WINDOWS
@@ -412,18 +414,13 @@ def test_a_stop_whose_kill_fails_refuses_and_keeps_the_record(
 ) -> None:
     """A stop whose server is already gone cannot kill it: it refuses naming the process."""
     started(str(harness), "--port", str(free_port(0)))
-    record = json.loads(
-        (harness / "server_info.json").read_text(encoding="utf-8")
-    )
-    served = psutil.Process(record["pid"])
-    served.kill()
-    served.wait(timeout=30)
+    pid = kill_recorded_server(harness)
 
     done = serve("stop", str(harness))
 
     assert done.returncode != 0
-    assert f"process {record['pid']}" in done.stderr
-    assert (harness / "server_info.json").is_file()
+    assert f"process {pid}" in done.stderr
+    assert (harness / serve_capture_app.SERVER_RECORD_FILENAME).is_file()
 
 
 @ON_WINDOWS

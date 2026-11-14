@@ -41,7 +41,7 @@ def serve(
 
 
 def started(*args: str, cwd: Path | None = None) -> dict:
-    """Run a ``start`` that must succeed and return the ``server_info.json`` it wrote."""
+    """Run a ``start`` that must succeed and return the server record it wrote."""
     done = serve("start", *args, cwd=cwd)
     assert done.returncode == 0, done.stderr
     return dict(json.loads(done.stdout))
@@ -74,6 +74,16 @@ def end_served_processes(root: Path) -> None:
             process.kill()
         except psutil.Error:
             continue
+
+
+def kill_recorded_server(root: Path) -> int:
+    """Kill the process ``root``'s server record names, wait for it to end, and return its pid."""
+    record = root / serve_capture_app.SERVER_RECORD_FILENAME
+    pid = int(json.loads(record.read_text(encoding="utf-8"))["pid"])
+    served = psutil.Process(pid)
+    served.kill()
+    served.wait(timeout=30)
+    return pid
 
 
 def answered_workspace(port: int) -> str:

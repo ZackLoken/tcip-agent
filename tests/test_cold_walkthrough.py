@@ -25,7 +25,7 @@ from tests._scratch_server_fixtures import (
     served_processes,
 )
 from tests._web_fixtures import new_project
-from tools import cold_walkthrough, cross_family_ask
+from tools import cold_walkthrough, cross_family_ask, serve_capture_app
 
 BUILT = (STATIC_DIR / "index.html").exists()
 NEEDS_PAGE = pytest.mark.skipif(
@@ -189,4 +189,4 @@ def test_a_root_whose_app_has_no_built_page_is_refused_after_its_server_stops(
         cold_walkthrough.walk(goal, harness, tmp_path_factory.mktemp("walks"))
     assert seen == []
     assert served_processes(harness) == []
-    assert not (harness / "server_info.json").exists()
+    assert not (harness / serve_capture_app.SERVER_RECORD_FILENAME).exists()
