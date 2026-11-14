@@ -17,8 +17,9 @@ src/tcip_store/
   values.py            # what a value must be to be stored, and its two spellings: a record
                         #   (encode_record) and a log line (encode_log_line), read by decode_value
   store.py             # the module functions over the one backend a process binds
-  sqlite_backend.py    # the database: <root>/.tcip/store.db, WAL at full synchronous, one
-                        #   connection per process, thread and root; the transaction handle Txn
+  sqlite_backend.py    # the database: <root>/.tcip/store.db, WAL at full synchronous and never
+                        #   checkpointed at a close, one connection per process, thread and
+                        #   root; the transaction handle Txn
   file_backend.py      # a file written atomically by path under its lock, and the lock a root's
                         #   database is created under
 ```

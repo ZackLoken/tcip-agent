@@ -2,9 +2,11 @@
 
 Creation builds the database under a unique temp name in rollback-journal mode, commits, puts it
 in WAL, closes, fsyncs and installs it with a no-clobber primitive, all under the root's transition
-lock, so the file's existence marks a complete WAL database. Every open verifies the schema and
-full synchronous before a single row is read, and changes nothing on disk. One writer at a time
-per root; in WAL the store's own writer never blocks a reader.
+lock, so the file's existence marks a complete WAL database; a creation refuses a root where its
+log or shared-memory index was left without the database. Every open verifies the schema and
+full synchronous before a single row is read, and changes nothing on disk. No connection on a
+published database checkpoints when it closes, so its log stays beside it after every exit. One
+writer at a time per root; in WAL the store's own writer never blocks a reader.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from collections import Counter
 from collections.abc import Callable, Generator, Sequence
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 from tcip_store.errors import (
     BackendUnavailableError,
@@ -30,6 +32,7 @@ from tcip_store.errors import (
     TransactionMisuseError,
 )
 from tcip_store.file_backend import (
+    _DATABASE_SIDECARS,
     DEFAULT_LOCK_TIMEOUT_S,
     _filelock_classes,
     _remove_quietly,
@@ -204,14 +207,56 @@ def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
         )
 
 
+class ConnectArgs(TypedDict, total=False):
+    """The keywords :func:`connect_published` passes on to ``sqlite3.connect``."""
+
+    timeout: float
+    isolation_level: None
+    check_same_thread: bool
+    factory: type[sqlite3.Connection]
+
+
+def connect_published(
+    db_path: Path, **connect_args: Unpack[ConnectArgs]
+) -> sqlite3.Connection:
+    """Connect to a published database so that no close of the connection checkpoints.
+
+    ``connect_args`` are passed to ``sqlite3.connect``. SQLite's no-checkpoint-on-close setting
+    is turned on and read back before any statement runs, so a close leaves the log and its
+    shared-memory index as they are. Refuses (``BackendUnavailableError``, the connection closed)
+    when turning the setting on raises, the driver's error as its cause, or it reads back off.
+    """
+    conn = sqlite3.connect(str(db_path), **connect_args)
+    refused = (
+        f"{db_path} would not take SQLite's no-checkpoint-on-close setting, so a close of this "
+        "connection could checkpoint its log into the database file"
+    )
+    try:
+        try:
+            option = sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE
+            conn.setconfig(option, True)
+            on = conn.getconfig(option)
+        except Exception as exc:
+            raise BackendUnavailableError(f"{refused}: {exc}") from exc
+        if not on:
+            raise BackendUnavailableError(
+                f"{refused}: it reads back off once turned on"
+            )
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
 def open_verified(db_path: Path, timeout_s: float) -> sqlite3.Connection:
     """Open a published database, verify its schema, and set the connection to full synchronous.
 
-    The database is opened in whatever journal mode it holds, its statements waiting up to
-    ``timeout_s`` on another connection's lock, the identity check's schema read first among them.
+    The connection is made by :func:`connect_published`. The database is opened in whatever
+    journal mode it holds, its statements waiting up to ``timeout_s`` on another connection's
+    lock, the identity check's schema read first among them.
     """
-    conn = sqlite3.connect(
-        str(db_path),
+    conn = connect_published(
+        db_path,
         timeout=timeout_s,
         isolation_level=None,
         check_same_thread=False,
@@ -235,9 +280,10 @@ def copy_database(source: Path, destination: Path) -> None:
     """Write a consistent copy of the database at ``source`` to ``destination``.
 
     The copy goes through SQLite's own backup, whatever another connection is committing
-    meanwhile.
+    meanwhile. The source is connected through :func:`connect_published`, so its log is left as
+    it was; the copy is closed by SQLite's default close, so it is one complete file.
     """
-    src = sqlite3.connect(str(source))
+    src = connect_published(source)
     try:
         dst = sqlite3.connect(str(destination))
         try:
@@ -398,7 +444,9 @@ class SqliteBackend:
         """Build a database beside its destination and install it atomically and exclusively.
 
         The transition lock is held across the existence re-check, the build and the install, so
-        two creators serialize and the loser opens the winner's database.
+        two creators serialize and the loser opens the winner's database. With no database there,
+        a log or shared-memory index left at the destination's sidecar names refuses
+        (``DatabaseRefusedError`` naming each) with nothing built or removed.
         """
         started = time.monotonic()
         try:
@@ -409,6 +457,17 @@ class SqliteBackend:
         try:
             if db_path.is_file():
                 return
+            left = [
+                f"{path} (its {what})"
+                for name, what in _DATABASE_SIDECARS.items()
+                if (path := db_path.with_name(name)).exists()
+            ]
+            if left:
+                raise DatabaseRefusedError(
+                    f"{db_path} is absent, and beside it is {' and '.join(left)}: a file a "
+                    "store keeps beside its database was left there without the database, so "
+                    "no new store is made over it"
+                )
             temp = db_path.parent / creation_temp_name(
                 db_path.name, uuid.uuid4().hex
             )
