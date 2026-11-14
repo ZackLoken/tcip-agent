@@ -59,13 +59,16 @@ section instead.
   orphan check for a registered tool no surface names anywhere.
 - `verify_skill_traits.py` - flags any trait-like token in a crop/domain `SKILL.md` that isn't a
   real name in `crops.yml`, to catch fabricated trait names in skill prose.
-- `serve_capture_app.py` - starts and stops `python -m tcip_web` under a scratch environment for a
-  GUI capture harness: `start` sets `TCIP_WORKSPACE` beneath a caller-named harness root (refusing
-  one under the repository; refusing one that aliases the caller's own active `TCIP_WORKSPACE` in
-  either direction; refusing, when no `TCIP_WORKSPACE` is bound, a root that already looks like a
-  workspace itself), waits for the projects route to answer, and records pid and port; `stop` kills
-  the recorded process tree, Windows-only (`taskkill /T`), refusing outright on any other host.
-  Carries no project fixture, seed, or crop name; seeding a project is the capture script's own job.
+- `serve_capture_app.py` - starts and stops `python -m tcip_web` under a scratch environment:
+  `start` sets `TCIP_WORKSPACE` beneath a caller-named harness root (refusing one under the
+  repository; refusing one that aliases the caller's own active `TCIP_WORKSPACE` in either
+  direction; refusing, when no `TCIP_WORKSPACE` is bound, a root that already holds a project
+  outside its own workspace; refusing a workspace or project linked outside the root), on the port
+  named or one the operating system assigns, waits until the port the backend recorded answers for
+  that same workspace, and records pid, port and workspace, ending the process it started on any
+  failure; `stop` kills the recorded process tree and refuses, keeping the record, when the kill
+  fails. Windows-only (`taskkill /T`), refusing outright on any other host. Carries no project
+  fixture, seed, or crop name; seeding a project is its caller's job.
 - `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
   transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
   frontend's public assets.
