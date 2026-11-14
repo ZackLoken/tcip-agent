@@ -65,7 +65,21 @@ def state(db: Path) -> dict:
 def raised(exc: BaseException) -> str:
     """Return an exception's class, message and, for SQLite's, its extended error name."""
     name = getattr(exc, "sqlite_errorname", None)
-    return f"{type(exc).__name__}: {exc}" + (f" [{name}]" if name else "")
+    code = getattr(exc, "sqlite_errorcode", None)
+    return f"{type(exc).__name__}: {exc}" + (
+        f" [{name} {code}]" if name else ""
+    )
+
+
+def powershell(command: str) -> tuple[int, str]:
+    """Run one PowerShell command and return its exit code and what it printed."""
+    done = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return done.returncode, (done.stdout + done.stderr).strip()
 
 
 def attempt(label: str, action: Callable[[], object]) -> dict:
@@ -142,21 +156,46 @@ def configure(conn: sqlite3.Connection, no_checkpoint: bool) -> None:
 
 
 def holder(
-    work: Path, letter: str, writer_exit: str, no_checkpoint: bool
+    work: Path,
+    letter: str,
+    writer_exit: str,
+    no_checkpoint: bool,
+    removal: str,
+    outer_letter: str,
 ) -> dict:
     """Run the whole sequence and return what each step observed."""
     work.mkdir(parents=True, exist_ok=True)
     vhd = work / "probe.vhd"
     db = Path(f"{letter}:/store.db")
+    outer_select = f'select vdisk file="{work / "outer.vhd"}"'
+    if removal == "nested":
+        vhd = Path(f"{outer_letter}:/probe.vhd")
     select = f'select vdisk file="{vhd}"'
     report: dict = {
         "sqlite": sqlite3.sqlite_version,
         "python": sys.version.split()[0],
+        "removal": removal,
         "writer_exit": writer_exit,
         "no_checkpoint_on_close": no_checkpoint,
         "steps": Told(),
     }
     steps = report["steps"]
+
+    if removal == "nested":
+        code, said = diskpart(
+            [
+                f'create vdisk file="{work / "outer.vhd"}" maximum=1024 type=expandable',
+                outer_select,
+                "attach vdisk",
+                "create partition primary",
+                "format fs=ntfs quick label=outer",
+                f"assign letter={outer_letter}",
+            ],
+            work,
+        )
+        steps.append(
+            {"step": "outer disk made", "exit": code, "said": said[-300:]}
+        )
 
     code, said = diskpart(
         [
@@ -207,18 +246,46 @@ def holder(
         }
     )
 
-    code, said = diskpart([select, "detach vdisk"], work)
-    steps.append(
-        {
-            "step": "detach with the connection open",
-            "exit": code,
-            "said": said[-400:],
-        }
-    )
-    time.sleep(2)
-    code, said = diskpart([select, "attach vdisk"], work)
-    steps.append({"step": "attach again", "exit": code, "said": said[-400:]})
-    time.sleep(2)
+    def told(step: str, outcome: tuple[int, str]) -> None:
+        """Record a removal or return command's exit code and the end of what it printed."""
+        steps.append(
+            {"step": step, "exit": outcome[0], "said": outcome[1][-300:]}
+        )
+        time.sleep(2)
+
+    if removal == "offline":
+        number = f"(Get-DiskImage -ImagePath '{vhd}').Number"
+        told(
+            "disk taken offline with the connection open",
+            powershell(f"Set-Disk -Number {number} -IsOffline $true"),
+        )
+        told(
+            "disk brought online again",
+            powershell(f"Set-Disk -Number {number} -IsOffline $false"),
+        )
+    elif removal == "nested":
+        told(
+            "outer disk detached with the connection open",
+            diskpart([outer_select, "detach vdisk"], work),
+        )
+        told(
+            "outer disk attached again",
+            diskpart([outer_select, "attach vdisk"], work),
+        )
+        told(
+            "inner disk's old attachment detached",
+            diskpart([select, "detach vdisk"], work),
+        )
+        told(
+            "inner disk attached again",
+            diskpart([select, "attach vdisk"], work),
+        )
+    else:
+        told(
+            "detach with the connection open",
+            diskpart([select, "detach vdisk"], work),
+        )
+        told("attach again", diskpart([select, "attach vdisk"], work))
     if not db.exists():
         code, said = diskpart(
             [select, "select partition 1", f"assign letter={letter}"], work
@@ -351,6 +418,10 @@ def main() -> int:
     )
     parser.add_argument("--no-checkpoint-on-close", action="store_true")
     parser.add_argument(
+        "--removal", choices=("detach", "offline", "nested"), default="detach"
+    )
+    parser.add_argument("--outer-letter", default="O")
+    parser.add_argument(
         "--role", choices=("holder", "writer"), default="holder"
     )
     parser.add_argument("--db")
@@ -362,6 +433,8 @@ def main() -> int:
         args.letter,
         args.writer_exit,
         args.no_checkpoint_on_close,
+        args.removal,
+        args.outer_letter,
     )
     print(json.dumps(report, indent=2))
     return 0
