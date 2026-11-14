@@ -20,8 +20,8 @@ starts in. Measured at 1.5.7 with the grant: a command that reads ran, a write i
 directory and a write under the user's Documents were denied, a write and a delete under the
 system temp tree outside the added directory succeeded, and a network lookup failed.
 
-Runs on the standard library alone, except that a ``browser-only`` launch reads the withheld
-variables from ``tcip_web.terminal``, in a Python whose UTF-8 mode is on (the project environment
+Runs on the standard library alone, except that a ``browser-only`` launch takes its environment
+from ``tcip_web.terminal``, in a Python whose UTF-8 mode is on (the project environment
 sets ``PYTHONUTF8``), and is invoked as ``python tools/cross_family_ask.py``.
 """
 
@@ -701,8 +701,7 @@ def run_one(
     The family, its model and its effort are ``launch``'s (:func:`resolve_launch`). The run's
     directory under ``out_root`` receives the prompt, the argv, stdout, stderr, the extracted
     response and ``meta.json``. The harness runs through :func:`launch_harness`, under a
-    ``browser`` condition without the variables the in-app terminal withholds from its children
-    (``tcip_web.terminal.WITHHELD_ENV_PREFIXES``). Refuses what
+    ``browser`` condition in ``tcip_web.terminal.inherited_env``'s environment. Refuses what
     :func:`refuse_unsupported` refuses before anything is written or launched.
     """
     family = launch.family
@@ -736,13 +735,9 @@ def run_one(
 
     env: dict[str, str] | None = None
     if condition["mcp"] == "browser":
-        from tcip_web.terminal import WITHHELD_ENV_PREFIXES
+        from tcip_web.terminal import inherited_env
 
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith(WITHHELD_ENV_PREFIXES)
-        }
+        env = inherited_env()
     started = now()
     clock = datetime.datetime.now()
     stdout: str | bytes

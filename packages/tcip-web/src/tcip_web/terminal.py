@@ -949,19 +949,23 @@ process's own import roots, a repository's on a development machine; the MCP ser
 session hook import through the packages :func:`backend_interpreter` has installed."""
 
 
-def spawn_env(session_id: str) -> dict[str, str]:
-    """Return the child's environment for the terminal session ``session_id``.
-
-    It is this process's own less every variable one of :data:`WITHHELD_ENV_PREFIXES` names, its
-    ``PWD`` the workspace the child runs in and :data:`TERMINAL_SESSION_ENV` the session id.
-    """
-    kept = {
+def inherited_env() -> dict[str, str]:
+    """Return this process's environment less each variable :data:`WITHHELD_ENV_PREFIXES` names."""
+    return {
         k: v
         for k, v in os.environ.items()
         if not k.startswith(WITHHELD_ENV_PREFIXES)
     }
+
+
+def spawn_env(session_id: str) -> dict[str, str]:
+    """Return the child's environment for the terminal session ``session_id``.
+
+    It is :func:`inherited_env`'s, its ``PWD`` the workspace the child runs in and
+    :data:`TERMINAL_SESSION_ENV` the session id.
+    """
     return {
-        **kept,
+        **inherited_env(),
         "PWD": str(store.workspace),
         TERMINAL_SESSION_ENV: session_id,
     }

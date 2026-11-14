@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
+from tcip_web import terminal
+from tests._web_fixtures import backend_session
 from tools import cross_family_ask
 
 if TYPE_CHECKING:
@@ -1706,6 +1708,7 @@ def test_the_browser_only_reader_launches_from_an_empty_folder_with_no_claude_va
 
     (launched,) = seen
     assert launched["cwd"] == empty
+    assert launched["env"] is not None
     assert not {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "PYTHONPATH"} & set(
         launched["env"]
     )
@@ -1713,6 +1716,46 @@ def test_the_browser_only_reader_launches_from_an_empty_folder_with_no_claude_va
     assert meta["condition"] == "browser-only"
     assert meta["mcp"] == "browser"
     assert meta["fault"] == ""
+
+
+def test_the_browser_only_reader_and_the_in_app_terminals_child_inherit_one_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runner's reader launch and the in-app terminal's ``spawn_env`` agree.
+
+    Each route's own answer is compared, under one environment holding a Claude Code session's
+    variable: the environment the runner hands the reader's launch, and the terminal child's less
+    the two variables the terminal sets for its own child.
+    """
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        cross_family_ask, "launch_harness", _recording_launch(seen)
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setenv("CLAUDECODE", "1")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (tmp_path / "workspace").mkdir()
+
+    with backend_session(tmp_path / "workspace"):
+        cross_family_ask.run_one(
+            "qid",
+            "browser-only",
+            "a goal",
+            empty,
+            tmp_path / "out",
+            5,
+            cross_family_ask.resolve_launch("claude", None, None),
+        )
+        child = terminal.spawn_env("t1")
+
+    (launched,) = seen
+    own = {"PWD", terminal.TERMINAL_SESSION_ENV}
+    assert {k: v for k, v in launched["env"].items() if k not in own} == {
+        k: v for k, v in child.items() if k not in own
+    }
 
 
 @pytest.mark.parametrize(
