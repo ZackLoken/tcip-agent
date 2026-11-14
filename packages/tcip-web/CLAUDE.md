@@ -151,8 +151,7 @@ which no line records. `session_start` is what records a report the session hook
 what refuses one. A session holds one launch for its life, and its one end is
 `TerminalSession.end` in `routes/terminal.py`, whose `agent_terminal_ended` line (`TerminalEnded`)
 the end route answers from. Whether a launch resumes, why not, and whether that reason is a fault
-(the last session never reported a conversation or is still held here, which the rail shows the
-person until they dismiss it) is decided once, by `launch_resumes` over `recorded_session`; a
+is decided once, by `launch_resumes` over `recorded_session`, whose docstring names the faults; a
 session whose backend stopped without ending it is resumed so, and no end line is written for it,
 as is one whose person's End answered that its end line could not be written. A switch of harness
 while an agent runs is `hand_off_session`, and `TerminalSession.hand_off_state` is what answers

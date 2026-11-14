@@ -119,7 +119,7 @@ class TerminalLaunch(BaseModel):
 
 
 class TerminalLaunchAnswer(TerminalLaunch):
-    """What create answers for a session: its launch and whether that launch met a resume fault.
+    """A started session's launch and whether that launch met a resume fault.
 
     ``resume_fault`` is :attr:`ResumeDecision.fault` for the launch.
     """
@@ -434,11 +434,11 @@ class TerminalSession:
         return True
 
     def launch(self) -> TerminalLaunch:
-        """Return the session's id and what it launched, as its start line records them."""
+        """Return the session's id and what it launched."""
         return TerminalLaunch(session_id=self.id, launched=self.launched)
 
     def answer(self) -> TerminalLaunchAnswer:
-        """Return what create answers for the session: :meth:`launch` and its resume fault."""
+        """Return :meth:`launch` and whether that launch met a resume fault."""
         return TerminalLaunchAnswer(
             **dict(self.launch()), resume_fault=self.resume_fault
         )
