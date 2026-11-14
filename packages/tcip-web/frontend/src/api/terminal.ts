@@ -9,7 +9,7 @@ import type {
   HandOffAnswer,
   SubmitRequest,
   TerminalEnd,
-  TerminalLaunch,
+  TerminalLaunchAnswer,
   TerminalStatus,
 } from "@/api/types.generated";
 
@@ -17,7 +17,7 @@ export const terminalApi = {
   status: () => getJson<TerminalStatus>(ROUTES.getTerminalStatus),
 
   createSession: (launch: CreateSessionRequest) =>
-    postJson<TerminalLaunch>(ROUTES.postTerminalSessions, launch),
+    postJson<TerminalLaunchAnswer>(ROUTES.postTerminalSessions, launch),
 
   end: (id: string, request: EndSessionRequest) =>
     postJson<TerminalEnd>(ROUTES.postTerminalSessionsBySessionIdEnd(id), request),

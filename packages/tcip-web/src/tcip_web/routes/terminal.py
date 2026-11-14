@@ -6,7 +6,8 @@ WebSocket carries :data:`TerminalServedFrame` JSON messages out, the PTY's outpu
 requests the session holds, and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON messages in.
 A reconnecting socket receives the scrollback and the held count first, then live frames, with no
 output lost or repeated between them. A launch resumes its row's last conversation in the open
-project when :func:`launch_resumes` says so, and says why it starts a new one otherwise.
+project when :func:`launch_resumes` says so, and says why it starts a new one otherwise and
+whether that reason is a fault.
 """
 
 from __future__ import annotations
@@ -115,6 +116,27 @@ class TerminalLaunch(BaseModel):
 
     session_id: str
     launched: LaunchedProgram
+
+
+class TerminalLaunchAnswer(TerminalLaunch):
+    """What create answers for a session: its launch and whether that launch met a resume fault.
+
+    ``resume_fault`` is :attr:`ResumeDecision.fault` for the launch.
+    """
+
+    resume_fault: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class ResumeDecision:
+    """What a launch resumes, or why none, and whether that reason is a fault.
+
+    ``fault`` is true when the row's last session never reported a conversation or this backend
+    still holds it, and false for a resume and every other reason.
+    """
+
+    resumed: pty_host.Resumed | pty_host.NotResumed
+    fault: bool
 
 
 class TerminalStatus(BaseModel):
@@ -256,6 +278,8 @@ class TerminalSession:
 
     launched: LaunchedProgram
     """What :meth:`start` launched."""
+    resume_fault: bool
+    """Whether :meth:`start`'s launch met a resume fault (:attr:`ResumeDecision.fault`)."""
     ended: TerminalEnded
     """The session's one end, set by :meth:`end` once it has stopped the process and read the
     hand-off."""
@@ -301,8 +325,10 @@ class TerminalSession:
             return pty_host.NotStarted(why=command.why)
         env = pty_host.spawn_env(self.id)
         try:
-            resumed = launch_resumes(provider, project, command.override)
-            argv = pty_host.render_argv(command.argv, project, env, resumed)
+            decision = launch_resumes(provider, project, command.override)
+            argv = pty_host.render_argv(
+                command.argv, project, env, decision.resumed
+            )
             prepared = pty_host.Prepared(
                 steps=[]
                 if command.override
@@ -317,7 +343,7 @@ class TerminalSession:
             provider=provider.id,
             prepared=prepared.steps,
             confinement=None if command.override else provider.confinement,
-            resumed=resumed,
+            resumed=decision.resumed,
             **program,
         )
         try:
@@ -328,9 +354,10 @@ class TerminalSession:
             return pty_host.NotStarted(why=str(exc))
         self._pty = pty
         self.launched = launched
+        self.resume_fault = decision.fault
         pty_host.start_writer(pty, self._inputs, name=f"term-{self.id}-input")
         try:
-            _record(_STARTED, self.answer().model_dump(), project, actor)
+            _record(_STARTED, self.launch().model_dump(), project, actor)
         except AuditEntryNotWrittenError as exc:
             if self.terminate():
                 pty.close()
@@ -406,9 +433,15 @@ class TerminalSession:
                     del _SESSIONS[self.id]
         return True
 
-    def answer(self) -> TerminalLaunch:
-        """Return the session's id and what it launched."""
+    def launch(self) -> TerminalLaunch:
+        """Return the session's id and what it launched, as its start line records them."""
         return TerminalLaunch(session_id=self.id, launched=self.launched)
+
+    def answer(self) -> TerminalLaunchAnswer:
+        """Return what create answers for the session: :meth:`launch` and its resume fault."""
+        return TerminalLaunchAnswer(
+            **dict(self.launch()), resume_fault=self.resume_fault
+        )
 
     def submit(self, text: str) -> None:
         """Queue ``text`` for the session's agent; :meth:`deliver` pastes it."""
@@ -832,7 +865,7 @@ def recorded_session(
 
 def launch_resumes(
     provider: pty_host.Provider, project: OpenProject | None, override: bool
-) -> pty_host.Resumed | pty_host.NotResumed:
+) -> ResumeDecision:
     """Return the conversation a launch of ``provider`` for ``project`` resumes, or why none.
 
     An ``override`` launch, a row with no :class:`~tcip_web.terminal.Resume` and a launch for no
@@ -841,9 +874,11 @@ def launch_resumes(
     was written, was by no person or closed a switch of harness, its conversation was reported,
     and the newest line it left is within the row's ``cache_lifetime`` of :func:`now`. Every
     other case is :class:`~tcip_web.terminal.NotResumed`, its sentence the reason this function
-    found. Raises ``ValueError`` for a log or a line that will not read.
+    found, a fault when this process holds the session or its conversation was never reported.
+    Raises ``ValueError`` for a log or a line that will not read.
     """
     row, resume = provider.name, provider.resume
+    fault = False
     if override:
         why = (
             f"The {pty_host.TERMINAL_CMD_ENV} override resumes no conversation"
@@ -859,6 +894,7 @@ def launch_resumes(
         end = session.end
         if session.session_id in _SESSIONS:
             why = f"{last} is still held by this backend"
+            fault = True
         elif (
             end is not None
             and end.actor is not None
@@ -867,11 +903,13 @@ def launch_resumes(
             why = f"{last} was ended by {end.actor}"
         elif session.report is None:
             why = f"{last} never reported a conversation through its hook"
+            fault = True
         elif now() - session.last_line_at <= resume.cache_lifetime:
-            return pty_host.Resumed(
+            resumed = pty_host.Resumed(
                 conversation=session.report.conversation,
                 session=session.session_id,
             )
+            return ResumeDecision(resumed, fault=False)
         else:
             at = session.last_line_at.isoformat(timespec="minutes")
             minutes = resume.cache_lifetime / timedelta(minutes=1)
@@ -879,9 +917,10 @@ def launch_resumes(
                 f"{last} left its last line in the log at {at}, longer ago than the "
                 f"row's {minutes:g} minute prompt-cache lifetime"
             )
-    return pty_host.NotResumed(
+    fresh = pty_host.NotResumed(
         why=f"{why}, so this launch starts a new conversation."
     )
+    return ResumeDecision(fresh, fault)
 
 
 def _provider(provider_id: str) -> pty_host.Provider:
@@ -900,7 +939,7 @@ def _provider(provider_id: str) -> pty_host.Provider:
 
 
 @router.post("/sessions")
-def create_session(req: CreateSessionRequest) -> TerminalLaunch:
+def create_session(req: CreateSessionRequest) -> TerminalLaunchAnswer:
     """Return the live session (attach semantics, like tmux) or start a new one.
 
     A new one runs the requested provider by the person ``req.user`` names
