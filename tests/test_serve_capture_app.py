@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING
 
@@ -344,12 +346,25 @@ def test_a_used_root_starts_again_when_another_backend_holds_its_last_port(
 def test_an_answer_for_another_workspace_is_refused_and_leaves_that_backend_running(
     harness: Path, make_root: Callable[[], Path]
 ) -> None:
+    """A recorded port another backend answers on is refused, and the waited-on process ended.
+
+    The workspace's record names a second real backend's port, written by the backend's own
+    writer; the process waited on is the test's own. No ``server_info.json`` is written, and the
+    second backend still answers for its own workspace.
+    """
     other = make_root()
     taken = started(str(other), "--port", str(free_port(0)))["port"]
-    (harness / "workspace").mkdir()
+    workspace = harness / "workspace"
+    workspace.mkdir()
+    record_backend_port(workspace, taken)
+    waited = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"]
+    )
 
     with pytest.raises(SystemExit, match="answers for"):
-        serve_capture_app.answers_for(taken, harness / "workspace")
+        serve_capture_app.record_when_ready(waited, harness, workspace, 60)
+    assert waited.poll() is not None
+    assert not (harness / "server_info.json").exists()
     assert os.path.samefile(answered_workspace(taken), other / "workspace")
     stopped(str(other))
 

@@ -233,7 +233,7 @@ def start(
     recorded is the one the backend bound, and a port an earlier start left recorded under the
     workspace is removed before launching. Returns the record. Refuses a host other than Windows,
     an existing ``server_info.json`` under ``root``, what :func:`build_environ` refuses, and what
-    :func:`_await_own_server` refuses, the last after ending the process tree it started.
+    :func:`record_when_ready` refuses, the last after ending the process tree it started.
     """
     refuse_unstoppable_host()
     root = root.resolve()
@@ -247,8 +247,7 @@ def start(
     port_key = backend_port_key(workspace)
     if tcip_store.exists(port_key):
         tcip_store.delete(port_key)
-    log_path = root / "server.log"
-    with open(log_path, "a", encoding="utf-8") as log:
+    with open(root / "server.log", "a", encoding="utf-8") as log:
         proc = subprocess.Popen(
             [sys.executable, "-m", "tcip_web"],
             env=env,
@@ -256,10 +255,26 @@ def start(
             stderr=subprocess.STDOUT,
             cwd=str(root),
         )
+    return record_when_ready(proc, root, workspace, timeout_s)
+
+
+def record_when_ready(
+    proc: subprocess.Popen, root: Path, workspace: Path, timeout_s: float
+) -> dict:
+    """Write and return ``root``'s ``server_info.json`` once ``proc`` serves ``workspace``.
+
+    The record holds the pid, the port :func:`_await_own_server` reads and the workspace.
+    Anything that fails on the way, a refusal of that function or the write, ends ``proc``'s
+    tree before it is raised.
+    """
     try:
-        bound = _await_own_server(proc, workspace, log_path, timeout_s)
+        bound = _await_own_server(
+            proc, workspace, root / "server.log", timeout_s
+        )
         info = {"pid": proc.pid, "port": bound, "workspace": str(workspace)}
-        info_path.write_text(json.dumps(info), encoding="utf-8")
+        (root / "server_info.json").write_text(
+            json.dumps(info), encoding="utf-8"
+        )
     except BaseException:
         _end(proc)
         raise
