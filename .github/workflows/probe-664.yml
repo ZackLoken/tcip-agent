@@ -9,29 +9,38 @@ on:
 jobs:
   volume-removal:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # The conda environment's interpreter reports SQLite 3.53.4; the probe runs on that library.
+      - uses: conda-incubator/setup-miniconda@v3
         with:
+          miniforge-version: latest
+          conda-remove-defaults: "true"
+          activate-environment: probe
           python-version: "3.13"
+          auto-activate-base: false
+
+      - name: Pin SQLite to the conda environment's version
+        run: |
+          conda install -y -n probe "libsqlite=3.53.4"
+          python -c "import sqlite3, sys; print(sys.version.split()[0], sqlite3.sqlite_version)"
 
       - name: Writer killed, the holder's close left as SQLite's default
         if: always()
-        shell: pwsh
-        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\kill-default" --letter V --writer-exit kill
+        run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/kill-default" --letter V --writer-exit kill
 
       - name: Writer closed cleanly, the holder's close left as SQLite's default
         if: always()
-        shell: pwsh
-        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\clean-default" --letter W --writer-exit clean
+        run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/clean-default" --letter W --writer-exit clean
 
       - name: Writer killed, the holder's connections told not to checkpoint on close
         if: always()
-        shell: pwsh
-        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\kill-no-checkpoint" --letter X --writer-exit kill --no-checkpoint-on-close
+        run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/kill-no-checkpoint" --letter X --writer-exit kill --no-checkpoint-on-close
 
       - name: Writer closed cleanly, the holder's connections told not to checkpoint on close
         if: always()
-        shell: pwsh
-        run: python .github/probe/volume_removal_probe.py "$env:RUNNER_TEMP\clean-no-checkpoint" --letter Y --writer-exit clean --no-checkpoint-on-close
+        run: python .github/probe/volume_removal_probe.py "$RUNNER_TEMP/clean-no-checkpoint" --letter Y --writer-exit clean --no-checkpoint-on-close
