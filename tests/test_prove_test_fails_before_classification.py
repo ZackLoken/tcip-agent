@@ -18,9 +18,9 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -1048,25 +1048,84 @@ TEST_OF_THE_SUBJECT = (
     "    assert _subject().accept_root(tmp_path) == tmp_path.resolve()\n"
 )
 
-TEST_LEAVING_AN_UNREMOVABLE_FILE = (
+TEST_LEAVING_READ_ONLY_FILES = (
     "import stat\n"
     "\n"
     "\n"
-    "def test_leaves_a_file_its_directory_cannot_drop(tmp_path):\n"
-    "    locked = tmp_path / 'locked'\n"
-    "    locked.mkdir()\n"
-    "    held = locked / 'held.txt'\n"
-    "    held.write_text('held')\n"
-    "    held.chmod(stat.S_IREAD)\n"
-    "    locked.chmod(stat.S_IREAD | stat.S_IEXEC)\n"
+    "def test_leaves_read_only_files(tmp_path):\n"
+    "    plain = tmp_path / 'plain.txt'\n"
+    "    plain.write_text('plain')\n"
+    "    plain.chmod(stat.S_IREAD)\n"
+    "    objects = tmp_path / 'objects' / 'ab'\n"
+    "    objects.mkdir(parents=True)\n"
+    "    packed = objects / 'cdef'\n"
+    "    packed.write_text('packed')\n"
+    "    packed.chmod(stat.S_IREAD)\n"
+)
+
+# Holds a file open until the release file appears, then closes it and writes the done file. The
+# wait is bounded by the 300 s per-test timeout CI runs the suite under (ci.yml, pytest --timeout).
+FILE_HOLDER = (
+    "import sys\n"
+    "import time\n"
+    "from pathlib import Path\n"
+    "\n"
+    "held, release, done = map(Path, sys.argv[1:4])\n"
+    "deadline = time.monotonic() + 300\n"
+    "with open(held, 'w') as handle:\n"
+    "    print('ready', flush=True)\n"
+    "    while not release.exists() and time.monotonic() < deadline:\n"
+    "        time.sleep(0.05)\n"
+    "done.write_text('done')\n"
+)
+
+TEST_LEAVING_A_FILE_A_PROCESS_HOLDS = (
+    "import os\n"
+    "import subprocess\n"
+    "import sys\n"
+    "from pathlib import Path\n"
+    "\n"
+    "\n"
+    "def test_leaves_a_file_a_process_still_holds(tmp_path):\n"
+    "    hold = Path(os.environ['FILE_HOLD_DIR'])\n"
+    "    holder = subprocess.Popen(\n"
+    "        [\n"
+    "            sys.executable,\n"
+    "            str(hold / 'holder.py'),\n"
+    "            str(tmp_path / 'held.txt'),\n"
+    "            str(hold / 'release'),\n"
+    "            str(hold / 'done'),\n"
+    "        ],\n"
+    "        cwd=hold,\n"
+    "        stdin=subprocess.DEVNULL,\n"
+    "        stdout=subprocess.PIPE,\n"
+    "        stderr=subprocess.DEVNULL,\n"
+    "    )\n"
+    "    assert holder.stdout.readline().strip() == b'ready'\n"
 )
 
 
-def _make_removable(root: Path) -> None:
-    for dirpath, _dirnames, filenames in os.walk(root):
-        os.chmod(dirpath, stat.S_IRWXU)
-        for name in filenames:
-            os.chmod(Path(dirpath) / name, stat.S_IRUSR | stat.S_IWUSR)
+def _run_baseline_leaving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_source: str
+) -> tuple[subprocess.CompletedProcess, Path]:
+    """Run the tool over a repository whose guard test is ``test_source``.
+
+    The run's temporary folder is redirected to a folder under ``tmp_path``, returned beside the
+    result, so a scratch directory left behind is found there.
+    """
+    scratch_root = tmp_path / "t"
+    scratch_root.mkdir()
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(scratch_root))
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    _write(repo / "tests" / "test_widgets.py", test_source)
+    _commit_all(repo, "double actually doubles")
+
+    return _run(repo, "tests/test_widgets.py", baseline), scratch_root
 
 
 def test_the_baseline_runs_temporary_root_lies_outside_the_materialized_tree(
@@ -1093,31 +1152,45 @@ def test_the_baseline_runs_temporary_root_lies_outside_the_materialized_tree(
     assert SCRATCH_REMOVAL_LINE not in result.stderr
 
 
+def test_a_scratch_directory_holding_read_only_files_is_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scratch directory holding read-only files is removed, silently.
+
+    The baseline run's test leaves a read-only file and a read-only file in a nested directory,
+    the shape of the object files git writes under ``.git``; no scratch directory remains and no
+    removal line is printed.
+    """
+    result, scratch_root = _run_baseline_leaving(
+        tmp_path, monkeypatch, TEST_LEAVING_READ_ONLY_FILES
+    )
+
+    assert result.returncode == EXIT["VACUOUS"], result.stdout + result.stderr
+    assert list(scratch_root.glob("failbefore-*")) == []
+    assert SCRATCH_REMOVAL_LINE not in result.stderr, result.stderr
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only Windows refuses to delete a file another process holds open",
+)
 def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A scratch directory the tool cannot remove is named on standard error, verdict unchanged.
 
-    The baseline run's test leaves a read-only file where removal fails; the run's own temporary
-    folder is redirected under ``tmp_path`` so the directory left behind is found there and removed
-    by this test.
+    The baseline run's test starts a process that holds a file under the scratch directory open
+    past the tool's removal. This test releases the process and removes the directory left behind.
     """
-    scratch_root = tmp_path / "t"
-    scratch_root.mkdir()
-    for name in ("TMPDIR", "TEMP", "TMP"):
-        monkeypatch.setenv(name, str(scratch_root))
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
-
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(
-        repo / "tests" / "test_widgets.py", TEST_LEAVING_AN_UNREMOVABLE_FILE
-    )
-    _commit_all(repo, "double actually doubles")
+    hold = tmp_path / "hold"
+    hold.mkdir()
+    _write(hold / "holder.py", FILE_HOLDER)
+    monkeypatch.setenv("FILE_HOLD_DIR", str(hold))
 
     try:
-        result = _run(repo, "tests/test_widgets.py", baseline)
+        result, scratch_root = _run_baseline_leaving(
+            tmp_path, monkeypatch, TEST_LEAVING_A_FILE_A_PROCESS_HOLDS
+        )
         left = sorted(scratch_root.glob("failbefore-*"))
 
         assert result.returncode == EXIT["VACUOUS"], (
@@ -1128,7 +1201,12 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
             result.stdout + result.stderr
         )
         assert str(left[0]) in result.stderr
+        assert "held.txt" in result.stderr
     finally:
-        for leftover in scratch_root.glob("failbefore-*"):
-            _make_removable(leftover)
+        _write(hold / "release", "")
+        # The holder closes its file within one 0.05 s poll of the release; 60 s only bounds a hang.
+        deadline = time.monotonic() + 60
+        while not (hold / "done").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        for leftover in (tmp_path / "t").glob("failbefore-*"):
             shutil.rmtree(leftover)

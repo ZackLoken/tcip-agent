@@ -77,7 +77,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
@@ -976,7 +975,8 @@ def main() -> int:
         "baseline_precedes_change": baseline_precedes,
     }
 
-    tmp = Path(tempfile.mkdtemp(prefix="failbefore-"))
+    scratch = tempfile.TemporaryDirectory(prefix="failbefore-")
+    tmp = Path(scratch.name)
     tree = tmp / "tree"
     outcome_json = tmp / "outcome.json"
     current_test_path = tmp / "current_test.txt"
@@ -1085,28 +1085,25 @@ def main() -> int:
         verdict, why = _classify(observed, baseline_precedes)
         record.update(verdict=verdict, why=why)
     finally:
-        _remove_scratch_directory(tmp)
+        _remove_scratch_directory(scratch)
 
     return _report(record, args.json_out)
 
 
-def _remove_scratch_directory(path: Path) -> None:
-    """Remove `path` and everything under it, naming on standard error any that stays.
+def _remove_scratch_directory(
+    scratch: tempfile.TemporaryDirectory[str],
+) -> None:
+    """Remove the temporary directory `scratch` and everything under it.
 
-    When something cannot be removed, one line names the directory left in place and the first
-    path that could not be removed. Nothing is raised, so the verdict already reached stands.
+    Read-only paths are made writable and retried by the library's own removal. When it still
+    cannot remove something, one line on standard error names the directory left in place and the
+    error, which names the path. Nothing is raised, so the verdict already reached stands.
     """
-    refused: list[str] = []
-
-    def record(
-        _function: Callable[..., object], failed: str, error: BaseException
-    ) -> None:
-        refused.append(f"{failed} ({error})")
-
-    shutil.rmtree(path, onexc=record)
-    if refused:
+    try:
+        scratch.cleanup()
+    except OSError as error:
         print(
-            f"scratch directory left in place: {path}; first path not removed: {refused[0]}",
+            f"scratch directory left in place: {scratch.name}; not removed: {error}",
             file=sys.stderr,
         )
 
