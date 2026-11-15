@@ -1237,7 +1237,7 @@ def test_loading_a_plant_mapping_while_the_store_is_unbound_raises_the_programmi
                 "/api/results/plant_mapping/load", json={"name": "valley"}
             )
     finally:
-        tcip_store.bind()
+        tcip_store.bind()  # the fixture's exit binds its own backend again
 
     assert (
         client.post(
