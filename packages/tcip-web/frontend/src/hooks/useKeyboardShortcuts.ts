@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { keydownInModal } from "@/lib/modalKeydown";
+import { keydownInModal, keydownInPane } from "@/lib/modalKeydown";
 
 export interface Shortcut {
   keys: string; // space-separated e.g. "Ctrl+z", "a", "ArrowLeft"
@@ -14,7 +14,7 @@ const FOCUSABLE_ROLES = new Set(["button", "tab", "checkbox", "switch", "menuite
  *  control, a contenteditable, or anything carrying an interactive ARIA role): the app's
  *  shortcuts never intercept a keydown aimed at one, so Enter/Space still activate a focused
  *  button and arrow keys still move within a focused tab list or checkbox group. */
-export function isFocusableControl(tgt: EventTarget | null): boolean {
+function isFocusableControl(tgt: EventTarget | null): boolean {
   if (!tgt || !(tgt instanceof Element)) return false;
   if (
     tgt.tagName === "INPUT" ||
@@ -27,6 +27,12 @@ export function isFocusableControl(tgt: EventTarget | null): boolean {
   }
   const role = tgt.getAttribute("role");
   return !!role && FOCUSABLE_ROLES.has(role);
+}
+
+/** Whether a keydown is aimed at a control that owns its own key handling, or fell in a modal
+ *  dialog or in a docked pane. */
+export function leavesKeydownAlone(e: KeyboardEvent): boolean {
+  return isFocusableControl(e.target) || keydownInModal(e) || keydownInPane(e);
 }
 
 function matches(e: KeyboardEvent, keys: string): boolean {
@@ -51,10 +57,7 @@ function matches(e: KeyboardEvent, keys: string): boolean {
 export function useKeyboardShortcuts(shortcuts: Shortcut[]): void {
   useEffect(() => {
     function handler(e: KeyboardEvent) {
-      // A control that owns its own key handling keeps it: Enter/Space still activate a button.
-      if (isFocusableControl(e.target) || keydownInModal(e)) {
-        return;
-      }
+      if (leavesKeydownAlone(e)) return;
       for (const s of shortcuts) {
         if (!matches(e, s.keys)) continue;
         if (s.when && !s.when()) {

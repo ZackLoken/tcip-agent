@@ -38,6 +38,7 @@ import {
   TOOL_SELECTION,
 } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
+import { dockWithNotificationsOpen, measureWindow, PANE_FOCUS } from "@/test/dock";
 import { LABEL_ANSWERS, servedAnnotation, UNSTORED } from "@/test/labels";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
@@ -1679,6 +1680,63 @@ describe("AnnotateTab with the help open", () => {
 
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+});
+
+describe("AnnotateTab with the notifications pane open", () => {
+  beforeEach(measureWindow);
+  const openPane = dockWithNotificationsOpen;
+  /** A polygon begun on empty space, then the first polygon selected with the review-path key. */
+  const selectWithPolygonInProgress = (stage: HTMLElement) => {
+    fireEvent.click(stage, { clientX: 600, clientY: 600 });
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    expect(useStore.getState().canvas.focus).toEqual({ kind: "polygon", index: 0 });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(1);
+  };
+
+  const where = Object.keys(PANE_FOCUS) as (keyof typeof PANE_FOCUS)[];
+  it.each(where.flatMap((target) => ["Delete", "Escape"].map((key) => [key, target] as const)))(
+    "%s with focus on the pane's %s keeps the selection and the polygon in progress",
+    async (key, target) => {
+      const stage = await renderPolygonCanvas([POLY_A, POLY_B], openPane());
+      selectWithPolygonInProgress(stage);
+      const focused = await PANE_FOCUS[target]();
+      focused.focus();
+      expect(focused).toHaveFocus();
+
+      fireEvent.keyDown(focused, { key });
+      expect(useStore.getState().canvas.polygons).toHaveLength(2);
+      expect(useStore.getState().canvas.focus).toEqual({ kind: "polygon", index: 0 });
+      expect(useStore.getState().canvas.currentPolygon).toHaveLength(1);
+    },
+  );
+
+  it("the same keys on the canvas, pane open, still delete the selection and cancel the polygon", async () => {
+    const stage = await renderPolygonCanvas([POLY_A, POLY_B], openPane());
+    await PANE_FOCUS.heading();
+    selectWithPolygonInProgress(stage);
+
+    fireEvent.keyDown(document.body, { key: "Delete" });
+    expect(useStore.getState().canvas.polygons).toHaveLength(1);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+
+  it("the help overlay stays closed for a ? typed on the pane's heading", async () => {
+    await renderPolygonCanvas(
+      [POLY_A, POLY_B],
+      <>
+        {openPane()}
+        <HelpOverlay activeTab="annotate" />
+      </>,
+    );
+    const heading = await PANE_FOCUS.heading();
+    heading.focus();
+
+    fireEvent.keyDown(heading, { key: "?" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "?" });
+    expect(screen.getByRole("dialog", { name: "Shortcuts" })).toBeInTheDocument();
   });
 });
 

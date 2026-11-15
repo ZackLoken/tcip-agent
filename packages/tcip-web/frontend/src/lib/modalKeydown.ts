@@ -16,3 +16,14 @@ export function markKeydownsInModal(): () => void {
 export function keydownInModal(e: KeyboardEvent): boolean {
   return fellInModal.has(e);
 }
+
+/** The class a docked pane's tab carries as its content class, which marks the panel the docking
+ *  layout renders for it and everything inside as the pane's. */
+export const DOCKED_PANE_CLASS = "docked-pane";
+
+/** Whether a keydown's target is a docked pane's panel or lies inside one. A pane outside the
+ *  work area takes focus on something that is not a control, and the page's key listeners that
+ *  act on the work area read it and leave the key to the pane. */
+export function keydownInPane(e: KeyboardEvent): boolean {
+  return e.target instanceof Element && e.target.closest(`.${DOCKED_PANE_CLASS}`) !== null;
+}

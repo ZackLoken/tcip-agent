@@ -10,6 +10,7 @@ import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { loadOf } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
+import { measureWindow, PANE_FOCUS } from "@/test/dock";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
@@ -71,21 +72,8 @@ const VALLEY_OPENED = openedAs(VALLEY);
 
 const initialStoreState = useStore.getState();
 
-/** A window's size for the docking layout: jsdom lays nothing out, and FlexLayout renders a pane
- *  only once its container measures one. */
-const WINDOW_RECT = {
-  x: 0,
-  y: 0,
-  top: 0,
-  left: 0,
-  width: 1280,
-  height: 800,
-  right: 1280,
-  bottom: 800,
-};
-
 beforeEach(() => {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(WINDOW_RECT as DOMRect);
+  measureWindow();
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
   vi.mocked(api.projects.list).mockResolvedValue(PROJECT_FIXTURES.picker);
@@ -178,7 +166,7 @@ describe("App notifications area", () => {
     expect(screen.queryByTestId("condition-mark")).not.toBeInTheDocument();
 
     fireEvent.click(button);
-    const heading = await screen.findByRole("heading", { name: "Notifications" });
+    const heading = await PANE_FOCUS.heading();
     expect(heading).toBeVisible();
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText(/Nothing to report/)).toBeVisible();
@@ -218,7 +206,7 @@ describe("App notifications area", () => {
     const button = screen.getByRole("button", { name: "Notifications" });
 
     fireEvent.click(button);
-    await screen.findByRole("heading", { name: "Notifications" });
+    await PANE_FOCUS.heading();
     fireEvent.click(button);
 
     expect(button).toHaveAttribute("aria-expanded", "false");
