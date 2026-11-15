@@ -268,22 +268,31 @@ describe("TerminalRail", () => {
       onPlatform("Win32");
     });
 
+    /** The input frames the rail has sent over `ws`, as the program would receive them. */
+    function inputSent(ws: MockWebSocket) {
+      return ws.send.mock.calls
+        .map(([frame]) => JSON.parse(frame as string) as { type: string; data?: string })
+        .filter((frame) => frame.type === "input")
+        .map((frame) => frame.data);
+    }
+
     /** Render the rail live, with xterm's input textarea and the input frames sent the program. */
     async function mounted() {
       render(<TerminalRail />);
       const host = await screen.findByTestId("terminal-host");
       const ws = await openSocket();
-      const input = () =>
-        ws.send.mock.calls
-          .map(([frame]) => JSON.parse(frame as string) as { type: string; data?: string })
-          .filter((frame) => frame.type === "input")
-          .map((frame) => frame.data);
-      return { host, ws, textarea: host.querySelector("textarea")!, input };
+      return { host, ws, textarea: host.querySelector("textarea")!, input: () => inputSent(ws) };
     }
 
-    /** Have the program set a DEC private mode, and wait until xterm has applied it. */
-    async function programSets(ws: MockWebSocket, sequence: string, applied: () => boolean) {
-      served(ws, { type: "output", data: sequence });
+    /** Have the backend send `sequence` as output, live or as the scrollback's replay, and wait
+     *  until xterm has applied it. */
+    async function programSets(
+      ws: MockWebSocket,
+      sequence: string,
+      applied: () => boolean,
+      replay = false,
+    ) {
+      served(ws, { type: "output", data: sequence, replay });
       await waitFor(() => expect(applied()).toBe(true));
     }
 
@@ -336,6 +345,37 @@ describe("TerminalRail", () => {
       fireEvent.contextMenu(host);
       expect(readText).toHaveBeenCalledTimes(1);
       expect(input()).toEqual(["clipboard text"]);
+    });
+
+    const DEVICE_ATTRIBUTES_QUERY = "\x1b[c";
+    const BRACKETED_PASTE_ON = "\x1b[?2004h";
+    // The replay ends in a mode change, so xterm has parsed the query before the mode reads on.
+    const REPLAY = DEVICE_ATTRIBUTES_QUERY + BRACKETED_PASTE_ON;
+    const bracketedPasteOn = () => emulator.term!.modes.bracketedPasteMode;
+
+    it("sends no answer to a query its replay holds", async () => {
+      const { ws, input } = await mounted();
+      await programSets(ws, REPLAY, bracketedPasteOn, true);
+      expect(input()).toEqual([]);
+    });
+
+    it("a reopened rail sends nothing for its replay, and what is typed next as typed", async () => {
+      await mounted();
+      act(() => useStore.getState().setTerminalOpen(false));
+      act(() => useStore.getState().setTerminalOpen(true));
+      await screen.findByTestId("terminal-host");
+      const reopened = await openSocket(1);
+      await programSets(reopened, REPLAY, bracketedPasteOn, true);
+      expect(inputSent(reopened)).toEqual([]);
+      emulator.term!.input("exit");
+      expect(inputSent(reopened)).toEqual(["exit"]);
+    });
+
+    it("answers a query the program sends live, after a replay", async () => {
+      const { ws, input } = await mounted();
+      await programSets(ws, REPLAY, bracketedPasteOn, true);
+      served(ws, { type: "output", data: DEVICE_ATTRIBUTES_QUERY, replay: false });
+      await waitFor(() => expect(input()).toEqual(["\x1b[?1;2c"]));
     });
   });
 
