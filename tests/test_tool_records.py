@@ -311,7 +311,7 @@ def test_a_raster_pass_identity_missing_its_tile_batch_size_refuses_the_resume_n
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("torch")
-    from tcip_mcp.tools.inference_tools import _progress_key
+    from tcip_mcp.tools.inference_tools import _progress_key, _progress_place
     from tests.test_raster_pass_resume import _interrupted, _run, _setup
 
     ckpt, raster_path = _setup(tmp_path)
@@ -325,17 +325,17 @@ def test_a_raster_pass_identity_missing_its_tile_batch_size_refuses_the_resume_n
 
     result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
-    assert result["error"].startswith(
-        f"the raster-pass identity record toward bucket {bucket!r} under "
+    assert result["error"] == (
+        f"{_progress_place(tmp_path / 'ds', bucket, 'identity')}"
+        ": tile_batch_size: Field required"
     )
-    assert result["error"].endswith(": tile_batch_size: Field required")
 
 
 def test_a_raster_pass_batch_missing_its_slices_refuses_the_resume_naming_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("torch")
-    from tcip_mcp.tools.inference_tools import _progress_key
+    from tcip_mcp.tools.inference_tools import _progress_key, _progress_place
     from tests.test_raster_pass_resume import _interrupted, _run, _setup
 
     ckpt, raster_path = _setup(tmp_path)
@@ -347,13 +347,38 @@ def test_a_raster_pass_batch_missing_its_slices_refuses_the_resume_naming_it(
     with ts.transaction(key) as txn:
         txn.write(key, stored)
 
-    with pytest.raises(ts.ReadRefusedError) as refused:
-        _run(tmp_path, ckpt, raster_path, bucket, resume=True)
+    result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
-    assert refused.value.served.where.startswith(
-        f"the raster-pass batch-000000 record toward bucket {bucket!r} under "
+    assert result["error"] == (
+        f"{_progress_place(tmp_path / 'ds', bucket, 'batch-000000')}"
+        ": slices: Field required"
     )
-    assert str(refused.value.served.refusal) == "slices: Field required"
+
+
+@pytest.mark.parametrize("segment", ["identity", "batch-000000"])
+def test_a_raster_pass_record_that_will_not_decode_refuses_the_resume_naming_its_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, segment: str
+) -> None:
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.inference_tools import _progress_key, _progress_place
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
+    from tests.test_raster_pass_resume import _interrupted, _run, _setup
+
+    ckpt, raster_path = _setup(tmp_path)
+    bucket = "preds/2026-01-01"
+    _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
+    key = _progress_key(tmp_path, tmp_path / "ds", bucket, segment)
+    assert ts.read(key, default=None) is not None
+    damage_record(key, UNDECODABLE)
+    with pytest.raises(ts.DecodeError) as stored_sentence:
+        ts.read(key)
+
+    result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
+
+    assert result["error"] == (
+        f"{_progress_place(tmp_path / 'ds', bucket, segment)}"
+        f": {stored_sentence.value}"
+    )
 
 
 _SHAPE = {
