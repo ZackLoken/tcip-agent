@@ -199,9 +199,6 @@ them.
   workspace.
 - The editor saves the one label shape, the per-image label document, through the one label save
   (see `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option.
-- The GUI follows minimalist design without dropping functionality: prefer nesting related actions
-  into one structure (a menu, a split button, a grouped control) over adding sibling buttons, and
-  combine existing buttons into nested structures where the grouping is natural.
 - What a person meets at the screen:
   - A value the platform already holds is chosen or derived, never typed: a registry, a mapping, a
     plant, a trait, a bucket.
@@ -217,3 +214,42 @@ them.
     not shown.
   - A person can do everything in the application without the agent, and the agent can do
     everything a person can, except where the operating contract requires a person.
+
+## The window's layout
+
+The layout follows ArcGIS Pro's patterns, never its artwork: the look is the Savanna Institute's,
+its colors and fonts the tokens in `frontend/src/index.css` and its logos in
+`frontend/public/assets/`. Each rule below is judged by what a person can do at the screen.
+
+- The work in hand (the canvas, a chart, a table or a form) keeps the room it needs, and supporting
+  tools sit around it without covering it unless the person opens them over it. The notifications
+  button is in the top bar. The status line holds the active view's readouts (its zoom, the
+  pointer's position, whether it holds unsaved work) and never a message.
+- Prefer nesting related commands into one control (a menu, a split button, a gallery) where the
+  grouping is natural, and fold a group's rarer commands into its own menu. A command has one home,
+  on a command bar tab or on the pane or view it acts on; a shortcut or a context menu may reach it
+  too. A contextual group shows while its object or mode is active (a selected box, a staged set, a
+  running job, an editing mode) and leaves with it. A command that cannot run now is shown disabled,
+  and its reason is reachable from the keyboard as well as on hover.
+- A supporting pane can be closed and reopened from a command, minimized to a strip on its edge
+  from which it opens over the work area, tabbed with another pane, and docked or floated. The
+  arrangement a person makes is kept in their browser, one command restores the default, and a
+  restored arrangement never leaves a pane off the screen. Hiding a pane, resetting the arrangement
+  and discarding work are three actions, and none performs another: hiding or moving the agent's
+  terminal never ends its session, and moving or resizing a pane keeps the canvas's edits,
+  selection and view. Every pane operation is reachable without dragging. A pane that docks does so
+  through `flexlayout-react`, themed with the app's tokens, and the app's own code over it only
+  saves and restores its model and offers the reopen and reset commands.
+- When the window is small or zoomed, every control, the notifications area and each way back to
+  a closed or minimized pane stay reachable.
+- Explanation a person needs to fill a control stays where "What a person meets at the screen"
+  puts it. Other explanation sits behind a tooltip or the help overlay rather than docked on screen
+  as prose.
+- One notifications area, opened from the top bar's button, keeps the history of what the
+  application tells a person about its state or an error: a failed request, a background job's
+  end, a lasting condition such as a lost connection, and every refusal. A refusal is still written
+  where "What a person meets at the screen" puts it, and the area records the same message from
+  the one source that says it. Each entry holds its time, its sentence and any action it offers,
+  and is dismissable, as "What a person meets at the screen" requires. No message pops up and none
+  leaves on a timer; the button shows how many entries are new and whether a lasting condition
+  holds.
