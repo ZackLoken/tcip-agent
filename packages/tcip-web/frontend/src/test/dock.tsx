@@ -1,3 +1,4 @@
+import { screen } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { Dock } from "@/components/Dock";
@@ -19,6 +20,14 @@ const WINDOW_RECT = {
 export function measureWindow(): void {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(WINDOW_RECT as DOMRect);
 }
+
+/** The elements of the open notifications pane that take focus, by what a person pressed to put
+ *  focus there: the pane's heading, which opening the pane focuses, and the pane's own panel,
+ *  which a click on its text focuses. Each answers the element once the pane is shown. */
+export const PANE_FOCUS = {
+  heading: () => screen.findByRole("heading", { name: "Notifications" }),
+  panel: () => screen.findByRole("tabpanel", { name: "Notifications" }),
+};
 
 /** The docking layout with the notifications pane open over an empty work area, its model made
  *  by the layout's own default and toggle. Needs `measureWindow` first. */

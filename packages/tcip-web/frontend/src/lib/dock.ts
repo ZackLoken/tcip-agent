@@ -8,6 +8,8 @@ import {
   type TabNode,
 } from "flexlayout-react";
 
+import { DOCKED_PANE_CLASS } from "@/lib/modalKeydown";
+
 /** The work area's tab, which holds the shell or the picker. */
 export const WORK = "work";
 const NOTIFICATIONS = "notifications";
@@ -17,6 +19,7 @@ const NOTIFICATIONS_TAB: IJsonTabNode = {
   id: NOTIFICATIONS,
   name: "Notifications",
   component: NOTIFICATIONS,
+  contentClassName: DOCKED_PANE_CLASS,
   enableDrag: false,
 };
 

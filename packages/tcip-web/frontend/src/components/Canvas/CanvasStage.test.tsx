@@ -6,6 +6,7 @@ import { CanvasStage, type CanvasRegion } from "@/components/Canvas/CanvasStage"
 import { HelpOverlay } from "@/components/HelpOverlay";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { useStore } from "@/store";
+import { dockWithNotificationsOpen, measureWindow, PANE_FOCUS } from "@/test/dock";
 
 // Stage/Layer/Image render as divs but keep Konva's event surface: `evt` is the native event.
 vi.mock("konva", () => ({ default: {} }));
@@ -401,4 +402,27 @@ describe("CanvasStage Space-to-pan", () => {
     expect(notPrevented).toBe(true);
     expect(host().style.cursor).toBe("");
   });
+
+  it.each(Object.keys(PANE_FOCUS) as (keyof typeof PANE_FOCUS)[])(
+    "does not start a pan with focus on the notifications pane's %s, and still starts one on the canvas",
+    async (target) => {
+      measureWindow();
+      render(
+        <>
+          <CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={ignoreSize} />
+          {dockWithNotificationsOpen()}
+        </>,
+      );
+      const focused = await PANE_FOCUS[target]();
+      focused.focus();
+      expect(focused).toHaveFocus();
+
+      const notPrevented = fireEvent.keyDown(focused, space);
+      expect(notPrevented).toBe(true);
+      expect(host().style.cursor).toBe("");
+
+      fireEvent.keyDown(document.body, space);
+      expect(host().style.cursor).toBe("grab");
+    },
+  );
 });

@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { ModalDialog } from "@/components/ModalDialog";
-import { isFocusableControl } from "@/hooks/useKeyboardShortcuts";
+import { leavesKeydownAlone } from "@/hooks/useKeyboardShortcuts";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
-import { keydownInModal } from "@/lib/modalKeydown";
 import type { TabName } from "@/store/types";
 
 interface Shortcut {
@@ -62,7 +61,7 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (isFocusableControl(e.target) || keydownInModal(e)) return;
+      if (leavesKeydownAlone(e)) return;
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
         e.preventDefault();
         setOpen(true);
