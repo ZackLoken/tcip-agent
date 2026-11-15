@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -74,17 +73,19 @@ def run_ruff(worktree: Path, env: dict[str, str]) -> int:
 
 
 def run_mypy(worktree: Path, env: dict[str, str]) -> int:
-    """Run mypy in the worktree with a fresh cache directory and return its exit code."""
-    cache_dir = tempfile.mkdtemp(prefix="worktree-gate-mypy-")
-    try:
+    """Run mypy in the worktree with a fresh cache directory and return its exit code.
+
+    Raises the library's `OSError`, naming the path, when the cache directory cannot be removed.
+    """
+    with tempfile.TemporaryDirectory(
+        prefix="worktree-gate-mypy-"
+    ) as cache_dir:
         print(f"== mypy --cache-dir {cache_dir} ==")
         return subprocess.run(
             [sys.executable, "-m", "mypy", "--cache-dir", cache_dir],
             cwd=str(worktree),
             env=env,
         ).returncode
-    finally:
-        shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 def run_pytest(worktree: Path, env: dict[str, str], files: list[str]) -> int:
