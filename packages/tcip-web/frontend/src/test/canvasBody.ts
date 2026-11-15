@@ -7,7 +7,7 @@ import { RAW_SELECTION, TEST_PROJECT } from "@/test/store";
  *  project, built by the canvas's own builder: with its shapes as the mirror draws them when
  *  `full`, else a heartbeat. */
 export function canvasBody(full = false): CanvasStateBody {
-  const { canvas, gui, user } = useStore.getState();
+  const { canvas, gui, user, annotateUi } = useStore.getState();
   const { mode, active_subject: activeSubject } = gui;
   return canvasStateBody({
     projectId: TEST_PROJECT.id,
@@ -26,6 +26,7 @@ export function canvasBody(full = false): CanvasStateBody {
           activeSubject,
           visible: true,
           colorFor: subjectColor,
+          pendingPrompts: annotateUi.pendingPrompts,
         })
       : null,
   });

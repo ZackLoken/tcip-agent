@@ -21,6 +21,7 @@ import {
   FLAG_MARK,
   FOCUS_HALO,
   MATCH_COLORS,
+  NO_SUBJECT_DRAFT_COLOR,
 } from "@/lib/symbology";
 import { useStore } from "@/store";
 import type { Box, PointShape, Proposal } from "@/store/types";
@@ -30,6 +31,8 @@ import { servedFlag, servedProposal } from "@/test/labels";
 
 const RED = subjectColor("subject_a");
 const OTHER = subjectColor("other");
+/** The store's held prompts before any is placed. */
+const NO_PROMPTS = useStore.getState().annotateUi.pendingPrompts;
 
 const focusOn = (shape: ReviewItem["shape"], ref: number): ReviewItem => ({
   kind: "annotation",
@@ -143,6 +146,7 @@ describe("buildAnnotateShapes", () => {
     activeSubject: "subject_a",
     visible: true,
     colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
   };
 
   it("filters polygon mode to the active subject, colors from the GUI, unlabeled at rest", () => {
@@ -196,7 +200,7 @@ describe("buildAnnotateShapes", () => {
     const draft = draftStrokes({
       mode: "polygon",
       currentPolygon: [],
-      polygonColor: null,
+      polygonColor: RED,
       cutStart: { point: [3, 4], color: "#123456" },
       cursor: [5, 6],
     });
@@ -535,6 +539,25 @@ describe("buildAnnotateShapes", () => {
     expect(shapes.at(-1)?.label).toContain("open?");
   });
 
+  it("pushes a placed flag under Labels off beside no committed shape, as the canvas draws it", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      visible: false,
+      flagMarks: [
+        {
+          at: [12.04, 30],
+          flag: servedFlag({
+            text: "open?",
+            target: { point: [12.04, 30], subject: "subject_a" },
+          }),
+        },
+      ],
+    });
+    expect(shapes).toEqual([
+      expect.objectContaining({ kind: "point", points: [[12, 30]], tag: "flag" }),
+    ]);
+  });
+
   it("colors every shape by its match type while reviewing, the subject color otherwise", () => {
     const boxes = [
       {
@@ -581,6 +604,7 @@ describe("the shapes the server render is fed", () => {
     activeSubject: "subject_a",
     visible: true,
     colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
   };
 
   it("are what buildAnnotateShapes produces, the records the renderer's own tests read", async () => {
@@ -646,6 +670,7 @@ describe("buildAnnotateShapes proposals", () => {
     activeSubject: "subject_a",
     visible: true,
     colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
   };
   const BUCKET = ANNOTATE_ANSWERS.buckets.review;
   const proposal = (over: Partial<Proposal>): Proposal => ({
@@ -719,14 +744,67 @@ describe("buildAnnotateShapes proposals", () => {
     expect(shapes[0].label).toBeNull();
   });
 
-  it("the labels toggle hides proposals too", () => {
+  it("keeps the proposals under Labels off, as the canvas draws them", () => {
     expect(
       buildAnnotateShapes({
         ...base,
         visible: false,
         proposals: [proposal({ bbox: [1, 2, 11, 12] })],
       }),
-    ).toEqual([]);
+    ).toEqual([expect.objectContaining({ kind: "box", xyxy: [1, 2, 11, 12], tag: "proposal" })]);
+  });
+});
+
+describe("buildAnnotateShapes held prompts", () => {
+  const base = {
+    boxes: [],
+    polygons: [],
+    points: [],
+    mode: "box",
+    activeSubject: "subject_a",
+    visible: true,
+    colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
+  };
+  const pendingPrompts = {
+    points: [[1.04, 2] as [number, number]],
+    boxes: [[10, 20, 30, 40] as [number, number, number, number]],
+    found: [[50, 60, 70, 80] as [number, number, number, number]],
+  };
+
+  it("pushes each held point, then each held box and found box, under one tag", () => {
+    const shapes = buildAnnotateShapes({ ...base, pendingPrompts });
+    expect(shapes.map((s) => [s.tag, s.kind])).toEqual([
+      ["held_prompt", "point"],
+      ["held_prompt", "box"],
+      ["held_prompt", "box"],
+    ]);
+    expect(shapes[0]).toMatchObject({ points: [[1, 2]], color: RED });
+    expect(shapes.slice(1).map((s) => s.kind === "box" && s.xyxy)).toEqual([
+      [10, 20, 30, 40],
+      [50, 60, 70, 80],
+    ]);
+  });
+
+  it("strokes a held point dotted on its casing and a held box dashed as a draft, unlabeled", () => {
+    const [point, box] = buildAnnotateShapes({ ...base, pendingPrompts });
+    expect(point).toMatchObject({
+      dash: DOTTED_DASH,
+      casing: { color: CASING.color, opacity: CASING.opacity, width_factor: CASING.widthFactor },
+      halo: null,
+      label: null,
+    });
+    expect(box).toMatchObject({ dash: DRAFT_DASH, casing: null, halo: null, label: null });
+  });
+
+  it("strokes each in the neutral draft color while no subject is active", () => {
+    const shapes = buildAnnotateShapes({ ...base, activeSubject: null, pendingPrompts });
+    expect(shapes.map((s) => s.color)).toEqual(Array(3).fill(NO_SUBJECT_DRAFT_COLOR));
+  });
+
+  it("keeps them under Labels off, as the canvas draws them", () => {
+    const shapes = buildAnnotateShapes({ ...base, visible: false, pendingPrompts });
+    expect(shapes.map((s) => s.tag)).toEqual(Array(3).fill("held_prompt"));
   });
 });
 

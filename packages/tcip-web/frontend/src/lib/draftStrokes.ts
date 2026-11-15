@@ -4,7 +4,6 @@
  * the cursor (never dotted). Neither consumer is gated by the labels toggle.
  */
 
-import { NO_SUBJECT_DRAFT_COLOR } from "@/lib/symbology";
 import type { DrawingBox } from "@/store/types";
 
 export interface DraftStroke {
@@ -32,8 +31,8 @@ export function boxDraft(
 export function draftStrokes(args: {
   mode: string;
   currentPolygon: [number, number][];
-  /** The subject whose color the polygon in progress draws in; none draws the neutral draft color. */
-  polygonColor: string | null;
+  /** The color the polygon in progress draws in (`draftColor`); the cut takes its own. */
+  polygonColor: string;
   cutStart: { point: [number, number]; color: string } | null;
   cursor: [number, number] | null;
 }): DraftStroke[] {
@@ -46,7 +45,7 @@ export function draftStrokes(args: {
     }
   };
   if (args.currentPolygon.length > 0) {
-    add(args.currentPolygon, args.polygonColor ?? NO_SUBJECT_DRAFT_COLOR, "drawing");
+    add(args.currentPolygon, args.polygonColor, "drawing");
   }
   if (args.cutStart) add([args.cutStart.point], args.cutStart.color, "cut");
   return strokes;

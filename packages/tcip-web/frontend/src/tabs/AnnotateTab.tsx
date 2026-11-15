@@ -87,8 +87,9 @@ import { useSubjectColors } from "@/lib/subjectColors";
 import {
   dashAt,
   DRAFT_DASH,
-  NO_SUBJECT_DRAFT_COLOR,
+  draftColor,
   POINT_HIT_CANVAS,
+  PROMPT_POINT_STYLE,
   strokeWidths,
 } from "@/lib/symbology";
 import { nextMode } from "@/lib/toolMode";
@@ -616,7 +617,7 @@ export function AnnotateTab() {
     draftStrokes({
       mode,
       currentPolygon: canvas.currentPolygon,
-      polygonColor: activeSubject ? subjectColor(activeSubject) : null,
+      polygonColor: draftColor(activeSubject),
       cutStart: cutStart ? { point: cutStart.point, color: subjectColor(cutStart.subject) } : null,
       cursor,
     });
@@ -654,6 +655,7 @@ export function AnnotateTab() {
             visible: annotateUi.visible,
             colorFor: subjectColor,
             proposals: drawnProposals,
+            pendingPrompts: annotateUi.pendingPrompts,
           })
         : null,
     });
@@ -689,6 +691,7 @@ export function AnnotateTab() {
     activeSubject,
     annotateUi.visible,
     annotateUi.cut,
+    annotateUi.pendingPrompts,
     annotateUi.draggingVertex,
     drawing,
     cutStart,
@@ -1783,8 +1786,8 @@ export function AnnotateTab() {
                   <PointOverlay
                     key={`prompt-point-${i}`}
                     point={{ x, y }}
-                    stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
-                    style="dotted"
+                    stroke={draftColor(activeSubject)}
+                    style={PROMPT_POINT_STYLE}
                     coreR={widths.pointCoreR}
                     tickInner={widths.pointTickInner}
                     tickOuter={widths.pointTickOuter}
@@ -1801,7 +1804,7 @@ export function AnnotateTab() {
                       y={y1}
                       width={x2 - x1}
                       height={y2 - y1}
-                      stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
+                      stroke={draftColor(activeSubject)}
                       strokeWidth={boxStroke}
                       dash={dashAt(DRAFT_DASH, boxStroke)}
                     />

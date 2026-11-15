@@ -127,6 +127,18 @@ export function proposalLabel(
 /** The stroke of a shape being drawn while no subject is active. */
 export const NO_SUBJECT_DRAFT_COLOR = "#FFE7B1";
 
+/** The stroke of the polygon in progress and of the held prompts: the active subject's color, the
+ *  neutral draft color while none is active. */
+export function draftColor(activeSubject: string | null): string {
+  return activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR;
+}
+
+/** The line style of a held prompt point; a held prompt box draws `DRAFT_DASH` as a draft. */
+export const PROMPT_POINT_STYLE: LineStyle = "dotted";
+
+/** The line style of every proposal. */
+export const PROPOSAL_STYLE: LineStyle = "dotted";
+
 /** Screen-pixel reach of a placed point's mark, which is also its grab radius. */
 export const POINT_HIT_CANVAS = 11;
 
