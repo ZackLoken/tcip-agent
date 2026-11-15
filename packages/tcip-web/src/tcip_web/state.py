@@ -124,6 +124,13 @@ class OpenProject(NamedTuple):
     id: str
 
 
+class RefusedOpen(NamedTuple):
+    """An open the backend refused: the id the request named and the refusal's sentence."""
+
+    project_id: str
+    sentence: str
+
+
 class Held(NamedTuple):
     """The open project (``None`` when none is) and its live GUI state, published as one value."""
 
@@ -136,12 +143,14 @@ class StateStore:
 
     The project and its :class:`GuiState` are held as one value (:class:`Held`), which every
     change made for the project persists before it is broadcast; a change made while no project
-    is open is held and persisted nowhere.
+    is open is held and persisted nowhere. The last open the backend refused is held beside
+    them (:attr:`refused_open`) until an open or close succeeds.
     """
 
     def __init__(self) -> None:
-        """Start with no workspace, no open project and a fresh state at version 0."""
+        """Start with no workspace, open project or refused open, and a fresh state at version 0."""
         self._now = Held(None, GUI_STATE_DEFAULTS)
+        self._refused: RefusedOpen | None = None
         self._version = 0
         self._lock = asyncio.Lock()
         self._subscribers: list[Subscriber] = []
@@ -154,8 +163,12 @@ class StateStore:
     def configure(
         self, workspace: Path, image_roots: tuple[Path, ...]
     ) -> None:
-        """Set the workspace this backend serves and the additive image roots it admits."""
+        """Set the workspace this backend serves and the additive image roots it admits.
+
+        Configuring a workspace starts with no refused open.
+        """
         self._workspace, self._image_roots = workspace, image_roots
+        self._refused = None
 
     @property
     def workspace(self) -> Path:
@@ -179,6 +192,19 @@ class StateStore:
     def opened(self) -> OpenProject | None:
         """The open project, its directory and id together, or ``None`` when none is open."""
         return self._now.project
+
+    @property
+    def refused_open(self) -> RefusedOpen | None:
+        """The last open refused since an open or close succeeded, or ``None``."""
+        return self._refused
+
+    def refuse_open(self, project_id: str, sentence: str) -> None:
+        """Hold the open of ``project_id`` as refused, with the refusal's ``sentence``.
+
+        It replaces an earlier refused open and stays until an open or close succeeds
+        (:meth:`_switch`).
+        """
+        self._refused = RefusedOpen(project_id, sentence)
 
     def held(self) -> OpenProject:
         """Return the open project; raises :class:`NoProjectOpenError` when none is open."""
@@ -240,10 +266,11 @@ class StateStore:
         When ``closing`` is given and does not name the open project, nothing. Otherwise, when
         ``following`` replaces another project, end every unended session of the departed one
         (:func:`tcip_web.routes.sessions.end_sessions`), then, once that commit has returned,
-        publish ``following`` with ``state`` as one value, its retained events cleared, and
-        notify subscribers; a departure that raises publishes nothing. The departure's
-        ``session_ended`` lines (:func:`tcip_web.routes.sessions.record_ended`) follow the
-        publication, and a line that cannot be written raises then.
+        publish ``following`` with ``state`` as one value, its retained events cleared and
+        the refused open forgotten, and notify subscribers; a departure that raises publishes
+        nothing. The departure's ``session_ended`` lines
+        (:func:`tcip_web.routes.sessions.record_ended`) follow the publication, and a line that
+        cannot be written raises then.
         """
         from tcip_web.routes.sessions import end_sessions, record_ended
 
@@ -260,6 +287,7 @@ class StateStore:
                 and (following is None or following.id != departed.id)
                 else []
             )
+            self._refused = None
             await self._hold(following, state)
         if departed is not None and ended:
             await asyncio.to_thread(record_ended, departed.root, ended)
