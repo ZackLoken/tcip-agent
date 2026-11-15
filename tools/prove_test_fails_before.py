@@ -77,6 +77,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
@@ -1084,9 +1085,30 @@ def main() -> int:
         verdict, why = _classify(observed, baseline_precedes)
         record.update(verdict=verdict, why=why)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        _remove_scratch_directory(tmp)
 
     return _report(record, args.json_out)
+
+
+def _remove_scratch_directory(path: Path) -> None:
+    """Remove `path` and everything under it, naming on standard error any that stays.
+
+    When something cannot be removed, one line names the directory left in place and the first
+    path that could not be removed. Nothing is raised, so the verdict already reached stands.
+    """
+    refused: list[str] = []
+
+    def record(
+        _function: Callable[..., object], failed: str, error: BaseException
+    ) -> None:
+        refused.append(f"{failed} ({error})")
+
+    shutil.rmtree(path, onexc=record)
+    if refused:
+        print(
+            f"scratch directory left in place: {path}; first path not removed: {refused[0]}",
+            file=sys.stderr,
+        )
 
 
 def _report(record: dict, json_out: str | None) -> int:
