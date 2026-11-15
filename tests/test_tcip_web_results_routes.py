@@ -1216,6 +1216,37 @@ def test_loading_a_mapping_whose_receipt_log_is_in_a_database_that_will_not_open
     assert resp.json()["detail"] == str(refused.value)
 
 
+def test_loading_a_plant_mapping_while_the_store_is_unbound_raises_the_programming_error_not_a_409(
+    client: TestClient,
+    opened_project: Path,
+) -> None:
+    """A built mapping loaded while no store backend is bound raises ``StoreNotBoundError``.
+
+    The error is a programming error, not a refusal a breeder can act on, so the route does not
+    answer it 409. With a backend bound again, the same load answers 200.
+    """
+    from tests._mapping_fixtures import map_captures
+
+    map_captures(
+        opened_project, opened_project / "ds", ["2026-02-11"], name="valley"
+    )
+    tcip_store.unbind()
+    try:
+        with pytest.raises(tcip_store.StoreNotBoundError):
+            client.post(
+                "/api/results/plant_mapping/load", json={"name": "valley"}
+            )
+    finally:
+        tcip_store.bind()
+
+    assert (
+        client.post(
+            "/api/results/plant_mapping/load", json={"name": "valley"}
+        ).status_code
+        == 200
+    )
+
+
 def test_the_plant_mapping_list_refuses_while_no_project_is_open(
     client: TestClient,
 ) -> None:
