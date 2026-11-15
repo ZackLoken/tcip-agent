@@ -42,6 +42,7 @@ from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 from tools.fixture_session import ended
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import ModuleType
 
     from pydantic import JsonValue
@@ -1668,6 +1669,80 @@ def test_a_doors_error_answers_400_carrying_its_text(
 
     assert resp.status_code == 400
     assert "no checkpoint at the stated name" in resp.json()["detail"]
+
+
+def _stripped_of_its_engine(key: tcip_store.Key) -> str:
+    """Store the record at ``key`` without its ``engine``; return the refusal reading it earns."""
+    stored = dict(tcip_store.read(key))
+    del stored["engine"]
+    tcip_store.replace(key, stored)
+    return "engine: Field required"
+
+
+def _overwritten_with_undecodable_bytes(key: tcip_store.Key) -> str:
+    """Overwrite the record at ``key`` with undecodable bytes; return the store's sentence."""
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
+
+    damage_record(key, UNDECODABLE)
+    with pytest.raises(tcip_store.DecodeError) as sentence:
+        tcip_store.read(key)
+    return str(sentence.value)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [_stripped_of_its_engine, _overwritten_with_undecodable_bytes],
+)
+def test_a_staging_record_that_will_not_read_answers_400_as_the_tool_does(
+    opened_client: TestClient,
+    opened_project: Path,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+    monkeypatch: pytest.MonkeyPatch,
+    damage: Callable[[tcip_store.Key], str],
+) -> None:
+    """The record the proposal door wrote is damaged before the staging door reads it.
+
+    The route answers 400 carrying the place and the refusal, and the tool answers the same
+    sentence for that record and run.
+    """
+    from tcip_mcp.tools import proposal_tools
+    from tcip_web.routes import annotate
+
+    image = _image_of(dataset_root)
+    real_stage = proposal_tools.stage_assignments
+    seen: list[tuple[str, proposal_tools.StagedAssignments, str]] = []
+
+    def stage_after_damage(
+        project: Path,
+        image_path: str,
+        assignments: proposal_tools.StagedAssignments,
+        *,
+        actor: str | None,
+    ) -> proposal_tools.Staged | dict:
+        key = proposal_tools._staging_key_for(
+            image_path, assignments.staging_id
+        )
+        seen.append((image_path, assignments, damage(key)))
+        return real_stage(project, image_path, assignments, actor=actor)
+
+    monkeypatch.setattr(annotate, "stage_assignments", stage_after_damage)
+    resp = _propose(opened_client, image, {"points": [[40, 15]]})
+
+    ((image_path, assignments, refusal),) = seen
+    expected = (
+        f"proposal run {assignments.staging_id!r} staged for {image.stem}"
+        f": {refusal}"
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == expected
+    tool_answer = proposal_tools.stage_proposals(
+        opened_project,
+        image_path=image_path,
+        assignments=assignments,
+        actor=None,
+    )
+    assert tool_answer == {"error": resp.json()["detail"]}
 
 
 def _launch_setup(

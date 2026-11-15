@@ -43,7 +43,7 @@ from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import PathSegment
-from tcip_store import ReadRefusedError, validated
+from tcip_store import ReadRefusedError, read_record, validated
 
 if TYPE_CHECKING:
     import numpy as np
@@ -526,26 +526,29 @@ def _stage_assignments_regime(
     """Stage the candidates ``assignments`` names, each with its subject, for ``img``, by ``actor``.
 
     The candidates come from the record of the run ``assignments`` names, staged at ``address``;
-    refuses when that record is absent or the image's content no longer matches the content
-    identity it recorded, and raises ``tcip_store.ReadRefusedError`` naming the run when the
-    record does not validate.
+    refuses when that record is absent, will not decode or will not validate (the refusal naming
+    the run), or the image's content no longer matches the content identity it recorded.
     """
     try:
         source = resolve_image_path(img)
     except LogicalImageError as exc:
         return {"error": str(exc)}
 
-    stored = ts.read(address, default=None)
-    if stored is None:
+    try:
+        staging = read_record(
+            ts.read,
+            address,
+            ProposalStaging,
+            f"proposal run {assignments.staging_id!r} staged for {img.stem}",
+            default=None,
+        )
+    except ReadRefusedError as exc:
+        return {"error": str(exc)}
+    if staging is None:
         return {
             "error": f"No proposal run {assignments.staging_id!r} is staged for {img.stem}. "
             "Run propose_annotations and pass the staging_id it answers."
         }
-    staging = validated(
-        ProposalStaging,
-        stored,
-        f"proposal run {assignments.staging_id!r} staged for {img.stem}",
-    )
 
     from tcip_mcp.pipelines.raster_source import (
         displays_plain,

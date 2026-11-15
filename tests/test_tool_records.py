@@ -252,18 +252,42 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
     del stored["engine"]
     ts.replace(key, stored)
 
-    with pytest.raises(ts.ReadRefusedError) as refused:
-        stage_proposals(
-            tmp_path,
-            image_path=str(image),
-            assignments=kept(proposed, (0, "bud")),
-            actor=None,
-        )
-
-    assert str(refused.value) == (
-        f"proposal run {proposed.staging_id!r} staged for {image.stem}: "
-        "engine: Field required"
+    result = stage_proposals(
+        tmp_path,
+        image_path=str(image),
+        assignments=kept(proposed, (0, "bud")),
+        actor=None,
     )
+
+    assert result == {
+        "error": f"proposal run {proposed.staging_id!r} staged for {image.stem}: "
+        "engine: Field required"
+    }
+
+
+def test_a_staged_proposal_that_will_not_decode_refuses_the_staging_naming_its_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tcip_mcp.tools.proposal_tools import _staging_key_for, stage_proposals
+    from tests._record_damage_fixtures import UNDECODABLE, damage_record
+
+    image, _candidate, proposed = _proposed(tmp_path, monkeypatch)
+    key = _staging_key_for(str(image), proposed.staging_id)
+    damage_record(key, UNDECODABLE)
+    with pytest.raises(ts.DecodeError) as stored_sentence:
+        ts.read(key)
+
+    result = stage_proposals(
+        tmp_path,
+        image_path=str(image),
+        assignments=kept(proposed, (0, "bud")),
+        actor=None,
+    )
+
+    assert result == {
+        "error": f"proposal run {proposed.staging_id!r} staged for {image.stem}"
+        f": {stored_sentence.value}"
+    }
 
 
 def test_an_interrupted_raster_pass_reads_back_as_its_identity_and_first_batch(
