@@ -24,6 +24,49 @@ from tests.test_plant_mapping_binding import (
     _write_scene,
 )
 
+_NO_PLANT_SENTENCE = (
+    "{file} parsed no georeferenced plant, or is not UTF-8 text (need columns plant_id, "
+    "WGS84_centroid_x, WGS84_centroid_y with usable values); register only files that carry "
+    "at least one."
+)
+
+_NO_ID_SENTENCE = (
+    "{file}: {unnamed} of {parsed} parsed plants have no id; an id is read from the column "
+    "'plant_id', and every plant needs one."
+)
+
+
+def _located(path: Path) -> Path:
+    from tcip_mcp.registry_paths import located
+
+    return located(path, path.parent)
+
+
+def _write_text(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
+
+
+def _register(tmp_path: Path, *files: Path) -> dict:
+    return register_plant_registry(
+        tmp_path,
+        name="valley",
+        csv_paths=[str(f) for f in files],
+        crop="currant",
+        site="orchard",
+        actor=None,
+    )
+
+
+def _no_id_column_file(path: Path) -> Path:
+    return _write_text(
+        path,
+        "WGS84_centroid_x,WGS84_centroid_y,accession_name,plot_name,row_number,col_number\n"
+        "-90.0580,43.1967,acc-1,P1,1,1\n"
+        "-90.0581,43.1968,acc-2,P1,1,2\n"
+        "-90.0582,43.1969,acc-3,P2,2,1\n",
+    )
+
 
 def test_registers_a_csv_and_persists_the_frozen_record(
     tmp_path: Path,
@@ -176,50 +219,6 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
     assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
 
 
-_NO_PLANT_SENTENCE = (
-    "{file} parsed no georeferenced plant, or is not UTF-8 text (need columns plant_id, "
-    "WGS84_centroid_x, WGS84_centroid_y with usable values); register only files that carry "
-    "at least one."
-)
-
-_NO_ID_SENTENCE = (
-    "{file}: {unnamed} of {parsed} parsed plants have no id; an id is read from the column "
-    "'plant_id', and every plant needs one."
-)
-
-
-def _located(path: Path) -> Path:
-    from tcip_mcp.registry_paths import located
-
-    return located(path, path.parent)
-
-
-def _write_text(path: Path, text: str) -> Path:
-    path.write_text(text, encoding="utf-8", newline="\n")
-    return path
-
-
-def _register(tmp_path: Path, *files: Path) -> dict:
-    return register_plant_registry(
-        tmp_path,
-        name="valley",
-        csv_paths=[str(f) for f in files],
-        crop="currant",
-        site="orchard",
-        actor=None,
-    )
-
-
-def _no_id_column_file(path: Path) -> Path:
-    return _write_text(
-        path,
-        "WGS84_centroid_x,WGS84_centroid_y,accession_name,plot_name,row_number,col_number\n"
-        "-90.0580,43.1967,acc-1,P1,1,1\n"
-        "-90.0581,43.1968,acc-2,P1,1,2\n"
-        "-90.0582,43.1969,acc-3,P2,2,1\n",
-    )
-
-
 def test_refuses_a_file_with_no_id_column_naming_the_file_the_counts_and_the_column(
     tmp_path: Path,
 ) -> None:
@@ -311,6 +310,32 @@ def test_a_file_parsing_no_plant_beside_a_file_without_ids_is_refused_in_a_sente
         )
     }
     assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
+
+
+def test_every_registration_refusal_is_one_value_error_holding_every_sentence(
+    tmp_path: Path,
+) -> None:
+    """Both refusals of one call reach the pipeline caller as a single ``ValueError``."""
+    empty = write_plant_csv(tmp_path / "empty.csv", [])
+    no_column = _no_id_column_file(tmp_path / "no_column.csv")
+
+    with pytest.raises(ValueError) as refused:
+        plant_mapping.register_plant_registry_record(
+            tmp_path,
+            "valley",
+            [empty, no_column],
+            crop="currant",
+            site="orchard",
+        )
+
+    assert str(refused.value) == " ".join(
+        [
+            _NO_PLANT_SENTENCE.format(file=_located(empty)),
+            _NO_ID_SENTENCE.format(
+                file=_located(no_column), unnamed=3, parsed=3
+            ),
+        ]
+    )
 
 
 def test_registers_several_files_whose_plants_all_have_an_id(

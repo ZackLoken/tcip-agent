@@ -154,9 +154,9 @@ def register_plant_registry(
     (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with :func:`shp_to_plant_csv`), naming
     any file that parsed no georeferenced plant or is not UTF-8 text, naming any file with a
     plant that has no ``plant_id`` (how many of its parsed plants, and the column an id is read
-    from), naming a crop that is
-    empty or that ``crops.yml`` names for no trait, and naming a name conflict's two crops or two
-    digests or a name outside ``NAME_SEGMENT``. This does not require a project record.
+    from), naming a crop that is empty or that ``crops.yml`` names for no trait, and naming a name
+    conflict's two crops or two digests or a name outside ``NAME_SEGMENT``. This does not require
+    a project record.
 
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -188,11 +188,7 @@ def register_plant_registry(
         return plant_mapping.register_plant_registry_record(
             project, name, paths, crop=crop, site=site
         )
-    except (
-        plant_mapping.NoGeoreferencedPlantsError,
-        plant_mapping.PlantRegistryNameConflictError,
-        ValueError,
-    ) as exc:
+    except (plant_mapping.PlantRegistryNameConflictError, ValueError) as exc:
         return {"error": str(exc)}
 
 
