@@ -19,6 +19,7 @@ import tifffile
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.pipelines.data.band_groups import _EMBEDDED_METADATA_STRATEGIES
+from tests._producer_fixtures import unreadable_manifest, without_bands
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -975,7 +976,7 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "malform",
     [
-        pytest.param(lambda doc: doc.pop("bands"), id="no bands"),
+        pytest.param(without_bands, id="no bands"),
         pytest.param(lambda doc: doc.update(bands={}), id="empty bands"),
         pytest.param(
             lambda doc: doc.update(bands=list(doc["bands"].values())),
@@ -1004,7 +1005,7 @@ def test_a_malformed_manifest_refuses_its_read_and_its_directorys_scan(
         UnreadableBandGroupError,
         scan_identities,
     )
-    from tests._producer_fixtures import unreadable_manifest, write_band_group
+    from tests._producer_fixtures import write_band_group
 
     d = image_root(tmp_path)
     d.mkdir()
