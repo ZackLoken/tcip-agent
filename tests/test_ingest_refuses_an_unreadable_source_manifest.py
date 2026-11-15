@@ -91,13 +91,16 @@ def test_an_unreadable_source_manifest_refuses_before_a_copy_or_a_move(
     sources_before = _files(source)
     audit_before = len(audit_rows(project, "ingest_images"))
 
-    sentence = str(_refused(project, source, copy=copy))
+    refusal = _refused(project, source, copy=copy)
+    sentence = str(refusal)
 
     assert _destination(project) == destination_before
     assert _files(source) == sources_before
     (line,) = audit_rows(project, "ingest_images")[audit_before:]
     assert (line["status"], line["error"]) == ("exception", sentence)
     assert str(manifest) in sentence
+    assert refusal.__cause__ is not None
+    assert str(refusal.__cause__) in sentence
     assert sentence.endswith(INGEST_CLAUSE)
 
 

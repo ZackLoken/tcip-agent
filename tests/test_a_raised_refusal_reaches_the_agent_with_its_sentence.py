@@ -5,7 +5,8 @@ The door cases run the real ``tcip-pipeline`` server in memory through a handsha
 platform's own producers set up and a record of it then damaged through
 ``tests._record_damage_fixtures`` (or, for ``ingest_images``, a source folder whose band-group
 manifest the writer wrote and the test then made unreadable); the expected sentence is the one
-the platform's own reader of that record raises. The cases no door reaches (an empty sentence,
+the platform's own reader of that record raises, and for ``ingest_images`` the reader's error in
+the sentence the door states around it. The cases no door reaches (an empty sentence,
 an unknown trait's ``KeyError``, the SDK's resource and protocol errors) declare one function as
 a server's only tool.
 """
@@ -116,6 +117,7 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     raise reading a damaged registry record before a second registration under its name.
     ``ingest_images`` raises for a source folder whose band-group manifest will not read.
     """
+    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_registry_key,
     )
@@ -137,6 +139,12 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
         grouped, "cap", ("Green", "Red"), 8
     )
     unreadable_manifest(manifest, without_bands)
+    with pytest.raises(ValueError) as unread:
+        read_band_group_manifest(manifest)
+    ingest_sentence = (
+        f"the band-group manifest {manifest} will not read ({unread.value}), "
+        "so nothing was copied or moved: repair the manifest and ingest again."
+    )
     (image,) = (project / "images").rglob("IMG_0001.png")
     label_image(
         image, [{"subject": "bud", "bbox": [2, 2, 8, 8]}], project=project
@@ -182,8 +190,6 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
         )
     )
 
-    assert str(manifest) in _text(unread_ingest)
-    ingest_sentence = audit_rows(project, "ingest_images")[-1]["error"]
     for door, error_class, result, sentence in (
         ("export_labels", "DecodeError", exported, refused.value),
         ("register_dataset", "DecodeError", registered, refused.value),
