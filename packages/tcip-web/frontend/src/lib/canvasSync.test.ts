@@ -5,7 +5,6 @@ import {
   buildAnnotateShapes,
   computeViewport,
   createCanvasPusher,
-  measureCanvasHost,
   notifyCanvasStateRequest,
   onCanvasStateRequest,
   shapeVisible,
@@ -80,35 +79,6 @@ describe("computeViewport", () => {
       80,
     );
     expect(v).toBeNull();
-  });
-});
-
-describe("measureCanvasHost", () => {
-  afterEach(() => {
-    document.body.innerHTML = "";
-  });
-
-  const mountHost = (width: number, height: number) => {
-    const el = document.createElement("div");
-    el.setAttribute("data-canvas-host", "");
-    // jsdom lays nothing out, so the measured rect has to be supplied by the test.
-    el.getBoundingClientRect = () => ({ width, height, x: 0, y: 0, top: 0, left: 0 }) as DOMRect;
-    document.body.appendChild(el);
-    return el;
-  };
-
-  it("reports the mounted host's width and height, keeping them in that order", () => {
-    mountHost(640, 360);
-    expect(measureCanvasHost()).toEqual({ w: 640, h: 360 });
-  });
-
-  it("returns null when no canvas host is mounted", () => {
-    expect(measureCanvasHost()).toBeNull();
-  });
-
-  it("returns null when the host has collapsed to a sliver", () => {
-    mountHost(1, 360);
-    expect(measureCanvasHost()).toBeNull();
   });
 });
 

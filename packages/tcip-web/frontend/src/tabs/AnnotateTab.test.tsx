@@ -9,8 +9,8 @@ import { CONF_REFUSED, type ImageBands, PLAIN } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import type { BandChoice } from "@/lib/bandSelection";
-import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
+import type { LoadedImage } from "@/lib/imageLoader";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
 import type { ReviewItem } from "@/lib/reviewItems";
 import {
@@ -109,12 +109,22 @@ vi.mock("react-konva", () => ({
 // Pixel handlers are forwarded as plain mouse events (clientX/Y stand in for image-pixel coords;
 // the real screen<->image conversion is CanvasStage's own concern) so tests can drive the drawing
 // tools without a real Konva stage.
-vi.mock("@/components/Canvas/CanvasStage", () => {
+// What the stand-in stage measures and serves, for a test to set before it renders or to report
+// anew once it has: `size` is the host size it reports, `facts` the base serve's facts.
+const stage = vi.hoisted(() => ({
+  size: null as { w: number; h: number } | null,
+  facts: null as LoadedImage | null,
+  reportSize: (_size: { w: number; h: number } | null) => {},
+}));
+vi.mock("@/components/Canvas/CanvasStage", async () => {
+  const { useEffect } = await import("react");
   return {
     CanvasStage: (props: {
       children?: React.ReactNode;
       overlay?: React.ReactNode;
       imageUrl?: string | null;
+      onHostSize: (size: { w: number; h: number } | null) => void;
+      onBaseFacts: (facts: LoadedImage | null) => void;
       onPixelDown?: (x: number, y: number, ev: unknown) => void;
       onPixelMove?: (x: number, y: number, ev: unknown) => void;
       onPixelUp?: (x: number, y: number, ev: unknown) => void;
@@ -122,11 +132,16 @@ vi.mock("@/components/Canvas/CanvasStage", () => {
       onPixelDoubleClick?: (x: number, y: number, ev: unknown) => void;
       onPixelContextMenu?: (x: number, y: number, ev: unknown) => void;
     }) => {
+      const { onHostSize, onBaseFacts } = props;
+      useEffect(() => {
+        stage.reportSize = onHostSize;
+        onHostSize(stage.size);
+        onBaseFacts(stage.facts);
+      }, [onHostSize, onBaseFacts]);
       return (
         <div
           data-testid="canvas-stage"
           role="presentation"
-          data-canvas-host
           data-image-url={props.imageUrl ?? ""}
           onMouseDown={(e) =>
             props.onPixelDown?.(e.clientX, e.clientY, { evt: { button: e.button } })
@@ -262,8 +277,9 @@ beforeEach(() => {
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
   vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
-  // jsdom's own getBoundingClientRect is always zero; the viewport math needs a real host.
-  vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
+  // jsdom lays nothing out, so the stand-in stage reports the host size the viewport math needs.
+  stage.size = { w: 1000, h: 800 };
+  stage.facts = null;
   vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
   // One jsdom instance per file, not per test: a recolor left by an earlier test must not leak
   // into a later one's derived-color assertions.
@@ -1244,6 +1260,105 @@ describe("AnnotateTab ioError banner", () => {
     const fit = screen.getByRole("button", { name: "Fit" });
     expect(banner).toHaveClass("top-12");
     expect(fit).toHaveClass("top-3");
+  });
+});
+
+describe("AnnotateTab host size", () => {
+  const { img_width: IMG_W, img_height: IMG_H } = loadOf(IMG1);
+  const SMALLER = { w: Math.floor(IMG_W * 0.6), h: Math.floor(IMG_H * 0.5) };
+  const SMALLEST = { w: Math.floor(IMG_W * 0.3), h: Math.floor(IMG_H * 0.25) };
+
+  /** Mount over the first image at scale 1, in a host smaller than the image. */
+  async function mountInHost(size: { w: number; h: number }) {
+    stage.size = size;
+    useStore.getState().setView({ scale: 1, offset_x: 0, offset_y: 0 });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+  }
+
+  it("plans the region reads for the size the stage reports, and again when it reports another", async () => {
+    // The base bitmap is served at half size, so the view at scale 1 holds more than it carries.
+    stage.facts = {
+      ok: true,
+      image: null,
+      aborted: false,
+      servedSize: { w: IMG_W / 2, h: IMG_H / 2 },
+      imageError: null,
+    };
+    const reads = vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
+    await mountInHost(SMALLER);
+    await waitFor(() =>
+      expect(reads).toHaveBeenLastCalledWith(IMG1, expect.any(Number), {
+        x0: 0,
+        y0: 0,
+        x1: SMALLER.w,
+        y1: SMALLER.h,
+      }),
+    );
+
+    act(() => stage.reportSize(SMALLEST));
+    await waitFor(() =>
+      expect(reads).toHaveBeenLastCalledWith(IMG1, expect.any(Number), {
+        x0: 0,
+        y0: 0,
+        x1: SMALLEST.w,
+        y1: SMALLEST.h,
+      }),
+    );
+  });
+
+  it("fits the image to the size the stage reports", async () => {
+    await mountInHost(SMALLER);
+    act(() => useStore.getState().setView({ scale: 2, offset_x: 0, offset_y: 0 }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+
+    const scale = Math.min(SMALLER.w / IMG_W, SMALLER.h / IMG_H);
+    expect(useStore.getState().gui.view).toEqual({
+      scale,
+      offset_x: (SMALLER.w - IMG_W * scale) / 2,
+      offset_y: (SMALLER.h - IMG_H * scale) / 2,
+    });
+  });
+
+  it("pushes the viewport the stage's size shows to the agent", async () => {
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
+    await mountInHost(SMALLER);
+    act(() => notifyCanvasStateRequest());
+    await flush();
+
+    expect(pushSpy.mock.calls.at(-1)?.[0].viewport).toEqual({
+      x: 0,
+      y: 0,
+      w: SMALLER.w,
+      h: SMALLER.h,
+      scale: 1,
+    });
+  });
+
+  it("schedules a push of the new viewport when the stage reports another size", async () => {
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
+    await mountInHost(SMALLER);
+    // Settle the pushes the mount scheduled, so any push after this is the resize's own.
+    act(() => notifyCanvasStateRequest());
+    await flush();
+    pushSpy.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      act(() => stage.reportSize(SMALLEST));
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(pushSpy.mock.calls.at(-1)?.[0].viewport).toEqual({
+      x: 0,
+      y: 0,
+      w: SMALLEST.w,
+      h: SMALLEST.h,
+      scale: 1,
+    });
   });
 });
 

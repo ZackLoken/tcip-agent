@@ -42,7 +42,6 @@ import {
   canvasStateBody,
   computeViewport,
   createCanvasPusher,
-  measureCanvasHost,
   onCanvasStateRequest,
   type CanvasBodyBuilder,
 } from "@/lib/canvasSync";
@@ -93,7 +92,7 @@ import {
   strokeWidths,
 } from "@/lib/symbology";
 import { nextMode } from "@/lib/toolMode";
-import { fitView, zoomToRect } from "@/lib/viewGeometry";
+import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import { canvasImage, holdsCanvas, imageSize } from "@/store/slices/canvas";
 import {
@@ -199,18 +198,20 @@ export function AnnotateTab() {
   usePrefetchAdjacentImages(displayPixels, composite.bands, composite.stretch);
 
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
+  // The stage's own measurement of the canvas host; null until it has one.
+  const [host, setHost] = useState<HostSize | null>(null);
   const regions = useRegionServes({
     imagePath: imgPath,
     imgW,
     imgH,
     view,
+    host,
     displayPixels,
     baseFacts,
     composite,
   });
 
   function viewportRect(): [number, number, number, number] | null {
-    const host = measureCanvasHost();
     if (!host) return null;
     const vp = computeViewport(view, host, imgW, imgH);
     return vp ? [vp.x, vp.y, vp.w, vp.h] : null;
@@ -225,7 +226,6 @@ export function AnnotateTab() {
       viewRect[1] + viewRect[3] < imgH);
 
   function fit() {
-    const host = measureCanvasHost();
     if (!host || imgW <= 0 || imgH <= 0) return;
     setView(fitView(host, imgW, imgH));
   }
@@ -463,7 +463,6 @@ export function AnnotateTab() {
       setFocus({ kind: item.shape, index: item.ref });
       setActiveSubject(item.annotation.subject);
     }
-    const host = measureCanvasHost();
     if (!host || imgW <= 0 || imgH <= 0) return;
     const [x0, y0, x1, y1] = item.bbox;
     const pad = Math.max(x1 - x0, y1 - y0, Math.max(imgW, imgH) / 40);
@@ -628,7 +627,6 @@ export function AnnotateTab() {
     // Never push mid-transition: attaching the previous image's still-live shapes to the new
     // image_path would show the agent a false canvas; wait until the loaded identity matches.
     if (canvas.loaded?.image_path !== imageInView.path) return null;
-    const host = measureCanvasHost();
     return canvasStateBody({
       projectId: project.id,
       image: imageInView,
@@ -702,7 +700,7 @@ export function AnnotateTab() {
   ]);
   useEffect(() => {
     canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), false);
-  }, [view, subjectSwatches, canvas.dirty]);
+  }, [view, host, subjectSwatches, canvas.dirty]);
   useEffect(
     () =>
       onCanvasStateRequest(() => {
@@ -1769,6 +1767,7 @@ export function AnnotateTab() {
             imgHeight={imgH}
             regions={regions}
             onBaseFacts={setBaseFacts}
+            onHostSize={setHost}
             onStageRef={(st) => (stageRef.current = st)}
             onPixelDown={onDown}
             onPixelMove={onMove}

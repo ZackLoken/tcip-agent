@@ -136,14 +136,6 @@ export function computeViewport(
   return { x: r1(x1), y: r1(y1), w: r1(x2 - x1), h: r1(y2 - y1), scale: s };
 }
 
-/** Size of the mounted canvas host (CanvasStage tags its wrapper with data-canvas-host). */
-export function measureCanvasHost(): { w: number; h: number } | null {
-  const el = document.querySelector("[data-canvas-host]");
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return r.width > 1 && r.height > 1 ? { w: r.width, h: r.height } : null;
-}
-
 /** Whether a committed shape draws: only in its own tool mode, and there when it is of the active
  *  subject or is the focused item (a step can land on another subject's shape). A `derived` box
  *  is a polygon's read-only bounds, drawn with the boxes. The Annotate canvas and the agent's
