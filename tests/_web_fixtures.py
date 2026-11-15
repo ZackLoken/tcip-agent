@@ -85,8 +85,9 @@ def backend_session(workspace: Path) -> Iterator[TestClient]:
 
     The backend starts with the store bound, ``TCIP_WORKSPACE`` naming ``workspace`` and
     ``TCIP_IMAGE_ROOTS`` unset, configured with the workspace and no additive image roots. On
-    exit, by return or by exception, the open project is closed, the bound store's connections
-    are closed and both environment variables are restored.
+    exit, by return or by exception, the backend the session started with is bound again whatever
+    a test bound or unbound meanwhile, the open project is closed, that backend's connections are
+    closed and both environment variables are restored.
     """
     from fastapi.testclient import TestClient
 
@@ -103,6 +104,7 @@ def backend_session(workspace: Path) -> Iterator[TestClient]:
     try:
         yield TestClient(app, base_url="http://127.0.0.1")
     finally:
+        tcip_store.bind(backend)
         try:
             opened = store.opened
             if opened is not None:
