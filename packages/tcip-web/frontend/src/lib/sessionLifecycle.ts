@@ -60,7 +60,7 @@ function adopt(contribution: ImageEventPayload, written: SessionWrite): void {
  *  that named session is what a refusal answers about, so the next visit opens a fresh one, and
  *  its refusal added to the one notice of refused visits (`pushRefusal`). One with
  *  no answer or an indeterminate one stays held to be sent again under the same identity, and
- *  the notice of unconfirmed visits names every image now unconfirmed. */
+ *  the condition of unconfirmed visits names every image now unconfirmed. */
 function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>): Promise<void> {
   const held = () => holds(useStore.getState().heldContributions, contribution);
   return posted.then(

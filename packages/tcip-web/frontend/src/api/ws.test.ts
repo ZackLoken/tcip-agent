@@ -1,59 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StateSocket } from "@/api/ws";
+import { CONNECTION_LOST, StateSocket } from "@/api/ws";
 import { useStore } from "@/store";
+import { holdingSentence } from "@/test/notifications";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { PRODUCED_ENVELOPE } from "@/test/store";
+import { FakeWebSocket, lastSocket } from "@/test/webSocket";
 
-/** Minimal WebSocket stand-in: records instances, lets tests drive events. */
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-
-  url: string;
-  readyState = FakeWebSocket.CONNECTING;
-  onopen: (() => void) | null = null;
-  onmessage: ((ev: { data: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-
-  constructor(url: string) {
-    this.url = url;
-    FakeWebSocket.instances.push(this);
-  }
-
-  open() {
-    this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.();
-  }
-
-  message(data: string) {
-    this.onmessage?.({ data });
-  }
-
-  /** Server-side drop (unexpected close). */
-  drop() {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
-  }
-
-  error() {
-    this.onerror?.();
-  }
-
-  /** Client-initiated close: the browser still fires the close event. */
-  close() {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
-  }
-}
-
-function lastSocket(): FakeWebSocket {
-  return FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
-}
+const initialStoreState = useStore.getState();
 
 describe("StateSocket.connect", () => {
   beforeEach(() => {
@@ -150,17 +104,20 @@ describe("StateSocket state_snapshot dispatch", () => {
     socket.close();
   });
 
-  it("holds the sentence an envelope states for a stale bundle, and none once a frame states none", () => {
+  it("holds the stale bundle with the sentence an envelope states, one entry while it repeats, and ends it once a frame states none", () => {
     vi.spyOn(useStore.getState(), "mergeSnapshot").mockImplementation(() => {});
     const socket = new StateSocket();
     socket.connect();
     lastSocket().open();
+    const listed = useStore.getState().notifications.length;
 
     lastSocket().message(JSON.stringify({ ...PRODUCED_ENVELOPE, bundle: "rebuild the bundle" }));
-    expect(useStore.getState().staleBundle).toBe("rebuild the bundle");
+    lastSocket().message(JSON.stringify({ ...PRODUCED_ENVELOPE, bundle: "rebuild the bundle" }));
+    expect(holdingSentence("bundle")).toBe("rebuild the bundle");
+    expect(useStore.getState().notifications).toHaveLength(listed + 1);
 
     lastSocket().message(JSON.stringify(PRODUCED_ENVELOPE));
-    expect(useStore.getState().staleBundle).toBeNull();
+    expect(useStore.getState().holding.bundle).toBeUndefined();
     socket.close();
   });
 
@@ -175,9 +132,9 @@ describe("StateSocket state_snapshot dispatch", () => {
     expect(() =>
       lastSocket().message(JSON.stringify({ ...PRODUCED_ENVELOPE, bundle: "rebuild the bundle" })),
     ).toThrow(TypeError);
-    expect(useStore.getState().staleBundle).toBe("rebuild the bundle");
+    expect(holdingSentence("bundle")).toBe("rebuild the bundle");
 
-    useStore.getState().setStaleBundle(null);
+    useStore.getState().holdCondition("bundle", null);
     socket.close();
   });
 
@@ -196,40 +153,81 @@ describe("StateSocket state_snapshot dispatch", () => {
   });
 });
 
-describe("StateSocket wsStatus transitions", () => {
+describe("StateSocket lost connection", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);
-    useStore.setState({ wsStatus: "disconnected" });
+    useStore.setState(initialStoreState, true);
   });
 
   afterEach(() => vi.useRealTimers());
 
-  it("drives connecting, connected, error and an unexpected drop's disconnected", () => {
+  it("holds one lost connection from an error through the drop and every retry, and ends it at the next open", () => {
     const socket = new StateSocket();
     socket.connect();
-    expect(useStore.getState().wsStatus).toBe("connecting");
-
     lastSocket().open();
-    expect(useStore.getState().wsStatus).toBe("connected");
+    expect(useStore.getState().holding.connection).toBeUndefined();
 
     lastSocket().error();
-    expect(useStore.getState().wsStatus).toBe("error");
-
+    expect(holdingSentence("connection")).toBe(CONNECTION_LOST);
     lastSocket().drop();
-    expect(useStore.getState().wsStatus).toBe("disconnected");
+    vi.advanceTimersByTime(500);
+    lastSocket().drop();
+    expect(useStore.getState().notifications).toHaveLength(1);
+
+    vi.advanceTimersByTime(1000);
+    lastSocket().open();
+    expect(useStore.getState().holding.connection).toBeUndefined();
     socket.close();
   });
 
-  it("a deliberate close does not flip status to disconnected: supersession suppresses it", () => {
+  it("raises nothing for a connect that is slow to open", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    vi.advanceTimersByTime(5000);
+    lastSocket().open();
+
+    expect(useStore.getState().notifications).toEqual([]);
+    expect(useStore.getState().announced).toBeNull();
+    socket.close();
+  });
+
+  it("raises the lost connection at once when a first connect closes without opening", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().drop();
+
+    expect(holdingSentence("connection")).toBe(CONNECTION_LOST);
+    socket.close();
+  });
+
+  it("ends the lost connection on a deliberate close, and raises none from it", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().drop();
+    expect(useStore.getState().holding.connection).toBeDefined();
+
+    socket.close();
+    vi.advanceTimersByTime(60_000);
+    expect(useStore.getState().holding.connection).toBeUndefined();
+    expect(useStore.getState().notifications).toHaveLength(1);
+  });
+
+  it.each([
+    ["close", (socket: StateSocket) => socket.close()],
+    ["resync", (socket: StateSocket) => socket.resync()],
+  ])("raises no lost connection from a %s of an open socket", (_name, end) => {
     const socket = new StateSocket();
     socket.connect();
     lastSocket().open();
-    expect(useStore.getState().wsStatus).toBe("connected");
 
+    end(socket);
+    vi.advanceTimersByTime(60_000);
+
+    expect(useStore.getState().notifications).toEqual([]);
+    expect(useStore.getState().announced).toBeNull();
     socket.close();
-    expect(useStore.getState().wsStatus).toBe("connected");
   });
 });
 

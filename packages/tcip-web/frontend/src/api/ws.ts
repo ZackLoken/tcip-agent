@@ -9,16 +9,21 @@ import type { Panel, PanelEnvelope, StateSnapshotMessage } from "@/api/types.gen
 import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 
+export const CONNECTION_LOST =
+  "Lost the connection to TCIP. Retrying; the page shows no new changes until it reconnects.";
+
+/** The state socket, and the producer of the lost connection: it holds from an error or a close
+ *  of the socket, through every retry, until a connect opens or the socket is closed. A connect
+ *  still pending is not a lost connection, however long it takes. */
 export class StateSocket {
   private socket: ReconnectingSocket;
 
   constructor(private path: string = ROUTES.socketWsState) {
     this.socket = createReconnectingSocket({
       url: () => wsUrl(this.path),
-      onConnecting: () => useStore.getState().setWsStatus("connecting"),
-      onOpen: () => useStore.getState().setWsStatus("connected"),
-      onError: () => useStore.getState().setWsStatus("error"),
-      onClose: () => useStore.getState().setWsStatus("disconnected"),
+      onOpen: () => this.settle(),
+      onError: () => this.lost(),
+      onClose: () => this.lost(),
       onMessage: (data) => {
         let envelope: StateSnapshotMessage;
         try {
@@ -26,10 +31,19 @@ export class StateSocket {
         } catch {
           return;
         }
-        useStore.getState().setStaleBundle(envelope.bundle);
+        useStore.getState().holdCondition("bundle", envelope.bundle);
         useStore.getState().mergeSnapshot(envelope);
       },
     });
+  }
+
+  private lost() {
+    useStore.getState().holdCondition("connection", CONNECTION_LOST);
+  }
+
+  /** End the lost connection: a connect opened, or the socket is closed. */
+  private settle() {
+    useStore.getState().holdCondition("connection", null);
   }
 
   connect() {
@@ -38,6 +52,7 @@ export class StateSocket {
 
   close() {
     this.socket.stop();
+    this.settle();
   }
 
   /** Force a fresh connect-time replay, re-delivering the authoritative dataset and open project

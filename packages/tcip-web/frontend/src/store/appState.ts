@@ -3,6 +3,7 @@ import type { BandSelectionSlice } from "@/store/slices/bandSelection";
 import type { BannerSlice } from "@/store/slices/banners";
 import type { CanvasSlice } from "@/store/slices/canvas";
 import type { GuiSlice } from "@/store/slices/gui";
+import type { NotificationsSlice } from "@/store/slices/notifications";
 import type { PendingTerminalMessageSlice } from "@/store/slices/pendingTerminalMessage";
 import type { ProjectOpenSlice } from "@/store/slices/projectOpen";
 import type { RegistryStatusSlice } from "@/store/slices/registryStatus";
@@ -23,6 +24,7 @@ export interface AppState
     RegistryStatusSlice,
     AgentActivitySlice,
     ToastSlice,
+    NotificationsSlice,
     BannerSlice,
     TerminalOpenSlice,
     PendingTerminalMessageSlice,

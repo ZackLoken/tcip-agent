@@ -1,24 +1,9 @@
 import { useEffect } from "react";
 
+import { dismissLabel } from "@/lib/dismissLabel";
 import { useStore } from "@/store";
 import type { Toast } from "@/store";
-import { textOf } from "@/store/slices/toasts";
-
-const LEVEL_CLASS: Record<Toast["level"], string> = {
-  error: "tcip-problem",
-  info: "text-tcip-fg",
-  success: "text-tcip-fg",
-};
-
-const DISMISS_LABEL_WORDS = 6;
-
-/** The dismiss button's own name, so two toasts on screen at once never share one control
- * name: the message's first few words, the whole message when it is already that short. */
-function dismissLabel(message: string): string {
-  const words = message.trim().split(/\s+/);
-  const lead = words.slice(0, DISMISS_LABEL_WORDS).join(" ");
-  return `Dismiss: ${lead}${words.length > DISMISS_LABEL_WORDS ? "…" : ""}`;
-}
+import { LEVELS, textOf } from "@/store/slices/toasts";
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   useEffect(() => {
@@ -26,13 +11,13 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
     return () => window.clearTimeout(id);
   }, [toast.id, onDismiss]);
 
-  const isError = toast.level === "error";
+  const { live, tone } = LEVELS[toast.level];
   const text = textOf(toast);
   return (
     <div
-      role={isError ? "alert" : "status"}
-      aria-live={isError ? "assertive" : "polite"}
-      className={`flex items-start gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 shadow-lg ${LEVEL_CLASS[toast.level]}`}
+      role={live === "assertive" ? "alert" : "status"}
+      aria-live={live}
+      className={`flex items-start gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 shadow-lg ${tone}`}
     >
       <span className="flex-1 break-words">
         {text}

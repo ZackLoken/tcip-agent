@@ -1,55 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createReconnectingSocket } from "@/lib/reconnectingSocket";
-
-/** Minimal WebSocket stand-in: records instances, lets tests drive events. */
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-
-  url: string;
-  readyState = FakeWebSocket.CONNECTING;
-  onopen: (() => void) | null = null;
-  onmessage: ((ev: { data: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  onclose: ((ev: { code: number }) => void) | null = null;
-  sent: string[] = [];
-
-  constructor(url: string) {
-    this.url = url;
-    FakeWebSocket.instances.push(this);
-  }
-
-  open() {
-    this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.();
-  }
-
-  message(data: string) {
-    this.onmessage?.({ data });
-  }
-
-  drop(code = 1006) {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.({ code });
-  }
-
-  close() {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.({ code: 1000 });
-  }
-
-  send(data: string) {
-    this.sent.push(data);
-  }
-}
-
-function lastSocket(): FakeWebSocket {
-  return FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
-}
+import { FakeWebSocket, lastSocket } from "@/test/webSocket";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -61,20 +13,17 @@ afterEach(() => vi.useRealTimers());
 
 describe("createReconnectingSocket", () => {
   it("connects, reconnects on drop with capped backoff, and stop suppresses further attempts", () => {
-    const onConnecting = vi.fn();
     const onOpen = vi.fn();
     const onClose = vi.fn();
     const socket = createReconnectingSocket({
       url: "ws://x/one",
       onMessage: vi.fn(),
-      onConnecting,
       onOpen,
       onClose,
     });
 
     socket.start();
     expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(onConnecting).toHaveBeenCalledTimes(1);
 
     lastSocket().open();
     expect(onOpen).toHaveBeenCalledTimes(1);

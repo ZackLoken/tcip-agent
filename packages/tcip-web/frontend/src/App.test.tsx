@@ -6,6 +6,7 @@ import { sessionsApi } from "@/api/sessions";
 import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
+import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { loadOf } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
@@ -70,11 +71,26 @@ const VALLEY_OPENED = openedAs(VALLEY);
 
 const initialStoreState = useStore.getState();
 
+/** A window's size for the docking layout: jsdom lays nothing out, and FlexLayout renders a pane
+ *  only once its container measures one. */
+const WINDOW_RECT = {
+  x: 0,
+  y: 0,
+  top: 0,
+  left: 0,
+  width: 1280,
+  height: 800,
+  right: 1280,
+  bottom: 800,
+};
+
 beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(WINDOW_RECT as DOMRect);
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
   vi.mocked(api.projects.list).mockResolvedValue(PROJECT_FIXTURES.picker);
   stateSocket.connect.mockClear();
+  stateSocket.close.mockClear();
   stateSocket.subscribePanel.mockClear();
   vi.mocked(useActiveTabSync).mockClear();
 });
@@ -87,7 +103,7 @@ describe("App tab/panel wiring", () => {
     render(<App />);
 
     const tab = await screen.findByRole("tab", { name: /meta/i });
-    const panel = screen.getByRole("tabpanel");
+    const panel = screen.getByRole("tabpanel", { name: /meta/i });
     expect(tab).toHaveAttribute("aria-controls", panel.id);
     expect(panel).toHaveAttribute("aria-labelledby", tab.id);
   });
@@ -95,10 +111,10 @@ describe("App tab/panel wiring", () => {
   it("moves the panel's id and labelledby to the newly active tab on selection", async () => {
     act(() => useStore.getState().setActiveTab("meta"));
     render(<App />);
-    await screen.findByRole("tabpanel");
+    await screen.findByRole("tabpanel", { name: /meta/i });
 
     act(() => useStore.getState().setActiveTab("training"));
-    const panel = await screen.findByRole("tabpanel");
+    const panel = await screen.findByRole("tabpanel", { name: /training/i });
     const tab = screen.getByRole("tab", { name: /training/i });
     expect(panel.id).toBe("tabpanel-training");
     expect(panel).toHaveAttribute("aria-labelledby", tab.id);
@@ -110,7 +126,7 @@ describe("App panel events", () => {
     const { banner } = PANEL_EVENTS;
     act(() => useStore.getState().setActiveTab("results"));
     render(<App />);
-    await screen.findByRole("tabpanel");
+    await screen.findByRole("tabpanel", { name: /results/i });
 
     const subscribed = stateSocket.subscribePanel.mock.calls.find(([p]) => p === banner.panel);
     act(() => subscribed?.[1](banner));
@@ -127,7 +143,7 @@ describe("App annotator gate", () => {
 
     expect(await screen.findByText("Open a project")).toBeInTheDocument();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
-    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tabpanel", { name: /meta/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Toggle agent terminal" })).not.toBeInTheDocument();
     expect(screen.queryByText("no project open")).not.toBeInTheDocument();
     expect(stateSocket.connect).not.toHaveBeenCalled();
@@ -140,7 +156,7 @@ describe("App annotator gate", () => {
     expect(stateSocket.connect).not.toHaveBeenCalled();
 
     fireEvent.keyDown(field, { key: "Enter" });
-    expect(await screen.findByRole("tabpanel")).toBeInTheDocument();
+    expect(await screen.findByRole("tabpanel", { name: /meta/i })).toBeInTheDocument();
     expect(screen.getByRole("tablist")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Toggle agent terminal" })).toBeInTheDocument();
     expect(screen.getByText("no project open")).toBeInTheDocument();
@@ -148,6 +164,67 @@ describe("App annotator gate", () => {
     expect(stateSocket.subscribePanel).toHaveBeenCalled();
     expect(useActiveTabSync).toHaveBeenCalled();
     expect(useStore.getState().user).toBe("g");
+  });
+});
+
+describe("App notifications area", () => {
+  it("is reached from the name screen's top bar, and shows no lost connection there", async () => {
+    act(() => useStore.getState().setUser(""));
+    render(<App />);
+    await screen.findByText("Open a project");
+
+    const button = screen.getByRole("button", { name: "Notifications" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("condition-mark")).not.toBeInTheDocument();
+
+    fireEvent.click(button);
+    const heading = await screen.findByRole("heading", { name: "Notifications" });
+    expect(heading).toBeVisible();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/Nothing to report/)).toBeVisible();
+    await waitFor(() => expect(heading).toHaveFocus());
+
+    fireEvent.keyDown(heading, { key: "Escape" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Notifications" })).toHaveFocus());
+    expect(screen.getByText("Open a project")).toBeInTheDocument();
+  });
+
+  it("announces a condition raised while the area was never opened", async () => {
+    vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(new TypeError("Failed to fetch"));
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    render(<App />);
+    await screen.findByRole("tablist");
+
+    const s = useStore.getState();
+    act(() => {
+      s.startImageSessionTracking("a.jpg", Date.now() - 2000);
+      s.closeSessionInterval();
+      postHeldContributions();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /Could not confirm these visits were recorded.*a\.jpg/,
+      ),
+    );
+    expect(screen.queryByRole("heading", { name: "Notifications" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /a problem is ongoing/ })).toBeInTheDocument();
+  });
+
+  it("opens and closes over the project shell without remounting it", async () => {
+    render(<App />);
+    await screen.findByRole("tablist");
+    const button = screen.getByRole("button", { name: "Notifications" });
+
+    fireEvent.click(button);
+    await screen.findByRole("heading", { name: "Notifications" });
+    fireEvent.click(button);
+
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("heading", { name: "Notifications" })).not.toBeInTheDocument();
+    expect(stateSocket.connect).toHaveBeenCalledTimes(1);
+    expect(stateSocket.close).not.toHaveBeenCalled();
   });
 });
 

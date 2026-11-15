@@ -120,6 +120,39 @@ body,
   background: #454a3b; /* tcip-border-hover */
 }
 
+/* FlexLayout's dark theme read through the app's tokens, so docked panes, floats and pop-outs
+   share the bark panels, the field-notebook text and the focus color. */
+:root {
+  --flexlayout-font-family: var(--font-sans);
+  --flexlayout-font-size: 13px;
+  --flexlayout-color-background: var(--color-tcip-bg);
+  --flexlayout-color-base: var(--color-tcip-bg);
+  --flexlayout-color-text: var(--color-tcip-fg);
+  --flexlayout-color-icon: var(--color-tcip-muted);
+  --flexlayout-color-focus: var(--color-tcip-focus);
+  --flexlayout-color-splitter: var(--color-tcip-border);
+  --flexlayout-color-splitter-hover: var(--color-tcip-border-hover);
+  --flexlayout-color-tab-content: var(--color-tcip-panel);
+  --flexlayout-color-tabset-background: var(--color-tcip-panel);
+  --flexlayout-color-tab-selected: var(--color-tcip-fg);
+  --flexlayout-color-tab-unselected: var(--color-tcip-muted);
+  --flexlayout-color-border-background: var(--color-tcip-panel);
+  --flexlayout-color-border-tab-content: var(--color-tcip-panel);
+  --flexlayout-color-border-tab-selected: var(--color-tcip-fg);
+  --flexlayout-color-border-tab-selected-background: var(--color-tcip-hover);
+  --flexlayout-color-border-tab-unselected: var(--color-tcip-muted);
+  --flexlayout-color-border-divider-line: var(--color-tcip-border);
+  --flexlayout-color-float-window-header-background: var(--color-tcip-panel);
+  --flexlayout-color-popup-border: var(--color-tcip-border);
+  --flexlayout-color-popup-selected-background: var(--color-tcip-hover);
+  --flexlayout-color-popup-unselected-background: var(--color-tcip-panel);
+}
+
+/* FlexLayout's measuring element holds placeholder text a screen reader would otherwise read. */
+.flexlayout__layout_metrics {
+  visibility: hidden;
+}
+
 /* Deliberate motion only: respect the OS reduced-motion preference. */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -4,54 +4,10 @@ import { openInferenceStream } from "@/api/inference";
 import { openTrainingStream } from "@/api/training";
 import { INFERENCE_ANSWERS } from "@/test/inference";
 import { METRIC_FRAMES, STATUS_FRAME, UNKNOWN_RUN_FRAME } from "@/test/training";
+import { FakeWebSocket, lastSocket } from "@/test/webSocket";
 
 const { progress: PROGRESS, final: FINAL, unknown_job: UNKNOWN_JOB } = INFERENCE_ANSWERS;
 const [METRIC] = METRIC_FRAMES;
-
-/** Minimal WebSocket stand-in: records instances, lets tests drive events. */
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-
-  url: string;
-  readyState = FakeWebSocket.CONNECTING;
-  onopen: (() => void) | null = null;
-  onmessage: ((ev: { data: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-
-  constructor(url: string) {
-    this.url = url;
-    FakeWebSocket.instances.push(this);
-  }
-
-  open() {
-    this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.();
-  }
-
-  message(data: string) {
-    this.onmessage?.({ data });
-  }
-
-  /** Server-side drop (unexpected close). */
-  drop() {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
-  }
-
-  close() {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
-  }
-}
-
-function lastSocket(): FakeWebSocket {
-  return FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
-}
 
 beforeEach(() => {
   vi.useFakeTimers();

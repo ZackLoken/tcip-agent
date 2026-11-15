@@ -2,10 +2,24 @@ import type { StateCreator } from "zustand";
 
 import type { AppState } from "@/store/appState";
 
+/** How loud a message to the person is. */
+export type MessageLevel = "error" | "info" | "success";
+
+/** How each level is shown and told, read by every message component: its word, its text tone,
+ *  the color of its mark, and the politeness its live region announces it with. */
+export const LEVELS: Record<
+  MessageLevel,
+  { word: string; tone: string; mark: string; live: "assertive" | "polite" }
+> = {
+  error: { word: "Error", tone: "tcip-problem", mark: "bg-tcip-fp", live: "assertive" },
+  info: { word: "Notice", tone: "text-tcip-fg", mark: "bg-tcip-fn", live: "polite" },
+  success: { word: "Done", tone: "text-tcip-fg", mark: "bg-tcip-tp", live: "polite" },
+};
+
 /** What a toast says, held one way: its text, or the refusals a notice of refused work names
  *  (each an item and the reason given), never both; `textOf` reads either. */
 type ToastContent = {
-  level: "error" | "info" | "success";
+  level: MessageLevel;
   /** How many times this exact text (same level) has been pushed since it last appeared;
    * absent (or 1) for one that has never repeated. */
   count?: number;

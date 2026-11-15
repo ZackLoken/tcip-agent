@@ -154,10 +154,10 @@ export interface RegistryStatusSlice {
   /** Close the visit open now and forget the recorded session, as `following` (null for none)
    *  becomes the open project; every held contribution of another project is retired and the
    *  person told in one notice per outcome: never sent, not recorded; sent with no settling
-   *  answer, recording not confirmed. The live notice of unconfirmed contributions follows
+   *  answer, recording not confirmed. The condition of unconfirmed contributions follows
    *  (`noticeUnconfirmed`). */
   leaveProjectSession: (following: string | null) => void;
-  /** Retire `contribution` from the held and unconfirmed contributions; the live notice of
+  /** Retire `contribution` from the held and unconfirmed contributions; the condition of
    *  unconfirmed contributions follows (`noticeUnconfirmed`). */
   retireContribution: (contribution: ImageEventPayload) => void;
   setRecordedSession: (session: RecordedSession | null) => void;
@@ -168,23 +168,19 @@ export interface RecordedSession extends SessionRef {
   user: string;
 }
 
-const UNCONFIRMED_CHANNEL = "unconfirmed-visits";
-
-/** Refresh the notice of unconfirmed contributions from `s.unconfirmedContributions`, as a send
- *  fails and as contributions leave it: a standing notice is replaced to name every image now
- *  unconfirmed, or dismissed once none is; with `announce`, a notice is shown even when none
- *  stands. A send that only adds membership leaves the notice until its answer. */
+/** Refresh the condition of unconfirmed contributions from `s.unconfirmedContributions`, as a
+ *  send fails and as contributions leave it: while it holds, its sentence names every image now
+ *  unconfirmed, and it ends once none is; with `announce`, it begins when it does not hold. A
+ *  send that only adds membership leaves the condition until its answer. */
 export function noticeUnconfirmed(s: AppState, announce: boolean): void {
-  const standing = s.toasts.find((t) => t.channel === UNCONFIRMED_CHANNEL);
   const images = s.unconfirmedContributions.map((c) => c.image_name).join(", ");
   if (!images) {
-    if (standing) s.dismissToast(standing.id);
-  } else if (standing || announce) {
-    s.pushToast(
+    s.holdCondition("unconfirmed", null);
+  } else if (s.holding.unconfirmed !== undefined || announce) {
+    s.holdCondition(
+      "unconfirmed",
       `Could not confirm these visits were recorded; they are sent again with the next visit: ` +
         images,
-      "error",
-      UNCONFIRMED_CHANNEL,
     );
   }
 }
