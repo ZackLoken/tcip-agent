@@ -49,6 +49,7 @@ import {
   type LineStyle,
   outlineColor,
   PROMPT_POINT_STYLE,
+  PROPOSAL_STYLE,
   proposalLabel,
 } from "@/lib/symbology";
 import type { CanvasState } from "@/store/slices/canvas";
@@ -333,7 +334,7 @@ export function buildAnnotateShapes(
     const proposalFocused = focusesProposal(focused, p.index, p.bucket);
     const base = {
       color: outlineColor(p.subject, proposalMatch(p)),
-      ...strokeOf("dotted", proposalFocused),
+      ...strokeOf(PROPOSAL_STYLE, proposalFocused),
       tag: "proposal",
     };
     const label = proposalLabel(p, proposalFocused);

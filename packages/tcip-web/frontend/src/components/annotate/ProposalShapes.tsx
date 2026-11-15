@@ -5,7 +5,7 @@ import { PointOverlay } from "@/components/annotate/PointOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { focusesProposal, proposalMatch, type ReviewItem } from "@/lib/reviewItems";
-import { outlineColor, proposalLabel, type strokeWidths } from "@/lib/symbology";
+import { outlineColor, PROPOSAL_STYLE, proposalLabel, type strokeWidths } from "@/lib/symbology";
 import type { Proposal } from "@/store/types";
 
 /** The proposals the canvas shows, drawn in the tool's dotted stroke and their match color; the
@@ -26,7 +26,7 @@ export const ProposalShapes = memo(function ProposalShapes({
         const key = `proposal-${p.bucket}-${p.index}`;
         const shared = {
           stroke: outlineColor(p.subject, proposalMatch(p)),
-          style: "dotted" as const,
+          style: PROPOSAL_STYLE,
           labelSize: widths.labelSize,
           label: proposalLabel(p, isFocused),
           focused: isFocused,

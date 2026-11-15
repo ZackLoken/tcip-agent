@@ -31,7 +31,7 @@ export function boxDraft(
 export function draftStrokes(args: {
   mode: string;
   currentPolygon: [number, number][];
-  /** The color the polygon in progress draws in (`draftColor`). */
+  /** The color the polygon in progress draws in (`draftColor`); the cut takes its own. */
   polygonColor: string;
   cutStart: { point: [number, number]; color: string } | null;
   cursor: [number, number] | null;
