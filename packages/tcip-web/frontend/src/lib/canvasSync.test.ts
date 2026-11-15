@@ -31,6 +31,8 @@ import { servedFlag, servedProposal } from "@/test/labels";
 
 const RED = subjectColor("subject_a");
 const OTHER = subjectColor("other");
+/** The store's held prompts before any is placed. */
+const NO_PROMPTS = useStore.getState().annotateUi.pendingPrompts;
 
 const focusOn = (shape: ReviewItem["shape"], ref: number): ReviewItem => ({
   kind: "annotation",
@@ -144,6 +146,7 @@ describe("buildAnnotateShapes", () => {
     activeSubject: "subject_a",
     visible: true,
     colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
   };
 
   it("filters polygon mode to the active subject, colors from the GUI, unlabeled at rest", () => {
@@ -601,6 +604,7 @@ describe("the shapes the server render is fed", () => {
     activeSubject: "subject_a",
     visible: true,
     colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
   };
 
   it("are what buildAnnotateShapes produces, the records the renderer's own tests read", async () => {
@@ -666,6 +670,7 @@ describe("buildAnnotateShapes proposals", () => {
     activeSubject: "subject_a",
     visible: true,
     colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
   };
   const BUCKET = ANNOTATE_ANSWERS.buckets.review;
   const proposal = (over: Partial<Proposal>): Proposal => ({
@@ -759,6 +764,7 @@ describe("buildAnnotateShapes held prompts", () => {
     activeSubject: "subject_a",
     visible: true,
     colorFor: subjectColor,
+    pendingPrompts: NO_PROMPTS,
   };
   const pendingPrompts = {
     points: [[1.04, 2] as [number, number]],

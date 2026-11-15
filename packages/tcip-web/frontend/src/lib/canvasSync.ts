@@ -200,7 +200,7 @@ export function buildAnnotateShapes(
     /** The proposals the canvas shows. */
     proposals?: Proposal[];
     /** The points and boxes held for the segmenter, as the store holds them. */
-    pendingPrompts?: AnnotateUiState["pendingPrompts"];
+    pendingPrompts: AnnotateUiState["pendingPrompts"];
   },
 ): CanvasShape[] {
   const polylines: CanvasShape[] = (args.draft ?? []).map(
@@ -216,10 +216,25 @@ export function buildAnnotateShapes(
       tag: "in_progress",
     }),
   );
+  const draftBox = (
+    [x1, y1, x2, y2]: [number, number, number, number],
+    color: string,
+    tag: string,
+  ): CanvasShape => ({
+    kind: "box",
+    xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
+    color,
+    dash: DRAFT_DASH,
+    casing: null,
+    halo: null,
+    label: null,
+    fill: false,
+    tag,
+  });
   const heldColor = draftColor(args.activeSubject);
-  const heldBoxes = [...(args.pendingPrompts?.boxes ?? []), ...(args.pendingPrompts?.found ?? [])];
+  const held = args.pendingPrompts;
   const prompts: CanvasShape[] = [
-    ...(args.pendingPrompts?.points ?? []).map(([x, y]): CanvasShape => ({
+    ...held.points.map(([x, y]): CanvasShape => ({
       kind: "point",
       points: [[r1(x), r1(y)]],
       color: heldColor,
@@ -227,33 +242,11 @@ export function buildAnnotateShapes(
       label: null,
       tag: "held_prompt",
     })),
-    ...heldBoxes.map(([x1, y1, x2, y2]): CanvasShape => ({
-      kind: "box",
-      xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
-      color: heldColor,
-      dash: DRAFT_DASH,
-      casing: null,
-      halo: null,
-      label: null,
-      fill: false,
-      tag: "held_prompt",
-    })),
+    ...[...held.boxes, ...held.found].map((box) => draftBox(box, heldColor, "held_prompt")),
   ];
   const dragged = args.drawingBox ? boxDraft(args.drawingBox, args.colorFor) : null;
   const dragging: CanvasShape[] = dragged
-    ? [
-        {
-          kind: "box",
-          xyxy: dragged.bounds.map(r1) as [number, number, number, number],
-          color: dragged.color,
-          dash: DRAFT_DASH,
-          casing: null,
-          halo: null,
-          label: null,
-          fill: false,
-          tag: "in_progress",
-        },
-      ]
+    ? [draftBox(dragged.bounds, dragged.color, "in_progress")]
     : [];
 
   const statuses = args.matches ?? NO_MATCHES;
