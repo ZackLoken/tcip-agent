@@ -10,7 +10,7 @@ import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 afterEach(cleanup);
 
 describe("HelpOverlay", () => {
-  it("toggles with '?' and closes with Escape", () => {
+  it("opens with '?' and closes with Escape", () => {
     render(<HelpOverlay activeTab="annotate" />);
     expect(screen.queryByText(/^Shortcuts$/)).not.toBeInTheDocument();
 
@@ -56,11 +56,11 @@ describe("HelpOverlay", () => {
         <HelpOverlay activeTab="annotate" />
       </div>,
     );
-    // "?" aimed at a text field must insert the character, not toggle the overlay.
+    // "?" aimed at a text field must insert the character, not open the overlay.
     fireEvent.keyDown(screen.getByTestId("field"), { key: "?" });
     expect(screen.queryByText(/^Shortcuts$/)).not.toBeInTheDocument();
 
-    // Same key with no form control focused still toggles.
+    // Same key with no form control focused still opens it.
     fireEvent.keyDown(document.body, { key: "?" });
     expect(screen.getByText(/^Shortcuts$/)).toBeInTheDocument();
   });

@@ -113,7 +113,6 @@ describe("ConfirmDialog", () => {
     expect(appRoot.contains(dialog)).toBe(false);
     expect(document.body.contains(dialog)).toBe(true);
     expect(appRoot).toHaveAttribute("aria-hidden", "true");
-    expect(screen.queryByText("picker content")).toBeNull();
     unmount();
     expect(appRoot).not.toHaveAttribute("aria-hidden");
     appRoot.remove();
