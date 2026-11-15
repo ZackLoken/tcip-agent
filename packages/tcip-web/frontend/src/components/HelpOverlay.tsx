@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 
+import { ModalDialog } from "@/components/ModalDialog";
 import { isFocusableControl } from "@/hooks/useKeyboardShortcuts";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
+import { keydownInModal } from "@/lib/modalKeydown";
 import type { TabName } from "@/store/types";
 
 interface Shortcut {
@@ -10,7 +12,7 @@ interface Shortcut {
 }
 
 const GLOBAL: Shortcut[] = [
-  { key: "?", desc: "Toggle this help overlay" },
+  { key: "?", desc: "Open this help overlay" },
   { key: "Esc", desc: "Close dialogs / cancel in-progress drawing" },
 ];
 
@@ -60,38 +62,30 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (isFocusableControl(e.target)) return;
+      if (isFocusableControl(e.target) || keydownInModal(e)) return;
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
         e.preventDefault();
-        setOpen((p) => !p);
-      } else if (e.key === "Escape" && open) {
-        setOpen(false);
+        setOpen(true);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, []);
 
   if (!open) return null;
   return (
-    <div
-      role="presentation"
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) setOpen(false);
-      }}
+    <ModalDialog
+      title="Shortcuts"
+      onClose={() => setOpen(false)}
+      closeOnOutsideClick
+      className="w-[520px]"
+      headerClose="Close"
     >
-      <div className="tcip-panel p-5 w-[520px] max-w-[90vw] max-h-[80vh] overflow-auto flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div className="tcip-heading">Shortcuts</div>
-          <button className="tcip-btn text-[13px]" onClick={() => setOpen(false)}>
-            Close
-          </button>
-        </div>
+      <div className="flex flex-col gap-4">
         {activeTab === "annotate" && <Section title="Annotate" items={ANNOTATE} />}
         <Section title="Mouse" items={MOUSE} />
         <Section title="Global" items={GLOBAL} />
       </div>
-    </div>
+    </ModalDialog>
   );
 }

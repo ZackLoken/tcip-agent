@@ -9,6 +9,7 @@ import { Image as KonvaImage, Layer, Stage } from "react-konva";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useOverviewBuild, writtenLabel } from "@/hooks/useOverviewBuild";
 import { loadImage, type LoadedImage } from "@/lib/imageLoader";
+import { keydownInModal } from "@/lib/modalKeydown";
 import { clampView, fitView } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
@@ -282,7 +283,7 @@ export function CanvasStage(props: CanvasStageProps) {
       );
     };
     const down = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || e.repeat || isTyping()) return;
+      if (e.code !== "Space" || e.repeat || isTyping() || keydownInModal(e)) return;
       e.preventDefault();
       setSpaceHeld(true);
     };

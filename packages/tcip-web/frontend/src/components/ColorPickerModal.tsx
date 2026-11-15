@@ -2,7 +2,9 @@
  * Dark color picker: SI palette + basic palette + hex input, resolving to a hex string.
  */
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
+
+import { ModalDialog } from "@/components/ModalDialog";
 
 const SI_PALETTE: [string, string][] = [
   ["SI Green", "#507754"],
@@ -46,20 +48,6 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
   const [color, setColor] = useState(initialColor);
   const [hexDraft, setHexDraft] = useState(initialColor);
   const hexRef = useRef<HTMLInputElement | null>(null);
-  const titleId = useId();
-
-  useEffect(() => {
-    hexRef.current?.focus();
-    hexRef.current?.select();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCancel();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
 
   function pick(c: string) {
     setColor(c);
@@ -72,81 +60,67 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
   }
 
   return (
-    <div
-      role="presentation"
-      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
+    <ModalDialog
+      title={title}
+      onClose={onCancel}
+      closeOnOutsideClick
+      className="w-[400px]"
+      headerClose="Cancel"
+      onOpenAutoFocus={(e) => {
+        e.preventDefault();
+        hexRef.current?.focus();
+        hexRef.current?.select();
       }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="tcip-panel rounded-lg p-5 w-[400px]"
-      >
-        <div className="flex items-center justify-between mb-3">
-          <div id={titleId} className="text-[13px] font-semibold">
-            {title}
-          </div>
-          <button className="tcip-btn text-[13px]" onClick={onCancel}>
-            Cancel
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-[13px] text-tcip-muted">Selected:</span>
-          <div
-            className="w-7 h-7 rounded border border-tcip-border"
-            style={{ background: color }}
-          />
-          <input
-            ref={hexRef}
-            aria-label="hex color"
-            className="tcip-input w-24 font-mono"
-            value={hexDraft}
-            onChange={(e) => setHexDraft(e.target.value)}
-            onBlur={commitHex}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                commitHex();
-                e.preventDefault();
-              }
-            }}
-          />
-          <button
-            className="tcip-btn text-[13px]"
-            onClick={() => {
-              const el = document.createElement("input");
-              el.type = "color";
-              el.value = HEX_RE.test(color) ? color : "#ffffff";
-              el.addEventListener("input", () => pick(el.value.toUpperCase()), { once: false });
-              el.addEventListener("change", () => pick(el.value.toUpperCase()), { once: true });
-              el.click();
-            }}
-          >
-            System…
-          </button>
-        </div>
-
-        <Section title="SI Palette" palette={SI_PALETTE} onPick={pick} selected={color} />
-        <Section title="Basic Colors" palette={BASIC_PALETTE} onPick={pick} selected={color} />
-
-        <div className="flex gap-2 mt-4">
-          <button className="tcip-btn-primary flex-1" onClick={() => onSubmit(color)}>
-            OK
-          </button>
-          {onReset && (
-            <button className="tcip-btn flex-1" onClick={onReset}>
-              Reset
-            </button>
-          )}
-          <button className="tcip-btn flex-1" onClick={onCancel}>
-            Cancel
-          </button>
-        </div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[13px] text-tcip-muted">Selected:</span>
+        <div className="w-7 h-7 rounded border border-tcip-border" style={{ background: color }} />
+        <input
+          ref={hexRef}
+          aria-label="hex color"
+          className="tcip-input w-24 font-mono"
+          value={hexDraft}
+          onChange={(e) => setHexDraft(e.target.value)}
+          onBlur={commitHex}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commitHex();
+              e.preventDefault();
+            }
+          }}
+        />
+        <button
+          className="tcip-btn text-[13px]"
+          onClick={() => {
+            const el = document.createElement("input");
+            el.type = "color";
+            el.value = HEX_RE.test(color) ? color : "#ffffff";
+            el.addEventListener("input", () => pick(el.value.toUpperCase()), { once: false });
+            el.addEventListener("change", () => pick(el.value.toUpperCase()), { once: true });
+            el.click();
+          }}
+        >
+          System…
+        </button>
       </div>
-    </div>
+
+      <Section title="SI Palette" palette={SI_PALETTE} onPick={pick} selected={color} />
+      <Section title="Basic Colors" palette={BASIC_PALETTE} onPick={pick} selected={color} />
+
+      <div className="flex gap-2 mt-4">
+        <button className="tcip-btn-primary flex-1" onClick={() => onSubmit(color)}>
+          OK
+        </button>
+        {onReset && (
+          <button className="tcip-btn flex-1" onClick={onReset}>
+            Reset
+          </button>
+        )}
+        <button className="tcip-btn flex-1" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </ModalDialog>
   );
 }
 

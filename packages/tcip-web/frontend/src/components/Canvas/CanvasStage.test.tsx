@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { CanvasStage, type CanvasRegion } from "@/components/Canvas/CanvasStage";
+import { HelpOverlay } from "@/components/HelpOverlay";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { useStore } from "@/store";
 
@@ -307,5 +308,33 @@ describe("CanvasStage auto-fit", () => {
     expect(view.scale).toBe(0.25);
     expect(view.offset_x).toBe(275);
     expect(view.offset_y).toBe(0);
+  });
+});
+
+describe("CanvasStage Space-to-pan", () => {
+  const host = () => document.querySelector<HTMLElement>("[data-canvas-host]")!;
+  const space = { key: " ", code: "Space" };
+
+  it("turns the cursor to a grab hand while Space is held, and back on release", () => {
+    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} />);
+    fireEvent.keyDown(document.body, space);
+    expect(host().style.cursor).toBe("grab");
+    fireEvent.keyUp(document.body, space);
+    expect(host().style.cursor).toBe("");
+  });
+
+  it("does not start a pan while a modal dialog is open", () => {
+    render(
+      <>
+        <CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} />
+        <HelpOverlay activeTab="annotate" />
+      </>,
+    );
+    fireEvent.keyDown(document.body, { key: "?" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    const notPrevented = fireEvent.keyDown(document.body, space);
+    expect(notPrevented).toBe(true);
+    expect(host().style.cursor).toBe("");
   });
 });
