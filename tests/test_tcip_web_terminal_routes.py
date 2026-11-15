@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
+from contextlib import AbstractContextManager, suppress
 from itertools import pairwise
 from pathlib import Path
 from queue import Queue
@@ -1456,6 +1456,99 @@ def test_scrollback_replays_on_reconnect(client: TestClient) -> None:
     ) as ws2:
         acc = _read_until(ws2, "echo:before reconnect")
         assert "FAKE_TERMINAL_READY" in acc
+
+
+def _output_frames_until(
+    ws: WebSocketTestSession, needle: str, tries: int = 200
+) -> list[dict]:
+    """Return the output frames, as the wire carries them, up to the one holding ``needle``.
+
+    Raises AssertionError naming the needle when ``tries`` frames pass without it.
+    """
+    frames: list[dict] = []
+    for _ in range(tries):
+        frame = json.loads(ws.receive_text())
+        if frame["type"] != "output":
+            continue
+        frames.append(frame)
+        if needle in frame["data"]:
+            return frames
+    raise AssertionError(f"never saw {needle!r} in an output frame")
+
+
+def _attached(
+    client: TestClient, sid: str
+) -> AbstractContextManager[WebSocketTestSession]:
+    """Return a context manager opening the session's socket, as the rail does."""
+    return client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}")
+
+
+def _no_socket_attached(session: terminal_routes.TerminalSession) -> None:
+    """Wait until the session holds no subscriber, as after its socket's loop closed."""
+    deadline = time.time() + 30
+    while session._subs:
+        assert time.time() < deadline, "the closed socket stayed attached"
+        time.sleep(0.05)
+
+
+def test_a_first_attach_draws_the_scrollback_live_and_a_second_replays_it(
+    client: TestClient,
+) -> None:
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    with _attached(client, sid) as ws:
+        first = _output_frames_until(ws, "FAKE_TERMINAL_READY")
+        ws.send_json({"type": "input", "data": "before attach\r"})
+        first += _output_frames_until(ws, "echo:before attach")
+    assert [f.get("replay") for f in first] == [False] * len(first)
+    with _attached(client, sid) as ws2:
+        (replay,) = _output_frames_until(ws2, "echo:before attach")
+        assert replay.get("replay") is True
+        assert replay["data"].startswith("".join(f["data"] for f in first))
+        ws2.send_json({"type": "input", "data": "after attach\r"})
+        live = _output_frames_until(ws2, "echo:after attach")
+        assert [f.get("replay") for f in live] == [False] * len(live)
+
+
+def test_output_written_with_no_socket_attached_is_drawn_live_by_the_next_attach(
+    client: TestClient,
+) -> None:
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    with _attached(client, sid) as ws:
+        _output_frames_until(ws, "FAKE_TERMINAL_READY")
+    _no_socket_attached(session)
+    session.write("while detached\r")
+    _wait_for(session, "echo:while detached")
+    with _attached(client, sid) as ws2:
+        replay, *rest = _output_frames_until(ws2, "echo:while detached")
+        assert replay.get("replay") is True
+        assert "FAKE_TERMINAL_READY" in replay["data"]
+        assert "while detached" not in replay["data"]
+        assert rest
+        assert [f.get("replay") for f in rest] == [False] * len(rest)
+
+
+def test_output_trimmed_out_of_the_scrollback_stays_counted_as_unsent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(terminal_routes, "SCROLLBACK_MAX_CHARS", 60)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    with _attached(client, sid) as ws:
+        _output_frames_until(ws, "[session:")
+    _no_socket_attached(session)
+    session._on_output("a" * 40)
+    session._on_output("b" * 40)
+    with _attached(client, sid) as ws2:
+        (frame,) = _output_frames_until(ws2, "b" * 20)
+        assert frame.get("replay") is False
+        assert frame["data"] == session.scrollback_snapshot()
 
 
 def test_resize_does_not_crash_stream(client: TestClient) -> None:

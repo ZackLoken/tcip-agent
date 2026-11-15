@@ -2215,6 +2215,7 @@ export interface TerminalInputFrame {
 export interface TerminalOutputFrame {
   type: "output";
   data: string;
+  replay: boolean;
 }
 
 export interface TerminalResizeFrame {
