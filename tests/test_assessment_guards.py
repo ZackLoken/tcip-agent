@@ -1235,6 +1235,25 @@ def test_a_reference_source_removed_after_the_assessment_answers_for_nothing_nam
     assert str(removed[0]) in sentence
 
 
+def test_a_reference_source_given_a_second_image_of_its_stem_answers_for_nothing(
+    tmp_path: Path,
+) -> None:
+    """The gate refuses a bucket whose reference source shares its stem with a later image.
+
+    A second image of the source's stem written after the assessment makes the reference read as
+    changed, the refusal carrying the sentence the source's resolution now refuses with.
+    """
+    from tests._producer_fixtures import write_image
+
+    sentence, refused = _refused_after(
+        tmp_path,
+        "exp-ambiguous-source",
+        lambda source: write_image(source.with_suffix(".bmp"), (IMG, IMG)),
+    )
+
+    assert sentence in refused
+
+
 def test_an_assessment_over_a_reference_holding_two_images_of_one_stem_answers_it(
     tmp_path: Path,
 ) -> None:
