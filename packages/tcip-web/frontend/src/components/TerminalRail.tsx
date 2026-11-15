@@ -378,6 +378,9 @@ export function TerminalRail() {
     // The URL provider re-checks closedByClient after the await, so a torn-down effect
     // (rail toggled, StrictMode remount) cannot attach a fresh socket to a disposed terminal.
     let closedByClient = false;
+    // Replays handed to the emulator and not yet drawn: it answers the program's queries in
+    // them, which no program is waiting on, so nothing it emits meanwhile is sent.
+    let replaysDrawing = 0;
     const socket = createReconnectingSocket({
       url: async () => {
         try {
@@ -404,12 +407,18 @@ export function TerminalRail() {
       onOpen: () => {
         setError(null);
         setConn("open");
-        term.reset(); // the replay repaints the screen from scratch
+        term.reset(); // the scrollback repaints the screen from scratch
         sendSize();
       },
       ...jsonFrameHandlers<TerminalServedFrame>((frame) => {
-        if (frame.type === "output") term.write(frame.data);
-        else setHeld(frame.count);
+        if (frame.type !== "output") setHeld(frame.count);
+        else if (!frame.replay) term.write(frame.data);
+        else {
+          replaysDrawing += 1;
+          term.write(frame.data, () => {
+            replaysDrawing -= 1;
+          });
+        }
       }),
       // The ended code closes a session whose agent ended, starting a switch's chosen row; any
       // other close retries.
@@ -425,7 +434,9 @@ export function TerminalRail() {
     socketRef.current = socket;
     if (running(useStore.getState().terminalPhase)) socket.start();
 
-    const dataSub = term.onData((data) => send({ type: "input", data }));
+    const dataSub = term.onData((data) => {
+      if (replaysDrawing === 0) send({ type: "input", data });
+    });
     const resizeSub = term.onResize(sendSize);
     const observer = new ResizeObserver(() => {
       try {
