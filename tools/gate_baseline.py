@@ -41,9 +41,9 @@ OUT_OF_SCOPE_JOBS = {
     ),
     "project-removal-windows": (
         "it creates the conda environment this gate's own process already runs inside, and its "
-        "two selected tests exercise the denied-rename branch only a Windows host reaches, so a "
-        "Windows host's own suite already covers it and any other host has nothing local to run "
-        "in its place"
+        "three selected tests exercise the denied-rename branch and a UNC path, which only a "
+        "Windows host reaches, so a Windows host's own suite already covers it and any other host "
+        "has nothing local to run in its place"
     ),
     "powershell": (
         "its one step runs PSScriptAnalyzer under pwsh, from a module the Windows runner image "
