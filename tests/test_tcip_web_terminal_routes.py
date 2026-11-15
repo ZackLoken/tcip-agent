@@ -1206,10 +1206,6 @@ def pastes_after(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-OPENING_ECHO = "echo:[TCIP session start]"
-"""How the fake agent's echo of a launch's opening request begins."""
-
-
 def test_a_launch_for_no_project_is_pasted_its_opening_request_with_nothing_submitted(
     client: TestClient,
     pastes_after: None,
@@ -1222,8 +1218,9 @@ def test_a_launch_for_no_project_is_pasted_its_opening_request_with_nothing_subm
         "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
     ).json()["session_id"]
 
-    text = _wait_for(terminal_routes._SESSIONS[sid], OPENING_ECHO)
-    assert _echoes(text) == [f"echo:{terminal_routes.OPENING_REQUEST}"]
+    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
+    text = _wait_for(terminal_routes._SESSIONS[sid], opening)
+    assert _echoes(text) == [opening]
     assert "EARLY_INPUT" not in text
 
 
@@ -1235,16 +1232,14 @@ def test_a_launch_for_no_project_delivers_its_opening_request_before_a_submitted
     sid = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
     ).json()["session_id"]
-    _wait_for(terminal_routes._SESSIONS[sid], OPENING_ECHO)
+    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
+    _wait_for(terminal_routes._SESSIONS[sid], opening)
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "first request"}
     )
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:first request")
-    assert _echoes(text) == [
-        f"echo:{terminal_routes.OPENING_REQUEST}",
-        "echo:first request",
-    ]
+    assert _echoes(text) == [opening, "echo:first request"]
     assert "EARLY_INPUT" not in text
 
 
@@ -1318,16 +1313,14 @@ def test_overlapping_creates_deliver_the_request_once(
         answers = list(pool.map(create, range(2)))
     sid = answers[0]["session_id"]
     assert answers[1]["session_id"] == sid
-    _wait_for(terminal_routes._SESSIONS[sid], OPENING_ECHO)
+    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
+    _wait_for(terminal_routes._SESSIONS[sid], opening)
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "tab request"}
     )
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:tab request")
-    assert _echoes(text) == [
-        f"echo:{terminal_routes.OPENING_REQUEST}",
-        "echo:tab request",
-    ]
+    assert _echoes(text) == [opening, "echo:tab request"]
 
 
 class _Startup(NamedTuple):

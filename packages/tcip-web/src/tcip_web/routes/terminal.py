@@ -216,8 +216,8 @@ HAND_OFF_REQUEST = (
 """The request a switch of harness delivers to the agent it ends."""
 
 OPENING_REQUEST = (
-    "[TCIP session start] No project is open in the application. Greet the person, ask whether "
-    "to create a new project with you or to open one they already have, and say how each is done."
+    "[TCIP session start] Greet the person, ask whether to create a new project with you or to "
+    "open one they already have, and say how each is done."
 )
 """The request a launch with no project open delivers to its agent, so it speaks first."""
 
