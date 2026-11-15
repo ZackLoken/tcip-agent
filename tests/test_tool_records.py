@@ -311,7 +311,7 @@ def test_a_raster_pass_identity_missing_its_tile_batch_size_refuses_the_resume_n
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("torch")
-    from tcip_mcp.tools.inference_tools import _progress_key, _progress_place
+    from tcip_mcp.tools.inference_tools import _progress_key
     from tests.test_raster_pass_resume import _interrupted, _run, _setup
 
     ckpt, raster_path = _setup(tmp_path)
@@ -326,7 +326,7 @@ def test_a_raster_pass_identity_missing_its_tile_batch_size_refuses_the_resume_n
     result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
     assert result["error"] == (
-        f"{_progress_place(tmp_path / 'ds', bucket, 'identity')}"
+        f"the raster-pass identity record toward bucket {bucket!r} under {tmp_path / 'ds'}"
         ": tile_batch_size: Field required"
     )
 
@@ -335,7 +335,7 @@ def test_a_raster_pass_batch_missing_its_slices_refuses_the_resume_naming_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("torch")
-    from tcip_mcp.tools.inference_tools import _progress_key, _progress_place
+    from tcip_mcp.tools.inference_tools import _progress_key
     from tests.test_raster_pass_resume import _interrupted, _run, _setup
 
     ckpt, raster_path = _setup(tmp_path)
@@ -350,7 +350,7 @@ def test_a_raster_pass_batch_missing_its_slices_refuses_the_resume_naming_it(
     result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
     assert result["error"] == (
-        f"{_progress_place(tmp_path / 'ds', bucket, 'batch-000000')}"
+        f"the raster-pass batch-000000 record toward bucket {bucket!r} under {tmp_path / 'ds'}"
         ": slices: Field required"
     )
 
@@ -360,7 +360,7 @@ def test_a_raster_pass_record_that_will_not_decode_refuses_the_resume_naming_its
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, segment: str
 ) -> None:
     pytest.importorskip("torch")
-    from tcip_mcp.tools.inference_tools import _progress_key, _progress_place
+    from tcip_mcp.tools.inference_tools import _progress_key
     from tests._record_damage_fixtures import UNDECODABLE, damage_record
     from tests.test_raster_pass_resume import _interrupted, _run, _setup
 
@@ -376,7 +376,7 @@ def test_a_raster_pass_record_that_will_not_decode_refuses_the_resume_naming_its
     result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
     assert result["error"] == (
-        f"{_progress_place(tmp_path / 'ds', bucket, segment)}"
+        f"the raster-pass {segment} record toward bucket {bucket!r} under {tmp_path / 'ds'}"
         f": {stored_sentence.value}"
     )
 
