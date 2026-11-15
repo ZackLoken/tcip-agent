@@ -6,9 +6,11 @@ The refusal comes when tcip_mcp does not resolve inside the given worktree. No r
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import IO
 
 import pytest
 
@@ -141,6 +143,36 @@ def test_run_mypy_removes_its_cache_directory_afterward(
 
     assert code == 0
     assert created and not Path(created[0]).exists()
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only Windows refuses to delete a file a handle holds open",
+)
+def test_run_mypy_fails_naming_a_cache_file_it_cannot_remove(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[str] = []
+    handles: list[IO[str]] = []
+
+    def _fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        cache_dir = cmd[cmd.index("--cache-dir") + 1]
+        created.append(cache_dir)
+        handles.append(open(Path(cache_dir) / "held.json", "w"))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(worktree_gate.subprocess, "run", _fake_run)
+
+    try:
+        with pytest.raises(PermissionError, match="held.json"):
+            worktree_gate.run_mypy(Path("."), {})
+    finally:
+        for handle in handles:
+            handle.close()
+        for cache_dir in created:
+            shutil.rmtree(cache_dir)
 
 
 def test_a_worktree_that_is_not_a_directory_is_refused_before_any_proof_or_gate(
