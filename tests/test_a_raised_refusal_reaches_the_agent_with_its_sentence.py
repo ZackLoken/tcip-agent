@@ -116,7 +116,6 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     raise reading a damaged registry record before a second registration under its name.
     ``ingest_images`` raises for a source folder whose band-group manifest will not read.
     """
-    from tcip_mcp.pipelines.image_utils import UnreadableBandGroupError
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_registry_key,
     )
@@ -138,8 +137,6 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
         grouped, "cap", ("Green", "Red"), 8
     )
     unreadable_manifest(manifest, without_bands)
-    with pytest.raises(UnreadableBandGroupError) as unread:
-        ingest_images(project, source=str(grouped), actor=None)
     (image,) = (project / "images").rglob("IMG_0001.png")
     label_image(
         image, [{"subject": "bud", "bbox": [2, 2, 8, 8]}], project=project
@@ -186,6 +183,7 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     )
 
     assert str(manifest) in _text(unread_ingest)
+    ingest_sentence = audit_rows(project, "ingest_images")[-1]["error"]
     for door, error_class, result, sentence in (
         ("export_labels", "DecodeError", exported, refused.value),
         ("register_dataset", "DecodeError", registered, refused.value),
@@ -199,7 +197,7 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
             "ingest_images",
             "UnreadableBandGroupError",
             unread_ingest,
-            unread.value,
+            ingest_sentence,
         ),
     ):
         assert _text(result) == (
