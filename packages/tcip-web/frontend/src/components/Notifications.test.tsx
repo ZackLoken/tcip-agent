@@ -9,8 +9,11 @@ import {
   NotificationsLiveRegion,
   NotificationsPane,
 } from "@/components/Notifications";
+import { dismissLabel } from "@/lib/dismissLabel";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
+import { thrown } from "@/test/refusals";
+import { SESSION_ANSWERS } from "@/test/sessions";
 import { PRODUCED_ENVELOPE, openTestProject } from "@/test/store";
 import { FakeWebSocket, lastSocket } from "@/test/webSocket";
 
@@ -145,6 +148,34 @@ describe("the unconfirmed visits", () => {
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
     expect(screen.getByText(/Nothing to report/)).toBeInTheDocument();
     expect(screen.getByTestId("condition-mark")).toBeInTheDocument();
+  });
+});
+
+describe("the refused visits", () => {
+  it("are one entry naming each image under its reason, dismissed by a control named for that text, announced as first refused", async () => {
+    const refused = SESSION_ANSWERS.ended_named;
+    vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(refused));
+    useStore.getState().setUser("jordan");
+    openTestProject();
+    renderOpenHost();
+    const s = useStore.getState();
+    for (const image of ["a.jpg", "b.jpg"]) {
+      s.startImageSessionTracking(image, Date.now() - 2000);
+      s.closeSessionInterval();
+    }
+    postHeldContributions();
+    for (let i = 0; i < 3; i++) await act(flush);
+
+    const said = `Not recorded (${refused.body.detail}): a.jpg, b.jpg`;
+    const entry = screen.getByRole("listitem");
+    expect(within(entry).getByText(said)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      `Not recorded (${refused.body.detail}): a.jpg`,
+    );
+    fireEvent.click(
+      within(entry).getByRole("button", { name: (name) => name.startsWith(dismissLabel(said)) }),
+    );
+    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
   });
 });
 
