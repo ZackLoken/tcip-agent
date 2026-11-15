@@ -5,7 +5,6 @@ import { api } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
 import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
 import App from "@/App";
-import { LISTING_REFRESH_MS } from "@/components/ProjectPicker";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
 import { loadOf } from "@/test/annotate";
@@ -242,28 +241,22 @@ describe("App picker on the project already open", () => {
   const NO_IMAGES = /has no images yet\. Ask the agent in the terminal to add images\./;
 
   it("offers no Open on the card of an open project holding no capture, and says what to do", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      vi.mocked(api.projects.list)
-        .mockResolvedValueOnce(PROJECT_FIXTURES.picker)
-        .mockResolvedValue(PROJECT_FIXTURES.picker_empty_open);
-      vi.mocked(api.projects.open).mockResolvedValue(openedAs(EMPTY));
-      render(<App />);
+    vi.mocked(api.projects.list)
+      .mockResolvedValueOnce(PROJECT_FIXTURES.picker)
+      .mockResolvedValue(PROJECT_FIXTURES.picker_empty_open);
+    vi.mocked(api.projects.open).mockResolvedValue(openedAs(EMPTY));
+    render(<App />);
 
-      fireEvent.click(await screen.findByText(EMPTY.record.display_name));
-      fireEvent.click(screen.getByRole("button", { name: "Open" }));
-      await waitFor(() => expect(useStore.getState().openProject?.id).toBe(EMPTY.record.id));
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(LISTING_REFRESH_MS);
-      });
+    fireEvent.click(await screen.findByText(EMPTY.record.display_name));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(useStore.getState().openProject?.id).toBe(EMPTY.record.id));
 
-      const open = await screen.findByRole("button", { name: "Open" });
-      expect(open).toBeDisabled();
-      expect(open).toHaveAccessibleDescription(NO_IMAGES);
-      expect(screen.getByText(NO_IMAGES)).toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+    // The picker's own poll is 2 s away, past waitFor's timeout: the card learns it is open
+    // from the read the Open click chains on the open.
+    const open = screen.getByRole("button", { name: "Open" });
+    await waitFor(() => expect(open).toBeDisabled());
+    expect(open).toHaveAccessibleDescription(NO_IMAGES);
+    expect(screen.getByText(NO_IMAGES)).toBeInTheDocument();
   });
 
   it("keeps Open on the card of an open project holding captures after Switch project", async () => {

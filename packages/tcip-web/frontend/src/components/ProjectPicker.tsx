@@ -479,7 +479,7 @@ export function ProjectPicker() {
                           aria-describedby={nothingToOpen ? `nothing-to-open-${index}` : undefined}
                           onClick={() => {
                             commitName();
-                            void startOpen(p, date, subject, bucket);
+                            void startOpen(p, date, subject, bucket).then(refetch);
                           }}
                         >
                           {opening ? "Opening…" : "Open"}
