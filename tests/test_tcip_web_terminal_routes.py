@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager, suppress
+from contextlib import suppress
 from itertools import pairwise
 from pathlib import Path
 from queue import Queue
@@ -98,21 +98,33 @@ def _output(
     return frame.data if frame.type == "output" else ""
 
 
-def _read_until(
+def _frames_until(
     ws: WebSocketTestSession, needle: str, tries: int = 200
-) -> str:
-    """Accumulate the output of up to ``tries`` frames until ``needle`` appears; return it.
+) -> list[terminal_routes.TerminalOutputFrame]:
+    """Return the output frames of up to ``tries`` frames, up to where ``needle`` appears in them.
 
     Raises AssertionError naming the needle when ``tries`` frames pass without it.
     """
+    frames: list[terminal_routes.TerminalOutputFrame] = []
     acc = ""
     for _ in range(tries):
-        acc += _output(_frame(ws))
+        frame = _frame(ws)
+        if frame.type != "output":
+            continue
+        frames.append(frame)
+        acc += frame.data
         if needle in acc:
-            return acc
+            return frames
     raise AssertionError(
         f"never saw {needle!r} in terminal stream; got: {acc[-500:]!r}"
     )
+
+
+def _read_until(
+    ws: WebSocketTestSession, needle: str, tries: int = 200
+) -> str:
+    """Accumulate the output of up to ``tries`` frames until ``needle`` appears; return it."""
+    return "".join(f.data for f in _frames_until(ws, needle, tries))
 
 
 def _rows_with(
@@ -1447,40 +1459,21 @@ def test_scrollback_replays_on_reconnect(client: TestClient) -> None:
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
     ) as ws:
-        _read_until(ws, "FAKE_TERMINAL_READY")
+        drawn = _frames_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "before reconnect\r"})
-        _read_until(ws, "echo:before reconnect")
+        drawn += _frames_until(ws, "echo:before reconnect")
+    # The first socket was sent none of it before, so it draws all of it live.
+    assert [f.replay for f in drawn] == [False] * len(drawn)
     # New socket: the banner and the echoed line replay from scrollback.
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
     ) as ws2:
-        acc = _read_until(ws2, "echo:before reconnect")
-        assert "FAKE_TERMINAL_READY" in acc
-
-
-def _output_frames_until(
-    ws: WebSocketTestSession, needle: str, tries: int = 200
-) -> list[dict]:
-    """Return the output frames, as the wire carries them, up to the one holding ``needle``.
-
-    Raises AssertionError naming the needle when ``tries`` frames pass without it.
-    """
-    frames: list[dict] = []
-    for _ in range(tries):
-        frame = json.loads(ws.receive_text())
-        if frame["type"] != "output":
-            continue
-        frames.append(frame)
-        if needle in frame["data"]:
-            return frames
-    raise AssertionError(f"never saw {needle!r} in an output frame")
-
-
-def _attached(
-    client: TestClient, sid: str
-) -> AbstractContextManager[WebSocketTestSession]:
-    """Return a context manager opening the session's socket, as the rail does."""
-    return client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}")
+        replayed = _frames_until(ws2, "echo:before reconnect")
+        assert replayed[0].replay is True
+        assert "FAKE_TERMINAL_READY" in replayed[0].data
+        ws2.send_json({"type": "input", "data": "after reconnect\r"})
+        live = _frames_until(ws2, "echo:after reconnect")
+        assert [f.replay for f in live] == [False] * len(live)
 
 
 def _no_socket_attached(session: terminal_routes.TerminalSession) -> None:
@@ -1491,26 +1484,6 @@ def _no_socket_attached(session: terminal_routes.TerminalSession) -> None:
         time.sleep(0.05)
 
 
-def test_a_first_attach_draws_the_scrollback_live_and_a_second_replays_it(
-    client: TestClient,
-) -> None:
-    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
-        "session_id"
-    ]
-    with _attached(client, sid) as ws:
-        first = _output_frames_until(ws, "FAKE_TERMINAL_READY")
-        ws.send_json({"type": "input", "data": "before attach\r"})
-        first += _output_frames_until(ws, "echo:before attach")
-    assert [f.get("replay") for f in first] == [False] * len(first)
-    with _attached(client, sid) as ws2:
-        (replay,) = _output_frames_until(ws2, "echo:before attach")
-        assert replay.get("replay") is True
-        assert replay["data"].startswith("".join(f["data"] for f in first))
-        ws2.send_json({"type": "input", "data": "after attach\r"})
-        live = _output_frames_until(ws2, "echo:after attach")
-        assert [f.get("replay") for f in live] == [False] * len(live)
-
-
 def test_output_written_with_no_socket_attached_is_drawn_live_by_the_next_attach(
     client: TestClient,
 ) -> None:
@@ -1518,37 +1491,22 @@ def test_output_written_with_no_socket_attached_is_drawn_live_by_the_next_attach
         "session_id"
     ]
     session = terminal_routes._SESSIONS[sid]
-    with _attached(client, sid) as ws:
-        _output_frames_until(ws, "FAKE_TERMINAL_READY")
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws:
+        _read_until(ws, "FAKE_TERMINAL_READY")
     _no_socket_attached(session)
     session.write("while detached\r")
     _wait_for(session, "echo:while detached")
-    with _attached(client, sid) as ws2:
-        replay, *rest = _output_frames_until(ws2, "echo:while detached")
-        assert replay.get("replay") is True
-        assert "FAKE_TERMINAL_READY" in replay["data"]
-        assert "while detached" not in replay["data"]
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws2:
+        replay, *rest = _frames_until(ws2, "echo:while detached")
+        assert replay.replay is True
+        assert "FAKE_TERMINAL_READY" in replay.data
+        assert "while detached" not in replay.data
         assert rest
-        assert [f.get("replay") for f in rest] == [False] * len(rest)
-
-
-def test_output_trimmed_out_of_the_scrollback_stays_counted_as_unsent(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(terminal_routes, "SCROLLBACK_MAX_CHARS", 60)
-    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
-        "session_id"
-    ]
-    session = terminal_routes._SESSIONS[sid]
-    with _attached(client, sid) as ws:
-        _output_frames_until(ws, "[session:")
-    _no_socket_attached(session)
-    session._on_output("a" * 40)
-    session._on_output("b" * 40)
-    with _attached(client, sid) as ws2:
-        (frame,) = _output_frames_until(ws2, "b" * 20)
-        assert frame.get("replay") is False
-        assert frame["data"] == session.scrollback_snapshot()
+        assert [f.replay for f in rest] == [False] * len(rest)
 
 
 def test_resize_does_not_crash_stream(client: TestClient) -> None:
@@ -2377,7 +2335,8 @@ def test_output_past_the_scrollback_cap_keeps_its_newest_characters_for_a_reconn
 ) -> None:
     """Output past ``SCROLLBACK_MAX_CHARS`` keeps exactly its newest that many characters.
 
-    A socket opened afterwards is replayed them first.
+    A socket opened afterwards, which no socket was sent them before, draws them first as live
+    output.
     """
     wire_stub_spawn(monkeypatch, StubPty(survives=False))
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
@@ -2394,7 +2353,10 @@ def test_output_past_the_scrollback_cap_keeps_its_newest_characters_for_a_reconn
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
     ) as ws:
-        assert _output(_frame(ws)) == kept
+        frame = _frame(ws)
+        assert _output(frame) == kept
+        assert frame.type == "output"
+        assert frame.replay is False
 
 
 def test_a_socket_opened_while_an_end_writes_its_line_closes_only_after_the_line(

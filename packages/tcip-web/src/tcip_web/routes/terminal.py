@@ -293,8 +293,8 @@ class TerminalSession:
         self._project: OpenProject | None = None
         self._lock = threading.Lock()
         self._scrollback = ""
-        # How many of the scrollback's newest characters no subscriber was sent.
-        self._unsent = 0
+        # How many of the scrollback's newest characters no subscriber was offered.
+        self._unoffered = 0
         self._inputs: Queue[pty_host.Input] = Queue()
         # ws-id → (queue, that websocket's event loop)
         self._subs: dict[
@@ -624,14 +624,14 @@ class TerminalSession:
     def _show(self, data: str) -> None:
         """Keep ``data`` in the scrollback and offer it to every subscriber; under the lock.
 
-        With no subscriber it stays unsent, to be drawn live by the next :meth:`attach`.
+        With no subscriber it stays unoffered, to be drawn live by the next :meth:`attach`.
         """
         self._scrollback = (self._scrollback + data)[-SCROLLBACK_MAX_CHARS:]
         self._broadcast(TerminalOutputFrame(data=data, replay=False))
-        self._unsent = (
+        self._unoffered = (
             0
             if self._subs
-            else min(self._unsent + len(data), len(self._scrollback))
+            else min(self._unoffered + len(data), len(self._scrollback))
         )
 
     def _broadcast(self, item: TerminalServedFrame | tuple[int, str]) -> None:
@@ -666,9 +666,9 @@ class TerminalSession:
         """Register a subscriber; returns ``(sub_id, queue)``.
 
         The queue starts with the scrollback, unless it is empty: the part some subscriber was
-        already sent as a replay frame, then the part none was sent as a live frame. Then comes
-        how many requests the session holds (:meth:`_held`). All is taken atomically with the
-        registration, so output can be neither lost (arrived after the snapshot, before
+        already offered as a replay frame, then the part none was offered as a live frame. Then
+        comes how many requests the session holds (:meth:`_held`). All is taken atomically with
+        the registration, so output can be neither lost (arrived after the snapshot, before
         registration) nor duplicated. Once the session ended (the backend no longer holds it),
         the queue holds the ended close alone and nothing is registered.
         """
@@ -679,16 +679,16 @@ class TerminalSession:
             if self.id not in _SESSIONS:
                 queue.put_nowait(_ENDED_CLOSE)
             else:
-                sent = len(self._scrollback) - self._unsent
+                offered = len(self._scrollback) - self._unoffered
                 for data, replay in (
-                    (self._scrollback[:sent], True),
-                    (self._scrollback[sent:], False),
+                    (self._scrollback[:offered], True),
+                    (self._scrollback[offered:], False),
                 ):
                     if data:
                         queue.put_nowait(
                             TerminalOutputFrame(data=data, replay=replay)
                         )
-                self._unsent = 0
+                self._unoffered = 0
                 queue.put_nowait(self._held())
                 self._subs[sub_id] = (queue, loop)
         return sub_id, queue
@@ -760,9 +760,9 @@ _FRAME: TypeAdapter[TerminalFrame] = TypeAdapter(TerminalFrame)
 class TerminalOutputFrame(BaseModel):
     """Text of the session's terminal stream, as its scrollback keeps it.
 
-    ``replay`` is true for output some subscriber was already sent, which an attach sends again,
-    and false for output no subscriber was sent, so a rail draws the first without answering the
-    queries in it.
+    ``replay`` is true for output some subscriber was already offered, which an attach offers
+    again, and false for output no subscriber was offered, so a rail draws the first without
+    answering the queries in it.
     """
 
     type: Literal["output"] = "output"
