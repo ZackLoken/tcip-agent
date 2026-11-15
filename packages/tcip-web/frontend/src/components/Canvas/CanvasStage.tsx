@@ -14,7 +14,7 @@ import { clampView, fitView, type HostSize } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
 
-/** The size the Stage takes before the host has been measured. */
+/** The size the Stage takes while the host has at most one pixel on a side. */
 const UNMEASURED: HostSize = { w: 1, h: 1 };
 
 /** One region serve drawn above the base image, positioned in image coords. */
@@ -41,8 +41,8 @@ export interface CanvasStageProps {
   regions?: CanvasRegion[];
   /** The base serve's read facts: null while a load is in flight, then the loader's result. */
   onBaseFacts?: (facts: LoadedImage | null) => void;
-  /** The canvas host's size in whole pixels, again on every resize; null until the host has more
-   *  than one pixel on each side. */
+  /** The canvas host's size in whole pixels: null while the host has at most one pixel on a side;
+   *  reported again whenever its whole-pixel size changes. */
   onHostSize: (size: HostSize | null) => void;
   /** Static shapes, rendered in the content layer (below the overlay). */
   children?: React.ReactNode;

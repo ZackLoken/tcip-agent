@@ -198,7 +198,7 @@ export function AnnotateTab() {
   usePrefetchAdjacentImages(displayPixels, composite.bands, composite.stretch);
 
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
-  // The stage's own measurement of the canvas host; null until it has one.
+  // The stage's own measurement of the canvas host; null while it has at most one pixel on a side.
   const [host, setHost] = useState<HostSize | null>(null);
   const regions = useRegionServes({
     imagePath: imgPath,
