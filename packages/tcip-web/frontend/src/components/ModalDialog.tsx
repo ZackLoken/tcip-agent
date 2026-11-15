@@ -3,7 +3,7 @@
  * and returns to what had it on close, Tab stays inside, the page behind is hidden from assistive
  * technology and cannot be clicked, and Escape closes. The caller supplies the title, the body,
  * what closing does, and whether a click outside the panel closes it (`closeOnOutsideClick`,
- * required: a destructive confirmation refuses it).
+ * required: true closes on one, false leaves the dialog open).
  *
  * Focus returns to the element that had it when the shell mounted, since no trigger element
  * opens it. While the shell is mounted every keydown is marked as falling in a modal
@@ -25,8 +25,8 @@ interface Props {
   className: string;
   /** Label of a close button beside the title; omitted where the body carries its own. */
   headerClose?: string;
-  /** Set while the dialog is still waiting on something (a preview fetch); carried as
-   *  aria-busy so assistive technology knows the content is not yet final. */
+  /** Set while the dialog is still waiting on something; carried as aria-busy so assistive
+   *  technology knows the content is not yet final. */
   busy?: boolean;
   /** Runs when focus is about to move in on open; preventing the event leaves the move to it. */
   onOpenAutoFocus?: (event: Event) => void;

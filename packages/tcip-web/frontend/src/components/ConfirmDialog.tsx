@@ -11,8 +11,6 @@ interface Props {
   heading: string;
   onClose: () => void;
   children: React.ReactNode;
-  /** Set while the dialog is still waiting on something (a preview fetch); carried as
-   *  aria-busy so assistive technology knows the content is not yet final. */
   busy?: boolean;
 }
 
