@@ -193,9 +193,14 @@ jobs:
           }
 
   # An open database denies a directory rename only on Windows, so a removal's move and the seam's
-  # release of one root are proven only here, the shape of ray-exit-windows above.
+  # release of one root are proven only here, the shape of ray-exit-windows above, as is a store
+  # opened through a UNC path.
   project-removal-windows:
     runs-on: windows-latest
+    env:
+      REMOVAL: tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line
+      SEAM: tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other
+      UNC: tests/test_store_contract.py::test_a_store_reached_through_a_unc_path_round_trips
     defaults:
       run:
         shell: bash -el {0}
@@ -213,22 +218,17 @@ jobs:
       - name: The removal's move of a project whose database was open
         run: |
           set -o pipefail
-          removal=tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line
-          seam=tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other
-          pytest "$removal" "$seam" -v --timeout=300 | tee project-removal-windows-output.txt
+          pytest "$REMOVAL" "$SEAM" "$UNC" -v --timeout=300 | tee project-removal-windows-output.txt
 
-      - name: Prove both selected tests passed by node id, not a bare count
+      - name: Prove each selected test passed by node id, not a bare count
         run: |
-          removal=tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line
-          seam=tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other
-          grep -qF "$removal PASSED" project-removal-windows-output.txt || {
-            echo "the removal test did not pass (skipped or none selected)"
-            exit 1
-          }
-          grep -qF "$seam PASSED" project-removal-windows-output.txt || {
-            echo "the seam contract test did not pass (skipped or none selected)"
-            exit 1
-          }
+          for node in "$REMOVAL" "$SEAM" "$UNC"; do
+            grep -qF "$node PASSED" project-removal-windows-output.txt || {
+              echo "$node did not pass (skipped or none selected); the UNC store test skips"
+              echo "when the runner has no administrative share on the root's drive"
+              exit 1
+            }
+          done
 
   # The serving tool ends its server with taskkill /T, so its real-backend tests and the walks run
   # only here; the no-page refusal runs before the frontend's build makes a page, the walks after.

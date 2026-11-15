@@ -236,7 +236,9 @@ def test_release_root_waits_for_an_operation_in_flight_on_that_root(
 
 def _journal_mode(db: Path) -> str:
     """Return the journal mode a database reports, read without changing it."""
-    conn = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    from tcip_store.sqlite_backend import database_uri
+
+    conn = sqlite3.connect(database_uri(db, "ro"), uri=True)
     try:
         return str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
     finally:
@@ -567,21 +569,104 @@ def test_a_second_creator_opens_the_first_s_database_beside_its_sidecars(
     assert ts.read(key) == {"by": "second"}
 
 
+class _VanishingPublish(SqliteBackend):
+    """A backend whose creation removes the database it built before the first open."""
+
+    def _publish(
+        self,
+        db_path: Path,
+        root: str,
+        keys: tuple[ts.Key, ...],
+        timeout_s: float,
+    ) -> None:
+        super()._publish(db_path, root, keys, timeout_s)
+        db_path.unlink()
+
+
+def test_an_open_of_a_database_that_vanished_is_refused_and_leaves_no_file(
+    store: Harness,
+) -> None:
+    """A write whose database is gone at the open is refused with the driver's cannot-open error.
+
+    The refusal carries the driver's ``SQLITE_CANTOPEN`` error as its cause, and nothing is left
+    at the database path.
+    """
+    ts.bind(_VanishingPublish())
+    db = database_file(str(store.root))
+
+    with pytest.raises(ts.DatabaseRefusedError) as refused:
+        ts.replace(store.key(LWW, "vanished"), {"n": 1})
+
+    assert not db.exists()
+    assert "unable to open database file" in str(refused.value)
+    cause = refused.value.__cause__
+    assert isinstance(cause, sqlite3.OperationalError)
+    assert cause.sqlite_errorcode & 0xFF == sqlite3.SQLITE_CANTOPEN
+
+
+def _round_trips(root: Path) -> None:
+    """Write three records under ``root``, release it, and read each back through a fresh open."""
+    written = _written(root)
+    ts.release_root(root)
+    assert {key: ts.read(key) for key in written} == written
+
+
+def test_a_store_at_a_path_holding_a_space_a_percent_and_a_hash_round_trips(
+    store: Harness,
+) -> None:
+    """A root whose name holds characters a URI reserves writes and reads back."""
+    root = store.root / "a b%c#d"
+    root.mkdir()
+
+    _round_trips(root)
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="a Windows path cannot hold a question mark"
+)
+def test_a_store_at_a_path_holding_a_question_mark_round_trips(
+    store: Harness,
+) -> None:
+    """A root whose name holds ``?`` writes and reads back."""
+    root = store.root / "what?"
+    root.mkdir()
+
+    _round_trips(root)
+
+
+@pytest.mark.skipif(
+    os.name != "nt", reason="a UNC path exists on Windows alone"
+)
+def test_a_store_reached_through_a_unc_path_round_trips(
+    store: Harness,
+) -> None:
+    """A root reached through the host's own administrative share writes and reads back.
+
+    Skipped when the host exposes no administrative share for the root's drive.
+    """
+    share = Path(f"//localhost/{store.root.drive[0]}$")
+    root = share / store.root.relative_to(store.root.anchor)
+    if not root.is_dir():
+        pytest.skip(
+            f"{share} is not reachable, so this host exposes no administrative share for "
+            f"{store.root.drive}"
+        )
+
+    _round_trips(root)
+
+
 def _refusing_setting(
     refusal: str, made: list[sqlite3.Connection]
 ) -> type[sqlite3.Connection]:
     """Return a connection class on which the no-checkpoint setting will not hold.
 
     ``refusal`` is ``raises`` (turning the setting on raises the driver's error) or ``reads back
-    off``. Every connection the class makes is appended to ``made``.
+    off``. Every connection the class is asked to turn the setting on for is appended to ``made``.
     """
 
     class Refusing(sqlite3.Connection):
-        def __init__(self, database: str, **_: object) -> None:
-            super().__init__(database)
-            made.append(self)
-
         def setconfig(self, op: int, enable: bool = True, /) -> bool:
+            made.append(self)
             if refusal == "raises":
                 raise sqlite3.OperationalError("the setting is refused")
             return super().setconfig(op, enable)
