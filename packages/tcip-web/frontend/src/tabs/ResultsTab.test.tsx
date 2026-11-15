@@ -386,6 +386,16 @@ describe("ResultsTab onset table validity marker", () => {
     return row;
   }
 
+  it("names the captures the measurement could not verify at delivery time", async () => {
+    await computeWithOnsetRow(MISSING_IMAGE);
+    const { captures_unverified: unverified } = MISSING_IMAGE.plant_mapping;
+    expect(unverified.length).toBeGreaterThan(0);
+
+    expect(
+      screen.getByText(`Not verified at delivery time: ${unverified.join(", ")}`),
+    ).toBeInTheDocument();
+  });
+
   it("marks a fully-classified, fully-observed plant valid", async () => {
     await computeWithOnsetRow(VALIDATED);
     expect(screen.getByText("valid")).toBeInTheDocument();

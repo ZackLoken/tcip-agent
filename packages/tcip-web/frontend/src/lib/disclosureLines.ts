@@ -11,6 +11,13 @@ export function deliveredDatesLine(disclosure: PlantMappingDisclosure): string {
   );
 }
 
+/** The captures a delivery could not verify, or null when it verified every one. */
+export function unverifiedCapturesLine(disclosure: PlantMappingDisclosure): string | null {
+  return disclosure.captures_unverified.length > 0
+    ? `Not verified at delivery time: ${disclosure.captures_unverified.join(", ")}`
+    : null;
+}
+
 /** The registry plants a delivered raster does not cover. */
 export function outsideRasterLine(plants: string[]): string {
   return `Outside the raster: ${plants.join(", ")}`;

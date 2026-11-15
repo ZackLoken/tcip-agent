@@ -37,7 +37,7 @@ import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { ErrorRetry } from "@/components/ErrorRetry";
 import { TabHeading } from "@/components/TabHeading";
 import { useMappingNames } from "@/hooks/useMappingNames";
-import { deliveredDatesLine } from "@/lib/disclosureLines";
+import { deliveredDatesLine, unverifiedCapturesLine } from "@/lib/disclosureLines";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { bucketsForDate } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -60,17 +60,13 @@ function auditGapExportMessage(savedPath: string, detail: string): string {
 /** What a measurement's plant mapping disclosed: its delivered dates and what it could not verify
  *  at delivery time. */
 function MappingDisclosureLines({ disclosure }: { disclosure: PlantMappingDisclosure }) {
-  const { dates_delivered, captures_unverified } = disclosure;
+  const unverified = unverifiedCapturesLine(disclosure);
   return (
     <>
-      {dates_delivered.length > 0 && (
+      {disclosure.dates_delivered.length > 0 && (
         <div className="text-tcip-muted">{deliveredDatesLine(disclosure)}</div>
       )}
-      {captures_unverified.length > 0 && (
-        <div className="text-tcip-muted">
-          {`Not verified at delivery time: ${captures_unverified.join(", ")}`}
-        </div>
-      )}
+      {unverified !== null && <div className="text-tcip-muted">{unverified}</div>}
     </>
   );
 }
