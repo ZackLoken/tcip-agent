@@ -31,11 +31,12 @@ from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import (
     Key,
+    ReadRefusedError,
     Version,
     VersionConflictError,
     canonical_path,
+    read_record,
     store,
-    validated,
 )
 
 if TYPE_CHECKING:
@@ -183,30 +184,25 @@ def infer(
     except (FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
 
-    stored = (
-        store.read(
-            _progress_key(project, root, bucket, "identity"), default=None
-        )
-        if resume
-        else None
-    )
-    if resume and stored is None:
-        return {
-            "error": f"resume=True but no raster-pass progress toward bucket {bucket!r} "
-            f"under {root} is recorded."
-        }
     if raster_path is not None:
         stated = stated.model_copy(update={"tile": True})
     try:
         recorded = (
-            None
-            if stored is None
-            else validated(
+            read_record(
+                store.read,
+                _progress_key(project, root, bucket, "identity"),
                 RasterPassIdentity,
-                stored,
                 _progress_place(root, bucket, "identity"),
+                default=None,
             )
+            if resume
+            else None
         )
+        if resume and recorded is None:
+            return {
+                "error": f"resume=True but no raster-pass progress toward bucket {bucket!r} "
+                f"under {root} is recorded."
+            }
         assessed = (
             None
             if recorded is not None or assessment_id is None
@@ -311,6 +307,8 @@ def infer(
                     "resume it (resume=True), or name a bucket no pass has been "
                     "recorded toward."
                 }
+            except ReadRefusedError as exc:
+                return {"error": str(exc)}
         else:
             results = list(_image_results(p, progress, canceled))
             if not results and canceled is not None and canceled():
@@ -444,7 +442,8 @@ def run_inference(
         resume: ``raster_path`` only: continue a raster pass toward ``bucket`` whose progress
             the project records, under the execution record that progress recorded; a stated
             value it records differently refuses by name, and so does a different checkpoint,
-            raster, assessment or tile batch size.
+            raster, assessment or tile batch size. A progress record that will not read refuses
+            naming its place.
 
     """
     return infer(
@@ -515,9 +514,10 @@ def _raster_pass(
     prior: SliceBatch | None = None
     if resumed:
         batches = [
-            validated(
+            read_record(
+                store.read,
+                key,
                 SliceBatch,
-                store.read(key),
                 _progress_place(root, bucket, key.parts[-1]),
             )
             for _index, key in sorted(
