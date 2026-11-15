@@ -4,7 +4,12 @@
  * confirmed, which it names, so this panel carries no confirm/withdraw affordance.
  */
 
-import { ACKNOWLEDGED, ANSWERS, type ServedDeliveryEvent } from "@/api/types.generated";
+import {
+  ACKNOWLEDGED,
+  ANSWERS,
+  PLANT_MAPPING,
+  type ServedDeliveryEvent,
+} from "@/api/types.generated";
 import {
   deliveredDatesLine,
   outsideRasterLine,
@@ -16,10 +21,7 @@ function DeliveryEventRow({
 }: {
   served: ServedDeliveryEvent;
 }) {
-  const unverified =
-    record.plant_mapping?.kind === "plant_mapping"
-      ? unverifiedCapturesLine(record.plant_mapping)
-      : null;
+  const mapping = record.plant_mapping?.kind === PLANT_MAPPING ? record.plant_mapping : null;
   return (
     <li
       className="rounded border border-tcip-border p-3"
@@ -110,16 +112,19 @@ function DeliveryEventRow({
           )}
         </div>
       )}
-      {record.plant_mapping?.kind === "plant_mapping" && (
+      {mapping !== null && (
         <div className="mt-2 text-[13px] text-tcip-muted">
           <div>
-            {deliveredDatesLine(record.plant_mapping)}
+            {deliveredDatesLine(mapping)}
             {resolved_key === null && " (the cited mapping record no longer resolves)"}
             {resolved_key !== null &&
-              resolved_key !== record.plant_mapping.name &&
+              resolved_key !== mapping.name &&
               ` (cited record archived as ${resolved_key})`}
           </div>
-          {unverified !== null && <div>{unverified}</div>}
+          {(() => {
+            const unverified = unverifiedCapturesLine(mapping);
+            return unverified !== null && <div>{unverified}</div>;
+          })()}
         </div>
       )}
     </li>
