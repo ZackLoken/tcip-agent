@@ -14,12 +14,14 @@ import { api } from "@/api/client";
 import { messageOf, readRefusalText } from "@/api/http";
 import { type ProjectsListing, READ, type ReadProject, UNREAD } from "@/api/types.generated";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { NotificationItem } from "@/components/Notifications";
 import { SeasonRail } from "@/components/SeasonRail";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import {
   bucketsForDate,
   choiceForDate,
   defaultDate,
+  openKey,
   startOpen,
   subjectsForDate,
 } from "@/lib/openProject";
@@ -28,10 +30,10 @@ import { useStore } from "@/store";
 import { isAnnotatorName, selectAnnotatorNamed } from "@/store/slices/user";
 
 function selectCard(p: ReadProject) {
-  const { patchOpenChoice, patchOpenStatus } = useStore.getState();
+  const { patchOpenChoice, releaseNotification } = useStore.getState();
   const d = defaultDate(p.tree.captures);
   patchOpenChoice({ projectId: p.record.id, date: d, ...choiceForDate(p.tree, d, null) });
-  patchOpenStatus({ openError: null });
+  releaseNotification(openKey(p.record.id));
 }
 
 function RemovalDialog({
@@ -55,15 +57,27 @@ function RemovalDialog({
     setSubmitError(null);
     try {
       const res = await api.projects.remove({ id, confirm_name: confirmText, user });
+      const { raiseNotification } = useStore.getState();
+      const context = { project: id, target: name };
       try {
         forgetRecentProject(id);
       } catch (e) {
-        useStore
-          .getState()
-          .pushToast(`Removed, but the recent projects list was not updated: ${messageOf(e)}`);
+        raiseNotification({
+          kind: "notice",
+          level: "warning",
+          text: {
+            sentence: `Removed, but the recent projects list was not updated: ${messageOf(e)}`,
+          },
+          context,
+        });
       }
       if (useStore.getState().openProject?.id === id) useStore.getState().clearDataset();
-      useStore.getState().pushToast(`Removed ${name}. Archived as ${res.archive_name}.`, "success");
+      raiseNotification({
+        kind: "notice",
+        level: "info",
+        text: { sentence: `Removed ${name}. Archived as ${res.archive_name}.` },
+        context,
+      });
       onRemoved();
     } catch (e) {
       setSubmitError(messageOf(e));
@@ -131,7 +145,12 @@ function RenameDialog({
     setSubmitError(null);
     try {
       const res = await api.projects.rename({ id, display_name: newName, user });
-      useStore.getState().pushToast(`Renamed ${name} to ${res.record.display_name}.`, "success");
+      useStore.getState().raiseNotification({
+        kind: "notice",
+        level: "info",
+        text: { sentence: `Renamed ${name} to ${res.record.display_name}.` },
+        context: { project: id, target: name },
+      });
       onRenamed();
     } catch (e) {
       setSubmitError(messageOf(e));
@@ -207,7 +226,6 @@ export function ProjectPicker() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const { projectId: selected, date, subject, bucket } = useStore((s) => s.openChoice);
   const opening = useStore((s) => s.opening !== null);
-  const openError = useStore((s) => s.openError);
   const patchOpenChoice = useStore((s) => s.patchOpenChoice);
   const [removalTarget, setRemovalTarget] = useState<ReadProject | null>(null);
   const [renameTarget, setRenameTarget] = useState<ReadProject | null>(null);
@@ -468,9 +486,11 @@ export function ProjectPicker() {
                           </select>
                         </label>
                       </div>
-                      {openError?.projectId === record.id && (
-                        <span className="text-[13px] tcip-problem">{openError.message}</span>
-                      )}
+                      <NotificationItem
+                        placement="in place"
+                        entryKey={openKey(record.id)}
+                        afterDismiss={() => document.getElementById(`open-${index}`)?.focus()}
+                      />
                       {nothingToOpen && (
                         <span
                           id={`nothing-to-open-${index}`}
@@ -482,6 +502,7 @@ export function ProjectPicker() {
                       )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
+                          id={`open-${index}`}
                           className="tcip-btn-primary flex-1"
                           disabled={opening || !draftNamed || nothingToOpen}
                           aria-describedby={nothingToOpen ? `nothing-to-open-${index}` : undefined}

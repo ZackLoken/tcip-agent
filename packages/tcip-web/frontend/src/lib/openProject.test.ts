@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import type { SessionWrite } from "@/api/types.generated";
-import { openWithDefaults, startOpen } from "@/lib/openProject";
+import { openKey, openWithDefaults, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
+import { selectStanding } from "@/store/slices/notifications";
 import { openedAs, PICKER } from "@/test/projectRecords";
 import { SESSION_WRITES, sessionOf } from "@/test/sessions";
 import { RAW_SELECT_ANSWER, stateEnvelope, TROUBLED_SELECT_ANSWER } from "@/test/store";
@@ -116,7 +117,9 @@ describe("a switch this page starts", () => {
     expect(useStore.getState().heldContributions).toEqual([
       expect.objectContaining({ image_name: "a.jpg", project_id: VALLEY.record.id }),
     ]);
-    expect(useStore.getState().openError?.message).toMatch(/could not be sent/);
+    expect(selectStanding(openKey(RIDGE.record.id))(useStore.getState())?.sentence).toMatch(
+      /could not be sent/,
+    );
 
     useStore.getState().incrementAnnotationsAdded();
     expect(useStore.getState().sessionTracking).toMatchObject({
@@ -152,13 +155,18 @@ describe("a switch this page starts", () => {
 });
 
 describe("startOpen", () => {
-  it("pushes a toast naming the label document when the selection carries a label_problem", async () => {
+  it("raises a failure of the project naming the label document when the selection carries a label_problem", async () => {
     vi.mocked(api.dataset.select).mockResolvedValue(TROUBLED_SELECT_ANSWER);
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     const [{ name: date }] = VALLEY.tree.captures;
 
     await startOpen(VALLEY, date, VALLEY.tree.subjects_by_date[date][0], null);
 
-    expect(pushToast).toHaveBeenCalledWith(TROUBLED_SELECT_ANSWER.label_problem);
+    expect(useStore.getState().notifications).toContainEqual(
+      expect.objectContaining({
+        kind: "failure",
+        sentence: TROUBLED_SELECT_ANSWER.label_problem,
+        context: { project: VALLEY.record.id },
+      }),
+    );
   });
 });

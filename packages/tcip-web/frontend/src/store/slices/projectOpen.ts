@@ -18,12 +18,6 @@ export const NO_OPEN_CHOICE: OpenChoice = {
   bucket: null,
 };
 
-/** A failed open and the project it was started for. */
-export interface OpenFailure {
-  projectId: string;
-  message: string;
-}
-
 /** The one open in flight: its request id (each open takes a new one) and its project. A result
  *  whose request is no longer the held one is dropped. */
 export interface OpenHold {
@@ -36,10 +30,9 @@ export interface ProjectOpenSlice {
    *  being replaced when the person's name is committed. */
   openChoice: OpenChoice;
   opening: OpenHold | null;
-  openError: OpenFailure | null;
   /** Choosing another project than the one in flight supersedes that open. */
   patchOpenChoice: (patch: Partial<OpenChoice>) => void;
-  patchOpenStatus: (patch: Partial<Pick<ProjectOpenSlice, "opening" | "openError">>) => void;
+  patchOpenStatus: (patch: Partial<Pick<ProjectOpenSlice, "opening">>) => void;
   /** Release the open in flight when it is bound to a project other than ``keepProjectId``. */
   supersedeOpen: (keepProjectId: string | null) => void;
 }
@@ -53,7 +46,6 @@ export const createProjectOpenSlice: StateCreator<AppState, [], [], ProjectOpenS
 ) => ({
   openChoice: NO_OPEN_CHOICE,
   opening: null,
-  openError: null,
   patchOpenChoice: (patch) => {
     set((s) => ({ openChoice: { ...s.openChoice, ...patch } }));
     if (patch.projectId !== undefined) get().supersedeOpen(patch.projectId);

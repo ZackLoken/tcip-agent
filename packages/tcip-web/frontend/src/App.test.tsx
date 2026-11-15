@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
@@ -69,6 +69,9 @@ const { valley: VALLEY, ridge: RIDGE, empty: EMPTY } = PICKER;
 const VALLEY_NAME = VALLEY.record.display_name;
 
 const VALLEY_OPENED = openedAs(VALLEY);
+
+/** The sentence of every listed notifications entry, oldest first. */
+const listedSentences = () => useStore.getState().notifications.map((e) => e.sentence);
 
 const initialStoreState = useStore.getState();
 
@@ -227,7 +230,7 @@ describe("App admission through the picker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     expect(await screen.findByRole("tablist")).toBeInTheDocument();
-    expect(await screen.findAllByText(/backend refused/)).toHaveLength(2);
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
     expect(useStore.getState().user).toBe("jordan");
     expect(useStore.getState().openChoice.projectId).toBe(VALLEY.record.id);
@@ -251,7 +254,7 @@ describe("App admission through the picker", () => {
     expect(useStore.getState().opening).toBeNull();
   });
 
-  it("toasts a failed open that the selected tab hides the picker behind", async () => {
+  it("lists a failed open that the selected tab hides the picker behind", async () => {
     vi.mocked(api.projects.open).mockRejectedValue(new Error("backend refused"));
     act(() => useStore.getState().setUser(""));
     act(() => useStore.getState().setActiveTab("meta"));
@@ -263,14 +266,10 @@ describe("App admission through the picker", () => {
 
     expect(await screen.findByRole("tablist")).toBeInTheDocument();
     expect(screen.queryByText("Open a project")).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
-        expect.stringContaining("backend refused"),
-      ),
-    );
+    await waitFor(() => expect(listedSentences()).toEqual(["backend refused"]));
   });
 
-  it("toasts a failed open whose project a snapshot adopted while the open was pending", async () => {
+  it("lists a failed open whose project a snapshot adopted while the open was pending", async () => {
     const open = Promise.withResolvers<OpenAnswer>();
     vi.mocked(api.projects.open).mockReturnValue(open.promise);
     act(() => useStore.getState().setUser(""));
@@ -287,9 +286,83 @@ describe("App admission through the picker", () => {
 
     await act(() => Promise.resolve(open.reject(new Error("selection failed"))));
 
-    expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
-      expect.stringContaining("selection failed"),
+    expect(listedSentences()).toEqual(["selection failed"]);
+  });
+});
+
+describe("App refused open", () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+  afterEach(() => vi.useRealTimers());
+
+  /** The chosen card's own line, the entry the picker shows in place. */
+  const cardLine = () => screen.queryByTestId("entry-in-place");
+  /** The notifications area, once it is open. */
+  const area = () => within(screen.getByRole("region", { name: "Notifications" }));
+  const toggleArea = () => fireEvent.click(screen.getByRole("button", { name: /^Notifications/ }));
+
+  it("stays until dismissed, shows in place on its card, and Retry repeats the original open", async () => {
+    const open = vi.mocked(api.projects.open);
+    const select = vi.mocked(api.dataset.select);
+    open.mockRejectedValueOnce(new Error("backend refused"));
+    render(<App />);
+    fireEvent.click(await screen.findByText(VALLEY_NAME));
+    const chosen = useStore.getState().openChoice;
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused"));
+    expect(useStore.getState().notifications.map((e) => e.context.project)).toEqual([
+      VALLEY.record.id,
+    ]);
+    act(() => {
+      vi.advanceTimersByTime(6001);
+    });
+    toggleArea();
+    await PANE_FOCUS.heading();
+    toggleArea();
+    expect(cardLine()).toHaveTextContent("backend refused");
+    expect(useStore.getState().notifications).toHaveLength(1);
+
+    toggleArea();
+    await PANE_FOCUS.heading();
+    fireEvent.click(area().getByRole("button", { name: /^Dismiss: backend refused/ }));
+    expect(cardLine()).not.toBeInTheDocument();
+    expect(useStore.getState().notifications).toEqual([]);
+
+    open.mockRejectedValueOnce(new Error("backend refused again"));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused again"));
+
+    const otherDate = VALLEY.tree.captures.map((c) => c.name).find((d) => d !== chosen.date);
+    fireEvent.change(screen.getByRole("combobox", { name: "Date" }), {
+      target: { value: otherDate },
+    });
+    const retried = Promise.withResolvers<OpenAnswer>();
+    open.mockReturnValueOnce(retried.promise);
+    select.mockRejectedValueOnce(new Error("selection refused"));
+    fireEvent.click(area().getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(3));
+    expect(cardLine()).not.toBeInTheDocument();
+    expect(useStore.getState().notifications).toHaveLength(1);
+
+    await act(() => Promise.resolve(retried.resolve(VALLEY_OPENED)));
+    await waitFor(() => expect(cardLine()).toHaveTextContent("selection refused"));
+    expect(open.mock.calls[2]).toEqual(open.mock.calls[1]);
+    expect(open.mock.calls[2][0]).toEqual({ id: VALLEY.record.id, user: "grower" });
+    expect(select).toHaveBeenCalledWith({
+      dataset_root: VALLEY_OPENED.project.path,
+      date: chosen.date,
+      subject: chosen.subject,
+      bucket: chosen.bucket,
+    });
+    expect(useStore.getState().openChoice.date).toBe(otherDate);
+    expect(listedSentences()).toEqual(["backend refused again", "selection refused"]);
+
+    fireEvent.click(
+      within(cardLine()!).getByRole("button", { name: /^Dismiss: selection refused/ }),
     );
+    expect(cardLine()).not.toBeInTheDocument();
+    expect(listedSentences()).toEqual(["backend refused again"]);
+    expect(area().getAllByRole("listitem")).toHaveLength(1);
   });
 });
 

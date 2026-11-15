@@ -6,7 +6,7 @@
 import { api } from "@/api/client";
 import { messageOf } from "@/api/http";
 import type { Capture, ReadProject, TreeContents } from "@/api/types.generated";
-import { toastLabelProblem } from "@/lib/labelProblemToast";
+import { raiseLabelProblem } from "@/lib/labelProblem";
 import { recordRecentProject } from "@/lib/recentProjects";
 import { settleVisits } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
@@ -26,16 +26,17 @@ export function heldOpen(requestId: number | null): OpenHold | null {
   return opening !== null && opening.requestId === requestId ? opening : null;
 }
 
-/** Take the one open hold for ``projectId`` before any step of the open that waits; null when
- *  an open already holds it. */
+/** The key a failed open of ``projectId`` stands on, which that project's card shows in place. */
+export const openKey = (projectId: string): string => `open:${projectId}`;
+
+/** Take the one open hold for ``projectId`` before any step of the open that waits, releasing
+ *  that project's failed open; null when an open already holds it. */
 export function takeOpenHold(projectId: string): number | null {
   const state = useStore.getState();
   if (state.opening !== null) return null;
   const requestId = ++lastRequestId;
-  state.patchOpenStatus({
-    opening: { requestId, projectId },
-    openError: null,
-  });
+  state.patchOpenStatus({ opening: { requestId, projectId } });
+  state.releaseNotification(openKey(projectId));
   return requestId;
 }
 
@@ -73,12 +74,15 @@ async function performOpen(
   try {
     recordRecentProject(project.id);
   } catch (e) {
-    useStore
-      .getState()
-      .pushToast(`Opened, but the recent projects list was not updated: ${messageOf(e)}`);
+    useStore.getState().raiseNotification({
+      kind: "notice",
+      level: "warning",
+      text: { sentence: `Opened, but the recent projects list was not updated: ${messageOf(e)}` },
+      context: { project: project.id, target: p.record.display_name },
+    });
   }
   useStore.getState().applyRestoredDataset(res.selection, project);
-  toastLabelProblem(res.label_problem);
+  raiseLabelProblem(res.label_problem, project.id);
 }
 
 /** The one transition owner for opening ``p`` (a listed project whose record reads) on a capture, subject and bucket name (one ``bucketsForDate`` serves), as the
@@ -86,9 +90,10 @@ async function performOpen(
  *  holding no capture (``date`` null) opens with no dataset selected, and an open already in
  *  flight leaves this one unstarted. The open holds a request id in the store; a second choice
  *  of project or a snapshot adopting another project releases it, and a result from a request
- *  no longer held, success or failure, is dropped. A held failure is recorded for ``p`` and
- *  toasted so a tab that replaced the picker does not hide it. An image visit the settlement
- *  stopped and no departure closed resumes counting when the open ends, whatever its outcome. */
+ *  no longer held, success or failure, is dropped. A held failure is an entry for ``p`` standing
+ *  on its ``openKey``, whose Retry starts this open again over the same arguments. An image
+ *  visit the settlement stopped and no departure closed resumes counting when the open ends,
+ *  whatever its outcome. */
 export async function startOpen(
   p: ReadProject,
   date: string | null,
@@ -101,10 +106,15 @@ export async function startOpen(
   try {
     await performOpen(requestId, p, date, subject, bucket);
   } catch (e) {
-    const now = useStore.getState();
     if (!heldOpen(requestId)) return;
-    now.patchOpenStatus({ openError: { projectId: p.record.id, message: messageOf(e) } });
-    now.pushToast(messageOf(e));
+    useStore.getState().raiseNotification({
+      kind: "failure",
+      level: "error",
+      text: { sentence: messageOf(e) },
+      context: { project: p.record.id, target: p.record.display_name },
+      key: openKey(p.record.id),
+      action: { label: "Retry", run: () => void startOpen(p, date, subject, bucket) },
+    });
   } finally {
     releaseOpenHold(requestId);
     useStore.getState().resumeSessionInterval();

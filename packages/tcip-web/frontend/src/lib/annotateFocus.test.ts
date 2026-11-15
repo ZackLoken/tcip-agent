@@ -141,10 +141,9 @@ describe("applyAnnotateFocus", () => {
     });
   });
 
-  it("toasts a label_problem the selection carries", async () => {
+  it("raises a label_problem the selection carries as a failure of the open project", async () => {
     const { label_problem } = TROUBLED_SELECT_ANSWER;
     seedDataset(selection({ subject: CURRENT }));
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     vi.mocked(api.dataset.select).mockResolvedValue(TROUBLED_SELECT_ANSWER);
 
     const outcome = await applyAnnotateFocus(
@@ -153,7 +152,13 @@ describe("applyAnnotateFocus", () => {
     );
 
     expect(outcome).toBe("adopted");
-    expect(pushToast).toHaveBeenCalledWith(label_problem);
+    expect(useStore.getState().notifications).toContainEqual(
+      expect.objectContaining({
+        kind: "failure",
+        sentence: label_problem,
+        context: { project: useStore.getState().openProject?.id },
+      }),
+    );
   });
 
   it("adopts nothing and answers declined-selected when the focus is no longer wanted once the selection resolves", async () => {
