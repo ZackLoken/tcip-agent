@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { api, loadedLabels, type LoadedLabels, type LoadedSave } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
 import { subjectColor } from "@/api/subjects";
-import { CONF_REFUSED, PLAIN } from "@/api/types.generated";
+import { CONF_REFUSED, type ImageBands, PLAIN } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import type { BandChoice } from "@/lib/bandSelection";
@@ -1382,6 +1382,27 @@ describe("AnnotateTab band-composite wiring", () => {
     // Defaulted to the server's default bands and its default stretch.
     expect(params.getAll("bands")).toEqual(BAND_ANSWERS.four_spectral.default_bands);
     expect(params.get("stretch")).toBe(BAND_ANSWERS.four_spectral.default_stretch);
+  });
+
+  it("requests the next image without the previous image's bands until its own answer arrives", async () => {
+    const nextAnswer = Promise.withResolvers<ImageBands>();
+    vi.spyOn(api.images, "bands").mockImplementation((path) =>
+      path === IMG1 ? Promise.resolve(BAND_ANSWERS.four_spectral) : nextAnswer.promise,
+    );
+    render(<AnnotateTab />);
+    await waitFor(() =>
+      expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-choice", "banded"),
+    );
+
+    act(() => changeSelection({ current_image_index: 1 }));
+    await flush();
+    const url = screen.getByTestId("canvas-stage").getAttribute("data-image-url") ?? "";
+    expect(url).toContain(encodeURIComponent(IMG2));
+    expect(url).not.toContain("bands=");
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-choice", "none");
+
+    await act(() => Promise.resolve(nextAnswer.resolve(BAND_ANSWERS.four_spectral)));
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-choice", "banded");
   });
 });
 
