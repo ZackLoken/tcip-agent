@@ -425,6 +425,49 @@ def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
     assert not _published(tmp_path, "preds/2026-01-01")
 
 
+def test_a_raster_pass_over_a_band_member_answers_the_resolvers_sentence(
+    tmp_path: Path,
+) -> None:
+    """A raster pass naming one band of a grouped capture answers the resolver's sentence bare.
+
+    A raster in the same capture whose bytes no reader decodes still answers that its content
+    identity could not be computed; neither publishes.
+    """
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._producer_fixtures import write_band_group
+
+    raster_path = _raster(tmp_path)
+    _write_geo_raster(raster_path)
+    capture = raster_path.parent
+    bands = {name: capture / f"plot_{name}.tif" for name in ("Green", "Red")}
+    for band in bands.values():
+        tifffile.imwrite(str(band), np.full((64, 64), 7, dtype=np.uint8))
+    write_band_group(capture, "plot", bands, central_wavelength_nm=None)
+    torn = capture / "torn.tif"
+    torn.write_bytes(b"not a raster")
+    register_dataset_at(tmp_path, tmp_path / "ds", crop=COUNT_CROP)
+    ckpt = _bespoke_detection_checkpoint(tmp_path)
+    with pytest.raises(Exception) as refused:
+        resolve_image_path(bands["Red"])
+
+    def ran(raster_path: Path) -> dict:
+        return run_inference(
+            tmp_path,
+            ckpt,
+            bucket="preds/2026-01-01",
+            raster_path=str(raster_path),
+            stated=RASTER_PASS,
+            actor=None,
+        )
+
+    assert ran(bands["Red"]) == {"error": str(refused.value)}
+    assert ran(torn)["error"].startswith(
+        f"raster content identity could not be computed for {torn}: "
+    )
+    assert not _published(tmp_path, "preds/2026-01-01")
+
+
 # ── deliver_orthomosaic_plant_counts ─────────────────────────────────────
 
 

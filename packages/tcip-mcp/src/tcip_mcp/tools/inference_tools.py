@@ -259,7 +259,9 @@ def infer(
                     tile_batch_size=tile_batch_size,
                     execution=p.execution,
                 )
-            except (LogicalImageError, FileNotFoundError, ValueError) as exc:
+            except LogicalImageError as exc:
+                return {"error": str(exc)}
+            except (FileNotFoundError, ValueError) as exc:
                 return {
                     "error": f"raster content identity could not be computed for "
                     f"{raster_path}: {exc}"
