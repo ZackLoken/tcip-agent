@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
 import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
 import App from "@/App";
+import { LISTING_REFRESH_MS } from "@/components/ProjectPicker";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
 import { loadOf } from "@/test/annotate";
@@ -63,7 +64,7 @@ vi.mock("@/api/client", async (importOriginal) => {
   };
 });
 
-const { valley: VALLEY, ridge: RIDGE } = PICKER;
+const { valley: VALLEY, ridge: RIDGE, empty: EMPTY } = PICKER;
 const VALLEY_NAME = VALLEY.record.display_name;
 
 const VALLEY_OPENED = openedAs(VALLEY);
@@ -228,15 +229,71 @@ describe("App admission through the picker", () => {
   });
 });
 
+/** Answer what the Annotate tab reads on a capture's first image. */
+function answerAnnotateReads() {
+  vi.spyOn(api.annotate, "load").mockImplementation((path) => Promise.resolve(loadOf(path)));
+  vi.spyOn(api.annotate, "save");
+  vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
+  vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
+  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
+}
+
+describe("App picker on the project already open", () => {
+  const NO_IMAGES = /has no images yet\. Ask the agent in the terminal to add images\./;
+
+  it("offers no Open on the card of an open project holding no capture, and says what to do", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.mocked(api.projects.list)
+        .mockResolvedValueOnce(PROJECT_FIXTURES.picker)
+        .mockResolvedValue(PROJECT_FIXTURES.picker_empty_open);
+      vi.mocked(api.projects.open).mockResolvedValue(openedAs(EMPTY));
+      render(<App />);
+
+      fireEvent.click(await screen.findByText(EMPTY.record.display_name));
+      fireEvent.click(screen.getByRole("button", { name: "Open" }));
+      await waitFor(() => expect(useStore.getState().openProject?.id).toBe(EMPTY.record.id));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LISTING_REFRESH_MS);
+      });
+
+      const open = await screen.findByRole("button", { name: "Open" });
+      expect(open).toBeDisabled();
+      expect(open).toHaveAccessibleDescription(NO_IMAGES);
+      expect(screen.getByText(NO_IMAGES)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps Open on the card of an open project holding captures after Switch project", async () => {
+    answerAnnotateReads();
+    vi.mocked(api.projects.list)
+      .mockResolvedValueOnce(PROJECT_FIXTURES.picker)
+      .mockResolvedValue(PROJECT_FIXTURES.picker_open);
+    vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
+    vi.mocked(api.dataset.select).mockResolvedValue(SUBJECT_SELECT_ANSWER);
+    render(<App />);
+
+    fireEvent.click(await screen.findByText(VALLEY_NAME));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByTestId("canvas-stage");
+    fireEvent.click(screen.getByRole("button", { name: "Switch project" }));
+    await screen.findByText("Open a project");
+
+    const open = await screen.findByRole("button", { name: "Open" });
+    expect(await screen.findByText("open")).toBeInTheDocument();
+    expect(open).toBeEnabled();
+    expect(open).not.toHaveAccessibleDescription(NO_IMAGES);
+    expect(screen.queryByText(NO_IMAGES)).not.toBeInTheDocument();
+  });
+});
+
 describe("App visit attribution across a change of person", () => {
   const answer = SUBJECT_SELECT_ANSWER;
   const FIRST_IMAGE = answer.selection.images[0].name;
   it("attributes the outgoing visit to the first person and project, the next to the second", async () => {
-    vi.spyOn(api.annotate, "load").mockImplementation((path) => Promise.resolve(loadOf(path)));
-    vi.spyOn(api.annotate, "save");
-    vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
-    vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
-    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
+    answerAnnotateReads();
     vi.mocked(api.projects.open)
       .mockResolvedValueOnce(VALLEY_OPENED)
       .mockResolvedValueOnce(openedAs(RIDGE));

@@ -329,6 +329,9 @@ export function ProjectPicker() {
               }
               const { record, tree } = p;
               const isSelected = record.id === selected;
+              const isOpen = record.id === listing?.open_id;
+              const noCaptures = tree.captures.length === 0;
+              const nothingToOpen = isOpen && noCaptures;
               return (
                 <div
                   key={record.id}
@@ -352,7 +355,7 @@ export function ProjectPicker() {
                       {record.display_name}
                     </span>
                     <div id={`project-desc-${index}`} className="contents">
-                      {record.id === listing?.open_id && (
+                      {isOpen && (
                         <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent self-start">
                           open
                         </span>
@@ -402,7 +405,7 @@ export function ProjectPicker() {
                             value={date ?? ""}
                             onChange={(e) => chooseDate(p, e.target.value || null)}
                           >
-                            {tree.captures.length === 0 && <option value="">no dates</option>}
+                            {noCaptures && <option value="">no dates</option>}
                             {tree.captures.map(({ name }) => (
                               <option key={name} value={name}>
                                 {name}
@@ -460,10 +463,20 @@ export function ProjectPicker() {
                       {openError?.projectId === record.id && (
                         <span className="text-[13px] tcip-problem">{openError.message}</span>
                       )}
+                      {nothingToOpen && (
+                        <span
+                          id={`nothing-to-open-${index}`}
+                          className="text-[13px] text-tcip-muted"
+                        >
+                          This project is open and has no images yet. Ask the agent in the terminal
+                          to add images.
+                        </span>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
                           className="tcip-btn-primary flex-1"
-                          disabled={opening || !draftNamed}
+                          disabled={opening || !draftNamed || nothingToOpen}
+                          aria-describedby={nothingToOpen ? `nothing-to-open-${index}` : undefined}
                           onClick={() => {
                             commitName();
                             void startOpen(p, date, subject, bucket);
