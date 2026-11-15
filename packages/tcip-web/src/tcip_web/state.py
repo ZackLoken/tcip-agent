@@ -144,7 +144,7 @@ class StateStore:
     The project and its :class:`GuiState` are held as one value (:class:`Held`), which every
     change made for the project persists before it is broadcast; a change made while no project
     is open is held and persisted nowhere. The last open the backend refused is held beside
-    them (:attr:`refused_open`) until the open project changes.
+    them (:attr:`refused_open`) until an open or close succeeds.
     """
 
     def __init__(self) -> None:
@@ -165,7 +165,7 @@ class StateStore:
     ) -> None:
         """Set the workspace this backend serves and the additive image roots it admits.
 
-        A refused open named a project of the earlier workspace, so none is held after this.
+        Configuring a workspace starts with no refused open.
         """
         self._workspace, self._image_roots = workspace, image_roots
         self._refused = None
@@ -195,13 +195,13 @@ class StateStore:
 
     @property
     def refused_open(self) -> RefusedOpen | None:
-        """The last open refused since the open project changed, or ``None`` when there is none."""
+        """The last open refused since an open or close succeeded, or ``None``."""
         return self._refused
 
     def refuse_open(self, project_id: str, sentence: str) -> None:
         """Hold the open of ``project_id`` as refused, with the refusal's ``sentence``.
 
-        It replaces an earlier refused open and stays until the open project changes
+        It replaces an earlier refused open and stays until an open or close succeeds
         (:meth:`_switch`).
         """
         self._refused = RefusedOpen(project_id, sentence)
