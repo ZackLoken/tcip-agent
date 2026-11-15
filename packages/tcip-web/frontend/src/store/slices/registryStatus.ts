@@ -153,9 +153,9 @@ export interface RegistryStatusSlice {
   resumeSessionInterval: () => void;
   /** Close the visit open now and forget the recorded session, as `following` (null for none)
    *  becomes the open project; every held contribution of another project is retired and the
-   *  person told in one notice per outcome: never sent, not recorded; sent with no settling
-   *  answer, recording not confirmed. The condition of unconfirmed contributions follows
-   *  (`noticeUnconfirmed`). */
+   *  person told in one failure per departed project and outcome: never sent, not recorded; sent
+   *  with no settling answer, recording not confirmed. The condition of unconfirmed contributions
+   *  follows (`noticeUnconfirmed`). */
   leaveProjectSession: (following: string | null) => void;
   /** Retire `contribution` from the held and unconfirmed contributions; the condition of
    *  unconfirmed contributions follows (`noticeUnconfirmed`). */
@@ -402,7 +402,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
 
   leaveProjectSession: (following) => {
     get().closeSessionInterval();
-    const { heldContributions, unconfirmedContributions, pushToast } = get();
+    const { heldContributions, unconfirmedContributions, raiseNotification } = get();
     const departed = heldContributions.filter((c) => c.project_id !== following);
     set({
       recordedSession: null,
@@ -410,17 +410,25 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
       unconfirmedContributions: unconfirmedContributions.filter((c) => !holds(departed, c)),
     });
     noticeUnconfirmed(get(), false);
-    const images = (sent: boolean) =>
-      departed
-        .filter((c) => holds(unconfirmedContributions, c) === sent)
-        .map((c) => c.image_name)
-        .join(", ");
-    const [unsent, unconfirmed] = [images(false), images(true)];
-    if (unsent) pushToast(`Not recorded, as their project was switched away from: ${unsent}`);
-    if (unconfirmed) {
-      pushToast(
-        `Recording not confirmed before their project was switched away from: ${unconfirmed}`,
-      );
+    const said = [
+      [false, "Not recorded, as their project was switched away from"],
+      [true, "Recording not confirmed before their project was switched away from"],
+    ] as const;
+    for (const project of new Set(departed.map((c) => c.project_id))) {
+      for (const [sent, sentence] of said) {
+        const images = departed
+          .filter((c) => c.project_id === project && holds(unconfirmedContributions, c) === sent)
+          .map((c) => c.image_name)
+          .join(", ");
+        if (images) {
+          raiseNotification({
+            kind: "failure",
+            level: "error",
+            text: { sentence: `${sentence}: ${images}` },
+            context: { project },
+          });
+        }
+      }
     }
   },
 

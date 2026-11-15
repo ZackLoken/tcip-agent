@@ -21,7 +21,9 @@ import { holds, noticeUnconfirmed } from "@/store/slices/registryStatus";
 
 let line: Promise<void> = Promise.resolve();
 const queued = new Set<string>();
-const REFUSED_CHANNEL = "refused-visits";
+
+/** The key the one notice of a project's refused visits stands on. */
+const refusedVisitsKey = (projectId: string): string => `refused-visits:${projectId}`;
 
 function after(step: () => Promise<void> | void): void {
   line = line.then(step, step);
@@ -55,12 +57,13 @@ function adopt(contribution: ImageEventPayload, written: SessionWrite): void {
 
 /** Dispose of one posted contribution by its answer while it is still held; the answer to one
  *  retired meanwhile updates nothing. One the backend accepted, or committed and could not
- *  record the line of (the gap toasted), is adopted. One it refused by name (a 4xx answer other
- *  than a gap saying it committed) is retired, the session its request named forgotten (`forgetSession`), since
- *  that named session is what a refusal answers about, so the next visit opens a fresh one, and
- *  its refusal added to the one notice of refused visits (`pushRefusal`). One with
- *  no answer or an indeterminate one stays held to be sent again under the same identity, and
- *  the condition of unconfirmed visits names every image now unconfirmed. */
+ *  record the line of (the gap raised as a warning), is adopted. One it refused by name (a 4xx
+ *  answer other than a gap saying it committed) is retired, the session its request named
+ *  forgotten (`forgetSession`), since that named session is what a refusal answers about, so the
+ *  next visit opens a fresh one, and its refusal added to the one failure listing its project's
+ *  refused visits. One with no answer or an indeterminate one stays held to be sent again under
+ *  the same identity, and the condition of unconfirmed visits names every image now
+ *  unconfirmed. */
 function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>): Promise<void> {
   const held = () => holds(useStore.getState().heldContributions, contribution);
   return posted.then(
@@ -70,10 +73,16 @@ function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>)
     (e: unknown) => {
       if (!held()) return;
       const s = useStore.getState();
+      const project = contribution.project_id;
       const committed = committedOf<SessionWrite>(e);
       if (committed !== null) {
         adopt(contribution, committed);
-        s.pushToast(messageOf(e));
+        s.raiseNotification({
+          kind: "notice",
+          level: "warning",
+          text: { sentence: messageOf(e) },
+          context: { project },
+        });
       } else if (
         !refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN)?.committed &&
         e instanceof StructuredRefusalError &&
@@ -81,7 +90,13 @@ function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>)
       ) {
         s.retireContribution(contribution);
         if (contribution.started !== null) forgetSession(contribution.started);
-        s.pushRefusal(REFUSED_CHANNEL, contribution.image_name, e.message);
+        s.raiseNotification({
+          kind: "failure",
+          level: "error",
+          text: { refusal: { item: contribution.image_name, reason: e.message } },
+          context: { project },
+          key: refusedVisitsKey(project),
+        });
       } else {
         noticeUnconfirmed(s, true);
       }

@@ -4,7 +4,7 @@ import { sessionsApi } from "@/api/sessions";
 import type { ImageEventPayload, SessionWrite, SnapshotProject } from "@/api/types.generated";
 import { endRecordedSession, postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
-import { textOf } from "@/store/slices/toasts";
+import { textOf } from "@/store/slices/notifications";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import { holdingSentence } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
@@ -49,6 +49,13 @@ const naming = (project: SnapshotProject) =>
 async function flush() {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 }
+
+/** Every listed entry but a condition's, as its kind, level, text and project. */
+const raised = () =>
+  useStore
+    .getState()
+    .notifications.filter((e) => e.kind !== "condition")
+    .map((e) => [e.kind, e.level, textOf(e), e.context.project]);
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
@@ -178,7 +185,7 @@ describe("session lifecycle", () => {
   it("retires a contribution the backend refuses by name, says why, and never posts it again", async () => {
     const reason = ENDED_NAMED.body.detail;
     const post = vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(ENDED_NAMED));
-    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+    useStore.setState({ heldContributions: [contribution("a.jpg")] });
 
     postHeldContributions();
     await flush();
@@ -188,13 +195,15 @@ describe("session lifecycle", () => {
     expect(post).toHaveBeenCalledTimes(1);
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().recordedSession).toBeNull();
-    expect(useStore.getState().toasts.map(textOf)).toEqual([`Not recorded (${reason}): a.jpg`]);
+    expect(raised()).toEqual([
+      ["failure", "error", `Not recorded (${reason}): a.jpg`, TEST_PROJECT.id],
+    ]);
   });
 
-  it("adopts the session a refusal says committed and toasts its message", async () => {
+  it("adopts the session a refusal says committed and warns with its message", async () => {
     const gap = SESSION_ANSWERS.audit_gap;
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(gap));
-    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+    useStore.setState({ heldContributions: [contribution("a.jpg")] });
 
     postHeldContributions();
     await flush();
@@ -205,13 +214,13 @@ describe("session lifecycle", () => {
       started: S2,
       user: "jordan",
     });
-    expect(useStore.getState().toasts.map(textOf)).toEqual([gap.body.detail.message]);
+    expect(raised()).toEqual([["notice", "warning", gap.body.detail.message, TEST_PROJECT.id]]);
   });
 
   it("retires a contribution whose audit-gap refusal says nothing committed, saying why", async () => {
     const gap = TERMINAL_ANSWERS.start_audit_gap;
     const post = vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(gap));
-    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+    useStore.setState({ heldContributions: [contribution("a.jpg")] });
 
     postHeldContributions();
     await flush();
@@ -221,15 +230,15 @@ describe("session lifecycle", () => {
     expect(post).toHaveBeenCalledTimes(1);
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().recordedSession).toBeNull();
-    expect(useStore.getState().toasts.map(textOf)).toEqual([
-      `Not recorded (${gap.body.detail.message}): a.jpg`,
+    expect(raised()).toEqual([
+      ["failure", "error", `Not recorded (${gap.body.detail.message}): a.jpg`, TEST_PROJECT.id],
     ]);
   });
 
   it("keeps a contribution unconfirmed when its refusal says committed and carries no session", async () => {
     const gap = RESULTS_ANSWERS.mapping_audit_gap;
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(gap));
-    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+    useStore.setState({ heldContributions: [contribution("a.jpg")] });
 
     postHeldContributions();
     await flush();
@@ -245,7 +254,7 @@ describe("session lifecycle", () => {
 
   it("says recording is unconfirmed, never absent, for a visit whose send failed before its project departed, and withdraws the promise to send it again", async () => {
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+    useStore.setState({ heldContributions: [contribution("a.jpg")] });
     postHeldContributions();
     await flush();
     expect(useStore.getState().holding.unconfirmed).toBeDefined();
@@ -254,13 +263,13 @@ describe("session lifecycle", () => {
 
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().holding.unconfirmed).toBeUndefined();
-    expect(useStore.getState().toasts.map(textOf)).toEqual([UNCONFIRMED]);
+    expect(raised()).toEqual([["failure", "error", UNCONFIRMED, TEST_PROJECT.id]]);
   });
 
   it("says recording is unconfirmed for a visit in flight when its project departed, and nothing more when the send then fails", async () => {
     const pending = Promise.withResolvers<SessionWrite>();
     vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(pending.promise);
-    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+    useStore.setState({ heldContributions: [contribution("a.jpg")] });
     postHeldContributions();
     await flush();
 
@@ -269,14 +278,14 @@ describe("session lifecycle", () => {
     await flush();
 
     expect(useStore.getState().heldContributions).toEqual([]);
-    expect(useStore.getState().toasts.map(textOf)).toEqual([UNCONFIRMED]);
+    expect(raised()).toEqual([["failure", "error", UNCONFIRMED, TEST_PROJECT.id]]);
   });
 
   it("ends the condition of unconfirmed visits once a resend confirms them", async () => {
     vi.spyOn(sessionsApi, "imageEvent")
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
       .mockResolvedValueOnce(FIRST);
-    useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
+    useStore.setState({ heldContributions: [contribution("a.jpg")] });
     postHeldContributions();
     await flush();
     expect(useStore.getState().holding.unconfirmed).toBeDefined();
@@ -286,10 +295,10 @@ describe("session lifecycle", () => {
 
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().holding.unconfirmed).toBeUndefined();
-    expect(useStore.getState().toasts).toEqual([]);
+    expect(raised()).toEqual([]);
   });
 
-  it("names every visit refused, under each reason, in one notice that a refusal after its dismissal starts afresh", async () => {
+  it("names every visit refused, under each reason, in one entry of their project that a refusal after its dismissal starts afresh", async () => {
     const ended = ENDED_NAMED.body.detail;
     const other = ANOTHER_NAMED.body.detail;
     const refused = { [ended]: await thrown(ENDED_NAMED), [other]: await thrown(ANOTHER_NAMED) };
@@ -301,7 +310,6 @@ describe("session lifecycle", () => {
     useStore.setState({
       user: "jordan",
       recordedSession: { project_id: TEST_PROJECT.id, started: S1, user: "jordan" },
-      toasts: [],
     });
     const s = useStore.getState();
     for (const image of images) {
@@ -313,18 +321,25 @@ describe("session lifecycle", () => {
     for (let i = 0; i < images.length; i++) await flush();
 
     expect(useStore.getState().heldContributions).toEqual([]);
-    expect(useStore.getState().toasts.map(textOf)).toEqual([
-      `Not recorded (${ended}): a.jpg, c.jpg, e.jpg, f.jpg; ` +
-        `Not recorded (${other}): b.jpg, d.jpg`,
+    expect(raised()).toEqual([
+      [
+        "failure",
+        "error",
+        `Not recorded (${ended}): a.jpg, c.jpg, e.jpg, f.jpg; ` +
+          `Not recorded (${other}): b.jpg, d.jpg`,
+        TEST_PROJECT.id,
+      ],
     ]);
 
-    s.dismissToast(useStore.getState().toasts[0].id);
+    s.dismissNotification(useStore.getState().notifications[0].id);
     s.startImageSessionTracking("g.jpg", Date.now() - 2000);
     s.closeSessionInterval();
     postHeldContributions();
     await flush();
 
-    expect(useStore.getState().toasts.map(textOf)).toEqual([`Not recorded (${other}): g.jpg`]);
+    expect(raised()).toEqual([
+      ["failure", "error", `Not recorded (${other}): g.jpg`, TEST_PROJECT.id],
+    ]);
   });
 
   it("forgets a session learned from one visit when another's repeat answers that it ended, so the next opens fresh", async () => {
@@ -404,7 +419,7 @@ describe("session lifecycle", () => {
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(new TypeError("Failed to fetch"));
     const images = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"];
     const held = images.map(contribution);
-    useStore.setState({ heldContributions: held, toasts: [] });
+    useStore.setState({ heldContributions: held });
 
     postHeldContributions();
     for (let i = 0; i < images.length; i++) await flush();
@@ -415,7 +430,6 @@ describe("session lifecycle", () => {
       "Could not confirm these visits were recorded; they are sent again with the next visit: " +
         images.join(", "),
     ]);
-    expect(useStore.getState().toasts).toEqual([]);
   });
 
   it("forgets the recorded session a refused visit named, so the next visit opens a fresh one", async () => {

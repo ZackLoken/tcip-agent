@@ -145,10 +145,10 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().heldContributions).toEqual([]);
   });
 
-  it("retires the departed project's visits in one notice naming every image when another project is adopted", () => {
+  it("retires the departed project's visits in one entry of that project naming every image when another project is adopted", () => {
     const images = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"];
     s().setUser("grower");
-    useStore.setState({ toasts: [] });
+    useStore.setState({ notifications: [] });
     images.forEach((image, i) => {
       s().startImageSessionTracking(image, Date.now() - 2000);
       if (i < images.length - 1) s().closeSessionInterval();
@@ -158,8 +158,8 @@ describe("mergeSnapshot ownership model", () => {
 
     expect(s().sessionTracking.currentImageName).toBeNull();
     expect(s().heldContributions).toEqual([]);
-    expect(s().toasts.map((t) => t.message)).toEqual([
-      `Not recorded, as their project was switched away from: ${images.join(", ")}`,
+    expect(s().notifications.map((e) => [e.sentence, e.context.project])).toEqual([
+      [`Not recorded, as their project was switched away from: ${images.join(", ")}`, PROJECT.id],
     ]);
   });
 
