@@ -108,6 +108,55 @@ def test_weighted_ce_built() -> None:
     assert loss.ce.weight is not None  # class weight injected
 
 
+def test_a_misspelled_weight_scheme_refuses_over_a_present_class() -> None:
+    """A scheme outside the three refuses naming them, where it once fell to balanced."""
+    with pytest.raises(
+        ValueError, match="'balanced', 'inverse' or 'effective'"
+    ):
+        build_loss(
+            "weighted_ce",
+            class_distribution={0: 90, 1: 10},
+            num_classes=2,
+            weight_scheme="blanced",
+        )
+
+
+def test_a_misspelled_weight_scheme_refuses_with_no_class_distribution() -> (
+    None
+):
+    """A scheme outside the three refuses though no distribution reads it."""
+    with pytest.raises(
+        ValueError, match="'balanced', 'inverse' or 'effective'"
+    ):
+        build_loss("cross_entropy", weight_scheme="blanced")
+
+
+def test_a_misspelled_scheme_refuses_over_a_distribution_with_no_present_class() -> (
+    None
+):
+    """``compute_class_weights`` and the context's own refuse a misspelled scheme."""
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
+    for weigh in (compute_class_weights, TrainContext.compute_class_weights):
+        with pytest.raises(
+            ValueError, match="'balanced', 'inverse' or 'effective'"
+        ):
+            weigh({0: 0, 1: 0}, scheme="blanced")
+
+
+@pytest.mark.parametrize("scheme", ["balanced", "inverse", "effective"])
+def test_each_named_weight_scheme_builds_a_weighted_loss(scheme: str) -> None:
+    """Each of the three names builds a loss carrying one weight per class."""
+    loss = build_loss(
+        "weighted_ce",
+        class_distribution={0: 90, 1: 10},
+        num_classes=2,
+        weight_scheme=scheme,
+    )
+    assert loss.ce.weight is not None
+    assert loss.ce.weight[1] > loss.ce.weight[0]  # the rarer class up-weighted
+
+
 def test_class_distribution_on_an_unweightable_loss_refuses() -> None:
     """A class distribution handed to a loss that cannot weight refuses by name."""
     with pytest.raises(ValueError, match="not weightable"):
