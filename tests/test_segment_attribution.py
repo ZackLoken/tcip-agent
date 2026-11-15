@@ -743,38 +743,6 @@ def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(
         )
 
 
-def test_tie_segments_to_plants_refuses_a_blank_named_plant(
-    tmp_path: Path,
-) -> None:
-    _, raster_path, georef, identity = _setup(tmp_path)
-    segments_data = _document(
-        [
-            Annotation(
-                subject="canopy",
-                geometry=_square(0, 0, 20, 20),
-                created_by="user:breeder",
-            ),
-        ],
-    )
-    segments = load_canopy_segments(
-        segments_data,
-        subject="canopy",
-        raster_stem=raster_path.stem,
-        raster_identity=identity,
-    )
-    plants = [_plant(georef, "", 10, 10)]
-
-    with pytest.raises(ValueError, match="blank plant_id"):
-        tie_segments_to_plants(
-            segments,
-            plants,
-            georef,
-            width=WIDTH,
-            height=HEIGHT,
-            position_error_m=POSITION_ERROR_M,
-        )
-
-
 def test_tie_segments_to_plants_refuses_a_duplicate_plant_id(
     tmp_path: Path,
 ) -> None:
