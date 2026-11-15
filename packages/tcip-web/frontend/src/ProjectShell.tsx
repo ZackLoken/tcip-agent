@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, type ReactNode } from "react";
 
 import { subjectsApi } from "@/api/subjects";
 import {
@@ -15,11 +15,10 @@ import { ProjectPicker } from "@/components/ProjectPicker";
 import { StatusBar } from "@/components/StatusBar";
 import { TabBanner } from "@/components/TabBanner";
 import { TerminalRail } from "@/components/TerminalRail";
-import { TopBar, tabButtonId, tabPanelId } from "@/components/TopBar";
+import { tabButtonId, tabPanelId } from "@/components/TopBar";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
-import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
 import { adoptLoad } from "@/lib/registrySave";
 import { endRecordedSession } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
@@ -68,8 +67,8 @@ function TabFallback() {
 
 /**
  * Everything that runs on behalf of a project: the state socket and its snapshot adoption, the
- * agent's panel events, the registry hydration, the session end, the top bar, the agent rail, the
- * status bar and the tabs.
+ * agent's panel events, the registry hydration, the session end, the agent rail, the status bar
+ * and the tabs.
  */
 export function ProjectShell() {
   const activeTab = useStore((s) => s.gui.active_tab);
@@ -78,7 +77,6 @@ export function ProjectShell() {
   const datasetReady = useStore((s) => s.gui.dataset !== null);
   const projectRoot = useStore(selectProjectRoot);
   const registryCapture = useStore((s) => registryCaptureOf(s.gui.dataset));
-  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     stateSocket.connect();
@@ -87,13 +85,6 @@ export function ProjectShell() {
 
   // Every change to the active tab is sent to the backend's GUI state, debounced.
   useActiveTabSync();
-
-  // Browser ctrl+wheel zoom stays off inside the app; an iframe-embedded tool (TensorBoard)
-  // receives wheel events inside its own document and keeps it.
-  useEffect(() => {
-    if (!rootRef.current) return;
-    return attachCtrlWheelGuard(rootRef.current);
-  }, []);
 
   // Subscribe to agent panel pushes for every tab: a "banner" event becomes that tab's note,
   // and the Annotate panel's pushes also drive the agent-activity indicator.
@@ -200,8 +191,7 @@ export function ProjectShell() {
   };
 
   return (
-    <div ref={rootRef} className="flex-1 flex flex-col min-h-0">
-      <TopBar />
+    <div className="flex-1 flex flex-col min-h-0">
       {/* The agent rail docks to the right; the tabs are its canvas, driven through the
           MCP panel channel. */}
       <div className="flex-1 flex min-h-0">

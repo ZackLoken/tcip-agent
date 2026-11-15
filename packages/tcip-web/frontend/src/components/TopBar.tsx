@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef } from "react";
 
 import { TAB_NAMES } from "@/api/types.generated";
 import { TAB_LABELS } from "@/lib/tabLabels";
 import { useStore } from "@/store";
+import { selectAnnotatorNamed } from "@/store/slices/user";
 import type { TabName } from "@/store/types";
 
 /** The id both this strip's own tab buttons and App's tab panel wrapper derive from a tab
@@ -15,46 +16,21 @@ export function tabPanelId(tab: TabName): string {
   return `tabpanel-${tab}`;
 }
 
-/** One status pill: a dot of the `dot` color class and its `label`, `title` on hover. */
-function StatusPill({ dot, label, title }: { dot: string; label: string; title?: string }) {
-  return (
-    <div
-      title={title}
-      className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[12px]"
-    >
-      <span className={`w-2 h-2 rounded-full ${dot}`} />
-      <span className="text-tcip-muted">{label}</span>
-    </div>
-  );
-}
-
 /**
- * Global app bar: logo, centered tab navigation, agent-rail toggle, and status pills that
- * appear only when something is wrong: a degraded connection, a served bundle not built from
- * its source. The project breadcrumb lives in the StatusBar's lower-right corner; tab-specific
- * tools live in each tab's own toolbar (e.g. AnnotateToolbar), not here.
+ * Global app bar, on every screen: the logo and the `notifications` button; once the person is
+ * named, also the centered tab navigation and the agent-rail toggle. The project breadcrumb
+ * lives in the StatusBar's lower-right corner; tab-specific tools live in each tab's own toolbar
+ * (e.g. AnnotateToolbar), not here.
  */
-export function TopBar() {
+export function TopBar({ notifications }: { notifications: ReactNode }) {
+  const annotatorNamed = useStore(selectAnnotatorNamed);
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
-  const wsStatus = useStore((s) => s.wsStatus);
-  const staleBundle = useStore((s) => s.staleBundle);
   const terminalOpen = useStore((s) => s.terminalOpen);
   const setTerminalOpen = useStore((s) => s.setTerminalOpen);
   // A minimized rail's switch of harness waits for the agent's hand-off; the rail starts the
   // chosen harness once it is open again.
   const handingOff = useStore((s) => s.terminalPhase === "handing-off") && !terminalOpen;
-
-  // Grace window so the initial handshake doesn't flash "reconnecting…" on every load;
-  // hard failures (error/disconnected) surface immediately.
-  const [graceOver, setGraceOver] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setGraceOver(true), 2000);
-    return () => clearTimeout(t);
-  }, []);
-  const degraded =
-    wsStatus === "error" || wsStatus === "disconnected" || (wsStatus === "connecting" && graceOver);
-  const label = wsStatus === "connecting" ? "reconnecting…" : "disconnected, retrying";
 
   const tabRefs = useRef<Partial<Record<TabName, HTMLButtonElement>>>({});
 
@@ -74,7 +50,7 @@ export function TopBar() {
   }
 
   return (
-    <div className="h-topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 border-b border-tcip-border bg-tcip-panel shrink-0">
+    <div className="h-topbar grid grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)] gap-2 items-center px-3 border-b border-tcip-border bg-tcip-panel shrink-0">
       <img
         src="/assets/WHITE_SI_logo_SIDESTACKED.png"
         alt="Savanna Institute"
@@ -82,66 +58,70 @@ export function TopBar() {
         draggable={false}
       />
 
-      {/* Tabs: the grid's auto track keeps them truly centered */}
-      <div role="tablist" aria-label="Tabs" className="flex items-center gap-1 justify-self-center">
-        {TAB_NAMES.map((id, index) => (
+      {/* Tabs: the grid's equal outer tracks keep them centered; on a narrow window the outer
+          tracks keep their content and the tabs scroll, so the logo and the buttons stay reachable */}
+      {annotatorNamed ? (
+        <div
+          role="tablist"
+          aria-label="Tabs"
+          className="flex items-center gap-1 justify-self-center min-w-0 max-w-full overflow-x-auto"
+        >
+          {TAB_NAMES.map((id, index) => (
+            <button
+              key={id}
+              id={tabButtonId(id)}
+              ref={(el) => {
+                if (el) tabRefs.current[id] = el;
+              }}
+              role="tab"
+              aria-selected={activeTab === id}
+              aria-controls={tabPanelId(id)}
+              tabIndex={activeTab === id ? 0 : -1}
+              onClick={() => setActiveTab(id)}
+              onKeyDown={(e) => onTabKeyDown(e, index)}
+              className={`px-3 h-7 rounded text-[13px] font-medium transition-colors ${
+                activeTab === id
+                  ? "bg-tcip-accent text-white"
+                  : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
+              }`}
+            >
+              {TAB_LABELS[id]}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div />
+      )}
+
+      <div className="flex items-center justify-self-end">
+        {notifications}
+
+        {/* Agent rail toggle */}
+        {annotatorNamed && (
           <button
-            key={id}
-            id={tabButtonId(id)}
-            ref={(el) => {
-              if (el) tabRefs.current[id] = el;
-            }}
-            role="tab"
-            aria-selected={activeTab === id}
-            aria-controls={tabPanelId(id)}
-            tabIndex={activeTab === id ? 0 : -1}
-            onClick={() => setActiveTab(id)}
-            onKeyDown={(e) => onTabKeyDown(e, index)}
-            className={`px-3 h-7 rounded text-[13px] font-medium transition-colors ${
-              activeTab === id
+            onClick={() => setTerminalOpen(!terminalOpen)}
+            aria-pressed={terminalOpen}
+            aria-label="Toggle agent terminal"
+            title={
+              handingOff
+                ? "The agent is writing its hand-off; open the rail to start the chosen harness once it is recorded"
+                : undefined
+            }
+            className={`px-2.5 h-7 rounded text-[13px] font-medium transition-colors ${
+              terminalOpen
                 ? "bg-tcip-accent text-white"
                 : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
             }`}
           >
-            {TAB_LABELS[id]}
+            TCIP Agent
+            {handingOff && (
+              <span
+                aria-hidden="true"
+                className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-tcip-warn animate-pulse"
+              />
+            )}
           </button>
-        ))}
-      </div>
-
-      <div className="flex items-center justify-self-end">
-        {/* Connection state: visible only when something is wrong; it self-dismisses once the
-            connection recovers. */}
-        {degraded && (
-          <StatusPill dot={wsStatus === "connecting" ? "bg-tcip-fn" : "bg-tcip-fp"} label={label} />
         )}
-
-        {/* The backend's own sentence: the served bundle is not the one its source builds. */}
-        {staleBundle && <StatusPill dot="bg-tcip-fn" label="stale bundle" title={staleBundle} />}
-
-        {/* Agent rail toggle */}
-        <button
-          onClick={() => setTerminalOpen(!terminalOpen)}
-          aria-pressed={terminalOpen}
-          aria-label="Toggle agent terminal"
-          title={
-            handingOff
-              ? "The agent is writing its hand-off; open the rail to start the chosen harness once it is recorded"
-              : undefined
-          }
-          className={`px-2.5 h-7 rounded text-[13px] font-medium transition-colors ${
-            terminalOpen
-              ? "bg-tcip-accent text-white"
-              : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
-          }`}
-        >
-          TCIP Agent
-          {handingOff && (
-            <span
-              aria-hidden="true"
-              className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-tcip-warn animate-pulse"
-            />
-          )}
-        </button>
       </div>
     </div>
   );

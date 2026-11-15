@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { NotificationsButton } from "@/components/Notifications";
 import { TopBar } from "@/components/TopBar";
 import { useStore } from "@/store";
 
@@ -8,57 +9,41 @@ const initialStoreState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
+  useStore.getState().setUser("grower");
 });
 
 afterEach(cleanup);
 
+/** The top bar as App renders it, its notifications button closed. */
+function renderTopBar() {
+  return render(
+    <TopBar notifications={<NotificationsButton open={false} onToggle={() => {}} />} />,
+  );
+}
+
 describe("TopBar logo", () => {
   it("shows the white side-stacked logo the dark bar calls for", () => {
-    render(<TopBar />);
+    renderTopBar();
     const logos = screen.getAllByRole("img", { name: "Savanna Institute" });
     expect(logos).toHaveLength(1);
     expect(logos[0]).toHaveAttribute("src", "/assets/WHITE_SI_logo_SIDESTACKED.png");
   });
 });
 
-describe("TopBar connection notice", () => {
-  it("shows nothing while the socket is connected", () => {
-    useStore.setState({ wsStatus: "connected" });
-    render(<TopBar />);
-    expect(screen.queryByText(/retrying/i)).not.toBeInTheDocument();
-  });
-
-  it("names a dropped connection, and clears once it reconnects", () => {
-    useStore.setState({ wsStatus: "disconnected" });
-    render(<TopBar />);
-    expect(screen.getByText(/disconnected, retrying/i)).toBeInTheDocument();
-
-    act(() => useStore.setState({ wsStatus: "connected" }));
-    expect(screen.queryByText(/disconnected, retrying/i)).not.toBeInTheDocument();
-  });
-});
-
-describe("TopBar stale bundle notice", () => {
-  const SENTENCE = "The frontend bundle was not built from the source; run the build.";
-
-  it("shows nothing while the backend states no stale bundle", () => {
-    render(<TopBar />);
-    expect(screen.queryByText(/stale bundle/i)).not.toBeInTheDocument();
-  });
-
-  it("names the stale bundle with the backend's sentence, and clears when it states none", () => {
-    useStore.setState({ staleBundle: SENTENCE });
-    render(<TopBar />);
-    expect(screen.getByText(/stale bundle/i).closest("[title]")).toHaveAttribute("title", SENTENCE);
-
-    act(() => useStore.setState({ staleBundle: null }));
-    expect(screen.queryByText(/stale bundle/i)).not.toBeInTheDocument();
+describe("TopBar before a name is committed", () => {
+  it("shows the logo and the notifications button, and neither the tabs nor the agent toggle", () => {
+    act(() => useStore.getState().setUser(""));
+    renderTopBar();
+    expect(screen.getByRole("img", { name: "Savanna Institute" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Notifications" })).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Toggle agent terminal" })).not.toBeInTheDocument();
   });
 });
 
 describe("TopBar tab strip accessibility", () => {
   it("exposes the strip as a tablist and marks the active tab selected", () => {
-    render(<TopBar />);
+    renderTopBar();
     const active = useStore.getState().gui.active_tab;
     const tablist = screen.getByRole("tablist");
     const tabs = screen.getAllByRole("tab");
@@ -70,21 +55,21 @@ describe("TopBar tab strip accessibility", () => {
   });
 
   it("moves aria-selected to the clicked tab", () => {
-    render(<TopBar />);
+    renderTopBar();
     const inferenceTab = screen.getByRole("tab", { name: /inference/i });
     fireEvent.click(inferenceTab);
     expect(inferenceTab).toHaveAttribute("aria-selected", "true");
   });
 
   it("points each tab's aria-controls at that tab's own panel id", () => {
-    render(<TopBar />);
+    renderTopBar();
     const inferenceTab = screen.getByRole("tab", { name: /inference/i });
     expect(inferenceTab).toHaveAttribute("id", "tab-inference");
     expect(inferenceTab).toHaveAttribute("aria-controls", "tabpanel-inference");
   });
 
   it("keeps only the active tab in the Tab order, a roving tabindex", () => {
-    render(<TopBar />);
+    renderTopBar();
     const tabs = screen.getAllByRole("tab");
     const active = tabs.filter((t) => t.getAttribute("aria-selected") === "true");
     const inactive = tabs.filter((t) => t.getAttribute("aria-selected") !== "true");
@@ -98,7 +83,7 @@ describe("TopBar tab strip accessibility", () => {
   });
 
   it("moves selection and focus with the arrow keys, wrapping at either end", () => {
-    render(<TopBar />);
+    renderTopBar();
     const training = screen.getByRole("tab", { name: /training/i });
     fireEvent.click(training);
     training.focus();

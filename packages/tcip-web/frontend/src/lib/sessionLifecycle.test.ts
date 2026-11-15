@@ -6,6 +6,7 @@ import { endRecordedSession, postHeldContributions } from "@/lib/sessionLifecycl
 import { useStore } from "@/store";
 import { textOf } from "@/store/slices/toasts";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
+import { holdingSentence } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, SESSION_WRITES, sessionOf } from "@/test/sessions";
 import { openTestProject, stateEnvelope, TEST_PROJECT, testProject } from "@/test/store";
@@ -235,9 +236,9 @@ describe("session lifecycle", () => {
 
     expect(useStore.getState().heldContributions).toEqual([contribution("a.jpg")]);
     expect(useStore.getState().recordedSession).toBeNull();
-    expect(useStore.getState().toasts.map(textOf)).toEqual([
+    expect(holdingSentence("unconfirmed")).toBe(
       "Could not confirm these visits were recorded; they are sent again with the next visit: a.jpg",
-    ]);
+    );
   });
 
   const UNCONFIRMED = "Recording not confirmed before their project was switched away from: a.jpg";
@@ -247,11 +248,12 @@ describe("session lifecycle", () => {
     useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
     postHeldContributions();
     await flush();
-    expect(useStore.getState().toasts).toHaveLength(1);
+    expect(useStore.getState().holding.unconfirmed).toBeDefined();
 
     useStore.getState().mergeSnapshot(naming(OTHER));
 
     expect(useStore.getState().heldContributions).toEqual([]);
+    expect(useStore.getState().holding.unconfirmed).toBeUndefined();
     expect(useStore.getState().toasts.map(textOf)).toEqual([UNCONFIRMED]);
   });
 
@@ -270,19 +272,20 @@ describe("session lifecycle", () => {
     expect(useStore.getState().toasts.map(textOf)).toEqual([UNCONFIRMED]);
   });
 
-  it("withdraws the notice of unconfirmed visits once a resend confirms them", async () => {
+  it("ends the condition of unconfirmed visits once a resend confirms them", async () => {
     vi.spyOn(sessionsApi, "imageEvent")
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
       .mockResolvedValueOnce(FIRST);
     useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
     postHeldContributions();
     await flush();
-    expect(useStore.getState().toasts).toHaveLength(1);
+    expect(useStore.getState().holding.unconfirmed).toBeDefined();
 
     postHeldContributions();
     await flush();
 
     expect(useStore.getState().heldContributions).toEqual([]);
+    expect(useStore.getState().holding.unconfirmed).toBeUndefined();
     expect(useStore.getState().toasts).toEqual([]);
   });
 
@@ -397,7 +400,7 @@ describe("session lifecycle", () => {
     expect(useStore.getState().recordedSession).toMatchObject({ started: S2 });
   });
 
-  it("keeps visits with no answer held, names every one in one live notice, and records no session for them", async () => {
+  it("keeps visits with no answer held, names every one in one entry, and records no session for them", async () => {
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(new TypeError("Failed to fetch"));
     const images = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"];
     const held = images.map(contribution);
@@ -408,10 +411,11 @@ describe("session lifecycle", () => {
 
     expect(useStore.getState().heldContributions).toEqual(held);
     expect(useStore.getState().recordedSession).toBeNull();
-    expect(useStore.getState().toasts.map(textOf)).toEqual([
+    expect(useStore.getState().notifications.map((e) => e.sentence)).toEqual([
       "Could not confirm these visits were recorded; they are sent again with the next visit: " +
         images.join(", "),
     ]);
+    expect(useStore.getState().toasts).toEqual([]);
   });
 
   it("forgets the recorded session a refused visit named, so the next visit opens a fresh one", async () => {

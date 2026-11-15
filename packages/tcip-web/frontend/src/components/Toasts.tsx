@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { dismissLabel } from "@/lib/dismissLabel";
 import { useStore } from "@/store";
 import type { Toast } from "@/store";
 import { textOf } from "@/store/slices/toasts";
@@ -9,16 +10,6 @@ const LEVEL_CLASS: Record<Toast["level"], string> = {
   info: "text-tcip-fg",
   success: "text-tcip-fg",
 };
-
-const DISMISS_LABEL_WORDS = 6;
-
-/** The dismiss button's own name, so two toasts on screen at once never share one control
- * name: the message's first few words, the whole message when it is already that short. */
-function dismissLabel(message: string): string {
-  const words = message.trim().split(/\s+/);
-  const lead = words.slice(0, DISMISS_LABEL_WORDS).join(" ");
-  return `Dismiss: ${lead}${words.length > DISMISS_LABEL_WORDS ? "…" : ""}`;
-}
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   useEffect(() => {

@@ -7,6 +7,7 @@ import { createBandSelectionSlice } from "@/store/slices/bandSelection";
 import { createBannerSlice } from "@/store/slices/banners";
 import { createCanvasSlice, focusContext } from "@/store/slices/canvas";
 import { createGuiSlice } from "@/store/slices/gui";
+import { createNotificationsSlice } from "@/store/slices/notifications";
 import { createPendingTerminalMessageSlice } from "@/store/slices/pendingTerminalMessage";
 import { createProjectOpenSlice } from "@/store/slices/projectOpen";
 import { createRegistryStatusSlice } from "@/store/slices/registryStatus";
@@ -31,6 +32,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createRegistryStatusSlice(...a),
   ...createAgentActivitySlice(...a),
   ...createToastSlice(...a),
+  ...createNotificationsSlice(...a),
   ...createBannerSlice(...a),
   ...createTerminalOpenSlice(...a),
   ...createPendingTerminalMessageSlice(...a),

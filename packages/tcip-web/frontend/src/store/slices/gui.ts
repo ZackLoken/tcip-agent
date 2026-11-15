@@ -44,15 +44,11 @@ export interface GuiSlice {
   gui: GuiState;
   /** The project the backend has open, from its state envelope or the open request's answer. */
   openProject: SnapshotProject | null;
-  wsStatus: "disconnected" | "connecting" | "connected" | "error";
   /** Highest backend state version applied; used to drop stale snapshot replays. */
   wsVersion: number;
   /** This backend process's launch identity, from the envelope; a change accepts a lower
    *  wsVersion instead of dropping it as a stale replay (a restarted backend's own snapshot). */
   wsEpoch: string | null;
-  /** The sentence the backend's latest envelope states for a bundle not built from its source,
-   *  `null` when it states none. */
-  staleBundle: string | null;
 
   patchGui: (partial: Partial<GuiState>) => void;
   /** Clear the dataset selection, returning the GUI to the project front door. */
@@ -71,8 +67,6 @@ export interface GuiSlice {
    * envelope's project and epoch are adopted in this one update.
    */
   mergeSnapshot: (envelope: StateSnapshotMessage) => void;
-  setWsStatus: (s: "disconnected" | "connecting" | "connected" | "error") => void;
-  setStaleBundle: (sentence: string | null) => void;
   setActiveTab: (tab: TabName) => void;
   setView: (view: ViewState) => void;
   setMode: (mode: Mode) => void;
@@ -82,10 +76,8 @@ export interface GuiSlice {
 export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, get) => ({
   gui: GUI_STATE_DEFAULTS,
   openProject: null,
-  wsStatus: "disconnected",
   wsVersion: 0,
   wsEpoch: null,
-  staleBundle: null,
 
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
   clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: null } })),
@@ -187,8 +179,6 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
     }
   },
 
-  setWsStatus: (wsStatus) => set({ wsStatus }),
-  setStaleBundle: (staleBundle) => set({ staleBundle }),
   setActiveTab: (active_tab) =>
     set((s) => {
       // Write-through so the next open of this project resumes on the tab last worked in.
