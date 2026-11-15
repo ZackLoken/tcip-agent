@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api/client";
 import type { OpenAnswer, ReadProject } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
-import { openWithDefaults } from "@/lib/openProject";
+import { openKey, openWithDefaults } from "@/lib/openProject";
 import { useStore } from "@/store";
+import { selectStanding } from "@/store/slices/notifications";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import {
   SELECTED_SUBJECT as SUBJECT,
@@ -52,7 +53,8 @@ afterEach(cleanup);
 beforeEach(() => {
   localStorage.removeItem("tcip.recent_projects");
   useStore.getState().setUser("grower");
-  useStore.getState().patchOpenStatus({ opening: null, openError: null });
+  useStore.getState().patchOpenStatus({ opening: null });
+  useStore.setState({ notifications: [] });
   vi.mocked(api.projects.list).mockReset();
   vi.mocked(api.projects.open).mockReset();
   vi.mocked(api.dataset.select).mockReset();
@@ -124,18 +126,21 @@ describe("recent-projects menu through the one opening transition", () => {
     expect(listingsBeforeOpen).toBe(1);
   });
 
-  it("records and toasts a failed open for the project it was started for", async () => {
+  it("lists a failed open as an entry for the project it was started for", async () => {
     recent(VALLEY, RIDGE);
     vi.mocked(api.projects.open).mockRejectedValue(new Error("ridge refused"));
     render(<ProjectBreadcrumb />);
     fireEvent.click(screen.getByTitle("Recent projects"));
     fireEvent.click(await screen.findByText(RIDGE.record.display_name));
 
-    await waitFor(() => expect(useStore.getState().openError?.message).toContain("ridge refused"));
-    expect(useStore.getState().openError?.projectId).toBe(RIDGE.record.id);
-    expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
-      expect.stringContaining("ridge refused"),
+    await waitFor(() =>
+      expect(selectStanding(openKey(RIDGE.record.id))(useStore.getState())?.sentence).toContain(
+        "ridge refused",
+      ),
     );
+    expect(useStore.getState().notifications.map((e) => e.context.project)).toEqual([
+      RIDGE.record.id,
+    ]);
   });
 
   it("drops a date switch's result once a snapshot adopted another project", async () => {

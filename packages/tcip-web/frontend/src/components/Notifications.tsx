@@ -1,13 +1,15 @@
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 
 import { dismissLabel } from "@/lib/dismissLabel";
 import { useStore } from "@/store";
 import {
+  LEVELS,
   type NotificationEntry,
   selectHoldingLevel,
   selectNewCount,
+  selectStanding,
+  textOf,
 } from "@/store/slices/notifications";
-import { LEVELS } from "@/store/slices/toasts";
 
 export const NOTIFICATIONS_HEADING_ID = "notifications-heading";
 
@@ -59,41 +61,93 @@ export const NotificationsButton = forwardRef<
   );
 });
 
-function NotificationItem({ entry, ongoing }: { entry: NotificationEntry; ongoing: boolean }) {
+/** Where an entry is shown: in the notifications area, or in place beside the control it stands
+ *  for, where it is the entry standing on `entryKey` and `afterDismiss` puts focus back. */
+type Placement =
+  | { placement: "area"; entry: NotificationEntry }
+  | { placement: "in place"; entryKey: string; afterDismiss: () => void };
+
+/**
+ * The one entry component. In the area it shows the entry's text, level, kind, target, time,
+ * count, action and dismiss control, and whether a condition still holds; in place it shows the
+ * entry standing on its key, while one is listed, with its text, count, action and dismiss
+ * control, and nothing when none stands.
+ */
+export function NotificationItem(props: Placement) {
+  const standing = useStore((s) =>
+    props.placement === "area" ? props.entry : selectStanding(props.entryKey)(s),
+  );
+  const holding = useStore((s) => s.holding);
   const dismiss = useStore((s) => s.dismissNotification);
+  const textId = useId();
+  if (!standing) return null;
+  const entry = standing;
   const { word, tone, mark } = LEVELS[entry.level];
+  const text = textOf(entry);
   const at = new Date(entry.time);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const count = entry.count > 1 ? `, ${entry.count} times` : "";
+  const action = entry.action && (
+    <button
+      type="button"
+      className="tcip-btn h-6 shrink-0 px-2 text-[12px]"
+      aria-describedby={textId}
+      onClick={entry.action.run}
+    >
+      {entry.action.label}
+    </button>
+  );
+  const dismissControl = (
+    <button
+      type="button"
+      className="h-6 w-6 shrink-0 rounded text-tcip-muted hover:bg-tcip-hover hover:text-tcip-fg"
+      onClick={() => {
+        dismiss(entry.id);
+        if (props.placement === "area") document.getElementById(NOTIFICATIONS_HEADING_ID)?.focus();
+        else props.afterDismiss();
+      }}
+      aria-label={`${dismissLabel(text)} (${time})`}
+    >
+      ×
+    </button>
+  );
+
+  if (props.placement === "in place") {
+    return (
+      <div data-testid="entry-in-place" className="flex items-start gap-2 text-[13px]">
+        <p id={textId} className={`min-w-0 flex-1 break-words leading-6 ${tone}`}>
+          {text}
+          {count && <span className="text-tcip-muted">{count}</span>}
+        </p>
+        {action}
+        {dismissControl}
+      </div>
+    );
+  }
+  const meta = [word, entry.kind, entry.context.target].filter(Boolean).join(", ");
   return (
     <li className="flex items-start gap-2 py-2.5 pr-2">
       <span aria-hidden="true" className={`w-0.5 self-stretch rounded-full ${mark}`} />
       <div className="min-w-0 flex-1 pl-1">
-        <p className={`break-words text-[13px] leading-snug ${tone}`}>{entry.sentence}</p>
-        <p className="mt-1 text-[11px] text-tcip-muted tabular-nums">
-          {word}, <time dateTime={at.toISOString()}>{time}</time>
-          {ongoing ? ", ongoing" : ", ended"}
+        <p id={textId} className={`break-words text-[13px] leading-snug ${tone}`}>
+          {text}
         </p>
+        <p className="mt-1 text-[11px] text-tcip-muted tabular-nums">
+          {meta}, <time dateTime={at.toISOString()}>{time}</time>
+          {count}
+          {entry.condition && (holding[entry.condition] === entry.id ? ", ongoing" : ", ended")}
+        </p>
+        {action && <div className="mt-2">{action}</div>}
       </div>
-      <button
-        className="h-6 w-6 shrink-0 rounded text-tcip-muted hover:bg-tcip-hover hover:text-tcip-fg"
-        onClick={() => {
-          dismiss(entry.id);
-          document.getElementById(NOTIFICATIONS_HEADING_ID)?.focus();
-        }}
-        aria-label={`${dismissLabel(entry.sentence)} (${time})`}
-      >
-        ×
-      </button>
+      {dismissControl}
     </li>
   );
 }
 
-/** The notifications area's content: every listed entry, newest first, each in one entry
- *  component with its level, time, sentence, whether its condition still holds and its dismiss
- *  control. */
+/** The notifications area's content: every listed entry, newest first, each in the one entry
+ *  component. */
 export function NotificationsPane() {
   const entries = useStore((s) => s.notifications);
-  const holding = useStore((s) => s.holding);
 
   return (
     <section
@@ -110,11 +164,7 @@ export function NotificationsPane() {
       {entries.length ? (
         <ul className="flex flex-col gap-1 px-2 pb-3">
           {entries.toReversed().map((entry) => (
-            <NotificationItem
-              key={entry.id}
-              entry={entry}
-              ongoing={holding[entry.condition] === entry.id}
-            />
+            <NotificationItem key={entry.id} placement="area" entry={entry} />
           ))}
         </ul>
       ) : (
@@ -134,10 +184,10 @@ export function NotificationsLiveRegion() {
   return (
     <div className="sr-only">
       <div role="status" aria-live="polite">
-        {announced && live === "polite" && <span key={announced.id}>{announced.sentence}</span>}
+        {announced && live === "polite" && <span key={announced.id}>{textOf(announced)}</span>}
       </div>
       <div role="alert" aria-live="assertive">
-        {announced && live === "assertive" && <span key={announced.id}>{announced.sentence}</span>}
+        {announced && live === "assertive" && <span key={announced.id}>{textOf(announced)}</span>}
       </div>
     </div>
   );

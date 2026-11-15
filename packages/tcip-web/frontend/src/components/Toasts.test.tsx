@@ -116,22 +116,6 @@ describe("Toasts stack", () => {
       "four",
       "five",
     ]);
-    s.pushRefusal("c", "a.jpg", "refused");
-    expect(useStore.getState().toasts).toHaveLength(4);
-  });
-});
-
-describe("Toasts refusal notice", () => {
-  it("shows and names a notice of refusals by the text its refusals give, holding no text of its own", () => {
-    render(<Toasts />);
-    act(() => useStore.getState().pushRefusal("refused", "a.jpg", "ended"));
-    act(() => useStore.getState().pushRefusal("refused", "b.jpg", "ended"));
-
-    expect(useStore.getState().toasts[0].message).toBeUndefined();
-    expect(screen.getByText("Not recorded (ended): a.jpg, b.jpg")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Dismiss: Not recorded (ended): a.jpg, b.jpg" }),
-    ).toBeInTheDocument();
   });
 });
 

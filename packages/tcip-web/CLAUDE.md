@@ -249,7 +249,7 @@ its colors and fonts the tokens in `frontend/src/index.css` and its logos in
   application tells a person about its state or an error: a failed request, a background job's
   end, a lasting condition such as a lost connection, and every refusal. A refusal is still written
   where "What a person meets at the screen" puts it, and the area records the same message from
-  the one source that says it. Each entry holds its time, its sentence and any action it offers,
-  and is dismissable, as "What a person meets at the screen" requires. No message pops up and none
-  leaves on a timer; the button shows how many entries are new and whether a lasting condition
-  holds.
+  the one source that says it. Each entry holds its kind, its context, its time, its sentence and
+  any action it offers, and is dismissable, as "What a person meets at the screen" requires. No
+  message pops up and none leaves on a timer; the button shows how many entries are new and
+  whether a lasting condition holds.

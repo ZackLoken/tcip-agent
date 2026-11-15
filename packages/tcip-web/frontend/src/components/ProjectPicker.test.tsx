@@ -8,12 +8,14 @@ import {
   type OpenAnswer,
   type ProjectsListing,
   READ,
+  type ReadProject,
   type SnapshotProject,
   UNREAD,
 } from "@/api/types.generated";
 import { LISTING_REFRESH_MS, ProjectPicker } from "@/components/ProjectPicker";
-import { startOpen } from "@/lib/openProject";
+import { openKey, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
+import { selectStanding } from "@/store/slices/notifications";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { stateEnvelope, SUBJECT_SELECT_ANSWER } from "@/test/store";
 
@@ -58,6 +60,9 @@ function backendHoldsValleyOpen() {
   vi.mocked(api.projects.open).mockResolvedValue(openedAs(VALLEY));
   vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
 }
+
+/** The failed open standing for the listed project `p`, null when none does. */
+const openFailure = (p: ReadProject) => selectStanding(openKey(p.record.id))(useStore.getState());
 
 const initialStoreState = useStore.getState();
 
@@ -314,8 +319,8 @@ describe("ProjectPicker", () => {
 
       await act(() => Promise.resolve(reject(new Error("valley refused"))));
 
-      expect(useStore.getState().openError?.projectId).toBe(VALLEY.record.id);
-      expect(useStore.getState().openError?.message).toContain("valley refused");
+      expect(openFailure(VALLEY)?.context.project).toBe(VALLEY.record.id);
+      expect(openFailure(VALLEY)?.sentence).toContain("valley refused");
       expect(await screen.findByText(/valley refused/)).toBeInTheDocument();
       expect(useStore.getState().opening).toBeNull();
     });
@@ -327,7 +332,7 @@ describe("ProjectPicker", () => {
 
       await act(() => Promise.resolve(reject(new Error("valley refused"))));
 
-      expect(useStore.getState().openError).toBeNull();
+      expect(useStore.getState().notifications).toEqual([]);
       expect(screen.queryByText(/valley refused/)).not.toBeInTheDocument();
       expect(useStore.getState().opening).toBeNull();
     });
@@ -339,7 +344,7 @@ describe("ProjectPicker", () => {
 
       await act(() => Promise.resolve(reject(new Error("valley refused"))));
 
-      expect(useStore.getState().openError).toBeNull();
+      expect(useStore.getState().notifications).toEqual([]);
     });
 
     it("applies a success while the project is still the chosen one", async () => {
@@ -458,7 +463,7 @@ describe("ProjectPicker", () => {
         requestId: second,
         projectId: VALLEY.record.id,
       });
-      expect(useStore.getState().openError).toBeNull();
+      expect(useStore.getState().notifications).toEqual([]);
     });
 
     it("leaves one request when a second open is started beside one in flight", async () => {
@@ -475,27 +480,22 @@ describe("ProjectPicker", () => {
 
     it("shows a failure only on the card of the project it belongs to", async () => {
       vi.mocked(api.projects.list).mockResolvedValue(LISTING);
+      vi.mocked(api.projects.open)
+        .mockRejectedValueOnce(new Error("valley refused"))
+        .mockRejectedValueOnce(new Error("ridge refused"));
       render(<ProjectPicker />);
       await screen.findByText(RIDGE.record.display_name);
-      act(() => {
-        const state = useStore.getState();
-        state.patchOpenChoice({
-          projectId: RIDGE.record.id,
-          date: RIDGE.tree.captures[0].name,
-        });
-        state.patchOpenStatus({
-          openError: { projectId: VALLEY.record.id, message: "valley refused" },
-        });
-      });
+      const [{ name: ridgeDate }] = RIDGE.tree.captures;
+      act(() =>
+        useStore.getState().patchOpenChoice({ projectId: RIDGE.record.id, date: ridgeDate }),
+      );
+      await act(() => startOpen(VALLEY, null, null, null));
 
+      expect(useStore.getState().notifications).toHaveLength(1);
       expect(screen.queryByText(/valley refused/)).not.toBeInTheDocument();
 
-      act(() =>
-        useStore.getState().patchOpenStatus({
-          openError: { projectId: RIDGE.record.id, message: "ridge refused" },
-        }),
-      );
-      expect(screen.getByText(/ridge refused/)).toBeInTheDocument();
+      await act(() => startOpen(RIDGE, ridgeDate, null, null));
+      expect(within(screen.getByTestId("entry-in-place")).getByText(/ridge refused/)).toBeVisible();
     });
   });
 
@@ -588,10 +588,38 @@ describe("ProjectPicker", () => {
       user: "grower",
     });
     await waitFor(() =>
-      expect(useStore.getState().toasts.at(-1)?.message).toBe(
-        `Removed ${VALLEY.record.display_name}. Archived as ${removed.archive_name}.`,
-      ),
+      expect(useStore.getState().notifications.at(-1)).toMatchObject({
+        kind: "notice",
+        level: "info",
+        sentence: `Removed ${VALLEY.record.display_name}. Archived as ${removed.archive_name}.`,
+        context: { project: VALLEY.record.id },
+      }),
     );
+  });
+
+  it("warns, naming the project, when the recent projects list was not updated behind a removal", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue(LISTING);
+    vi.mocked(api.projects.remove).mockResolvedValue(PROJECT_FIXTURES.removed);
+    localStorage.setItem("tcip.recent_projects", "{}");
+    render(<ProjectPicker />);
+
+    fireEvent.click(await screen.findByText(VALLEY.record.display_name));
+    fireEvent.click(screen.getByText("Remove…"));
+    fireEvent.change(screen.getByLabelText("Type the project name to confirm"), {
+      target: { value: VALLEY.record.display_name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => expect(useStore.getState().notifications).toHaveLength(2));
+    localStorage.removeItem("tcip.recent_projects");
+    expect(useStore.getState().notifications[0]).toMatchObject({
+      kind: "notice",
+      level: "warning",
+      sentence:
+        "Removed, but the recent projects list was not updated: " +
+        "the recent-projects list in this browser does not hold project ids: {}",
+      context: { project: VALLEY.record.id, target: VALLEY.record.display_name },
+    });
   });
 
   it("renames a project's display name by its id", async () => {
@@ -614,5 +642,15 @@ describe("ProjectPicker", () => {
       display_name: renamed.record.display_name,
       user: "grower",
     });
+    await waitFor(() =>
+      expect(useStore.getState().notifications).toEqual([
+        expect.objectContaining({
+          kind: "notice",
+          level: "info",
+          sentence: `Renamed ${VALLEY.record.display_name} to ${renamed.record.display_name}.`,
+          context: { project: VALLEY.record.id, target: VALLEY.record.display_name },
+        }),
+      ]),
+    );
   });
 });

@@ -3,7 +3,7 @@
  *
  * `wanted` is asked first and again once a requested selection resolves; while it answers true,
  * a dataset root differing from the selection in root, subject, date or bucket is selected
- * through `/dataset/select` and adopted, a label problem it names toasted, then each stated image
+ * through `/dataset/select` and adopted, a label problem it names raised, then each stated image
  * index (persisted), mode, active subject and focused proposal applied and the Annotate tab
  * shown. Answers `adopted` when the focus was applied, `declined-unselected` when `wanted`
  * answered false before any selection was requested, and `declined-selected` when it answered
@@ -13,7 +13,7 @@
 
 import { api } from "@/api/client";
 import type { AnnotateFocus } from "@/api/types.generated";
-import { toastLabelProblem } from "@/lib/labelProblemToast";
+import { raiseLabelProblem } from "@/lib/labelProblem";
 import { useStore } from "@/store";
 
 export type AnnotateFocusOutcome = "adopted" | "declined-unselected" | "declined-selected";
@@ -40,7 +40,7 @@ export async function applyAnnotateFocus(
     });
     if (!wanted()) return "declined-selected";
     useStore.getState().applyRestoredDataset(res.selection, project);
-    toastLabelProblem(res.label_problem);
+    raiseLabelProblem(res.label_problem, project.id);
   }
   // Apply the view controls after any dataset switch has resolved, so a same-identity
   // snapshot (which keeps index/mode local) can't overwrite them.

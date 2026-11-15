@@ -17,8 +17,9 @@ staged bucket and the flag's id read under the scene's names for them
 ``registry_unstored``, the load before any registry is stored, ``registry_bare``, the load once
 its subject is declared, ``registry_saved``, the first registry save, ``registry_stale``, the
 refusal of it repeated over its stale version, ``registry_audit_gap``, the second's refusal, and
-``registry_loaded``, the registry the load route then serves; each refusal is kept with its
-status.
+``registry_loaded``, the registry the load route then serves, and ``registry_unreadable``, what it
+serves once a second image's saved label document is damaged in the store; each refusal is kept
+with its status.
 
     python -m tools.generate_labels_fixture
 """
@@ -72,13 +73,14 @@ def produce() -> dict[str, JsonValue]:
     A route refusing what it should admit raises.
     """
     from tcip_annotation.flags import FlagRequest, PointTarget
-    from tcip_mcp.dataset_layout import Gestures, image_dir
+    from tcip_mcp.dataset_layout import Gestures, image_dir, label_key_of
     from tcip_web.routes.annotate import (
         AnnotationPayload,
         SavedLabels,
         SavePayload,
     )
     from tests._producer_fixtures import staged_box, write_image
+    from tests._record_damage_fixtures import damage_record
     from tests._web_fixtures import named_project
 
     with scratch_session() as (workspace, client):
@@ -127,6 +129,24 @@ def produce() -> dict[str, JsonValue]:
         )
         resolved = answered(client, "save_labels", 200, resolve)
         registry = _registry_saves(client, str(root))
+        damaged = write_image(image_dir(root, CAPTURE) / "b.jpg", FRAME)
+        answered(
+            client,
+            "save_labels",
+            200,
+            SavePayload(
+                image_path=str(damaged),
+                user=ACTOR,
+                annotations=[AnnotationPayload(subject=SUBJECT, bbox=BOX)],
+            ),
+        )
+        damage_record(label_key_of(damaged), b"[]")
+        unreadable = answered(
+            client,
+            "load_subjects",
+            200,
+            params={"dataset_root": str(root), "date": CAPTURE},
+        )
         return normalized(
             {
                 "saved": saved,
@@ -135,6 +155,7 @@ def produce() -> dict[str, JsonValue]:
                 "resolved": resolved,
                 "version_conflict": stale,
                 **registry,
+                "registry_unreadable": unreadable,
             },
             workspace,
             instants=LABEL_DOCUMENT_STAMPS,

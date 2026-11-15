@@ -752,18 +752,49 @@ describe("AnnotateToolbar review queue", () => {
     expect(screen.getByRole("textbox", { name: "Image position" })).toHaveValue("1");
   });
 
-  it("shows a failed job's error as the backend wrote it and holds no ordering", async () => {
+  it("lists a failed job's error as the backend wrote it in one entry, holding no ordering, and the same end read again adds none", async () => {
     openTestProject(QUEUE_SELECTION);
     useStore.getState().setReviewQueue(LAUNCHED);
-    vi.spyOn(api.annotate, "queueJob").mockResolvedValue(FAILED);
+    const read = vi.spyOn(api.annotate, "queueJob").mockResolvedValue(FAILED);
     renderToolbar();
 
     await waitFor(
-      () => expect(useStore.getState().toasts.map((t) => t.message)).toContain(FAILED_ERROR),
+      () =>
+        expect(useStore.getState().notifications.map((e) => [e.kind, e.sentence])).toEqual([
+          ["job", FAILED_ERROR],
+        ]),
       { timeout: 5000 },
     );
     expect(useStore.getState().annotateUi.imageFilter).toBe("all");
     expect(screen.queryByRole("option", { name: /^review queue/ })).toBeNull();
+
+    act(() => useStore.getState().setReviewQueue(LAUNCHED));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2), { timeout: 5000 });
+    await waitFor(() =>
+      expect(useStore.getState().annotateUi.reviewQueue?.state).toEqual(FAILED.state),
+    );
+    expect(useStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("lists a failed read of the job as its one entry and drops the held job", async () => {
+    openTestProject(QUEUE_SELECTION);
+    useStore.getState().setReviewQueue(LAUNCHED);
+    vi.spyOn(api.annotate, "queueJob").mockRejectedValue(new TypeError("Failed to fetch"));
+    renderToolbar();
+
+    await waitFor(
+      () =>
+        expect(useStore.getState().notifications).toEqual([
+          expect.objectContaining({
+            kind: "job",
+            level: "error",
+            sentence: "Failed to fetch",
+            key: `review-queue:${LAUNCHED.job_id}`,
+          }),
+        ]),
+      { timeout: 5000 },
+    );
+    expect(useStore.getState().annotateUi.reviewQueue).toBeNull();
   });
 
   it("offers a held queue only on the capture it ranked", () => {

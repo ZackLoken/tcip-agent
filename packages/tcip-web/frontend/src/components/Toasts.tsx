@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { useStore } from "@/store";
 import type { Toast } from "@/store";
-import { LEVELS, textOf } from "@/store/slices/toasts";
+import { LEVELS } from "@/store/slices/notifications";
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   useEffect(() => {
@@ -12,7 +12,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
   }, [toast.id, onDismiss]);
 
   const { live, tone } = LEVELS[toast.level];
-  const text = textOf(toast);
+  const text = toast.message;
   return (
     <div
       role={live === "assertive" ? "alert" : "status"}
