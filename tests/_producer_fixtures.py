@@ -20,7 +20,7 @@ from tests._mapping_fixtures import CROP
 from tests._training_values import drawn_split
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     import numpy as np
     import pytest
@@ -446,6 +446,76 @@ def write_band_group(
             ),
         )
     )
+
+
+def write_grouped_capture(
+    images_dir: Path, stem: str, bands: Sequence[str], size: int
+) -> tuple[Path, dict[str, Path]]:
+    """Write ``stem``'s band group into ``images_dir``, its directory made.
+
+    Each of ``bands`` is a ``size`` px square single-band uint16 TIFF ``<stem>_<band>.tif``, the
+    n-th filled at ``111 * n``, grouped by :func:`write_band_group` under no wavelengths. Returns
+    the manifest and the band files by name.
+    """
+    import numpy as np
+    import tifffile
+
+    images_dir.mkdir(parents=True, exist_ok=True)
+    files = {band: images_dir / f"{stem}_{band}.tif" for band in bands}
+    for n, path in enumerate(files.values(), start=1):
+        tifffile.imwrite(
+            str(path), np.full((size, size), 111 * n, dtype=np.uint16)
+        )
+    manifest = write_band_group(
+        images_dir, stem, files, central_wavelength_nm=None
+    )
+    return manifest, files
+
+
+def labeled_grouped_capture(root: Path, capture: str) -> GroupedDataset:
+    """Write a grouped capture and a photograph into ``root``'s ``capture``, each labeled.
+
+    The group ``capture_001`` is :func:`write_grouped_capture`'s Green and Red bands at 16 px, the
+    photograph ``plain_002.jpg`` 16 px at (5, 5, 5); each holds one ``bud`` box in its label
+    document, and ``root``'s registry declares ``bud``.
+    """
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = image_dir(root, capture)
+    images_dir.mkdir(parents=True)
+    registry_over(root, registry_of("bud"))
+    manifest, bands = write_grouped_capture(
+        images_dir, "capture_001", ("Green", "Red"), 16
+    )
+    plain = write_image(images_dir / "plain_002.jpg", (16, 16), (5, 5, 5))
+    for source in (manifest, plain):
+        label_image(
+            source,
+            [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
+            16,
+            16,
+        )
+    return GroupedDataset(root, images_dir, manifest, bands, plain)
+
+
+def write_stray(images_dir: Path) -> Path:
+    """Write ``notes.txt``, a file whose suffix names no image, into ``images_dir``; return it."""
+    stray = images_dir / "notes.txt"
+    stray.write_bytes(b"field notes")
+    return stray
+
+
+def refusal_sentence(read: Callable[[Path], object], path: Path) -> str:
+    """Return the sentence ``read`` refuses ``path`` with.
+
+    ``read`` is the resolver (``image_utils.resolve_image_path``) or the enumerator
+    (``image_utils.list_logical_images``); a ``read`` that answers fails the test.
+    """
+    import pytest
+
+    with pytest.raises(Exception) as refused:
+        read(path)
+    return str(refused.value)
 
 
 def stub_images(images_dir: Path, names: list[str]) -> list[Path]:

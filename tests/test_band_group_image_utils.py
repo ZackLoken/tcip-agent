@@ -102,19 +102,26 @@ def test_resolve_image_path_refuses_a_band_member_naming_its_manifest(
     A band of a grouped capture is no logical image of its own: its path refuses naming the
     manifest that claims it, and the manifest's path admits the grouped capture.
     """
-    from tcip_mcp.pipelines.image_utils import BandGroupRef, resolve_image_path
+    from tcip_mcp.pipelines.image_utils import (
+        BandGroupRef,
+        ImageNotNamedError,
+        resolve_image_path,
+    )
 
-    with pytest.raises(FileNotFoundError, match=grouped_dir.manifest.name):
+    with pytest.raises(ImageNotNamedError, match=grouped_dir.manifest.name):
         resolve_image_path(grouped_dir.bands["Red"])
     assert isinstance(resolve_image_path(grouped_dir.manifest), BandGroupRef)
 
 
-def test_resolve_image_path_unknown_path_raises_file_not_found(
+def test_resolve_image_path_unknown_path_raises_image_not_named(
     grouped_dir: GroupedDataset,
 ) -> None:
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.image_utils import (
+        ImageNotNamedError,
+        resolve_image_path,
+    )
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ImageNotNamedError):
         resolve_image_path(grouped_dir.images_dir / "does_not_exist.jpg")
 
 

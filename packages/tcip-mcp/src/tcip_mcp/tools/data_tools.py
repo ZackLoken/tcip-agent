@@ -206,14 +206,14 @@ def scan_dataset(project: Path, folder_path: str) -> dict:
 
     """
     from tcip_mcp.buckets import buckets_under
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
 
     root = located(folder_path, project)
     if not root.is_dir():
         return {"error": f"Directory not found: {folder_path}"}
     try:
         scan = _scan_dataset(str(root))
-    except AmbiguousImageStemError as exc:
+    except LogicalImageError as exc:
         return {"error": str(exc)}
 
     labels = set(scan["labels"])
@@ -381,10 +381,7 @@ def draw_splits_at(
         stated_shares,
     )
     from tcip_mcp.pipelines.data.splits import foreground_group_count
-    from tcip_mcp.pipelines.image_utils import (
-        AmbiguousImageStemError,
-        BandGroupIncompleteError,
-    )
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
 
     # Each place holding ground truth: (its name, images directory, ground truth).
     places: list[tuple[str, Path, str | None]]
@@ -429,10 +426,8 @@ def draw_splits_at(
             ratios=ratios,
         )
     except (
+        LogicalImageError,
         UnreadableLabelDocumentError,
-        AmbiguousImageStemError,
-        BandGroupIncompleteError,
-        FileNotFoundError,
         ValueError,
         OSError,
     ) as exc:
@@ -560,6 +555,7 @@ def plant_aware_group_splits(
     """
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.splits import member_identity
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
 
     root = located(folder_path, project)
@@ -584,7 +580,7 @@ def plant_aware_group_splits(
                 nn_tolerance_m=tolerance_m,
             ),
         )
-    except ValueError as exc:
+    except (LogicalImageError, ValueError) as exc:
         return {"error": str(exc)}
     return draw_splits_at(
         project,

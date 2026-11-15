@@ -170,10 +170,12 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(
     re-form the surviving bands under that stem.
     """
     from tcip_mcp.pipelines.data.band_groups import (
-        BandGroupIncompleteError,
         detect_and_write_band_groups,
     )
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.image_utils import (
+        BandGroupIncompleteError,
+        resolve_image_path,
+    )
 
     result = detect_and_write_band_groups(dji_copy)
     stem = result["formed"][0]["stem"]

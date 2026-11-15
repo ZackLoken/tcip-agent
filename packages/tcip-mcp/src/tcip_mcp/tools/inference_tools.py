@@ -25,6 +25,7 @@ from tcip_mcp.pipelines.execution import (
     Execution,
     Stated,
 )
+from tcip_mcp.pipelines.image_utils import LogicalImageError
 from tcip_mcp.pipelines.raster_source import RasterIdentity
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
@@ -231,7 +232,7 @@ def infer(
             tile_batch_size=tile_batch_size,
             restored=restored,
         ).runnable()
-    except (ExecutionRefusedError, ValueError) as exc:
+    except (ExecutionRefusedError, LogicalImageError, ValueError) as exc:
         return {"error": str(exc)}
 
     # A raster pass reads its raster through one reader, opened at the model's count: the
@@ -258,6 +259,8 @@ def infer(
                     tile_batch_size=tile_batch_size,
                     execution=p.execution,
                 )
+            except LogicalImageError as exc:
+                return {"error": str(exc)}
             except (FileNotFoundError, ValueError) as exc:
                 return {
                     "error": f"raster content identity could not be computed for "

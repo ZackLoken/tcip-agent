@@ -30,6 +30,7 @@ from tcip_mcp.pipelines.data.band_groups import (
 )
 from tcip_mcp.pipelines.image_utils import (
     IMAGE_EXTS,
+    LogicalImageError,
     bucket_logical_identities,
     stem_collision_key,
 )
@@ -484,7 +485,7 @@ def state_capture_date(
         named = [located(image, project) for image in images]
         root = dataset_layout.source_root(named, what="the images to move")
         logical = resolve_image_paths(named)
-    except (ValueError, FileNotFoundError) as exc:
+    except (LogicalImageError, ValueError) as exc:
         return {"error": str(exc)}
     files: list[Path] = []
     rekeyed: list[tuple[tcip_store.Key, tcip_store.Key]] = []
@@ -638,7 +639,7 @@ def import_coco(
             project=project,
             actor=actor,
         )
-    except (ValueError, FileNotFoundError) as exc:
+    except (LogicalImageError, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
 
 
@@ -723,7 +724,12 @@ def export_labels(
                 exported.model_dump_json(indent=2),
                 compress_type=zipfile.ZIP_DEFLATED,
             )
-    except (ValueError, FileExistsError, FileNotFoundError) as exc:
+    except (
+        LogicalImageError,
+        ValueError,
+        FileExistsError,
+        FileNotFoundError,
+    ) as exc:
         return {"error": str(exc)}
     return {
         "destination": str(dest),
@@ -773,6 +779,7 @@ def import_labels(
             actor=actor,
         )
     except (
+        LogicalImageError,
         ValueError,
         KeyError,
         zipfile.BadZipFile,

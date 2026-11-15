@@ -569,3 +569,36 @@ def test_main_cli_answers_a_plant_csv_with_zero_rows_as_its_refusal(
 
     assert rc == 0
     assert "zero rows" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_the_tool_answers_a_capture_holding_two_images_of_one_stem(
+    tmp_path: Path, project: Path, four_plant_csv: Path
+) -> None:
+    """``plant_aware_group_splits`` draws, then answers a second image of one stem as its error.
+
+    The error is the sentence the capture's enumeration refuses with.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tcip_mcp.tools.data_tools import plant_aware_group_splits
+    from tests._producer_fixtures import refusal_sentence, write_image
+
+    dataset_root = _four_plant_dataset(tmp_path)
+
+    def drawn() -> dict:
+        return plant_aware_group_splits(
+            project,
+            str(dataset_root),
+            [str(four_plant_csv)],
+            SUBJECT,
+            seed=0,
+            stratify_foreground=True,
+            rationale=RATIONALE,
+            actor=None,
+            **SHARES,
+        )
+
+    assert "error" not in drawn(), drawn()
+    capture = image_dir(dataset_root, "2026-02-01")
+    write_image(capture / "p1_2026-02-01.png", (SHAPE[1], SHAPE[0]))
+    assert drawn() == {"error": refusal_sentence(list_logical_images, capture)}

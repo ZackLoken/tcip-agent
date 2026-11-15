@@ -442,3 +442,31 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path: Path) -> None:
     failed = job.state
     assert failed.status == "failed", failed
     assert "logical image" in failed.error
+
+
+def test_a_pass_over_a_stem_collision_answers_the_enumerators_sentence(
+    tmp_path: Path,
+) -> None:
+    """``run_inference`` over a capture holding two images of one stem answers its refusal.
+
+    The answer is the sentence the capture's enumeration refuses with, nothing published.
+    """
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._producer_fixtures import refusal_sentence, write_image
+
+    images_dir = _one_image(tmp_path, "foo")
+    write_image(images_dir / "foo.png", (100, 100), (120, 120, 120))
+
+    answered = run_inference(
+        tmp_path,
+        checkpoint_path=str(_checkpoint(tmp_path)),
+        images_dir=str(images_dir),
+        bucket=BUCKET,
+        stated=Stated(conf=0.25, rationale=RATIONALE),
+        actor=None,
+    )
+
+    assert answered == {
+        "error": refusal_sentence(list_logical_images, images_dir)
+    }

@@ -1034,6 +1034,42 @@ def test_two_file_names_of_one_band_group_refuse_whether_annotated_or_not(
     assert _written(root) == []
 
 
+def test_a_capture_that_resolves_no_logical_image_refuses_the_import_with_its_sentence(
+    tmp_path: Path,
+) -> None:
+    """A group missing a band, or two images of one stem, refuse the import with nothing written.
+
+    Each is answered with the sentence the image's own resolution refuses with.
+    """
+    from tcip_mcp.pipelines.image_utils import (
+        list_logical_images,
+        resolve_image_path,
+    )
+    from tests._producer_fixtures import refusal_sentence, write_image
+
+    root = _grouped(tmp_path)
+    images_dir = image_dir(root, DATE)
+    (images_dir / "plot7_R.tif").unlink()
+    grouped = _document(
+        tmp_path / "grouped.json",
+        images=[
+            {"id": 1, "file_name": "plot7.tif", "width": IMG, "height": IMG}
+        ],
+        annotations=[{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}],
+    )
+    assert _import(grouped, root) == {
+        "error": refusal_sentence(
+            resolve_image_path, images_dir / "plot7.bandgroup"
+        )
+    }
+
+    write_image(images_dir / "tree_01.jpg", (IMG, IMG))
+    assert _import(_document(tmp_path / "external.json"), root) == {
+        "error": refusal_sentence(list_logical_images, images_dir)
+    }
+    assert _written(root) == []
+
+
 CROWD = [36.0, 34.0, 20.0, 18.0]
 
 

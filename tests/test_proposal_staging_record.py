@@ -521,6 +521,79 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
     assert admitted.staging_id is not None, admitted
 
 
+def test_each_proposal_door_answers_a_path_naming_no_logical_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proposing and both staging regimes answer a refused path with the resolver's sentence.
+
+    A band of a grouped capture and a file whose suffix names no image each answer it from
+    ``propose_annotations``, ``stage_proposals``' assignments regime and its explicit regime;
+    the group's manifest proposes, accepts and stages explicit shapes.
+    """
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.tools.proposal_tools import (
+        Assignment,
+        StagedAssignments,
+        propose_annotations,
+        stage_proposals,
+    )
+    from tests._producer_fixtures import (
+        refusal_sentence,
+        write_grouped_capture,
+        write_stray,
+    )
+
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    manifest, bands = write_grouped_capture(
+        images_dir, "capture", ("Red", "Green", "Blue"), 48
+    )
+    stray = write_stray(images_dir)
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
+    box = {
+        "subject": "bud",
+        "conf": 0.9,
+        "cx": 0.5,
+        "cy": 0.5,
+        "w": 0.2,
+        "h": 0.2,
+    }
+
+    def answers(image: Path, staging_id: str) -> list:
+        return [
+            propose_annotations(
+                tmp_path, image_path=str(image), engine="stub", actor=None
+            ),
+            stage_proposals(
+                tmp_path,
+                image_path=str(image),
+                actor=None,
+                assignments=StagedAssignments(
+                    staging_id=staging_id,
+                    candidates=[Assignment(candidate_id=0, subject="bud")],
+                ),
+            ),
+            stage_proposals(
+                tmp_path,
+                image_path=str(image),
+                actor=None,
+                boxes=[box],
+                model_name="detector",
+            ),
+        ]
+
+    for refused in (bands["Red"], stray):
+        assert (
+            answers(refused, "staging-none")
+            == [{"error": refusal_sentence(resolve_image_path, refused)}] * 3
+        )
+    proposed = propose_annotations(
+        tmp_path, image_path=str(manifest), engine="stub", actor=None
+    )
+    served = answers(manifest, kept(proposed, (0, "bud")).staging_id)
+    assert not any(isinstance(answer, dict) for answer in served), served
+
+
 def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -325,8 +325,8 @@ def selection_for(choice: DatasetChoice) -> DatasetSelection:
 
     Each image is placed at the path its scan found it at
     (:func:`~tcip_mcp.pipelines.image_utils.source_path_of`); the index is clamped to them. Raises
-    ``AmbiguousImageStemError`` for a capture holding two images of one stem, and ``ValueError``
-    for a ``date`` that is no capture name.
+    ``LogicalImageError`` for a capture the enumerator refuses (two images of one stem), and
+    ``ValueError`` for a ``date`` that is no capture name.
     """
     from tcip_mcp.pipelines.image_utils import (
         logical_images_by_name,
@@ -373,6 +373,7 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     selection will not build raises ``tcip_store.ReadRefusedError`` naming the project: the
     shape's issues, or the sentence of the error that stopped it.
     """
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_mcp.registry_paths import resolved_registry_path
 
     place = f"the GUI snapshot of {project}"
@@ -386,7 +387,7 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     if persisted is None:
         return None
     choice = persisted.dataset
-    with tcip_store.unreadable(place, ValueError):
+    with tcip_store.unreadable(place, LogicalImageError, ValueError):
         dataset = (
             None
             if choice is None

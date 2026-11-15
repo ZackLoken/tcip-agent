@@ -35,7 +35,7 @@ from tcip_mcp.pipelines.execution import (
     ProposalExecution,
 )
 from tcip_mcp.pipelines.image_utils import (
-    BandGroupIncompleteError,
+    LogicalImageError,
     resolve_image_path,
 )
 from tcip_mcp.pipelines.raster_source import RasterIdentity, SourceHeader
@@ -346,8 +346,8 @@ def propose_annotations(
         header = SourceHeader(source)
         raster = header.open_at_route_count()
     except (
+        LogicalImageError,
         FileNotFoundError,
-        BandGroupIncompleteError,
         ValueError,
         ImportError,
     ) as e:
@@ -532,7 +532,7 @@ def _stage_assignments_regime(
     """
     try:
         source = resolve_image_path(img)
-    except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
+    except LogicalImageError as exc:
         return {"error": str(exc)}
 
     stored = ts.read(address, default=None)
@@ -736,7 +736,7 @@ def _stage_explicit_regime(
 
     try:
         img_source = resolve_image_path(img)
-    except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
+    except LogicalImageError as exc:
         return {"error": str(exc)}
     img_w, img_h = SourceHeader(img_source).display_frame
 

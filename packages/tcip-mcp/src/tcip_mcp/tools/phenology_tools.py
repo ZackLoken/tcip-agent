@@ -248,6 +248,7 @@ def build_plant_mapping(
 
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     try:
@@ -270,6 +271,7 @@ def build_plant_mapping(
     except (
         plant_mapping.UngeoreferencedCaptureError,
         AuditEntryNotWrittenError,
+        LogicalImageError,
         ValueError,
     ) as exc:
         return {"error": str(exc)}

@@ -235,12 +235,16 @@ def _resolving[T](read: Callable[[Path], T], path: str) -> tuple[Path, T]:
 
     ``read`` is a reader of the logical image a path names; its resolver's refusals are
     translated: a path naming no logical image (a band of a grouped capture) answers 404 naming
-    why, a grouped capture missing a band 409, and an ambiguous stem 400.
+    why, a grouped capture missing a band 409, and an ambiguous stem 400. A file gone between
+    :func:`allowed_file`'s check and ``read`` answers 404.
     """
     from fastapi import HTTPException
 
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncompleteError
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
+    from tcip_mcp.pipelines.image_utils import (
+        AmbiguousImageStemError,
+        BandGroupIncompleteError,
+        ImageNotNamedError,
+    )
 
     p = allowed_file(path)
     try:
@@ -249,7 +253,7 @@ def _resolving[T](read: Callable[[Path], T], path: str) -> tuple[Path, T]:
         raise HTTPException(409, str(exc)) from exc
     except AmbiguousImageStemError as exc:
         raise HTTPException(400, str(exc)) from exc
-    except FileNotFoundError as exc:
+    except (ImageNotNamedError, FileNotFoundError) as exc:
         raise HTTPException(404, str(exc)) from exc
 
 

@@ -24,14 +24,16 @@ Quantile = Annotated[float, Field(ge=0, le=1)]
 def _refusals() -> tuple[type[Exception], ...]:
     """Return the exception types an assessment refuses with.
 
-    They are ``ValueError``, ``UnreadableLabelDocumentError``, ``UnregisteredCheckpointError``,
-    ``TraitUnknownError`` and ``FileNotFoundError``.
+    They are ``LogicalImageError``, ``ValueError``, ``UnreadableLabelDocumentError``,
+    ``UnregisteredCheckpointError``, ``TraitUnknownError`` and ``FileNotFoundError``.
     """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.model_registry import UnregisteredCheckpointError
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_mcp.traits import TraitUnknownError
 
     return (
+        LogicalImageError,
         ValueError,
         UnreadableLabelDocumentError,
         UnregisteredCheckpointError,

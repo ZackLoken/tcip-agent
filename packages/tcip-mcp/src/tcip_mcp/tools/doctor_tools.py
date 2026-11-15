@@ -47,14 +47,14 @@ def _census(root: Path, findings: list) -> dict | None:
         UnreadableLabelDocumentError,
         read_label_document,
     )
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_mcp.tools.data_tools import _scan_dataset
 
     try:
         scan = _listed(
             "the label census", findings, lambda: _scan_dataset(str(root))
         )
-    except AmbiguousImageStemError as exc:
+    except LogicalImageError as exc:
         findings.append(("error", str(exc)))
         return None
     if scan is None:

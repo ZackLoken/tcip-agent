@@ -199,10 +199,6 @@ class BandGroupRef:
         }
 
 
-class BandGroupIncompleteError(FileNotFoundError):
-    """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk."""
-
-
 def _read_xmp_tags(path: Path) -> dict[str, str] | None:
     """Return flat qualified tags from an embedded XMP packet, or ``None``.
 
