@@ -32,6 +32,7 @@ from tcip_mcp.pipelines.image_utils import (
     IMAGE_EXTS,
     LogicalImageError,
     bucket_logical_identities,
+    read_manifest_or_refuse,
     stem_collision_key,
 )
 from tcip_mcp.registry_paths import located
@@ -300,7 +301,10 @@ def ingest_images(
     when a source's destination stem would create a second logical image under a key another
     source, an existing raw file, or an existing band-group manifest already holds in that bucket;
     re-ingesting the exact same destination file is skipped instead, recorded in
-    ``skipped_collisions``. Does not annotate, split, choose a task, or write ``subjects.json``.
+    ``skipped_collisions``. Raises
+    :class:`~tcip_mcp.pipelines.image_utils.UnreadableBandGroupError`, before anything is copied
+    or moved, when a band-group manifest among the sources will not read. Does not annotate,
+    split, choose a task, or write ``subjects.json``.
 
     Each file's bucket is the capture date it states (a photo's EXIF ``DateTimeOriginal``, a
     raster's own date metadata), read from its header only. The capture date never gates
@@ -336,6 +340,14 @@ def ingest_images(
     sources = list(_iter_source_images(source, recursive))
     if not sources:
         return {"error": f"No images found under {source!r}"}
+
+    for manifest in sources:
+        if manifest.suffix.lower() == MANIFEST_EXT:
+            read_manifest_or_refuse(
+                manifest,
+                "so nothing was copied or moved: "
+                "repair the manifest and ingest again.",
+            )
 
     captured = {
         src_path: _capture_iso_date(src_path, raster_date_item)

@@ -40,6 +40,7 @@ __all__ = [
     "logical_image_name",
     "pil_to_tensor",
     "pixel_array",
+    "read_manifest_or_refuse",
     "refuse_incomplete_band_group",
     "resolve_image_path",
     "resolve_image_paths",
@@ -109,6 +110,21 @@ def stem_collision_key(name: str) -> str:
     return name.lower()
 
 
+def read_manifest_or_refuse(manifest: Path, consequence: str) -> BandGroupRef:
+    """Read the ``.bandgroup`` manifest at ``manifest``, or refuse naming it and the reader's error.
+
+    A manifest whose bytes or record will not read raises :class:`UnreadableBandGroupError`; its
+    sentence is the manifest's path and the reader's error, then ``consequence``, the caller's own
+    closing clause (the consequence and the next step).
+    """
+    try:
+        return read_band_group_manifest(manifest)
+    except (OSError, ValueError) as exc:
+        raise UnreadableBandGroupError(
+            f"the band-group manifest {manifest} will not read ({exc}), {consequence}"
+        ) from exc
+
+
 def scan_identities(d: Path) -> dict[str, list[Path | BandGroupRef]]:
     """Scan ``d`` for its logical identities, keyed by :func:`stem_collision_key`.
 
@@ -124,14 +140,11 @@ def scan_identities(d: Path) -> dict[str, list[Path | BandGroupRef]]:
     identities: dict[str, list[Path | BandGroupRef]] = {}
     claimed: set[Path] = set()
     for mp in sorted(d.glob(f"*{MANIFEST_EXT}")):
-        try:
-            ref = read_band_group_manifest(mp)
-        except (OSError, ValueError) as exc:
-            raise UnreadableBandGroupError(
-                f"the band-group manifest {mp} will not read ({exc}), so no file in {d} can "
-                "be told apart from one of its bands and none is listed: repair or delete the "
-                "manifest to let a later detection pass group the bands again."
-            ) from exc
+        ref = read_manifest_or_refuse(
+            mp,
+            f"so no file in {d} can be told apart from one of its bands and none is listed: "
+            "repair or delete the manifest to let a later detection pass group the bands again.",
+        )
         identities.setdefault(stem_collision_key(ref.stem), []).append(ref)
         claimed.update(ref.bands.values())
     for p in sorted(d.iterdir()):

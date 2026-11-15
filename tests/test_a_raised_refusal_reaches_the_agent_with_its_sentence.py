@@ -3,9 +3,12 @@
 The door cases run the real ``tcip-pipeline`` server in memory through a handshake
 (``tests._server_calls.results_through_handshake``), each over a project the
 platform's own producers set up and a record of it then damaged through
-``tests._record_damage_fixtures``; the expected sentence is the one the platform's own reader of
-that record raises. The cases no door reaches (an empty sentence, an unknown trait's ``KeyError``,
-the SDK's resource and protocol errors) declare one function as a server's only tool.
+``tests._record_damage_fixtures`` (or, for ``ingest_images``, a source folder whose band-group
+manifest the writer wrote and the test then made unreadable); the expected sentence is the one
+the platform's own reader of that record raises, and for ``ingest_images`` the reader's error in
+the sentence the door states around it. The cases no door reaches (an empty sentence,
+an unknown trait's ``KeyError``, the SDK's resource and protocol errors) declare one function as
+a server's only tool.
 """
 
 from __future__ import annotations
@@ -112,7 +115,9 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     are damaged: ``export_labels`` and ``register_dataset`` read it with the store's plain read,
     whose ``DecodeError`` no handler of theirs catches. ``register_plant_registry`` meets the same
     raise reading a damaged registry record before a second registration under its name.
+    ``ingest_images`` raises for a source folder whose band-group manifest will not read.
     """
+    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_registry_key,
     )
@@ -120,10 +125,26 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     from tcip_mcp.tools.phenology_tools import register_plant_registry
     from tcip_mcp.traits import registered_crops
     from tests._mapping_fixtures import PLANTS, write_plant_csv
+    from tests._producer_fixtures import (
+        unreadable_manifest,
+        without_bands,
+        write_grouped_capture,
+    )
 
     source = write_image(project / "raw" / "IMG_0001.png", (16, 16))
     ingested = ingest_images(project, source=str(source.parent), actor=None)
     assert isinstance(ingested, IngestManifest), ingested
+    grouped = project / "raw_group"
+    manifest, _bands = write_grouped_capture(
+        grouped, "cap", ("Green", "Red"), 8
+    )
+    unreadable_manifest(manifest, without_bands)
+    with pytest.raises(ValueError) as unread:
+        read_band_group_manifest(manifest)
+    ingest_sentence = (
+        f"the band-group manifest {manifest} will not read ({unread.value}), "
+        "so nothing was copied or moved: repair the manifest and ingest again."
+    )
     (image,) = (project / "images").rglob("IMG_0001.png")
     label_image(
         image, [{"subject": "bud", "bbox": [2, 2, 8, 8]}], project=project
@@ -148,28 +169,45 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     with pytest.raises(ts.DecodeError) as registry_refused:
         ts.read(registry_key)
 
-    exported, registered, reregistered = results_through_handshake(
-        [
-            (
-                "export_labels",
-                {"dataset_root": str(project), "destination": "labels.zip"},
-            ),
-            (
-                "register_dataset",
-                {"dataset_root": str(project), "crop": crop},
-            ),
-            ("register_plant_registry", registry),
-        ],
-        bound=bound,
+    exported, registered, reregistered, unread_ingest = (
+        results_through_handshake(
+            [
+                (
+                    "export_labels",
+                    {
+                        "dataset_root": str(project),
+                        "destination": "labels.zip",
+                    },
+                ),
+                (
+                    "register_dataset",
+                    {"dataset_root": str(project), "crop": crop},
+                ),
+                ("register_plant_registry", registry),
+                ("ingest_images", {"source": str(grouped)}),
+            ],
+            bound=bound,
+        )
     )
 
-    for door, result, sentence in (
-        ("export_labels", exported, refused.value),
-        ("register_dataset", registered, refused.value),
-        ("register_plant_registry", reregistered, registry_refused.value),
+    for door, error_class, result, sentence in (
+        ("export_labels", "DecodeError", exported, refused.value),
+        ("register_dataset", "DecodeError", registered, refused.value),
+        (
+            "register_plant_registry",
+            "DecodeError",
+            reregistered,
+            registry_refused.value,
+        ),
+        (
+            "ingest_images",
+            "UnreadableBandGroupError",
+            unread_ingest,
+            ingest_sentence,
+        ),
     ):
         assert _text(result) == (
-            f"Error executing tool {door}: DecodeError: {sentence}"
+            f"Error executing tool {door}: {error_class}: {sentence}"
         )
         (line,) = audit_rows(project, door)[-1:]
         assert (line["status"], line["error"]) == ("exception", str(sentence))
