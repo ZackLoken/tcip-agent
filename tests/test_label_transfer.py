@@ -489,22 +489,15 @@ def test_a_band_group_missing_a_band_refuses_the_import_with_its_sentence(
 
     The import answers the sentence the group's own resolution refuses with.
     """
-    import numpy as np
-    import tifffile
-
     from tcip_mcp.pipelines.image_utils import resolve_image_path
-    from tests._producer_fixtures import write_band_group
+    from tests._producer_fixtures import (
+        refusal_sentence,
+        write_grouped_capture,
+    )
 
     root = _project(tmp_path / "first", _photographs(tmp_path / "raw"))
-    images_dir = image_dir(root, FIRST)
-    bands = {
-        "Green": images_dir / "plot7_G.tif",
-        "Red": images_dir / "plot7_R.tif",
-    }
-    for band, fill in zip(bands.values(), (111, 222), strict=True):
-        tifffile.imwrite(str(band), np.full((SIZE, SIZE), fill, np.uint16))
-    manifest = write_band_group(
-        images_dir, "plot7", bands, central_wavelength_nm=None
+    manifest, bands = write_grouped_capture(
+        image_dir(root, FIRST), "plot7", ("Green", "Red"), SIZE
     )
     label_image(
         manifest, [{"subject": "leaf", "bbox": [4, 4, 20, 20]}], project=root
@@ -512,13 +505,11 @@ def test_a_band_group_missing_a_band_refuses_the_import_with_its_sentence(
     container = tmp_path / "labels.zip"
     _export(root, container)
     bands["Red"].unlink()
-    with pytest.raises(Exception) as incomplete:
-        resolve_image_path(manifest)
     before = _stored(root)
 
     answer = import_labels(root, str(container), str(root), actor=BREEDER)
 
-    assert answer == {"error": str(incomplete.value)}
+    assert answer == {"error": refusal_sentence(resolve_image_path, manifest)}
     assert _stored(root) == before
 
 
@@ -529,16 +520,12 @@ def test_a_capture_holding_two_images_of_one_stem_refuses_the_export_and_the_imp
 
     Each answers the sentence the capture's enumeration refuses with.
     """
-    from tcip_mcp.pipelines.image_utils import (
-        LogicalImageError,
-        list_logical_images,
-    )
-    from tests._producer_fixtures import write_image
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tests._producer_fixtures import refusal_sentence, write_image
 
     first, container = exported
     write_image(image_dir(first, FIRST) / "boxes.jpg", (SIZE, SIZE))
-    with pytest.raises(LogicalImageError) as ambiguous:
-        list_logical_images(image_dir(first, FIRST))
+    sentence = refusal_sentence(list_logical_images, image_dir(first, FIRST))
     destination = tmp_path / "again.zip"
     before = _stored(first)
 
@@ -547,7 +534,7 @@ def test_a_capture_holding_two_images_of_one_stem_refuses_the_export_and_the_imp
     )
     importing = import_labels(first, str(container), str(first), actor=BREEDER)
 
-    assert exporting == importing == {"error": str(ambiguous.value)}
+    assert exporting == importing == {"error": sentence}
     assert not destination.exists()
     assert _stored(first) == before
 

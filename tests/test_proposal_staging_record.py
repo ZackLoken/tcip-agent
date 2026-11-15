@@ -531,32 +531,24 @@ def test_each_proposal_door_answers_a_path_naming_no_logical_image(
     ``propose_annotations``, ``stage_proposals``' assignments regime and its explicit regime;
     the group's manifest proposes, accepts and stages explicit shapes.
     """
-    import tifffile
-
-    from tcip_mcp.pipelines.image_utils import (
-        LogicalImageError,
-        resolve_image_path,
-    )
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.tools.proposal_tools import (
         Assignment,
         StagedAssignments,
         propose_annotations,
         stage_proposals,
     )
-    from tests._producer_fixtures import write_band_group
+    from tests._producer_fixtures import (
+        refusal_sentence,
+        write_grouped_capture,
+        write_stray,
+    )
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    images_dir.mkdir(parents=True)
-    bands = {}
-    for name in ("Red", "Green", "Blue"):
-        band_path = images_dir / f"capture_{name}.tif"
-        tifffile.imwrite(str(band_path), np.full((48, 48), 30, dtype=np.uint8))
-        bands[name] = band_path
-    manifest = write_band_group(
-        images_dir, "capture", bands, central_wavelength_nm=None
+    manifest, bands = write_grouped_capture(
+        images_dir, "capture", ("Red", "Green", "Blue"), 48
     )
-    stray = images_dir / "notes.txt"
-    stray.write_bytes(b"field notes")
+    stray = write_stray(images_dir)
     install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     box = {
         "subject": "bud",
@@ -591,11 +583,9 @@ def test_each_proposal_door_answers_a_path_naming_no_logical_image(
         ]
 
     for refused in (bands["Red"], stray):
-        with pytest.raises(LogicalImageError) as sentence:
-            resolve_image_path(refused)
         assert (
             answers(refused, "staging-none")
-            == [{"error": str(sentence.value)}] * 3
+            == [{"error": refusal_sentence(resolve_image_path, refused)}] * 3
         )
     proposed = propose_annotations(
         tmp_path, image_path=str(manifest), engine="stub", actor=None

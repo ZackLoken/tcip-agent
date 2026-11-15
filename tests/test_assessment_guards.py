@@ -1186,6 +1186,36 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
     assert source in str(refused.value)
 
 
+def _refused_after(
+    project: Path, experiment_id: str, change: Callable[[Path], object]
+) -> tuple[str, str]:
+    """Run the chain, ``change`` its assessment's first reference source, and gate its bucket.
+
+    Returns the sentence the changed source's resolution refuses with and the gate's refusal,
+    which must say the reference changed since.
+    """
+    from tcip_mcp.assessment import read_assessment
+    from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
+    from tcip_mcp.operationalization import latest_confirmed
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tests._producer_fixtures import refusal_sentence
+
+    chain = run_the_chain(project, experiment_id=experiment_id)
+    assessment = read_assessment(project, chain.assessment["assessment_id"])
+    source = Path(assessment.reference.samples[0].sample.source)
+    change(source)
+
+    with pytest.raises(DeliveryRefusedError, match="changed since") as refused:
+        gate(
+            project,
+            [chain.read()],
+            delivery_kind="per_image_count",
+            revision=latest_confirmed(fx.COUNT_TRAIT, project),
+            result=Result((), (), population=()),
+        )
+    return refusal_sentence(resolve_image_path, source), str(refused.value)
+
+
 def test_a_reference_source_removed_after_the_assessment_answers_for_nothing_naming_it(
     tmp_path: Path,
 ) -> None:
@@ -1193,28 +1223,16 @@ def test_a_reference_source_removed_after_the_assessment_answers_for_nothing_nam
 
     The refusal carries the sentence the source's resolution now refuses with, naming its path.
     """
-    from tcip_mcp.assessment import read_assessment
-    from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
-    from tcip_mcp.operationalization import latest_confirmed
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    removed: list[Path] = []
 
-    chain = run_the_chain(tmp_path, experiment_id="exp-removed-source")
-    assessment = read_assessment(tmp_path, chain.assessment["assessment_id"])
-    source = Path(assessment.reference.samples[0].sample.source)
-    source.unlink()
-    with pytest.raises(Exception) as gone:
-        resolve_image_path(source)
+    def remove(source: Path) -> None:
+        source.unlink()
+        removed.append(source)
 
-    with pytest.raises(DeliveryRefusedError, match="changed since") as refused:
-        gate(
-            tmp_path,
-            [chain.read()],
-            delivery_kind="per_image_count",
-            revision=latest_confirmed(fx.COUNT_TRAIT, tmp_path),
-            result=Result((), (), population=()),
-        )
-    assert str(gone.value) in str(refused.value)
-    assert str(source) in str(gone.value)
+    sentence, refused = _refused_after(tmp_path, "exp-removed-source", remove)
+
+    assert sentence in refused
+    assert str(removed[0]) in sentence
 
 
 def test_an_assessment_over_a_reference_holding_two_images_of_one_stem_answers_it(
@@ -1224,12 +1242,9 @@ def test_an_assessment_over_a_reference_holding_two_images_of_one_stem_answers_i
 
     The answer is the sentence one reference image's resolution refuses with.
     """
-    from tcip_mcp.pipelines.image_utils import (
-        LogicalImageError,
-        resolve_image_path,
-    )
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tests._chain_fixtures import trained_detector
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import refusal_sentence, write_image
 
     _root, images_dir, selection_dir, checkpoint = trained_detector(
         tmp_path, experiment_id="exp-ambiguous-reference"
@@ -1237,11 +1252,9 @@ def test_an_assessment_over_a_reference_holding_two_images_of_one_stem_answers_i
     images = sorted(images_dir.iterdir())
     for image in images:
         write_image(image.with_suffix(".bmp"), (IMG, IMG))
-    sentences = set()
-    for image in images:
-        with pytest.raises(LogicalImageError) as ambiguous:
-            resolve_image_path(image)
-        sentences.add(str(ambiguous.value))
+    sentences = {
+        refusal_sentence(resolve_image_path, image) for image in images
+    }
 
     answered = assess(tmp_path, checkpoint, selection_dir)
 

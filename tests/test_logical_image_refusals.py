@@ -16,19 +16,20 @@ import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pytest
-import tifffile
 
+from tcip_mcp.pipelines.image_utils import (
+    list_logical_images,
+    resolve_image_path,
+)
 from tests._mapping_fixtures import CROP
 from tests._producer_fixtures import (
     GroupedDataset,
-    label_image,
+    labeled_grouped_capture,
+    refusal_sentence,
     register_dataset_at,
-    registry_of,
-    registry_over,
-    write_band_group,
     write_image,
+    write_stray,
 )
 
 if TYPE_CHECKING:
@@ -40,42 +41,15 @@ if TYPE_CHECKING:
 
 CAPTURE = "2026-04-01"
 SIZE = 16
-STRAY = "notes.txt"
-"""The capture's file whose suffix names no image."""
+"""The edge, in pixels, of every image :func:`labeled_grouped_capture` writes."""
 
 
 def _written(root: Path, project: Path) -> GroupedDataset:
-    """Write a grouped capture, a photograph and :data:`STRAY` into ``root``'s :data:`CAPTURE`.
+    """Return :func:`labeled_grouped_capture` of ``root``'s :data:`CAPTURE`, ``root`` registered.
 
-    The group ``capture_001`` holds two single-band TIFFs, the photograph is ``plain_002.jpg``,
-    each image holds one ``bud`` box in its label document, the dataset's registry declares
-    ``bud`` and ``root`` is registered in ``project`` at :data:`~tests._mapping_fixtures.CROP`.
+    ``root`` is registered in ``project`` at :data:`~tests._mapping_fixtures.CROP`.
     """
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import image_dir
-
-    images_dir = image_dir(root, CAPTURE)
-    images_dir.mkdir(parents=True)
-    registry_over(root, registry_of("bud"))
-    bands = {
-        "Green": images_dir / "capture_001_G.tif",
-        "Red": images_dir / "capture_001_R.tif",
-    }
-    for band, fill in zip(bands.values(), (111, 222), strict=True):
-        tifffile.imwrite(str(band), np.full((SIZE, SIZE), fill, np.uint16))
-    manifest = write_band_group(
-        images_dir, "capture_001", bands, central_wavelength_nm=None
-    )
-    plain = write_image(images_dir / "plain_002.jpg", (SIZE, SIZE), (5, 5, 5))
-    for source in (manifest, plain):
-        label_image(
-            source,
-            [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
-            SIZE,
-            SIZE,
-        )
-    written = GroupedDataset(root, images_dir, manifest, bands, plain)
-    (written.images_dir / STRAY).write_bytes(b"field notes")
+    written = labeled_grouped_capture(root, CAPTURE)
     register_dataset_at(project, root, crop=CROP)
     return written
 
@@ -84,27 +58,6 @@ def _written(root: Path, project: Path) -> GroupedDataset:
 def written(tmp_path: Path) -> GroupedDataset:
     """Return :func:`_written` of ``tmp_path / "ds"``, registered in ``tmp_path``."""
     return _written(tmp_path / "ds", tmp_path)
-
-
-def _sentence(read: Callable[[Path], object], path: Path) -> str:
-    """Return the sentence ``read`` refuses ``path`` with."""
-    with pytest.raises(Exception) as refused:
-        read(path)
-    return str(refused.value)
-
-
-def _resolved(path: Path) -> str:
-    """Return the sentence the resolver refuses ``path`` with."""
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
-
-    return _sentence(resolve_image_path, path)
-
-
-def _listed(images_dir: Path) -> str:
-    """Return the sentence the enumerator refuses ``images_dir`` with."""
-    from tcip_mcp.pipelines.image_utils import list_logical_images
-
-    return _sentence(list_logical_images, images_dir)
 
 
 def _ambiguous(written: GroupedDataset) -> Path:
@@ -127,8 +80,6 @@ def test_every_refusal_of_the_resolver_and_the_enumerator_is_a_logical_image_err
         BandGroupIncompleteError,
         ImageNotNamedError,
         LogicalImageError,
-        list_logical_images,
-        resolve_image_path,
     )
 
     def refusal(read: Callable[[Path], object], path: Path) -> Exception:
@@ -142,7 +93,7 @@ def test_every_refusal_of_the_resolver_and_the_enumerator_is_a_logical_image_err
             ImageNotNamedError,
         ),
         (
-            refusal(resolve_image_path, written.images_dir / STRAY),
+            refusal(resolve_image_path, write_stray(written.images_dir)),
             ImageNotNamedError,
         ),
     ]
@@ -192,10 +143,12 @@ def test_stating_a_capture_date_answers_a_path_naming_no_logical_image(
 
     for refused in (
         written.bands["Green"],
-        written.images_dir / STRAY,
+        write_stray(written.images_dir),
         written.images_dir / "absent.jpg",
     ):
-        assert stated(refused) == {"error": _resolved(refused)}
+        assert stated(refused) == {
+            "error": refusal_sentence(resolve_image_path, refused)
+        }
     assert written.plain.is_file()
     assert [move["source"] for move in stated(written.plain)["moved"]] == [
         str(written.plain)
@@ -230,7 +183,9 @@ def test_rendering_failure_cases_answers_an_image_that_no_longer_resolves(
 
     assert "error" not in rendered(), rendered()
     _ambiguous(written)
-    assert rendered() == {"error": _resolved(written.plain)}
+    assert rendered() == {
+        "error": refusal_sentence(resolve_image_path, written.plain)
+    }
 
 
 def test_evaluating_over_an_incomplete_band_group_answers_its_refusal(
@@ -254,7 +209,10 @@ def test_evaluating_over_an_incomplete_band_group_answers_its_refusal(
         iou_threshold=IOU_THRESHOLD,
     )
 
-    assert _resolved(written.manifest) in evaluated["error"], evaluated
+    assert (
+        refusal_sentence(resolve_image_path, written.manifest)
+        in evaluated["error"]
+    ), evaluated
 
 
 def test_evaluating_over_an_ambiguous_stem_answers_the_enumerators_refusal(
@@ -278,7 +236,10 @@ def test_evaluating_over_an_ambiguous_stem_answers_the_enumerators_refusal(
         iou_threshold=IOU_THRESHOLD,
     )
 
-    assert _listed(written.images_dir) in evaluated["error"], evaluated
+    assert (
+        refusal_sentence(list_logical_images, written.images_dir)
+        in evaluated["error"]
+    ), evaluated
 
 
 def test_a_plant_aware_draw_answers_an_ambiguous_stem(
@@ -304,7 +265,9 @@ def test_a_plant_aware_draw_answers_an_ambiguous_stem(
         actor=None,
     )
 
-    assert drawn == {"error": _listed(written.images_dir)}
+    assert drawn == {
+        "error": refusal_sentence(list_logical_images, written.images_dir)
+    }
 
 
 def test_a_dataset_sample_render_skips_an_incomplete_band_group(
@@ -327,10 +290,10 @@ def test_a_dataset_sample_render_skips_an_incomplete_band_group(
 def test_building_a_plant_mapping_answers_an_ambiguous_capture(
     tmp_path: Path,
 ) -> None:
-    """Both mapping doors answer a mapped capture holding two images of one stem.
+    """The mapping tool answers a mapped capture holding two images of one stem.
 
-    The tool answers the enumerator's sentence as its error and the web route as a 400; with
-    the second image gone the tool builds the mapping.
+    It answers the enumerator's sentence as its error; with the second image gone it builds the
+    mapping.
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
@@ -358,7 +321,11 @@ def test_building_a_plant_mapping_answers_an_ambiguous_capture(
             actor=None,
         )
 
-    assert built() == {"error": _listed(image_dir(dataset_root, CAPTURE))}
+    assert built() == {
+        "error": refusal_sentence(
+            list_logical_images, image_dir(dataset_root, CAPTURE)
+        )
+    }
     second.unlink()
     assert "error" not in built(), built()
 
@@ -394,8 +361,8 @@ def test_the_web_mapping_build_answers_an_ambiguous_capture_400(
     )
 
     assert answered.status_code == 400, answered.text
-    assert answered.json()["detail"] == _listed(
-        image_dir(dataset_root, CAPTURE)
+    assert answered.json()["detail"] == refusal_sentence(
+        list_logical_images, image_dir(dataset_root, CAPTURE)
     )
 
 
@@ -421,7 +388,7 @@ def test_selecting_an_ambiguous_capture_answers_400_and_a_snapshot_over_it_refus
 
     assert selected().status_code == 200
     _ambiguous(written)
-    sentence = _listed(written.images_dir)
+    sentence = refusal_sentence(list_logical_images, written.images_dir)
 
     refused = selected()
     assert refused.status_code == 400, refused.text
@@ -452,4 +419,6 @@ def test_the_image_door_answers_an_ambiguous_stem_400(
 
     refused = served()
     assert refused.status_code == 400, refused.text
-    assert refused.json()["detail"] == _resolved(written.plain)
+    assert refused.json()["detail"] == refusal_sentence(
+        resolve_image_path, written.plain
+    )

@@ -13,13 +13,15 @@ import numpy as np
 import pytest
 import tifffile
 
+from tcip_mcp.pipelines.image_utils import resolve_image_path
 from tests._producer_fixtures import (  # noqa: E402
     GroupedDataset,
     dataset_over,
     label_image,
-    registry_of,
-    registry_over,
+    labeled_grouped_capture,
+    refusal_sentence,
     write_image,
+    write_stray,
 )
 from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 
@@ -30,46 +32,10 @@ if TYPE_CHECKING:
     from tcip_web.state import OpenProject
 
 
-def _write_group(images_dir: Path, stem: str) -> tuple[Path, dict[str, Path]]:
-    """Write ``stem``'s two-band group into ``images_dir``; return its manifest and its bands."""
-    from tests._producer_fixtures import write_band_group
-
-    bands = {
-        "Green": images_dir / f"{stem}_G.tif",
-        "Red": images_dir / f"{stem}_R.tif",
-    }
-    for band, fill in zip(bands.values(), (111, 222), strict=True):
-        tifffile.imwrite(str(band), np.full((16, 16), fill, dtype=np.uint16))
-    manifest = write_band_group(
-        images_dir, stem, bands, central_wavelength_nm=None
-    )
-    return manifest, bands
-
-
 @pytest.fixture
 def grouped_dataset(tmp_path: Path) -> GroupedDataset:
-    """Write one grouped capture and one plain photo into ``images/2026-04-01/``.
-
-    Each has a detection GT label document, and the registry declares ``bud``.
-    """
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import image_dir
-
-    root = tmp_path / "proj"
-    images_dir = image_dir(root, "2026-04-01")
-    images_dir.mkdir(parents=True)
-    registry_over(root, registry_of("bud"))
-
-    manifest, bands = _write_group(images_dir, "capture_001")
-    plain = write_image(images_dir / "plain_002.jpg", (16, 16), (5, 5, 5))
-    for source in (manifest, plain):
-        label_image(
-            source,
-            [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
-            16,
-            16,
-        )
-    return GroupedDataset(root, images_dir, manifest, bands, plain)
+    """Return :func:`labeled_grouped_capture` of ``tmp_path / "proj"``'s ``2026-04-01``."""
+    return labeled_grouped_capture(tmp_path / "proj", "2026-04-01")
 
 
 # ── datasets.py ─────────────────────────────────────────────────────────────────────────
@@ -307,25 +273,6 @@ def test_visualize_annotations_on_a_grouped_capture(
     assert Path(result["image_path"]).is_file()
 
 
-def _resolver_sentence(path: Path) -> str:
-    """Return the sentence ``resolve_image_path`` refuses ``path`` with."""
-    from tcip_mcp.pipelines.image_utils import (
-        LogicalImageError,
-        resolve_image_path,
-    )
-
-    with pytest.raises(LogicalImageError) as refused:
-        resolve_image_path(path)
-    return str(refused.value)
-
-
-def _stray(grouped_dataset: GroupedDataset) -> Path:
-    """Write a file whose suffix names no image into the grouped capture's folder; return it."""
-    stray = grouped_dataset.images_dir / "notes.txt"
-    stray.write_bytes(b"field notes")
-    return stray
-
-
 def test_each_render_of_a_band_member_or_a_stray_file_answers_the_resolvers_sentence(
     tmp_path: Path, grouped_dataset: GroupedDataset
 ) -> None:
@@ -341,7 +288,10 @@ def test_each_render_of_a_band_member_or_a_stray_file_answers_the_resolvers_sent
         visualize,
     )
 
-    for refused in (grouped_dataset.bands["Green"], _stray(grouped_dataset)):
+    for refused in (
+        grouped_dataset.bands["Green"],
+        write_stray(grouped_dataset.images_dir),
+    ):
         path = str(refused)
         for render in (
             AnnotationsRender(source="annotations", path=path),
@@ -354,8 +304,12 @@ def test_each_render_of_a_band_member_or_a_stray_file_answers_the_resolvers_sent
             ),
         ):
             result = visualize(tmp_path, render)
-            assert result == {"error": _resolver_sentence(refused)}, render
-    member = _resolver_sentence(grouped_dataset.bands["Green"])
+            assert result == {
+                "error": refusal_sentence(resolve_image_path, refused)
+            }, render
+    member = refusal_sentence(
+        resolve_image_path, grouped_dataset.bands["Green"]
+    )
     assert "capture_001.bandgroup" in member
     assert "name the manifest" in member
 
@@ -421,10 +375,13 @@ def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_s
         assert not any(result.is_error for result in results), results
         return [decoded_answer(result) for result in results]
 
-    for refused in (grouped_dataset.bands["Green"], _stray(grouped_dataset)):
+    for refused in (
+        grouped_dataset.bands["Green"],
+        write_stray(grouped_dataset.images_dir),
+    ):
         assert (
             answers(str(refused))
-            == [{"error": _resolver_sentence(refused)}] * 5
+            == [{"error": refusal_sentence(resolve_image_path, refused)}] * 5
         )
     served = answers(str(grouped_dataset.manifest))
     assert [answer.get("error") for answer in served] == [None] * 5, served

@@ -1042,17 +1042,14 @@ def test_a_capture_that_resolves_no_logical_image_refuses_the_import_with_its_se
     Each is answered with the sentence the image's own resolution refuses with.
     """
     from tcip_mcp.pipelines.image_utils import (
-        LogicalImageError,
         list_logical_images,
         resolve_image_path,
     )
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import refusal_sentence, write_image
 
     root = _grouped(tmp_path)
     images_dir = image_dir(root, DATE)
     (images_dir / "plot7_R.tif").unlink()
-    with pytest.raises(LogicalImageError) as incomplete:
-        resolve_image_path(images_dir / "plot7.bandgroup")
     grouped = _document(
         tmp_path / "grouped.json",
         images=[
@@ -1060,13 +1057,15 @@ def test_a_capture_that_resolves_no_logical_image_refuses_the_import_with_its_se
         ],
         annotations=[{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}],
     )
-    assert _import(grouped, root) == {"error": str(incomplete.value)}
+    assert _import(grouped, root) == {
+        "error": refusal_sentence(
+            resolve_image_path, images_dir / "plot7.bandgroup"
+        )
+    }
 
     write_image(images_dir / "tree_01.jpg", (IMG, IMG))
-    with pytest.raises(LogicalImageError) as ambiguous:
-        list_logical_images(images_dir)
     assert _import(_document(tmp_path / "external.json"), root) == {
-        "error": str(ambiguous.value)
+        "error": refusal_sentence(list_logical_images, images_dir)
     }
     assert _written(root) == []
 
