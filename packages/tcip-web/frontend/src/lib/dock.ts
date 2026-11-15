@@ -22,9 +22,8 @@ const NOTIFICATIONS_TAB: IJsonTabNode = {
 
 /** The default arrangement: the work area alone, with no tab strip and nothing dropped into it,
  *  and the right border, shown only once it holds a pane, which opens a pane over the work area
- *  and keeps it as a strip on that edge while minimized. The notifications area starts closed,
- *  and stays in that border: moving it is reachable only by dragging, which the layout standard
- *  rules out as a pane operation's only route. */
+ *  and keeps it as a strip on that edge while minimized. The notifications area starts closed
+ *  and stays in that border. */
 const DEFAULT_LAYOUT: IJsonModel = {
   global: { tabEnableRenderOnDemand: false },
   borders: [

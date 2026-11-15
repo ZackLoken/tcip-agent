@@ -3,13 +3,7 @@ import { useEffect } from "react";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { useStore } from "@/store";
 import type { Toast } from "@/store";
-import { textOf } from "@/store/slices/toasts";
-
-const LEVEL_CLASS: Record<Toast["level"], string> = {
-  error: "tcip-problem",
-  info: "text-tcip-fg",
-  success: "text-tcip-fg",
-};
+import { LEVELS, textOf } from "@/store/slices/toasts";
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   useEffect(() => {
@@ -17,13 +11,13 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
     return () => window.clearTimeout(id);
   }, [toast.id, onDismiss]);
 
-  const isError = toast.level === "error";
+  const { live, tone } = LEVELS[toast.level];
   const text = textOf(toast);
   return (
     <div
-      role={isError ? "alert" : "status"}
-      aria-live={isError ? "assertive" : "polite"}
-      className={`flex items-start gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 shadow-lg ${LEVEL_CLASS[toast.level]}`}
+      role={live === "assertive" ? "alert" : "status"}
+      aria-live={live}
+      className={`flex items-start gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 shadow-lg ${tone}`}
     >
       <span className="flex-1 break-words">
         {text}

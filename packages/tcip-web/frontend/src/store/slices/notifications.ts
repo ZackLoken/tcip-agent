@@ -1,16 +1,14 @@
 import type { StateCreator } from "zustand";
 
 import type { AppState } from "@/store/appState";
-import type { Toast } from "@/store/slices/toasts";
+import type { MessageLevel } from "@/store/slices/toasts";
 
 /** A state of the application that holds over time: the state socket's lost connection, a
  *  served bundle its source would not build, and visits whose recording is unconfirmed. */
 export type ConditionName = "connection" | "bundle" | "unconfirmed";
 
-/** How loudly each condition is told, on the toasts' levels: the lost connection's pill dot was
- *  the failure red, the stale bundle's the caution gold, and the unconfirmed visits' notice an
- *  error toast. */
-const CONDITION_LEVEL: Record<ConditionName, Toast["level"]> = {
+/** How loudly each condition is told. */
+const CONDITION_LEVEL: Record<ConditionName, MessageLevel> = {
   connection: "error",
   bundle: "info",
   unconfirmed: "error",
@@ -19,7 +17,7 @@ const CONDITION_LEVEL: Record<ConditionName, Toast["level"]> = {
 /** One entry of the notifications area: one occurrence of a condition, from when it began. */
 export interface NotificationEntry {
   id: number;
-  level: Toast["level"];
+  level: MessageLevel;
   /** The condition whose occurrence this entry reports. */
   condition: ConditionName;
   /** When the occurrence began, in milliseconds since the epoch. */
@@ -100,7 +98,7 @@ export const selectNewCount = (s: AppState): number =>
   s.notifications.filter((e) => e.id > s.seenThrough).length;
 
 /** The loudest level among the conditions holding now, null while none holds. */
-export const selectHoldingLevel = (s: AppState): Toast["level"] | null => {
+export const selectHoldingLevel = (s: AppState): MessageLevel | null => {
   const levels = (Object.keys(s.holding) as ConditionName[]).map((c) => CONDITION_LEVEL[c]);
   if (!levels.length) return null;
   return levels.includes("error") ? "error" : levels[0];
