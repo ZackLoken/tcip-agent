@@ -23,7 +23,8 @@ type Listing = Awaited<ReturnType<typeof api.projects.list>>;
  * `renamed` answer of `Valley farm`'s rename, and the `opened` answers of `Valley farm`, `Ridge
  * farm` and `Empty block`, in that order, and `picker_empty_open` listing with `Empty block` open;
  * then, with `Valley farm` open again and its record
- * damaged, the `picker_damaged` listing.
+ * damaged, the `picker_damaged` listing; and, in a workspace of its own, the `picker_uncounted`
+ * listing of `Hill block`, whose band-group manifest will not read, beside `Ridge farm`.
  */
 export const PROJECT_FIXTURES = fixtures as unknown as {
   listing: Listing;
@@ -37,6 +38,7 @@ export const PROJECT_FIXTURES = fixtures as unknown as {
   picker_open: Listing;
   picker_empty_open: Listing;
   picker_damaged: Listing;
+  picker_uncounted: Listing;
   removed: ProjectRemoval;
   renamed: RecordCorrection;
 };

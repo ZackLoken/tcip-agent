@@ -19,6 +19,7 @@ import tifffile
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.pipelines.data.band_groups import _EMBEDDED_METADATA_STRATEGIES
+from tests._producer_fixtures import unreadable_manifest, without_bands
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -975,7 +976,7 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "malform",
     [
-        pytest.param(lambda doc: doc.pop("bands"), id="no bands"),
+        pytest.param(without_bands, id="no bands"),
         pytest.param(lambda doc: doc.update(bands={}), id="empty bands"),
         pytest.param(
             lambda doc: doc.update(bands=list(doc["bands"].values())),
@@ -991,20 +992,19 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
         ),
     ],
 )
-def test_a_malformed_manifest_refuses_and_is_no_identity(
+def test_a_malformed_manifest_refuses_its_read_and_its_directorys_scan(
     tmp_path: Path, malform: Callable[[dict], object]
 ) -> None:
-    """A manifest its record's fields refuse raises ``ValueError`` and claims nothing.
+    """A manifest its record's fields refuse raises ``ValueError``, and the scan of it refuses.
 
-    The manifest is the writer's, one field then removed or replaced; the scan lists no identity
-    under its stem and each band file as its own.
+    The manifest is the writer's, one field then removed or replaced; the scan raises
+    ``UnreadableBandGroupError`` naming it, from the reader's refusal.
     """
     from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
     from tcip_mcp.pipelines.image_utils import (
+        UnreadableBandGroupError,
         scan_identities,
-        stem_collision_key,
     )
-    from tcip_store import decode_value, encode_record
     from tests._producer_fixtures import write_band_group
 
     d = image_root(tmp_path)
@@ -1018,16 +1018,15 @@ def test_a_malformed_manifest_refuses_and_is_no_identity(
         bands,
         central_wavelength_nm={"Green": 560.0, "Red": 650.0},
     )
-    document = decode_value(manifest.read_bytes())
-    malform(document)
-    manifest.write_bytes(encode_record(document))
+    unreadable_manifest(manifest, malform)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as cause:
         read_band_group_manifest(manifest)
-    identities = scan_identities(d)
-    assert stem_collision_key("cap") not in identities
-    for band in bands.values():
-        assert identities[stem_collision_key(band.stem)] == [band]
+    with pytest.raises(UnreadableBandGroupError) as refused:
+        scan_identities(d)
+    assert str(manifest) in str(refused.value)
+    assert refused.value.__cause__ is not None
+    assert str(refused.value.__cause__) == str(cause.value)
 
 
 # ── ingest_images ──────────────────────────────────────────────────────────────────────

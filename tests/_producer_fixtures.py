@@ -472,6 +472,28 @@ def write_grouped_capture(
     return manifest, files
 
 
+def without_bands(document: dict) -> object:
+    """Remove a manifest record's ``bands``, which its model requires; return what it held."""
+    return document.pop("bands")
+
+
+def unreadable_manifest(
+    manifest: Path, malform: Callable[[dict], object]
+) -> Path:
+    """Write ``manifest``'s own record back changed by ``malform``, so its model refuses it.
+
+    ``manifest`` is one :func:`write_band_group` wrote; ``malform`` changes its decoded record in
+    place. Returns ``manifest``.
+    """
+    from tcip_store import decode_value, encode_record
+
+    document = decode_value(manifest.read_bytes())
+    assert isinstance(document, dict), document
+    malform(document)
+    manifest.write_bytes(encode_record(document))
+    return manifest
+
+
 def labeled_grouped_capture(root: Path, capture: str) -> GroupedDataset:
     """Write a grouped capture and a photograph into ``root``'s ``capture``, each labeled.
 

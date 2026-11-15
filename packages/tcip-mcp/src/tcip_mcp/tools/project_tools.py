@@ -516,7 +516,10 @@ def inspect_project(project: Path) -> dict:
 
     Carries the project's ``reading``, ``tcip_mcp.project_record.record_or_problem``'s: the
     record on ``kind`` ``read``, or on ``unread`` the ``problem`` naming why it will not read (a
-    damaged record, or one in a database that will not open or answer). ``plant_mappings`` is on
+    damaged record, or one in a database that will not open or answer). While the project holds
+    an image root, ``dates`` is every capture's name and ``image_count`` their logical images
+    (:func:`~tcip_mcp.pipelines.image_utils.image_count`): the total, or the ``problem`` of each
+    capture left uncounted. ``plant_mappings`` is on
     ``kind`` ``listed`` every mapping name persisted under the project (:class:`MappingsListed`),
     or on ``unlisted`` why the store refuses to read the root (:class:`MappingsUnlisted`).
     ``recent_activity`` is :func:`_recent_activity`'s.
@@ -530,11 +533,17 @@ def inspect_project(project: Path) -> dict:
 
     # The logical images under <root>/images/<date>/ and the capture dates they sit under.
     from tcip_mcp import dataset_layout
-    from tcip_mcp.pipelines.image_utils import logical_image_counts
+    from tcip_mcp.pipelines.image_utils import (
+        image_count,
+        logical_image_counts,
+    )
 
     if dataset_layout.image_root(project).is_dir():
         counts = logical_image_counts(project)
-        status["image_count"] = sum(counts.values())
+        counted = image_count(counts)
+        status["image_count"] = (
+            counted if isinstance(counted, int) else counted.model_dump()
+        )
         status["dates"] = list(counts)
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (

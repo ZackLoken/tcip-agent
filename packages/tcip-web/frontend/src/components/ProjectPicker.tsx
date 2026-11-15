@@ -371,6 +371,14 @@ export function ProjectPicker() {
                           {tree.label_problem}
                         </span>
                       )}
+                      {typeof p.image_count !== "number" && (
+                        <span
+                          className="text-[13px] tcip-problem truncate"
+                          title={p.image_count.problem}
+                        >
+                          {p.image_count.problem}
+                        </span>
+                      )}
                       {/* Signature: the project's captures across the season, each date labeled. */}
                       <SeasonRail
                         captures={tree.captures}
@@ -379,7 +387,7 @@ export function ProjectPicker() {
                         className="my-0.5"
                       />
                       <div className="text-[13px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
-                        <span>{p.image_count} image(s)</span>
+                        {typeof p.image_count === "number" && <span>{p.image_count} image(s)</span>}
                         <span>
                           {tree.captures.length} date
                           {tree.captures.length === 1 ? "" : "s"}

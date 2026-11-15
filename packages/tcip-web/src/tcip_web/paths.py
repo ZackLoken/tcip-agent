@@ -235,8 +235,9 @@ def _resolving[T](read: Callable[[Path], T], path: str) -> tuple[Path, T]:
 
     ``read`` is a reader of the logical image a path names; its resolver's refusals are
     translated: a path naming no logical image (a band of a grouped capture) answers 404 naming
-    why, a grouped capture missing a band 409, and an ambiguous stem 400. A file gone between
-    :func:`allowed_file`'s check and ``read`` answers 404.
+    why, a grouped capture missing a band or a path beside a manifest that will not read 409, and
+    an ambiguous stem 400. A file gone between :func:`allowed_file`'s check and ``read`` answers
+    404.
     """
     from fastapi import HTTPException
 
@@ -244,12 +245,13 @@ def _resolving[T](read: Callable[[Path], T], path: str) -> tuple[Path, T]:
         AmbiguousImageStemError,
         BandGroupIncompleteError,
         ImageNotNamedError,
+        UnreadableBandGroupError,
     )
 
     p = allowed_file(path)
     try:
         return p, read(p)
-    except BandGroupIncompleteError as exc:
+    except (BandGroupIncompleteError, UnreadableBandGroupError) as exc:
         raise HTTPException(409, str(exc)) from exc
     except AmbiguousImageStemError as exc:
         raise HTTPException(400, str(exc)) from exc

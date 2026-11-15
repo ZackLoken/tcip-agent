@@ -21,6 +21,11 @@ from pydantic import BaseModel, Field, TypeAdapter
 from tcip_mcp import workspace
 from tcip_mcp.audit import AuditEntryNotWrittenError
 from tcip_mcp.identity import actor
+from tcip_mcp.pipelines.image_utils import (
+    ImagesUncounted,
+    image_count,
+    logical_image_counts,
+)
 from tcip_mcp.project_record import (
     CaptureInvariances,
     ProjectRecord,
@@ -55,11 +60,12 @@ class ReadProject(ReadRecord, ProjectFacts):
     """A workspace project whose record read: the record and its directory's contents.
 
     ``tree`` is the project root's contents, so the pickers never offer a date with nothing
-    there; ``image_count`` is its logical images.
+    there; ``image_count`` is its logical images
+    (:func:`~tcip_mcp.pipelines.image_utils.image_count`).
     """
 
     tree: TreeContents
-    image_count: int
+    image_count: int | ImagesUncounted
 
 
 class UnreadProject(UnreadRecord, ProjectFacts):
@@ -81,8 +87,6 @@ def _summarize(listed: workspace.ListedProject) -> ProjectSummary:
     whose record will not read is not otherwise read, so a store another holder keeps does not
     wait the listing again.
     """
-    from tcip_mcp.pipelines.image_utils import logical_image_counts
-
     root = listed.root
     facts = {
         **dict(listed),
@@ -95,7 +99,7 @@ def _summarize(listed: workspace.ListedProject) -> ProjectSummary:
         {
             **facts,
             "tree": contents_of(root),
-            "image_count": sum(logical_image_counts(root).values()),
+            "image_count": image_count(logical_image_counts(root)),
         }
     )
 
