@@ -1206,11 +1206,49 @@ def pastes_after(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_a_fresh_launch_pastes_nothing_before_the_first_request_given_alone(
+def test_a_launch_for_no_project_is_pasted_its_opening_request_with_nothing_submitted(
     client: TestClient,
     pastes_after: None,
 ) -> None:
-    """A fresh launch's agent is given nothing before the first request a person submitted.
+    """A launch with no project open gives its agent the opening request alone, unprompted.
+
+    It is pasted once the agent turned paste on and its composer is live, and never earlier.
+    """
+    sid = client.post(
+        "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
+    ).json()["session_id"]
+
+    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
+    text = _wait_for(terminal_routes._SESSIONS[sid], opening)
+    assert _echoes(text) == [opening]
+    assert "EARLY_INPUT" not in text
+
+
+def test_a_launch_for_no_project_delivers_its_opening_request_before_a_submitted_request(
+    client: TestClient,
+    pastes_after: None,
+) -> None:
+    """The opening request reaches the agent first, then a request a person submitted."""
+    sid = client.post(
+        "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
+    ).json()["session_id"]
+    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
+    _wait_for(terminal_routes._SESSIONS[sid], opening)
+    client.post(
+        f"/api/terminal/sessions/{sid}/submit", json={"text": "first request"}
+    )
+
+    text = _wait_for(terminal_routes._SESSIONS[sid], "echo:first request")
+    assert _echoes(text) == [opening, "echo:first request"]
+    assert "EARLY_INPUT" not in text
+
+
+def test_a_fresh_launch_for_a_project_pastes_nothing_before_the_first_request_given_alone(
+    opened: OpenProject,
+    client: TestClient,
+    pastes_after: None,
+) -> None:
+    """A fresh launch for an open project gives its agent nothing before the first request.
 
     Each request reaches the agent alone, once it turned paste on, and never earlier.
     """
@@ -1233,6 +1271,7 @@ def test_a_fresh_launch_pastes_nothing_before_the_first_request_given_alone(
 
 
 def test_the_requests_staged_before_paste_is_on_each_go_as_their_own_paste(
+    opened: OpenProject,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The requests staged before paste is on each go as their own paste, oldest first.
@@ -1274,12 +1313,14 @@ def test_overlapping_creates_deliver_the_request_once(
         answers = list(pool.map(create, range(2)))
     sid = answers[0]["session_id"]
     assert answers[1]["session_id"] == sid
+    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
+    _wait_for(terminal_routes._SESSIONS[sid], opening)
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "tab request"}
     )
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:tab request")
-    assert _echoes(text) == ["echo:tab request"]
+    assert _echoes(text) == [opening, "echo:tab request"]
 
 
 class _Startup(NamedTuple):
@@ -1399,6 +1440,7 @@ and an Enter before it was held as "Waiting for startup" while a paste at it was
 @pytest.mark.parametrize("stream", sorted(_STARTUPS))
 def test_a_request_is_pasted_at_the_read_where_the_harness_composer_goes_live(
     stream: str,
+    opened: OpenProject,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A staged request is pasted at the read where the harness draws its composer frame.
@@ -2113,6 +2155,7 @@ def test_an_end_during_a_paste_answers_at_once_and_its_writer_writes_nothing_mor
     ids=["mid-paste", "last-write"],
 )
 def test_a_paste_released_before_an_end_records_stays_among_its_undelivered(
+    opened: OpenProject,
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     stub: type[_HeldWritePty],
@@ -2148,7 +2191,7 @@ class _OneBytePty(StubPty):
 
 
 def test_a_paste_leaves_the_held_count_only_once_all_of_it_reached_the_pty(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    opened: OpenProject, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A PTY taking one byte per write is given each paste whole, in order.
 
@@ -2287,7 +2330,7 @@ def test_a_posix_spawn_that_fails_leaves_none_of_its_descriptors_open(
 
 
 def test_keystrokes_the_socket_takes_during_a_paste_reach_the_pty_after_it(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    opened: OpenProject, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Keystrokes sent while a paste is being written reach the PTY after the whole paste.
 

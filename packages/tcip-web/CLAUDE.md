@@ -86,7 +86,9 @@ reads from a hook's stdout, so it reaches the agent as context, never as a paste
 answers with anything but 2xx is printed the same way, as a sentence with the answer's status and
 body, never raised.
 `TerminalSession.deliver`
-decides when a paste goes and what it carries. Each launch probes the version its harness declares
+decides when a paste goes and what it carries; a launch with no project open is given
+`OPENING_REQUEST` ahead of anything submitted, so its agent takes the first turn and asks the
+person whether to create a project or open one. Each launch probes the version its harness declares
 and records it, so a harness updated in place is seen at its next launch. No timer-free signal tells
 a launch whose sequence never arrives from one still starting, and a sequence that moved earlier
 still pastes early. The child's environment is this process's own less every variable
