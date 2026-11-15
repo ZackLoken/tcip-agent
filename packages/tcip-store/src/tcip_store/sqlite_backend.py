@@ -216,17 +216,33 @@ class ConnectArgs(TypedDict, total=False):
     factory: type[sqlite3.Connection]
 
 
+def database_uri(db_path: Path, mode: str) -> str:
+    """Return the SQLite ``file:`` URI that opens the database at the absolute ``db_path``.
+
+    The path is percent-quoted and the authority is empty, so a UNC host stays in the path.
+    ``mode`` is SQLite's open mode (``ro``, ``rw``, ``rwc``).
+    """
+    uri = db_path.as_uri()
+    if not uri.startswith("file:///"):
+        uri = uri.replace("file://", "file:////", 1)
+    return f"{uri}?mode={mode}"
+
+
 def connect_published(
     db_path: Path, **connect_args: Unpack[ConnectArgs]
 ) -> sqlite3.Connection:
     """Connect to a published database so that no close of the connection checkpoints.
 
-    ``connect_args`` are passed to ``sqlite3.connect``. SQLite's no-checkpoint-on-close setting
-    is turned on and read back before any statement runs, so a close leaves the log and its
-    shared-memory index as they are. Refuses (``BackendUnavailableError``, the connection closed)
-    when turning the setting on raises, the driver's error as its cause, or it reads back off.
+    ``db_path`` is absolute and names a file that exists: a missing one raises the driver's
+    ``sqlite3.OperationalError`` (``SQLITE_CANTOPEN``) and no file is created. ``connect_args`` are
+    passed to ``sqlite3.connect``. SQLite's no-checkpoint-on-close setting is turned on and read
+    back before any statement runs, so a close leaves the log and its shared-memory index as they
+    are. Refuses (``BackendUnavailableError``, the connection closed) when turning the setting on
+    raises, the driver's error as its cause, or it reads back off.
     """
-    conn = sqlite3.connect(str(db_path), **connect_args)
+    conn = sqlite3.connect(
+        database_uri(db_path, "rw"), uri=True, **connect_args
+    )
     refused = (
         f"{db_path} would not take SQLite's no-checkpoint-on-close setting, so a close of this "
         "connection could checkpoint its log into the database file"
@@ -281,7 +297,8 @@ def copy_database(source: Path, destination: Path) -> None:
 
     The copy goes through SQLite's own backup, whatever another connection is committing
     meanwhile. The source is connected through :func:`connect_published`, so its log is left as
-    it was; the copy is closed by SQLite's default close, so it is one complete file.
+    it was, and a missing source raises the driver's error with nothing created; the copy is
+    closed by SQLite's default close, so it is one complete file.
     """
     src = connect_published(source)
     try:
