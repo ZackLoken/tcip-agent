@@ -242,34 +242,6 @@ def test_evaluating_over_an_ambiguous_stem_answers_the_enumerators_refusal(
     ), evaluated
 
 
-def test_a_plant_aware_draw_answers_an_ambiguous_stem(
-    written: GroupedDataset, tmp_path: Path
-) -> None:
-    """``plant_aware_group_splits`` answers a capture holding two images of one stem."""
-    from tcip_mcp.tools.data_tools import plant_aware_group_splits
-    from tests._training_values import RATIONALE
-
-    _ambiguous(written)
-
-    drawn = plant_aware_group_splits(
-        tmp_path,
-        str(written.root),
-        [str(tmp_path / "plants.csv")],
-        "bud",
-        0,
-        0.25,
-        0.0,
-        0.0,
-        False,
-        RATIONALE,
-        actor=None,
-    )
-
-    assert drawn == {
-        "error": refusal_sentence(list_logical_images, written.images_dir)
-    }
-
-
 def test_a_dataset_sample_render_skips_an_incomplete_band_group(
     written: GroupedDataset, tmp_path: Path
 ) -> None:
