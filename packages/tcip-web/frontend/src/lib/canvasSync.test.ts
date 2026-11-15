@@ -806,63 +806,6 @@ describe("buildAnnotateShapes held prompts", () => {
     const shapes = buildAnnotateShapes({ ...base, visible: false, pendingPrompts });
     expect(shapes.map((s) => s.tag)).toEqual(Array(3).fill("held_prompt"));
   });
-
-  it("pushes proposals, committed shapes, flags, drafts, then held prompts, as the canvas draws them", () => {
-    const flag = servedFlag({ text: "open?", target: { point: [5, 5], subject: "subject_a" } });
-    const proposal = {
-      ...servedProposal({ subject: "subject_a", score: 0.9, bbox: [1, 2, 11, 12] }),
-      bucket: ANNOTATE_ANSWERS.buckets.review,
-    };
-    const everything = {
-      ...base,
-      polygons: [
-        {
-          rings: [
-            [
-              [0, 0],
-              [10, 0],
-              [10, 10],
-            ],
-          ] as [number, number][][],
-          subject: "subject_a",
-          attributes: {},
-          iscrowd: false,
-        },
-      ],
-      mode: "polygon",
-      proposals: [proposal],
-      flagMarks: [{ at: [5, 5] as [number, number], flag }],
-      draft: draftStrokes({
-        mode: "polygon",
-        currentPolygon: [[1, 1]],
-        polygonColor: RED,
-        cutStart: null,
-        cursor: null,
-      }),
-      pendingPrompts,
-    };
-    expect(buildAnnotateShapes(everything).map((s) => s.tag)).toEqual([
-      "proposal",
-      "gt",
-      "flag",
-      "in_progress",
-      "held_prompt",
-      "held_prompt",
-      "held_prompt",
-    ]);
-    // The box being dragged out draws after the held prompts, over the polygon's drafts.
-    const dragging = buildAnnotateShapes({
-      ...base,
-      pendingPrompts,
-      drawingBox: { x1: 1, y1: 2, x2: 3, y2: 4, subject: "subject_a" },
-    });
-    expect(dragging.map((s) => s.tag)).toEqual([
-      "held_prompt",
-      "held_prompt",
-      "held_prompt",
-      "in_progress",
-    ]);
-  });
 });
 
 describe("shapeVisible", () => {

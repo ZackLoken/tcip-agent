@@ -2865,8 +2865,9 @@ describe("AnnotateTab review symbology", () => {
 
     /** The items the mocked canvas draws, in draw order: each Konva node folded into the item it
      *  belongs to (a halo into the item it sits under, a point's four ticks and core into one
-     *  point, a label's two copies into one label), the corner handles and vertex dots dropped. A
-     *  node that fits no item is refused. */
+     *  point, the polygon in progress's line and vertex dots into one polyline, a label's two
+     *  copies into one label), the corner handles and vertex dots dropped. A node that fits no
+     *  item is refused. */
     const drawnMarks = (): Mark[] => {
       const marks: Mark[] = [];
       let halo = false;
@@ -2888,16 +2889,18 @@ describe("AnnotateTab review symbology", () => {
           else item("polygon", stroke, !!dash);
         } else if (testid === "k-line") {
           const ticks = nodes.slice(i, i + 4);
-          const core = nodes[i + 4];
-          if (
-            ticks.length < 4 ||
-            ticks.some((t) => t.dataset.testid !== "k-line" || t.dataset.closed) ||
-            core?.dataset.testid !== "k-circle"
-          ) {
-            throw new Error("an open line the canvas draws is not a point's ticks");
+          const isPoint =
+            ticks.length === 4 &&
+            ticks.every((t) => t.dataset.testid === "k-line" && !t.dataset.closed) &&
+            nodes[i + 4]?.dataset.testid === "k-circle";
+          if (isPoint) {
+            item("point", stroke, !!dash);
+            i += 4;
+          } else {
+            // The polygon in progress: one open line, then a dot on each vertex laid.
+            item("polyline", stroke, !!dash);
+            while (nodes[i + 1]?.dataset.testid === "k-circle") i++;
           }
-          item("point", stroke, !!dash);
-          i += 4;
         } else if (testid === "k-circle") {
           if (!fill) halo = true;
         } else if (testid === "k-text") {
@@ -2918,7 +2921,8 @@ describe("AnnotateTab review symbology", () => {
     };
 
     /** The items the last full push states, in its order; a flag's label is its glyph on the
-     *  canvas and the glyph with its comment in the mirror, so a flag is read by its glyph. */
+     *  canvas and the glyph with its comment in the mirror, so a flag is read by its glyph, and
+     *  the mirror names a polyline ("drawing", "cut") where the canvas draws no label. */
     const pushedMarks = (pushed: ReturnType<typeof canvasPushes>): Mark[] =>
       pushed.map((s) => ({
         kind: s.kind,
@@ -2926,9 +2930,11 @@ describe("AnnotateTab review symbology", () => {
         dashed: !!s.dash,
         halo: !!s.halo,
         label:
-          s.tag === "flag" && s.label?.startsWith(`${FLAG_MARK.glyph} `)
-            ? FLAG_MARK.glyph
-            : (s.label ?? null),
+          s.kind === "polyline"
+            ? null
+            : s.tag === "flag" && s.label?.startsWith(`${FLAG_MARK.glyph} `)
+              ? FLAG_MARK.glyph
+              : (s.label ?? null),
       }));
 
     let pushSpy: MockInstance<typeof api.canvas.pushState>;
@@ -2976,7 +2982,7 @@ describe("AnnotateTab review symbology", () => {
 
     // Each case names the state it sets and what the canvas then holds, so a state that drew
     // nothing could not pass for agreement.
-    const CASES: [string, () => void, (drawn: Mark[]) => void][] = [
+    const CASES: [string, () => void | Promise<void>, (drawn: Mark[]) => void][] = [
       [
         "every View toggle on",
         () => {},
@@ -3034,11 +3040,36 @@ describe("AnnotateTab review symbology", () => {
         () => act(() => useStore.getState().setMode("polygon")),
         (drawn) => expect(drawn.some((m) => !m.dashed && m.kind === "polygon")).toBe(true),
       ],
+      [
+        "a laid polygon vertex beside a held prompt",
+        () => {
+          act(() => useStore.getState().setMode("polygon"));
+          act(() => useStore.getState().setCurrentPolygon([[50, 50]]));
+          hold();
+        },
+        (drawn) =>
+          expect(drawn.slice(-held.length - 1)).toEqual([
+            { kind: "polyline", ...HELD, label: null },
+            ...held,
+          ]),
+      ],
+      [
+        "a box mid-drag beside a held prompt",
+        async () => {
+          hold();
+          const stage = screen.getByTestId("canvas-stage");
+          fireEvent.mouseDown(stage, { clientX: 100, clientY: 100, button: 0 });
+          fireEvent.mouseMove(stage, { clientX: 200, clientY: 200 });
+          await act(async () => void (await new Promise((r) => setTimeout(r, 25))));
+        },
+        (drawn) =>
+          expect(drawn.slice(-held.length - 1)).toEqual([...held, { kind: "box", ...HELD }]),
+      ],
     ];
 
     it.each(CASES)("state the same items in the same order under %s", async (_, apply, holds) => {
       await mountWithBoth();
-      apply();
+      await apply();
       await flush();
       act(() => notifyCanvasStateRequest());
       await flush();
