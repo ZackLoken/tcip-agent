@@ -371,6 +371,16 @@ describe("TerminalRail", () => {
       expect(inputSent(reopened)).toEqual(["exit"]);
     });
 
+    it("sends what is typed after a reconnect that reset the emulator before its replay was drawn", async () => {
+      const { ws, input } = await mounted();
+      served(ws, { type: "output", data: REPLAY, replay: true });
+      act(() => ws.onopen?.());
+      await waitFor(() => expect(bracketedPasteOn()).toBe(true));
+      expect(input()).toEqual([]);
+      emulator.term!.input("exit");
+      expect(input()).toEqual(["exit"]);
+    });
+
     it("answers a query the program sends live, after a replay", async () => {
       const { ws, input } = await mounted();
       await programSets(ws, REPLAY, bracketedPasteOn, true);

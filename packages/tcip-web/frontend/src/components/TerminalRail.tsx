@@ -407,7 +407,7 @@ export function TerminalRail() {
       onOpen: () => {
         setError(null);
         setConn("open");
-        term.reset(); // the replay repaints the screen from scratch
+        term.reset(); // the scrollback repaints the screen from scratch
         sendSize();
       },
       ...jsonFrameHandlers<TerminalServedFrame>((frame) => {
