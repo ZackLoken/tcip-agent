@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { AttrType, AttributeDef } from "@/api/subjects";
 import { ATTR_TYPES, type RegistrySubjects } from "@/api/types.generated";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { AddValue, ValueChips } from "@/components/annotate/ValueChips";
+import { NotificationItem } from "@/components/Notifications";
 import { saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
@@ -23,6 +24,8 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const add = useStore((s) => s.add);
   const update = useStore((s) => s.update);
   const remove = useStore((s) => s.remove);
+  const datasetRoot = useStore((s) => s.gui.dataset?.dataset_root);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // The focused annotation's own shape; a focused proposal has no attributes to set.
   const focusedShape =
@@ -50,8 +53,9 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
     });
   };
 
+  const refusedKey = `registry:attributes:${datasetRoot ?? ""}`;
   function saveGrownRegistry(next: RegistrySubjects) {
-    void saveRegistry(next, "Could not update the attributes");
+    void saveRegistry(next, "Could not update the attributes", refusedKey);
   }
 
   function addAttribute(subject: string, name: string, type: AttrType, values: string[]) {
@@ -137,9 +141,18 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
 
   return (
     <div
-      className="mt-1 border-t border-tcip-border px-2 pt-3 pb-1 text-[13px]"
+      ref={panelRef}
+      tabIndex={-1}
+      className="mt-1 border-t border-tcip-border px-2 pt-3 pb-1 text-[13px] outline-none"
       data-testid="subject-attributes"
     >
+      <div className="mb-3 empty:hidden">
+        <NotificationItem
+          placement="in place"
+          entryKey={refusedKey}
+          afterDismiss={() => panelRef.current?.focus()}
+        />
+      </div>
       {selected && (
         <div className="mb-5">
           <div className="mb-2 font-semibold">{selected.shape.subject}</div>

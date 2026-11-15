@@ -6,13 +6,14 @@
  * also opens the review queue's launch, and the Complete control.
  */
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 
 import { subjectColor } from "@/api/subjects";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { ReviewQueueLaunch } from "@/components/annotate/ReviewQueueLaunch";
 import { BandPicker } from "@/components/BandPicker";
+import { NotificationItem } from "@/components/Notifications";
 import { Stepper } from "@/components/Stepper";
 import { unended } from "@/hooks/jobPoll";
 import { useImageNav } from "@/hooks/useImageNav";
@@ -237,6 +238,8 @@ export function AnnotateToolbar({
   const polygonTools = mode === "polygon";
 
   const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
+  const newSubjectKey = `registry:new-subject:${dataset?.dataset_root ?? ""}`;
+  const subjectButtonRef = useRef<HTMLButtonElement>(null);
 
   async function addNewSubject() {
     const found = discovered.filter((n) => !subjectNames.includes(n));
@@ -259,6 +262,7 @@ export function AnnotateToolbar({
     const landed = await saveRegistry(
       { ...registry, [trimmed]: { description } },
       "Could not add the subject",
+      newSubjectKey,
     );
     if (!landed && projectRoot && dataset) setActiveSubject(previousSubject);
   }
@@ -294,6 +298,7 @@ export function AnnotateToolbar({
         {/* Subject picker */}
         <div className="relative">
           <button
+            ref={subjectButtonRef}
             type="button"
             onClick={() => setSubjectMenuOpen((o) => !o)}
             aria-expanded={subjectMenuOpen}
@@ -362,6 +367,15 @@ export function AnnotateToolbar({
                 <AttributePanel focused={focused} />
               </div>
             </>
+          )}
+          {!subjectMenuOpen && (
+            <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-md border border-tcip-border bg-tcip-panel px-3 py-1.5 shadow-lg empty:hidden">
+              <NotificationItem
+                placement="in place"
+                entryKey={newSubjectKey}
+                afterDismiss={() => subjectButtonRef.current?.focus()}
+              />
+            </div>
           )}
         </div>
 

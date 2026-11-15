@@ -182,7 +182,7 @@ describe("AttributePanel authoring", () => {
 describe("AttributePanel registry-growing on a lost audit line", () => {
   beforeEach(() => act(() => useStore.getState().setRegistry({ [SUBJECT]: BARE }, UNSTORED)));
 
-  it("adopts the committed registry and toasts the gap message on the audit-gap 409", async () => {
+  it("adopts the committed registry and lists the gap message as a warning notice on the audit-gap 409", async () => {
     const gap = LABEL_ANSWERS.registry_audit_gap;
     vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(gap));
 
@@ -191,10 +191,18 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
     // The committed registry is adopted as though the save had answered 200, and the gap
-    // itself is surfaced as a toast rather than swallowed.
+    // itself is listed rather than swallowed, standing on no key since the save landed.
     const { what, message } = gap.body.detail;
     expect(tokenOf(useStore.getState().registry.version)).toBe(what.version);
-    expect(useStore.getState().toasts.some((t) => t.message === message)).toBe(true);
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "warning",
+        sentence: message,
+        key: undefined,
+      }),
+    ]);
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
   });
 
   it.each([
@@ -210,9 +218,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
 
     expect(useStore.getState().registry.subjects).toEqual(LOADED.subjects);
     expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
-    expect(
-      useStore.getState().toasts.some((t) => t.message?.includes(gap.body.detail.message)),
-    ).toBe(true);
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(gap.body.detail.message);
   });
 
   it("reloads the registry from the server on an ordinary refusal, unlike the audit-gap case", async () => {
@@ -226,5 +232,30 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
 
     expect(useStore.getState().registry.subjects).toEqual(LOADED.subjects);
     expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
+  });
+
+  it("shows a refused save in the panel and in the area, and in the panel only until the next save lands", async () => {
+    const stale = LABEL_ANSWERS.registry_stale;
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockRejectedValueOnce(await thrown(stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
+
+    render(<AttributePanel focused={null} />);
+    fillAttributeDraft("opening", ["closed", "open"]);
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+
+    const sentence = `Could not update the attributes: ${stale.body.detail}`;
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(sentence);
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ kind: "failure", level: "error", sentence }),
+    ]);
+
+    saveSpy.mockResolvedValue(landed);
+    fireEvent.click(screen.getByRole("button", { name: ADD_A_VALUE }));
+    await act(() => Promise.resolve(enter(`new ${DECLARED} value`, "half")));
+
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ sentence, key: undefined }),
+    ]);
   });
 });

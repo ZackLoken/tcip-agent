@@ -438,6 +438,30 @@ describe("AnnotateToolbar subject authoring", () => {
     expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
   });
 
+  it("shows a refused new subject beside the subject control until the next add lands", async () => {
+    seedDataset();
+    act(() => adoptLoad(REGISTRY_LOADED));
+    const stale = LABEL_ANSWERS.registry_stale;
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockRejectedValueOnce(await thrown(stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(REGISTRY_LOADED);
+    answerPrompt("husk", "one husk", "husk", "one husk");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
+
+    const sentence = `Could not add the subject: ${stale.body.detail}`;
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(sentence);
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ kind: "failure", level: "error", sentence }),
+    ]);
+
+    saveSpy.mockResolvedValue(REGISTRY_SAVED);
+    openSubjectMenu();
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+  });
+
   it("reverts the optimistically set active subject when the save is refused", async () => {
     seedDataset();
     act(() => {
