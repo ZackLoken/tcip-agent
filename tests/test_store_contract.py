@@ -7,6 +7,7 @@ the crash case) where they fail.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sqlite3
@@ -27,6 +28,7 @@ import tcip_store as ts
 from tcip_annotation import verdicts
 from tcip_mcp import delivery, traits
 from tcip_store.file_backend import (
+    _DATABASE_SIDECARS,
     DATABASE_FILENAME,
     DEFAULT_LOCK_TIMEOUT_S,
     database_file,
@@ -61,6 +63,8 @@ from tests._store_worker import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+    from pydantic import JsonValue
 
 _WORKER = Path(__file__).with_name("_store_worker.py")
 
@@ -114,7 +118,6 @@ def store(tmp_path: Path) -> Iterator[Harness]:
                 proc.kill()
                 proc.wait(timeout=30)
         ts.unbind()
-        backend.close()
 
 
 # ── process lifecycle ───────────────────────────────────────────────────────────
@@ -322,6 +325,329 @@ def test_a_read_of_a_root_with_no_database_answers_absence_and_creates_none(
     assert ts.keys(LWW, str(store.root)) == []
     assert ts.read_log(store.key(LOG, "never-appended")).records == []
     assert not database_file(str(store.root)).exists()
+
+
+# ── a close never checkpoints ───────────────────────────────────────────────────
+
+
+def _written(root: Path) -> dict[ts.Key, JsonValue]:
+    """Write three records under ``root`` through the store and return each value by its key."""
+    written: dict[ts.Key, JsonValue] = {
+        ts.Key(LWW, str(root), (f"record-{n}",)): {"n": n} for n in range(3)
+    }
+    for key, value in written.items():
+        ts.replace(key, value)
+    return written
+
+
+def test_closing_a_backend_leaves_its_log_and_a_new_backend_reads_every_record(
+    store: Harness,
+) -> None:
+    """A backend's close of a root's only connection leaves the log beside the database as it was.
+
+    A backend bound afterwards reads every record written before the close.
+    """
+    from tcip_store.file_backend import DATABASE_LOG
+
+    written = _written(store.root)
+    log = database_file(str(store.root)).with_name(DATABASE_LOG)
+    before = log.read_bytes()
+    assert before
+
+    store.backend.close()
+
+    assert log.is_file() and log.read_bytes() == before
+    ts.bind(make_backend())
+    assert {key: ts.read(key) for key in written} == written
+
+
+def _held_connections(backend: SqliteBackend) -> list[sqlite3.Connection]:
+    held = list(backend._connections.values())
+    assert held
+    return held
+
+
+def test_binding_a_second_backend_closes_the_first_and_the_second_reads_its_record(
+    store: Harness,
+) -> None:
+    """``bind`` closes the backend it replaces, and the new backend reads what the old wrote."""
+    key = store.key(LWW, "replaced")
+    ts.replace(key, {"n": 1})
+    held = _held_connections(store.backend)
+
+    ts.bind(make_backend())
+
+    for conn in held:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("select 1")
+    assert ts.read(key) == {"n": 1}
+
+
+def test_unbinding_closes_the_backend_it_drops(store: Harness) -> None:
+    """``unbind`` closes the bound backend's connections."""
+    ts.replace(store.key(LWW, "dropped"), {"n": 1})
+    held = _held_connections(store.backend)
+
+    ts.unbind()
+
+    for conn in held:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("select 1")
+
+
+def test_binding_the_backend_already_bound_closes_nothing(
+    store: Harness,
+) -> None:
+    """``bind`` of the bound backend leaves its connections open and its records readable."""
+    key = store.key(LWW, "rebound")
+    ts.replace(key, {"n": 1})
+    held = _held_connections(store.backend)
+
+    ts.bind(store.backend)
+
+    for conn in held:
+        conn.execute("select 1")
+    assert ts.read(key) == {"n": 1}
+
+
+def test_a_bind_whose_backend_cannot_be_built_leaves_the_bound_backend_open(
+    store: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``bind`` refused as backend unavailable closes nothing and keeps the backend bound."""
+    key = store.key(LWW, "kept")
+    ts.replace(key, {"n": 1})
+    held = _held_connections(store.backend)
+
+    monkeypatch.setitem(sys.modules, "filelock", None)
+    with pytest.raises(ts.BackendUnavailableError):
+        ts.bind()
+    monkeypatch.undo()
+
+    for conn in held:
+        conn.execute("select 1")
+    assert ts.read(key) == {"n": 1}
+
+
+def test_the_store_s_backup_leaves_its_source_s_log_as_it_was(
+    store: Harness,
+) -> None:
+    """``copy_database`` copies a closed store whole and leaves the source's log byte for byte."""
+    from tcip_store.file_backend import DATABASE_LOG
+    from tcip_store.sqlite_backend import copy_database
+
+    written = _written(store.root)
+    store.backend.close()
+    source = database_file(str(store.root))
+    log = source.with_name(DATABASE_LOG)
+    assert log.is_file()
+    before = log.read_bytes()
+    copied_root = store.root.parent / f"{store.root.name}-copy"
+    destination = database_file(str(copied_root))
+    destination.parent.mkdir(parents=True)
+
+    copy_database(source, destination)
+
+    assert log.is_file() and log.read_bytes() == before
+    copied = {
+        ts.Key(key.store, str(copied_root), key.parts): value
+        for key, value in written.items()
+    }
+    assert {key: ts.read(key) for key in copied} == copied
+
+
+def test_no_database_is_published_beside_the_files_a_store_left_without_one(
+    store: Harness,
+) -> None:
+    """A write to a root whose database alone is gone is refused, naming the database and its log.
+
+    Nothing is built and the log's bytes are as they were.
+    """
+    from tcip_store.file_backend import DATABASE_LOG
+
+    key = next(iter(_written(store.root)))
+    ts.release_root(store.root)
+    db = database_file(str(store.root))
+    log = db.with_name(DATABASE_LOG)
+    db.unlink()
+    assert log.is_file()
+    before = log.read_bytes()
+
+    with pytest.raises(ts.DatabaseRefusedError) as refused:
+        ts.replace(key, {"n": 9})
+
+    message = str(refused.value)
+    assert str(db) in message and str(log) in message
+    assert not db.exists()
+    assert log.read_bytes() == before
+
+
+@pytest.mark.parametrize("kept", sorted(_DATABASE_SIDECARS))
+def test_either_file_a_store_keeps_beside_its_database_refuses_a_publish_alone(
+    store: Harness, kept: str
+) -> None:
+    """A sidecar left alone where a database is gone refuses a write, naming that file alone.
+
+    The refusal says what the file is, and names no other sidecar's kind.
+    """
+    key = next(iter(_written(store.root)))
+    ts.release_root(store.root)
+    db = database_file(str(store.root))
+    db.unlink()
+    for name in _DATABASE_SIDECARS:
+        if name != kept:
+            db.with_name(name).unlink()
+    assert db.with_name(kept).is_file()
+
+    with pytest.raises(ts.DatabaseRefusedError) as refused:
+        ts.replace(key, {"n": 9})
+
+    message = str(refused.value)
+    kind = _DATABASE_SIDECARS[kept]
+    assert str(db.with_name(kept)) in message and kind in message
+    assert not [
+        other
+        for other in _DATABASE_SIDECARS.values()
+        if other != kind and other in message
+    ]
+    assert not db.exists()
+
+
+class _PausedCreator(SqliteBackend):
+    """A backend whose creation, having found no database, waits for ``go`` before its lock."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.arrived = threading.Event()
+        self.go = threading.Event()
+
+    def _publish(
+        self,
+        db_path: Path,
+        root: str,
+        keys: tuple[ts.Key, ...],
+        timeout_s: float,
+    ) -> None:
+        self.arrived.set()
+        assert self.go.wait(30)
+        super()._publish(db_path, root, keys, timeout_s)
+
+
+def test_a_second_creator_opens_the_first_s_database_beside_its_sidecars(
+    store: Harness,
+) -> None:
+    """A creator that finds the first creator's database under the lock writes into it.
+
+    The first creator's log and shared-memory index are beside the database at that look.
+    """
+    key = store.key(LWW, "second")
+    second = _PausedCreator()
+    outcome: list[object] = []
+
+    def create() -> None:
+        try:
+            outcome.append(second.replace(key, {"by": "second"}))
+        except BaseException as exc:
+            outcome.append(exc)
+
+    worker = threading.Thread(target=create)
+    worker.start()
+    try:
+        assert second.arrived.wait(30)
+        ts.replace(store.key(LWW, "first"), {"by": "first"})
+        db = database_file(str(store.root))
+        assert [
+            db.with_name(name).is_file() for name in _DATABASE_SIDECARS
+        ] == [True] * len(_DATABASE_SIDECARS)
+    finally:
+        second.go.set()
+        worker.join(30)
+        second.close()
+
+    assert [type(found) for found in outcome] == [ts.Version]
+    assert ts.read(key) == {"by": "second"}
+
+
+def _refusing_setting(
+    refusal: str, made: list[sqlite3.Connection]
+) -> type[sqlite3.Connection]:
+    """Return a connection class on which the no-checkpoint setting will not hold.
+
+    ``refusal`` is ``raises`` (turning the setting on raises the driver's error) or ``reads back
+    off``. Every connection the class makes is appended to ``made``.
+    """
+
+    class Refusing(sqlite3.Connection):
+        def __init__(self, database: str, **_: object) -> None:
+            super().__init__(database)
+            made.append(self)
+
+        def setconfig(self, op: int, enable: bool = True, /) -> bool:
+            if refusal == "raises":
+                raise sqlite3.OperationalError("the setting is refused")
+            return super().setconfig(op, enable)
+
+        def getconfig(self, op: int, /) -> bool:
+            return refusal != "reads back off" and super().getconfig(op)
+
+    return Refusing
+
+
+@pytest.mark.parametrize("refusal", ["raises", "reads back off"])
+def test_a_connection_whose_close_could_checkpoint_is_refused_as_unavailable(
+    store: Harness, refusal: str
+) -> None:
+    """A connection on which the no-checkpoint setting will not hold is closed and refused.
+
+    The setting raising refuses with the driver's error as the cause; reading back off refuses
+    too. Each refusal names the database.
+    """
+    from tcip_store.sqlite_backend import connect_published
+
+    ts.replace(store.key(LWW, "published"), {"n": 1})
+    ts.release_root(store.root)
+    db = database_file(str(store.root))
+    made: list[sqlite3.Connection] = []
+
+    with pytest.raises(ts.BackendUnavailableError) as refused:
+        connect_published(db, factory=_refusing_setting(refusal, made))
+
+    assert str(db) in str(refused.value)
+    if refusal == "raises":
+        assert isinstance(refused.value.__cause__, sqlite3.OperationalError)
+    (conn,) = made
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("select 1")
+
+
+@pytest.mark.parametrize("refusal", ["raises", "reads back off"])
+def test_a_store_read_meets_an_unheld_no_checkpoint_setting_as_backend_unavailable(
+    store: Harness, refusal: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read whose connection will not hold the no-checkpoint setting is refused as unavailable.
+
+    The caller receives ``BackendUnavailableError`` naming the database, never the refused
+    database a driver error inside the read would map to.
+    """
+    from tcip_store import sqlite_backend
+
+    key = store.key(LWW, "published")
+    ts.replace(key, {"n": 1})
+    ts.release_root(store.root)
+    made: list[sqlite3.Connection] = []
+    monkeypatch.setattr(
+        sqlite_backend,
+        "connect_published",
+        functools.partial(
+            sqlite_backend.connect_published,
+            factory=_refusing_setting(refusal, made),
+        ),
+    )
+
+    with pytest.raises(ts.StoreError) as refused:
+        ts.read(key)
+
+    assert type(refused.value) is ts.BackendUnavailableError
+    assert str(database_file(str(store.root))) in str(refused.value)
 
 
 # ── atomicity ───────────────────────────────────────────────────────────────────

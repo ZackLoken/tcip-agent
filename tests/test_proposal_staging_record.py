@@ -25,6 +25,7 @@ from tests._producer_fixtures import (
     kept,
     write_image,
 )
+from tests.proposal_stub import STUB_ENGINE
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -358,27 +359,26 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
 
 
 def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
-    tmp_path: Path,
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     """A proposal outside a dataset tree refuses, naming where a run is staged.
 
     A path with no dataset address to stage under runs no engine, the one named failing the test
     that reaches it, and writes no staging record; the same image under a dataset's images/ tree
-    still proposes and stages through :data:`STUB_ENGINE`. Both calls resolve their engine by its
-    own name.
+    still proposes and stages through :data:`STUB_ENGINE`. Both calls are made through the server
+    and resolve their engine by its own name.
     """
     import tcip_store as ts
-    from tcip_mcp.tools.proposal_tools import (
-        PROPOSAL_STAGING_STORE,
-        ProposedCandidates,
-        propose_annotations,
-    )
+    from tcip_mcp.tools.proposal_tools import PROPOSAL_STAGING_STORE
+    from tests._server_calls import called_through_the_server
 
     loose = tmp_path / "loose.jpg"
     _make_image(loose)
 
-    refused = propose_annotations(
-        tmp_path, image_path=str(loose), engine=UNRUNNABLE_ENGINE, actor=None
+    refused = called_through_the_server(
+        "propose_annotations",
+        {"image_path": str(loose), "engine": UNRUNNABLE_ENGINE},
+        bound=bound,
     )
     assert isinstance(refused, dict) and "images/ tree" in refused["error"], (
         refused
@@ -387,12 +387,13 @@ def test_propose_outside_a_dataset_tree_refuses_before_the_engine_runs(
 
     placed = image_dir(tmp_path, "2026-01-01") / "placed.jpg"
     _make_image(placed)
-    proposed = propose_annotations(
-        tmp_path, image_path=str(placed), engine=STUB_ENGINE, actor=None
+    proposed = called_through_the_server(
+        "propose_annotations",
+        {"image_path": str(placed), "engine": STUB_ENGINE},
+        bound=bound,
     )
-    assert (
-        isinstance(proposed, ProposedCandidates)
-        and len(proposed.candidates) == 1
+    assert isinstance(proposed, dict) and len(proposed["candidates"]) == 1, (
+        proposed
     )
 
 
@@ -779,9 +780,6 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     assert len(audit_rows(tmp_path, "prediction_bucket_published")) == 1
     assert audit_rows(tmp_path, "stage_proposals") == []
 
-
-STUB_ENGINE = "tests.proposal_stub:factory"
-"""A dotted engine proposing one candidate box, ``tests.proposal_stub``'s."""
 
 UNRUNNABLE_ENGINE = "tests.test_proposal_staging_record:unrunnable_proposer"
 """A dotted engine whose pass fails the test that reaches it (:func:`unrunnable_proposer`)."""

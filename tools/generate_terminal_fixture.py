@@ -23,14 +23,15 @@ Then, with no override and every row's executable running the fake
 launched (``row_launch``), its hook's report of :data:`CONVERSATION`, naming no transcript, is
 posted through ``POST .../session-start`` once its agent wrote its banner, a second report of it
 posted while every audit append fails (``start_audit_gap``), the backend's sessions
-are ended by its shutdown (``shutdown_all``), and the row launched again (``resumed_launch``).
-Last, the status of those rows but the third, which names ``tests._terminal_fixtures.ABSENT``
+are ended by its shutdown (``shutdown_all``), and the row launched again (``resumed_launch``) and
+ended by a person. The row is launched twice more, its hook reporting nothing and the backend's
+shutdown ending each, so the second launch meets a resume fault (``fault_launch``). Last, the
+status of those rows but the third, which names ``tests._terminal_fixtures.ABSENT``
 (``status_mixed``), and of rows all naming it (``status_absent``), are listed. The answers, each
 refusal with its status, are written, normalized (``fixture_session.normalized``) with each
 session id minted read as its order, the interpreter as ``<python>``, the fake as
-``<fake agent>``, the executable running it as ``<fake executable>`` and each path a row launch
-names after ``--settings`` and ``--mcp-config`` as that flag's name, to
-:data:`GENERATED_PATH`.
+``<fake agent>``, the executable running it as ``<fake executable>`` and each path a launch names
+after ``--settings`` and ``--mcp-config`` as that flag's name, to :data:`GENERATED_PATH`.
 
     python -m tools.generate_terminal_fixture
 """
@@ -94,7 +95,7 @@ def produce() -> dict[str, JsonValue]:
         SessionStartReport,
         SubmitRequest,
         TerminalHeldFrame,
-        TerminalLaunch,
+        TerminalLaunchAnswer,
         TerminalOutputFrame,
         TerminalServedFrame,
     )
@@ -109,7 +110,7 @@ def produce() -> dict[str, JsonValue]:
     from tests._web_fixtures import named_project
 
     served: dict[str, JsonValue] = {}
-    sessions: list[str] = []
+    launches: list[TerminalLaunchAnswer] = []
     with (
         scratch_session() as (workspace, client),
         pytest.MonkeyPatch.context() as patch,
@@ -124,8 +125,8 @@ def produce() -> dict[str, JsonValue]:
                     provider=pty_host.PROVIDERS[0].id, user=ACTOR
                 ),
             )
-            sessions.append(TerminalLaunch.model_validate(launch).session_id)
-            return launch, {"session_id": sessions[-1]}
+            launches.append(TerminalLaunchAnswer.model_validate(launch))
+            return launch, {"session_id": launches[-1].session_id}
 
         def submit(session: dict[str, str], text: str) -> None:
             answered(
@@ -250,6 +251,10 @@ def produce() -> dict[str, JsonValue]:
         terminal_routes.shutdown_all()
         served["resumed_launch"], second_row = create()
         acted("end_session", second_row, 200)
+        create()
+        terminal_routes.shutdown_all()
+        served["fault_launch"], _ = create()
+        terminal_routes.shutdown_all()
         patch.setattr(
             pty_host,
             "PROVIDERS",
@@ -267,10 +272,8 @@ def produce() -> dict[str, JsonValue]:
         served["status_absent"] = answered(client, "get_status", 200)
         launch_files = {
             path: f"<{flag.removeprefix('--')}>"
-            for launch in (served["row_launch"], served["resumed_launch"])
-            for flag, path in pairwise(
-                TerminalLaunch.model_validate(launch).launched.argv
-            )
+            for launch in launches
+            for flag, path in pairwise(launch.launched.argv)
             if flag in LAUNCH_FILES
         }
         return normalized(
@@ -278,8 +281,8 @@ def produce() -> dict[str, JsonValue]:
             workspace,
             minted={
                 **{
-                    session: f"<session {n}>"
-                    for n, session in enumerate(sessions)
+                    launch.session_id: f"<session {n}>"
+                    for n, launch in enumerate(launches)
                 },
                 sys.executable: "<python>",
                 str(FAKE): "<fake agent>",
