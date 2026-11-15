@@ -237,18 +237,19 @@ its colors and fonts the tokens in `frontend/src/index.css` and its logos in
   restored arrangement never leaves a pane off the screen. Hiding a pane, resetting the arrangement
   and discarding work are three actions, and none performs another: hiding or moving the agent's
   terminal never ends its session, and moving or resizing a pane keeps the canvas's edits,
-  selection and view. Every pane operation is reachable without dragging. Docking is
-  `flexlayout-react`, themed with the app's tokens; the app's own code only saves and restores its
-  model and offers the reopen and reset commands.
+  selection and view. Every pane operation is reachable without dragging. A pane that docks does so
+  through `flexlayout-react`, themed with the app's tokens, and the app's own code over it only
+  saves and restores its model and offers the reopen and reset commands.
 - When the window is small or zoomed, every control, the notifications area and each way back to
   a closed or minimized pane stay reachable.
-- Explanation a person needs to fill a control, its input and what a blank means, stays where they
-  are looking, as "What a person meets at the screen" requires. Other explanation sits behind a
-  tooltip or the help overlay rather than docked on screen as prose.
+- Explanation a person needs to fill a control stays where "What a person meets at the screen"
+  puts it. Other explanation sits behind a tooltip or the help overlay rather than docked on screen
+  as prose.
 - One notifications area, opened from the top bar's button, keeps the history of what the
   application tells a person about its state or an error: a failed request, a background job's
-  end, a lasting condition such as a lost connection, and every refusal. A refusal still gives its
-  reason and next step at the control that refused; the area records the same message, from the
-  one source that says it. Each entry holds its time, its sentence and any action it offers, and is
-  dismissable, as the screen conventions above require. No message pops up and none leaves on a
-  timer; the button shows how many entries are new and whether a lasting condition holds.
+  end, a lasting condition such as a lost connection, and every refusal. A refusal is still written
+  where "What a person meets at the screen" puts it, and the area records the same message from
+  the one source that says it. Each entry holds its time, its sentence and any action it offers,
+  and is dismissable, as "What a person meets at the screen" requires. No message pops up and none
+  leaves on a timer; the button shows how many entries are new and whether a lasting condition
+  holds.
