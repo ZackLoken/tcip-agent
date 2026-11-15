@@ -110,8 +110,25 @@ const REGION: CanvasRegion = {
 
 const BASE_URL = api.images.url("orchard.tif", DISPLAY);
 
+const ignoreSize = () => {};
+
 function stageProps(regions: CanvasRegion[]) {
-  return { imageUrl: null, imgWidth: 1000, imgHeight: 800, regions };
+  return { imageUrl: null, imgWidth: 1000, imgHeight: 800, regions, onHostSize: ignoreSize };
+}
+
+/** A bounding rect of `width` x `height` at the origin. */
+function rectOf(width: number, height: number): DOMRect {
+  return {
+    width,
+    height,
+    top: 0,
+    left: 0,
+    right: width,
+    bottom: height,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  };
 }
 
 function putView(view: { scale: number; offset_x: number; offset_y: number }) {
@@ -201,6 +218,7 @@ describe("CanvasStage pointer geometry", () => {
         onPixelDown={onPixelDown}
         onPixelMove={onPixelMove}
         onPixelUp={onPixelUp}
+        onHostSize={ignoreSize}
       />,
     );
     const stage = screen.getByTestId("k-stage");
@@ -230,6 +248,7 @@ describe("CanvasStage pointer geometry", () => {
         onPixelClick={onPixelClick}
         onPixelDoubleClick={onPixelDoubleClick}
         onPixelContextMenu={onPixelContextMenu}
+        onHostSize={ignoreSize}
       />,
     );
     const stage = screen.getByTestId("k-stage");
@@ -264,7 +283,7 @@ describe("CanvasStage wheel zoom", () => {
 
   it("zooms in about the pointer when the wheel scrolls up", async () => {
     putView(START);
-    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} />);
+    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={ignoreSize} />);
     await pinchWheel(-100);
 
     const view = useStore.getState().gui.view;
@@ -276,7 +295,7 @@ describe("CanvasStage wheel zoom", () => {
 
   it("zooms out about the pointer when the wheel scrolls down", async () => {
     putView(START);
-    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} />);
+    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={ignoreSize} />);
     await pinchWheel(100);
 
     const view = useStore.getState().gui.view;
@@ -289,18 +308,10 @@ describe("CanvasStage wheel zoom", () => {
 describe("CanvasStage auto-fit", () => {
   it("fits the whole image inside the canvas when the image first loads", async () => {
     putView({ scale: 1, offset_x: 0, offset_y: 0 });
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
-      width: 800,
-      height: 300,
-      top: 0,
-      left: 0,
-      right: 800,
-      bottom: 300,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    render(<CanvasStage imageUrl={BASE_URL} imgWidth={1000} imgHeight={1200} />);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rectOf(800, 300));
+    render(
+      <CanvasStage imageUrl={BASE_URL} imgWidth={1000} imgHeight={1200} onHostSize={ignoreSize} />,
+    );
     await resolveLoad(BASE_URL, makeLoaded());
 
     const view = useStore.getState().gui.view;
@@ -311,12 +322,65 @@ describe("CanvasStage auto-fit", () => {
   });
 });
 
+describe("CanvasStage host size", () => {
+  /** Stand in for the observer the stage registers; the returned function fires every callback. */
+  function observedResizes() {
+    const callbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          callbacks.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    return () => act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
+  }
+
+  it("reports the size the stage measured, and again after a resize", () => {
+    const resize = observedResizes();
+    const rect = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockReturnValue(rectOf(800.7, 300.2));
+    const onHostSize = vi.fn();
+    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={onHostSize} />);
+    expect(onHostSize).toHaveBeenLastCalledWith({ w: 800, h: 300 });
+
+    rect.mockReturnValue(rectOf(640, 360));
+    resize();
+    expect(onHostSize).toHaveBeenLastCalledWith({ w: 640, h: 360 });
+  });
+
+  it("does not report again for a resize that leaves the whole-pixel size as it was", () => {
+    const resize = observedResizes();
+    const rect = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockReturnValue(rectOf(800, 300));
+    const onHostSize = vi.fn();
+    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={onHostSize} />);
+    const reported = onHostSize.mock.calls.length;
+
+    rect.mockReturnValue(rectOf(800.4, 300.9));
+    resize();
+    expect(onHostSize).toHaveBeenCalledTimes(reported);
+  });
+
+  it("reports no size for a host with none to measure", () => {
+    const onHostSize = vi.fn();
+    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={onHostSize} />);
+    expect(onHostSize).toHaveBeenLastCalledWith(null);
+  });
+});
+
 describe("CanvasStage Space-to-pan", () => {
-  const host = () => document.querySelector<HTMLElement>("[data-canvas-host]")!;
+  const host = () => screen.getByTestId("canvas-host");
   const space = { key: " ", code: "Space" };
 
   it("turns the cursor to a grab hand while Space is held, and back on release", () => {
-    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} />);
+    render(<CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={ignoreSize} />);
     fireEvent.keyDown(document.body, space);
     expect(host().style.cursor).toBe("grab");
     fireEvent.keyUp(document.body, space);
@@ -326,7 +390,7 @@ describe("CanvasStage Space-to-pan", () => {
   it("does not start a pan while a modal dialog is open", () => {
     render(
       <>
-        <CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} />
+        <CanvasStage imageUrl={null} imgWidth={1000} imgHeight={800} onHostSize={ignoreSize} />
         <HelpOverlay activeTab="annotate" />
       </>,
     );

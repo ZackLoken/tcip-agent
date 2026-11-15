@@ -375,7 +375,7 @@ export function ProjectPicker() {
                       <SeasonRail
                         captures={tree.captures}
                         showLabels
-                        active={date}
+                        active={isSelected ? date : null}
                         className="my-0.5"
                       />
                       <div className="text-[13px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">

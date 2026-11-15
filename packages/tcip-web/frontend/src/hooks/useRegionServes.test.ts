@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import type { ServingCell, ViewReads } from "@/api/types.generated";
@@ -27,32 +27,12 @@ function baseArgs(answer: ViewReads = IMAGE_ANSWERS.native) {
     displayPixels: renderHook(() => useDisplayPixels()).result.current,
     baseFacts: BASE_FACTS,
     composite: {},
+    host: { w: 1200, h: 800 },
   };
 }
 
 /** The key the hook serves `cell` under. */
 const keyOf = (cell: ServingCell) => `${cell.level}:${cell.name}`;
-
-beforeEach(() => {
-  const host = document.createElement("div");
-  host.setAttribute("data-canvas-host", "");
-  document.body.appendChild(host);
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-    width: 1200,
-    height: 800,
-    top: 0,
-    left: 0,
-    right: 1200,
-    bottom: 800,
-    x: 0,
-    y: 0,
-    toJSON: () => "",
-  });
-});
-
-afterEach(() => {
-  document.body.innerHTML = "";
-});
 
 describe("useRegionServes", () => {
   it("asks the server for the visible native rect and serves each read it answers", async () => {
@@ -156,6 +136,30 @@ describe("useRegionServes", () => {
       x1: 1,
       y1: 800,
     });
+  });
+
+  it("asks again for the rect of a host that was resized with the view unchanged", async () => {
+    const reads = vi.spyOn(api.images, "viewReads").mockResolvedValue(IMAGE_ANSWERS.native);
+    const args = baseArgs();
+    const { rerender } = renderHook((props) => useRegionServes(props), { initialProps: args });
+    await waitFor(() => expect(reads).toHaveBeenCalledTimes(1));
+
+    const host = { w: Math.floor(args.imgW / 2), h: Math.floor(args.imgH / 2) };
+    rerender({ ...args, host });
+    await waitFor(() => expect(reads).toHaveBeenCalledTimes(2));
+    expect(reads).toHaveBeenLastCalledWith(args.imagePath, args.displayPixels, {
+      x0: 0,
+      y0: 0,
+      x1: host.w,
+      y1: host.h,
+    });
+  });
+
+  it("asks nothing for a host the stage has not measured", () => {
+    const reads = vi.spyOn(api.images, "viewReads");
+    const { result } = renderHook(() => useRegionServes({ ...baseArgs(), host: null }));
+    expect(result.current).toEqual([]);
+    expect(reads).not.toHaveBeenCalled();
   });
 
   it("asks nothing for a band composite or while the base bitmap carries the zoom", () => {

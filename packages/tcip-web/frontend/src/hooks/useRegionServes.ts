@@ -13,8 +13,9 @@ import { api } from "@/api/client";
 import type { ServingCell } from "@/api/types.generated";
 import type { CanvasRegion } from "@/components/Canvas/CanvasStage";
 import type { compositeParams } from "@/lib/bandSelection";
-import { measureCanvasHost, computeViewport } from "@/lib/canvasSync";
+import { computeViewport } from "@/lib/canvasSync";
 import type { LoadedImage } from "@/lib/imageLoader";
+import type { HostSize } from "@/lib/viewGeometry";
 import type { ViewState } from "@/store/types";
 
 export function useRegionServes(args: {
@@ -22,6 +23,8 @@ export function useRegionServes(args: {
   imgW: number;
   imgH: number;
   view: ViewState;
+  /** The canvas host's size as the stage measured it; null while it has none. */
+  host: HostSize | null;
   displayPixels: number;
   baseFacts: LoadedImage | null;
   composite: ReturnType<typeof compositeParams>;
@@ -37,7 +40,7 @@ export function useRegionServes(args: {
   const served = args.baseFacts?.ok ? args.baseFacts.servedSize : null;
   // The base bitmap's resolution is its coarser axis: a one-pixel-wide frame reduces only in height.
   const baseScale = served && imgW > 0 && imgH > 0 ? Math.min(served.w / imgW, served.h / imgH) : 1;
-  const host = measureCanvasHost();
+  const { host } = args;
   const viewport =
     imagePath && host && baseScale < 1 && bands === undefined
       ? args.view.scale > baseScale && computeViewport(args.view, host, imgW, imgH)

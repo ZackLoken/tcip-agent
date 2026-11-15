@@ -10,9 +10,12 @@ import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useOverviewBuild, writtenLabel } from "@/hooks/useOverviewBuild";
 import { loadImage, type LoadedImage } from "@/lib/imageLoader";
 import { keydownInModal } from "@/lib/modalKeydown";
-import { clampView, fitView } from "@/lib/viewGeometry";
+import { clampView, fitView, type HostSize } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
+
+/** The size the Stage takes while the host has at most one pixel on a side. */
+const UNMEASURED: HostSize = { w: 1, h: 1 };
 
 /** One region serve drawn above the base image, positioned in image coords. */
 export interface CanvasRegion {
@@ -38,6 +41,9 @@ export interface CanvasStageProps {
   regions?: CanvasRegion[];
   /** The base serve's read facts: null while a load is in flight, then the loader's result. */
   onBaseFacts?: (facts: LoadedImage | null) => void;
+  /** The canvas host's size in whole pixels: null while the host has at most one pixel on a side;
+   *  reported again whenever its whole-pixel size changes. */
+  onHostSize: (size: HostSize | null) => void;
   /** Static shapes, rendered in the content layer (below the overlay). */
   children?: React.ReactNode;
   /** Cursor-following / transient shapes, rendered in a separate top layer so they
@@ -55,9 +61,14 @@ export interface CanvasStageProps {
 export function CanvasStage(props: CanvasStageProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
-  // Start at 0 so the one-shot fit waits for a real measurement (below) instead of fitting
-  // to a placeholder size: a stale-dims fit leaves the image mis-scaled/off-screen on first open.
-  const [dims, setDims] = useState({ w: 0, h: 0 });
+  // Null until a real measurement (below), so the one-shot fit waits instead of fitting to a
+  // placeholder size: a stale-size fit leaves the image mis-scaled/off-screen on first open.
+  const [host, setHost] = useState<HostSize | null>(null);
+  const dims = host ?? UNMEASURED;
+  const { onHostSize } = props;
+  useEffect(() => {
+    onHostSize(host);
+  }, [host, onHostSize]);
   const view = useStore((s) => s.gui.view);
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
@@ -75,7 +86,12 @@ export function CanvasStage(props: CanvasStageProps) {
     if (!wrapper.current) return;
     const measure = () => {
       const r = wrapper.current!.getBoundingClientRect();
-      setDims({ w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height)) });
+      const w = Math.floor(r.width);
+      const h = Math.floor(r.height);
+      // An unchanged size keeps its object, so a repeated measure re-renders nothing.
+      setHost((prev) =>
+        w > 1 && h > 1 ? (prev?.w === w && prev.h === h ? prev : { w, h }) : null,
+      );
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -174,10 +190,10 @@ export function CanvasStage(props: CanvasStageProps) {
     if (!img || !props.imgWidth || !props.imgHeight) return;
     const key = `${props.imageUrl}:${props.imgWidth}x${props.imgHeight}`;
     if (didFit.current === key) return;
-    if (dims.w <= 1 || dims.h <= 1) return; // wait for a real measurement before fitting
+    if (!host) return; // wait for a real measurement before fitting
     didFit.current = key;
-    setView(fitView(dims, props.imgWidth, props.imgHeight));
-  }, [img, props.imageUrl, props.imgWidth, props.imgHeight, dims, setView]);
+    setView(fitView(host, props.imgWidth, props.imgHeight));
+  }, [img, props.imageUrl, props.imgWidth, props.imgHeight, host, setView]);
 
   // Expose stage ref
   const { onStageRef } = props;
@@ -393,7 +409,7 @@ export function CanvasStage(props: CanvasStageProps) {
   return (
     <div
       ref={wrapper}
-      data-canvas-host
+      data-testid="canvas-host"
       className="relative flex-1 bg-tcip-canvas overflow-hidden"
       style={spaceHeld ? { cursor: "grab" } : undefined}
     >
