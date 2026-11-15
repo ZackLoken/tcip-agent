@@ -62,7 +62,8 @@ def _picker() -> dict[str, JsonValue]:
     workspace is listed (``picker``), ``Valley farm`` opened and the workspace listed again
     (``picker_open``), ``Valley farm`` renamed through ``POST /api/projects/rename``
     (``renamed``), and ``Ridge farm`` then ``Empty block`` opened, the three open answers kept in
-    that order (``opened``). Last ``Valley farm`` is opened again, its record is damaged to bytes
+    that order (``opened``), and the workspace is listed with ``Empty block`` open
+    (``picker_empty_open``). Last ``Valley farm`` is opened again, its record is damaged to bytes
     that will not decode, and the workspace is listed with it open and unread (``picker_damaged``).
     The answers
     are normalized by :data:`INSTANTS`, each minted project id and the removal's archive read as
@@ -155,6 +156,7 @@ def _picker() -> dict[str, JsonValue]:
             opened_valley,
             *(opened(client, project) for project in (ridge, empty)),
         ]
+        picker_empty_open = answered(client, "list_projects", 200)
         opened(client, valley)
         damage_record(
             project_record_key(str(valley.root)), b"{not valley json"
@@ -166,6 +168,7 @@ def _picker() -> dict[str, JsonValue]:
                 "picker": picker,
                 "opened": opened_projects,
                 "picker_open": picker_open,
+                "picker_empty_open": picker_empty_open,
                 "picker_damaged": picker_damaged,
                 "removed": removed,
                 "renamed": renamed,
