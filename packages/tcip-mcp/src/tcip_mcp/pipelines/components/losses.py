@@ -5,8 +5,11 @@ The ``a+b`` syntax composes a ``CombinedLoss`` from multiple terms.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
 import torch.nn as nn
+from pydantic import TypeAdapter
 from torch.nn import functional
 
 from tcip_mcp.pipelines.derivations import num_classes_from_distribution
@@ -294,23 +297,32 @@ class CombinedLoss(BaseLoss):
         return total
 
 
+ClassWeightScheme = Literal["balanced", "inverse", "effective"]
+_CLASS_WEIGHT_SCHEME: TypeAdapter[ClassWeightScheme] = TypeAdapter(
+    ClassWeightScheme
+)
+
+
 def compute_class_weights(
     class_distribution: dict[int, int],
     num_classes: int | None = None,
-    scheme: str = "balanced",
+    scheme: ClassWeightScheme = "balanced",
     beta: float = 0.999,
     normalize: bool = True,
 ) -> torch.Tensor:
     """Compute per-class loss weights from a class-count distribution.
 
-    Schemes: ``balanced`` (``total/(n_present*count)``), ``inverse`` (``1/count``), or
-    ``effective`` (``(1-beta)/(1-beta**count)``). Zero-count classes get weight 1.0. When
+    ``scheme`` is a :data:`ClassWeightScheme`, checked before any count is read; a name outside
+    it refuses naming the accepted ones. A present class weighs ``total/(n_present*count)`` under
+    ``balanced``, ``1/count`` under ``inverse`` and ``(1-beta)/(1-beta**count)`` under
+    ``effective``, the one scheme reading ``beta``. Zero-count classes get weight 1.0. When
     ``normalize``, weights are rescaled so the mean over present classes is 1.0.
 
     ``num_classes`` unstated is the count the distribution itself implies
     (:func:`~tcip_mcp.pipelines.derivations.num_classes_from_distribution`); a distribution that
     counted nothing implies no classes and weights none.
     """
+    _CLASS_WEIGHT_SCHEME.validate_python(scheme)
     if num_classes is None:
         num_classes = num_classes_from_distribution(class_distribution)
     counts = [int(class_distribution.get(c, 0)) for c in range(num_classes)]
@@ -357,7 +369,7 @@ def build_loss(
     *,
     class_distribution: dict[int, int] | None = None,
     num_classes: int | None = None,
-    weight_scheme: str = "balanced",
+    weight_scheme: ClassWeightScheme = "balanced",
     **kwargs: object,
 ) -> BaseLoss:
     """Build a loss by name, or a :class:`CombinedLoss` from terms joined like ``'bce+dice'``.
@@ -365,15 +377,18 @@ def build_loss(
     Each keyword goes to the terms whose constructor accepts it, so a per-term hyperparameter
     (``weight`` for the CE term, ``smooth`` for the dice term) reaches its own term; a keyword no
     term accepts refuses. A term is weightable when its constructor takes ``weight``: given a
-    ``class_distribution``, an inverse-frequency ``weight`` (:func:`compute_class_weights`) goes
-    to every weightable term unless ``weight`` was passed, and a ``class_distribution`` for a loss
-    with no weightable term refuses. An unknown name refuses (``ValueError``) naming the
-    registered ones.
+    ``class_distribution``, a ``weight`` (:func:`compute_class_weights`, following
+    ``weight_scheme``) goes to every weightable term unless ``weight`` was passed, and a
+    ``class_distribution`` for a loss with no weightable term refuses. An unknown name refuses
+    (``ValueError``) naming the registered ones, as does a ``weight_scheme`` outside
+    :data:`ClassWeightScheme`, with or without a ``class_distribution``.
     """
     from tcip_mcp.pipelines.model_build import (
         keyword_parameters,
         resolve_named,
     )
+
+    _CLASS_WEIGHT_SCHEME.validate_python(weight_scheme)
 
     parts = [p.strip() for p in name.split("+")]
     accepted = {
