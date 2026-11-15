@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import { keydownInModal } from "@/lib/modalKeydown";
+
 export interface Shortcut {
   keys: string; // space-separated e.g. "Ctrl+z", "a", "ArrowLeft"
   action: (e: KeyboardEvent) => void;
@@ -50,7 +52,7 @@ export function useKeyboardShortcuts(shortcuts: Shortcut[]): void {
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       // A control that owns its own key handling keeps it: Enter/Space still activate a button.
-      if (isFocusableControl(e.target)) {
+      if (isFocusableControl(e.target) || keydownInModal(e)) {
         return;
       }
       for (const s of shortcuts) {

@@ -7,6 +7,7 @@ import { sessionsApi } from "@/api/sessions";
 import { subjectColor } from "@/api/subjects";
 import { CONF_REFUSED, PLAIN } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
+import { HelpOverlay } from "@/components/HelpOverlay";
 import type { BandChoice } from "@/lib/bandSelection";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
@@ -1425,8 +1426,16 @@ function seedPolygons(polygons: (typeof POLY_A)[]) {
 const nextFrame = () =>
   act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 
-async function renderPolygonCanvas(polygons: (typeof POLY_A)[] = [POLY_A, POLY_B]) {
-  render(<AnnotateTab />);
+async function renderPolygonCanvas(
+  polygons: (typeof POLY_A)[] = [POLY_A, POLY_B],
+  alongside: React.ReactNode = null,
+) {
+  render(
+    <>
+      <AnnotateTab />
+      {alongside}
+    </>,
+  );
   await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
   await flush();
   act(() => {
@@ -1474,6 +1483,64 @@ describe("click-selection parity across the Snap/Stream toggles", () => {
     act(() => useStore.getState().setSnap(true));
     fireEvent.click(stage, { clientX: 50, clientY: 50 });
     expect(useStore.getState().canvas.focus).toEqual({ kind: "polygon", index: 0 });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+});
+
+describe("AnnotateTab with the help open", () => {
+  const openHelp = () => {
+    fireEvent.keyDown(document.body, { key: "?" });
+    expect(screen.getByRole("dialog", { name: "Shortcuts" })).toBeInTheDocument();
+  };
+  const help = <HelpOverlay activeTab="annotate" />;
+
+  it("Delete leaves the focused annotation, and removes it once the help is closed", async () => {
+    const stage = await renderPolygonCanvas([POLY_A, POLY_B], help);
+    fireEvent.click(stage, { clientX: 50, clientY: 50 });
+    expect(useStore.getState().canvas.focus).toEqual({ kind: "polygon", index: 0 });
+
+    openHelp();
+    fireEvent.keyDown(document.body, { key: "Delete" });
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "Delete" });
+    expect(useStore.getState().canvas.polygons).toHaveLength(1);
+  });
+
+  it("Ctrl+S does not save", async () => {
+    await renderPolygonCanvas([POLY_A, POLY_B], help);
+    openHelp();
+    fireEvent.keyDown(document.body, { key: "s", ctrlKey: true });
+    await flush();
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("Escape closes only the help and leaves the focus", async () => {
+    const stage = await renderPolygonCanvas([POLY_A, POLY_B], help);
+    fireEvent.click(stage, { clientX: 50, clientY: 50 });
+    openHelp();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useStore.getState().canvas.focus).toEqual({ kind: "polygon", index: 0 });
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(useStore.getState().canvas.focus).toBeNull();
+  });
+
+  it("Escape closes only the help and leaves a polygon in progress", async () => {
+    const stage = await renderPolygonCanvas([], help);
+    fireEvent.click(stage, { clientX: 600, clientY: 600 });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(1);
+    openHelp();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(1);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
     expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
   });
 });
