@@ -252,8 +252,3 @@ its colors and fonts the tokens in `frontend/src/index.css` and its logos in
   one source that says it. Each entry holds its time, its sentence and any action it offers, and is
   dismissable, as the screen conventions above require. No message pops up and none leaves on a
   timer; the button shows how many entries are new and whether a lasting condition holds.
-
-Today's screen departs from this section in three places, each brought in line by its issue: the
-top bar's connection and stale-bundle pills become lasting-condition entries (issue 724); the
-status line's agent-activity line and the toasts, each leaving on a timer, become entries (issue
-725); and no notifications area exists and no pane is docked until issue 724.
