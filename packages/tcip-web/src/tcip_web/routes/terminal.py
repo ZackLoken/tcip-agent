@@ -61,7 +61,7 @@ MAX_DIM = 500  # sanity bound on client-supplied rows/cols
 
 # Per-subscriber delivery queue cap. A stalled browser (frozen tab, suspended laptop)
 # stops draining while the TUI keeps painting; past this we drop the backlog and close
-# that socket: the client reconnects and repaints from the scrollback replay.
+# that socket: the client reconnects and receives the scrollback again, the dropped output live.
 QUEUE_MAX_CHUNKS = 2048
 
 # RFC 6455 leaves the close codes 4000-4999 to the application.
@@ -77,8 +77,8 @@ _SURVIVED = "The agent process could not be stopped and stays attached to this s
 class _Offered:
     """A frame queued for one subscriber, and how much of the session's output its sending covers.
 
-    ``reaches`` counts the characters of the session's output, from its first, that this frame
-    and every frame ahead of it in the queue cover.
+    ``reaches`` is a position in the session's output, counted in characters from its first, up
+    to which sending this frame and every frame ahead of it in the queue has carried the output.
     """
 
     frame: TerminalServedFrame
