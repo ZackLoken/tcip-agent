@@ -112,7 +112,9 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     are damaged: ``export_labels`` and ``register_dataset`` read it with the store's plain read,
     whose ``DecodeError`` no handler of theirs catches. ``register_plant_registry`` meets the same
     raise reading a damaged registry record before a second registration under its name.
+    ``ingest_images`` raises for a source folder whose band-group manifest will not read.
     """
+    from tcip_mcp.pipelines.image_utils import UnreadableBandGroupError
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_registry_key,
     )
@@ -120,10 +122,23 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     from tcip_mcp.tools.phenology_tools import register_plant_registry
     from tcip_mcp.traits import registered_crops
     from tests._mapping_fixtures import PLANTS, write_plant_csv
+    from tests._producer_fixtures import (
+        unreadable_manifest,
+        without_bands,
+        write_grouped_capture,
+    )
 
     source = write_image(project / "raw" / "IMG_0001.png", (16, 16))
     ingested = ingest_images(project, source=str(source.parent), actor=None)
     assert isinstance(ingested, IngestManifest), ingested
+    grouped = project / "raw_group"
+    manifest, _bands = write_grouped_capture(
+        grouped, "cap", ("Green", "Red"), 8
+    )
+    unreadable_manifest(manifest, without_bands)
+    with pytest.raises(UnreadableBandGroupError) as unread:
+        ingest_images(project, source=str(grouped), actor=None)
+    assert str(manifest) in str(unread.value)
     (image,) = (project / "images").rglob("IMG_0001.png")
     label_image(
         image, [{"subject": "bud", "bbox": [2, 2, 8, 8]}], project=project
@@ -148,28 +163,45 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     with pytest.raises(ts.DecodeError) as registry_refused:
         ts.read(registry_key)
 
-    exported, registered, reregistered = results_through_handshake(
-        [
-            (
-                "export_labels",
-                {"dataset_root": str(project), "destination": "labels.zip"},
-            ),
-            (
-                "register_dataset",
-                {"dataset_root": str(project), "crop": crop},
-            ),
-            ("register_plant_registry", registry),
-        ],
-        bound=bound,
+    exported, registered, reregistered, unread_ingest = (
+        results_through_handshake(
+            [
+                (
+                    "export_labels",
+                    {
+                        "dataset_root": str(project),
+                        "destination": "labels.zip",
+                    },
+                ),
+                (
+                    "register_dataset",
+                    {"dataset_root": str(project), "crop": crop},
+                ),
+                ("register_plant_registry", registry),
+                ("ingest_images", {"source": str(grouped)}),
+            ],
+            bound=bound,
+        )
     )
 
-    for door, result, sentence in (
-        ("export_labels", exported, refused.value),
-        ("register_dataset", registered, refused.value),
-        ("register_plant_registry", reregistered, registry_refused.value),
+    for door, error_class, result, sentence in (
+        ("export_labels", "DecodeError", exported, refused.value),
+        ("register_dataset", "DecodeError", registered, refused.value),
+        (
+            "register_plant_registry",
+            "DecodeError",
+            reregistered,
+            registry_refused.value,
+        ),
+        (
+            "ingest_images",
+            "UnreadableBandGroupError",
+            unread_ingest,
+            unread.value,
+        ),
     ):
         assert _text(result) == (
-            f"Error executing tool {door}: DecodeError: {sentence}"
+            f"Error executing tool {door}: {error_class}: {sentence}"
         )
         (line,) = audit_rows(project, door)[-1:]
         assert (line["status"], line["error"]) == ("exception", str(sentence))

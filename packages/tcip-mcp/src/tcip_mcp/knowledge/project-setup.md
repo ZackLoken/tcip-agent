@@ -116,7 +116,8 @@ ingest_images(source="<raw folder or glob>")
   landing on the same bucket+stem (case-folded), or a source colliding with an existing
   image or `.bandgroup` manifest, refuses the whole call, naming both sides; re-ingesting
   the exact same file already placed is the one exception, skipped and reported in
-  `skipped_collisions`. Relay the manifest to the human: its `files` (each with its date,
+  `skipped_collisions`. A `.bandgroup` manifest among the sources that will not read refuses the
+  whole call the same way, naming that manifest. Relay the manifest to the human: its `files` (each with its date,
   which names its bucket) and `skipped_collisions`, especially a refusal, many files in the undated bucket
   (their dates may need stating), and each `unreadable` date, which separates files whose
   container could not be read at all from files that simply state no date.
