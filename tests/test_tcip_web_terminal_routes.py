@@ -1209,15 +1209,25 @@ def pastes_after(monkeypatch: pytest.MonkeyPatch) -> None:
 def _first_turn_of_a_launch(client: TestClient) -> list[str]:
     """Launch through the create route and return the lines the fake agent echoed for its turn.
 
-    The turn is read once the opening request has reached the agent.
+    The turn is read once an echoed line ends with the opening request, so a terminal's own echo
+    of the paste, which carries no ``echo:`` prefix, is not taken for the agent's.
     """
     sid = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
     ).json()["session_id"]
-    text = _wait_for(
-        terminal_routes._SESSIONS[sid], terminal_routes.OPENING_REQUEST
+    session = terminal_routes._SESSIONS[sid]
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        echoes = _echoes(session.scrollback_snapshot())
+        if any(
+            line.endswith(terminal_routes.OPENING_REQUEST) for line in echoes
+        ):
+            return echoes
+        time.sleep(0.1)
+    raise AssertionError(
+        f"no echoed line ended with the opening request; got: "
+        f"{session.scrollback_snapshot()[-500:]!r}"
     )
-    return _echoes(text)
 
 
 def test_a_launch_after_a_refused_open_and_an_open_that_was_then_removed_is_told_no_refusal(
