@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -27,7 +28,7 @@ describe("ConfirmDialog", () => {
     expect(screen.getByLabelText("name")).toHaveFocus();
   });
 
-  it("returns focus to the invoking control on close", () => {
+  it("returns focus to the invoking control on close", async () => {
     const opener = document.createElement("button");
     opener.textContent = "opener";
     document.body.appendChild(opener);
@@ -40,22 +41,22 @@ describe("ConfirmDialog", () => {
     );
     expect(screen.getByLabelText("name")).toHaveFocus();
     unmount();
-    expect(opener).toHaveFocus();
+    await waitFor(() => expect(opener).toHaveFocus());
     opener.remove();
   });
 
-  it("closes on Escape without confirming", () => {
+  it("closes on Escape without confirming", async () => {
     const onClose = vi.fn();
     render(
       <ConfirmDialog heading="Remove x" onClose={onClose}>
         <input aria-label="name" />
       </ConfirmDialog>,
     );
-    fireEvent.keyDown(window, { key: "Escape" });
+    await userEvent.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps Tab and Shift+Tab inside the dialog", () => {
+  it("keeps Tab and Shift+Tab inside the dialog", async () => {
     render(
       <ConfirmDialog heading="Remove x" onClose={vi.fn()}>
         <input aria-label="first" />
@@ -67,11 +68,10 @@ describe("ConfirmDialog", () => {
     expect(first).toHaveFocus();
 
     last.focus();
-    fireEvent.keyDown(window, { key: "Tab" });
+    await userEvent.tab();
     expect(first).toHaveFocus();
 
-    first.focus();
-    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    await userEvent.tab({ shift: true });
     expect(last).toHaveFocus();
   });
 
@@ -90,10 +90,11 @@ describe("ConfirmDialog", () => {
         {"body"}
       </ConfirmDialog>,
     );
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
   });
 
-  it("marks the application root inert while open, restored on close, with the dialog rendered outside it", () => {
+  it("hides the application root from assistive technology while open, with the dialog rendered outside it", () => {
     const appRoot = document.createElement("div");
     appRoot.id = "root";
     const picker = document.createElement("div");
@@ -101,8 +102,6 @@ describe("ConfirmDialog", () => {
     appRoot.appendChild(picker);
     document.body.appendChild(appRoot);
 
-    // The app renders its whole tree, dialog included, as #root's one child; mount the same
-    // way so the dialog starts out inside #root and the portal is what carries it out.
     const { unmount } = render(
       <ConfirmDialog heading="Remove x" onClose={vi.fn()}>
         <input aria-label="name" />
@@ -113,20 +112,22 @@ describe("ConfirmDialog", () => {
     const dialog = screen.getByRole("dialog");
     expect(appRoot.contains(dialog)).toBe(false);
     expect(document.body.contains(dialog)).toBe(true);
-    expect(appRoot).toHaveAttribute("inert");
+    expect(appRoot).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByText("picker content")).toBeNull();
     unmount();
-    expect(appRoot).not.toHaveAttribute("inert");
+    expect(appRoot).not.toHaveAttribute("aria-hidden");
     appRoot.remove();
   });
 
-  it("does not close on a backdrop click", () => {
+  it("does not close on a click outside the dialog", async () => {
     const onClose = vi.fn();
     render(
       <ConfirmDialog heading="Remove x" onClose={onClose}>
         <input aria-label="name" />
       </ConfirmDialog>,
     );
-    const backdrop = screen.getByRole("dialog").parentElement as HTMLElement;
+    const backdrop = screen.getByRole("dialog").previousElementSibling as HTMLElement;
+    await userEvent.pointer({ keys: "[MouseLeft]", target: backdrop });
     fireEvent.click(backdrop);
     expect(onClose).not.toHaveBeenCalled();
   });
