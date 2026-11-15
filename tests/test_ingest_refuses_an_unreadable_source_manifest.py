@@ -64,47 +64,41 @@ def _refused(
     return refused.value
 
 
-def _the_call_changed_nothing(
-    project: Path,
-    source: Path,
-    manifest: Path,
-    *,
-    destination_before: list[str],
-    sources_before: dict[str, bytes],
-    audit_before: int,
-    refusal: UnreadableBandGroupError,
+@pytest.mark.parametrize(
+    ("copy", "group_dir", "suffix"),
+    [
+        (True, "", ".bandgroup"),
+        (False, "", ".bandgroup"),
+        (True, "sub", ".bandgroup"),
+        (True, "sub", ".BANDGROUP"),
+    ],
+    ids=["copy", "move", "nested", "upper-case-suffix"],
+)
+def test_an_unreadable_source_manifest_refuses_before_a_copy_or_a_move(
+    project: Path, tmp_path: Path, copy: bool, group_dir: str, suffix: str
 ) -> None:
-    """Assert the refusal named the source manifest and left both trees and the log as stated."""
-    sentence = str(refusal)
+    """The refusal names the source's manifest and leaves destination and sources as they were.
+
+    Photographs sit in the source beside the band group (outside its subfolder when nested), so
+    a copy or move that began before the read would show in the destination or the sources.
+    """
+    source = tmp_path / "raw"
+    write_image(source / "a_plain.png")
+    write_image(source / "z_plain.png")
+    manifest = _unreadable_group(source / group_dir)
+    manifest = manifest.rename(manifest.with_suffix(suffix))
+    destination_before = _destination(project)
+    sources_before = _files(source)
+    audit_before = len(audit_rows(project, "ingest_images"))
+
+    sentence = str(_refused(project, source, copy=copy))
+
     assert _destination(project) == destination_before
     assert _files(source) == sources_before
     (line,) = audit_rows(project, "ingest_images")[audit_before:]
     assert (line["status"], line["error"]) == ("exception", sentence)
     assert str(manifest) in sentence
     assert sentence.endswith(INGEST_CLAUSE)
-
-
-@pytest.mark.parametrize("copy", [True, False], ids=["copy", "move"])
-def test_an_unreadable_source_manifest_refuses_before_a_copy_or_a_move(
-    project: Path, tmp_path: Path, copy: bool
-) -> None:
-    source = tmp_path / "raw"
-    manifest = _unreadable_group(source)
-    destination_before = _destination(project)
-    sources_before = _files(source)
-    audit_before = len(audit_rows(project, "ingest_images"))
-
-    refusal = _refused(project, source, copy=copy)
-
-    _the_call_changed_nothing(
-        project,
-        source,
-        manifest,
-        destination_before=destination_before,
-        sources_before=sources_before,
-        audit_before=audit_before,
-        refusal=refusal,
-    )
 
 
 def test_the_scan_and_the_ingest_refuse_one_manifest_with_one_head(
@@ -122,54 +116,6 @@ def test_the_scan_and_the_ingest_refuse_one_manifest_with_one_head(
     assert scan_head == ingest_head
     assert str(manifest) in scan_head
     assert scan_clause != ingest_clause
-
-
-def test_an_unreadable_manifest_in_a_subfolder_keeps_every_other_selected_image_out(
-    project: Path, tmp_path: Path
-) -> None:
-    source = tmp_path / "raw"
-    write_image(source / "plain.png")
-    write_image(source / "zz_after.png")
-    manifest = _unreadable_group(source / "sub")
-    destination_before = _destination(project)
-    sources_before = _files(source)
-    audit_before = len(audit_rows(project, "ingest_images"))
-
-    refusal = _refused(project, source)
-
-    _the_call_changed_nothing(
-        project,
-        source,
-        manifest,
-        destination_before=destination_before,
-        sources_before=sources_before,
-        audit_before=audit_before,
-        refusal=refusal,
-    )
-
-
-def test_an_unreadable_manifest_with_an_upper_case_suffix_is_read_before_the_copy(
-    project: Path, tmp_path: Path
-) -> None:
-    source = tmp_path / "raw"
-    write_image(source / "plain.png")
-    manifest = _unreadable_group(source / "sub")
-    upper = manifest.rename(manifest.with_name("cap.BANDGROUP"))
-    destination_before = _destination(project)
-    sources_before = _files(source)
-    audit_before = len(audit_rows(project, "ingest_images"))
-
-    refusal = _refused(project, source)
-
-    _the_call_changed_nothing(
-        project,
-        source,
-        upper,
-        destination_before=destination_before,
-        sources_before=sources_before,
-        audit_before=audit_before,
-        refusal=refusal,
-    )
 
 
 def test_a_glob_that_selects_a_readable_manifest_does_not_read_an_unselected_one(

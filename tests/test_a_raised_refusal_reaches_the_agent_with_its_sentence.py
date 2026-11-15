@@ -3,9 +3,11 @@
 The door cases run the real ``tcip-pipeline`` server in memory through a handshake
 (``tests._server_calls.results_through_handshake``), each over a project the
 platform's own producers set up and a record of it then damaged through
-``tests._record_damage_fixtures``; the expected sentence is the one the platform's own reader of
-that record raises. The cases no door reaches (an empty sentence, an unknown trait's ``KeyError``,
-the SDK's resource and protocol errors) declare one function as a server's only tool.
+``tests._record_damage_fixtures`` (or, for ``ingest_images``, a source folder whose band-group
+manifest the writer wrote and the test then made unreadable); the expected sentence is the one
+the platform's own reader of that record raises. The cases no door reaches (an empty sentence,
+an unknown trait's ``KeyError``, the SDK's resource and protocol errors) declare one function as
+a server's only tool.
 """
 
 from __future__ import annotations
@@ -138,7 +140,6 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     unreadable_manifest(manifest, without_bands)
     with pytest.raises(UnreadableBandGroupError) as unread:
         ingest_images(project, source=str(grouped), actor=None)
-    assert str(manifest) in str(unread.value)
     (image,) = (project / "images").rglob("IMG_0001.png")
     label_image(
         image, [{"subject": "bud", "bbox": [2, 2, 8, 8]}], project=project
@@ -184,6 +185,7 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
         )
     )
 
+    assert str(manifest) in _text(unread_ingest)
     for door, error_class, result, sentence in (
         ("export_labels", "DecodeError", exported, refused.value),
         ("register_dataset", "DecodeError", registered, refused.value),

@@ -301,10 +301,10 @@ def ingest_images(
     when a source's destination stem would create a second logical image under a key another
     source, an existing raw file, or an existing band-group manifest already holds in that bucket;
     re-ingesting the exact same destination file is skipped instead, recorded in
-    ``skipped_collisions``. Refuses the whole call the same way, with
-    :class:`~tcip_mcp.pipelines.image_utils.UnreadableBandGroupError`, when a band-group manifest
-    among the sources will not read. Does not annotate, split, choose a task, or write
-    ``subjects.json``.
+    ``skipped_collisions``. Raises
+    :class:`~tcip_mcp.pipelines.image_utils.UnreadableBandGroupError`, before anything is copied
+    or moved, when a band-group manifest among the sources will not read. Does not annotate,
+    split, choose a task, or write ``subjects.json``.
 
     Each file's bucket is the capture date it states (a photo's EXIF ``DateTimeOriginal``, a
     raster's own date metadata), read from its header only. The capture date never gates
