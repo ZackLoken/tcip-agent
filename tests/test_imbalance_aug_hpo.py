@@ -109,7 +109,7 @@ def test_weighted_ce_built() -> None:
 
 
 def test_a_misspelled_weight_scheme_refuses_over_a_present_class() -> None:
-    """A scheme outside the three refuses naming them, where it once fell to balanced."""
+    """A scheme outside the three refuses naming them."""
     with pytest.raises(
         ValueError, match="'balanced', 'inverse' or 'effective'"
     ):

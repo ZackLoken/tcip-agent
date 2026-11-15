@@ -313,9 +313,10 @@ def compute_class_weights(
     """Compute per-class loss weights from a class-count distribution.
 
     ``scheme`` is a :data:`ClassWeightScheme`, checked before any count is read; a name outside
-    it refuses naming the accepted ones. ``beta`` is read by the ``effective`` scheme alone.
-    Zero-count classes get weight 1.0. When ``normalize``, weights are rescaled so the mean over
-    present classes is 1.0.
+    it refuses naming the accepted ones. A present class weighs ``total/(n_present*count)`` under
+    ``balanced``, ``1/count`` under ``inverse`` and ``(1-beta)/(1-beta**count)`` under
+    ``effective``, the one scheme reading ``beta``. Zero-count classes get weight 1.0. When
+    ``normalize``, weights are rescaled so the mean over present classes is 1.0.
 
     ``num_classes`` unstated is the count the distribution itself implies
     (:func:`~tcip_mcp.pipelines.derivations.num_classes_from_distribution`); a distribution that
@@ -376,8 +377,8 @@ def build_loss(
     Each keyword goes to the terms whose constructor accepts it, so a per-term hyperparameter
     (``weight`` for the CE term, ``smooth`` for the dice term) reaches its own term; a keyword no
     term accepts refuses. A term is weightable when its constructor takes ``weight``: given a
-    ``class_distribution``, a ``weight`` (:func:`compute_class_weights`, by ``weight_scheme``,
-    balanced unless named) goes to every weightable term unless ``weight`` was passed, and a
+    ``class_distribution``, a ``weight`` (:func:`compute_class_weights`, following
+    ``weight_scheme``) goes to every weightable term unless ``weight`` was passed, and a
     ``class_distribution`` for a loss with no weightable term refuses. An unknown name refuses
     (``ValueError``) naming the registered ones, as does a ``weight_scheme`` outside
     :data:`ClassWeightScheme`, with or without a ``class_distribution``.
