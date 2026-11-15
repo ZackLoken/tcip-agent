@@ -219,7 +219,8 @@ OPENING_REQUEST = (
     "[TCIP session start] Greet the person, ask whether to create a new project with you or to "
     "open one they already have, and say how each is done."
 )
-"""The request every no-project launch's first turn ends with, so its agent speaks first."""
+"""The request that ends the session's own text a no-project launch pastes ahead of anything
+submitted, so its agent speaks first (:func:`opening_request` returns that text)."""
 
 
 def opening_request(refused: RefusedOpen | None) -> str:
