@@ -5,13 +5,21 @@
  */
 
 import { ACKNOWLEDGED, ANSWERS, type ServedDeliveryEvent } from "@/api/types.generated";
-import { deliveredDatesLine, outsideRasterLine } from "@/lib/disclosureLines";
+import {
+  deliveredDatesLine,
+  outsideRasterLine,
+  unverifiedCapturesLine,
+} from "@/lib/disclosureLines";
 
 function DeliveryEventRow({
   served: { event: record, resolved_key },
 }: {
   served: ServedDeliveryEvent;
 }) {
+  const unverified =
+    record.plant_mapping?.kind === "plant_mapping"
+      ? unverifiedCapturesLine(record.plant_mapping)
+      : null;
   return (
     <li
       className="rounded border border-tcip-border p-3"
@@ -104,11 +112,14 @@ function DeliveryEventRow({
       )}
       {record.plant_mapping?.kind === "plant_mapping" && (
         <div className="mt-2 text-[13px] text-tcip-muted">
-          {deliveredDatesLine(record.plant_mapping)}
-          {resolved_key === null && " (the cited mapping record no longer resolves)"}
-          {resolved_key !== null &&
-            resolved_key !== record.plant_mapping.name &&
-            ` (cited record archived as ${resolved_key})`}
+          <div>
+            {deliveredDatesLine(record.plant_mapping)}
+            {resolved_key === null && " (the cited mapping record no longer resolves)"}
+            {resolved_key !== null &&
+              resolved_key !== record.plant_mapping.name &&
+              ` (cited record archived as ${resolved_key})`}
+          </div>
+          {unverified !== null && <div>{unverified}</div>}
         </div>
       )}
     </li>

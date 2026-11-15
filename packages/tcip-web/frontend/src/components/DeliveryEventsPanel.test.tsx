@@ -1,9 +1,17 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { ANSWERS, CANOPY_SEGMENTS, UNANSWERED, UNVALIDATED } from "@/api/types.generated";
+import {
+  ANSWERS,
+  CANOPY_SEGMENTS,
+  PLANT_MAPPING,
+  UNANSWERED,
+  UNVALIDATED,
+} from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { acknowledgmentOf, DELIVERY_RECORDS, disclosureOf } from "@/test/deliveryRecords";
+
+afterEach(cleanup);
 
 describe("DeliveryEventsPanel bucket findings", () => {
   it("names the assessment behind a validated bucket", () => {
@@ -81,5 +89,32 @@ describe("DeliveryEventsPanel bucket findings", () => {
           `plant(s) delivered, ${pm.segments_without_plant} segment(s) with no plant`,
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("DeliveryEventsPanel unverified captures", () => {
+  it("names the captures a delivery could not verify", () => {
+    const served = DELIVERY_RECORDS.scale_answered;
+    const { captures_unverified: unverified } = disclosureOf(served, (d) =>
+      d.kind === PLANT_MAPPING ? d : null,
+    );
+    expect(unverified.length).toBeGreaterThan(0);
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
+    const row = screen.getByTestId(`delivery-${served.event.event_id}`);
+
+    expect(
+      within(row).getByText(`Not verified at delivery time: ${unverified.join(", ")}`),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no such sentence for a delivery whose captures were all verified", () => {
+    const served = DELIVERY_RECORDS.acknowledged_mapping;
+    expect(
+      disclosureOf(served, (d) => (d.kind === PLANT_MAPPING ? d : null)).captures_unverified,
+    ).toEqual([]);
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
+    const row = screen.getByTestId(`delivery-${served.event.event_id}`);
+
+    expect(within(row).queryByText(/Not verified at delivery time/)).not.toBeInTheDocument();
   });
 });
