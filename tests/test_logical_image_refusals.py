@@ -31,6 +31,7 @@ from tests._producer_fixtures import (
     refusal_sentence,
     register_dataset_at,
     unreadable_manifest,
+    without_bands,
     write_image,
     write_stray,
 )
@@ -433,7 +434,7 @@ def test_scanning_a_dataset_refuses_a_capture_whose_band_group_manifest_will_not
     Before the damage the group counts as one image beside the photograph.
     """
     assert _scanned(tmp_path, written)["image_count"] == 2
-    unreadable_manifest(written.manifest)
+    unreadable_manifest(written.manifest, without_bands)
 
     scanned = _scanned(tmp_path, written)
 
@@ -463,7 +464,7 @@ def test_stating_a_capture_date_refuses_every_image_of_a_capture_whose_manifest_
     """``state_capture_date`` refuses a former band and the photograph beside it, moving neither."""
     from tcip_mcp.tools.ingest_tools import state_capture_date
 
-    unreadable_manifest(written.manifest)
+    unreadable_manifest(written.manifest, without_bands)
 
     for image in (written.bands["Green"], written.plain):
         stated = state_capture_date(
@@ -497,7 +498,7 @@ def test_the_image_door_answers_a_band_of_an_unread_manifest_409(
         )
 
     assert served().status_code == 404
-    unreadable_manifest(written.manifest)
+    unreadable_manifest(written.manifest, without_bands)
 
     refused = served()
     assert refused.status_code == 409, refused.text
@@ -527,7 +528,7 @@ def _census(made: OpenProject) -> _Census:
     write_image(image_dir(made.root, LATER) / "later.jpg", (SIZE, SIZE))
     sound = named_project(made.root.parent / "sound", "sound")
     write_image(image_dir(sound.root, CAPTURE) / "a.jpg", (SIZE, SIZE))
-    unreadable_manifest(written.manifest)
+    unreadable_manifest(written.manifest, without_bands)
     return _Census(made, written, sound)
 
 
@@ -613,7 +614,7 @@ def test_reopening_a_project_whose_saved_selection_lies_in_an_unread_capture_ans
         json={"dataset_root": str(written.root), "date": CAPTURE},
     )
     assert selected.status_code == 200, selected.text
-    unreadable_manifest(written.manifest)
+    unreadable_manifest(written.manifest, without_bands)
     asyncio.run(store.close_project(opened.id))
 
     reopened = client.post(

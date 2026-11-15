@@ -1876,6 +1876,7 @@ def test_a_build_with_no_dates_stated_refuses_a_date_whose_band_group_manifest_w
     """
     from tests._producer_fixtures import (
         unreadable_manifest,
+        without_bands,
         write_grouped_capture,
     )
 
@@ -1883,7 +1884,7 @@ def test_a_build_with_no_dates_stated_refuses_a_date_whose_band_group_manifest_w
     manifest, _bands = write_grouped_capture(
         image_dir(dataset_root, EMPTY), "broken", ("Green", "Red"), 4
     )
-    unreadable_manifest(manifest)
+    unreadable_manifest(manifest, without_bands)
 
     built = _built_through_the_server(tmp_path, dataset_root, registry)
 

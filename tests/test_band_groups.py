@@ -1004,8 +1004,7 @@ def test_a_malformed_manifest_refuses_its_read_and_its_directorys_scan(
         UnreadableBandGroupError,
         scan_identities,
     )
-    from tcip_store import decode_value, encode_record
-    from tests._producer_fixtures import write_band_group
+    from tests._producer_fixtures import unreadable_manifest, write_band_group
 
     d = image_root(tmp_path)
     d.mkdir()
@@ -1018,9 +1017,7 @@ def test_a_malformed_manifest_refuses_its_read_and_its_directorys_scan(
         bands,
         central_wavelength_nm={"Green": 560.0, "Red": 650.0},
     )
-    document = decode_value(manifest.read_bytes())
-    malform(document)
-    manifest.write_bytes(encode_record(document))
+    unreadable_manifest(manifest, malform)
 
     with pytest.raises(ValueError) as cause:
         read_band_group_manifest(manifest)

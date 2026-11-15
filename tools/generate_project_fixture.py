@@ -64,6 +64,7 @@ def _uncounted() -> dict[str, JsonValue]:
     from tcip_mcp.dataset_layout import image_dir
     from tests._producer_fixtures import (
         unreadable_manifest,
+        without_bands,
         write_grouped_capture,
         write_image,
     )
@@ -75,7 +76,7 @@ def _uncounted() -> dict[str, JsonValue]:
         manifest, _bands = write_grouped_capture(
             image_dir(hill.root, date), "capture_001", ("Green", "Red"), 16
         )
-        unreadable_manifest(manifest)
+        unreadable_manifest(manifest, without_bands)
         ridge = named_project(workspace / "ridge", "Ridge farm")
         write_image(image_dir(ridge.root, date) / "a.jpg")
         return normalized(

@@ -472,16 +472,24 @@ def write_grouped_capture(
     return manifest, files
 
 
-def unreadable_manifest(manifest: Path) -> Path:
-    """Write ``manifest``'s own record back without its ``bands``, which its model refuses.
+def without_bands(document: dict) -> object:
+    """Remove a manifest record's ``bands``, which its model requires; return what it held."""
+    return document.pop("bands")
 
-    ``manifest`` is one :func:`write_band_group` wrote; returns it.
+
+def unreadable_manifest(
+    manifest: Path, malform: Callable[[dict], object]
+) -> Path:
+    """Write ``manifest``'s own record back changed by ``malform``, so its model refuses it.
+
+    ``manifest`` is one :func:`write_band_group` wrote; ``malform`` changes its decoded record in
+    place. Returns ``manifest``.
     """
     from tcip_store import decode_value, encode_record
 
     document = decode_value(manifest.read_bytes())
     assert isinstance(document, dict), document
-    del document["bands"]
+    malform(document)
     manifest.write_bytes(encode_record(document))
     return manifest
 

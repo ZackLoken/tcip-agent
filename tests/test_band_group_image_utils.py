@@ -146,9 +146,9 @@ def test_list_logical_images_refuses_a_directory_whose_manifest_will_not_read(
         UnreadableBandGroupError,
         list_logical_images,
     )
-    from tests._producer_fixtures import unreadable_manifest
+    from tests._producer_fixtures import unreadable_manifest, without_bands
 
-    unreadable_manifest(grouped_dir.manifest)
+    unreadable_manifest(grouped_dir.manifest, without_bands)
 
     with pytest.raises(UnreadableBandGroupError) as refused:
         list_logical_images(grouped_dir.images_dir)
@@ -264,10 +264,14 @@ def test_resolving_a_raw_file_beside_a_same_stem_manifest_that_will_not_read_ref
         UnreadableBandGroupError,
         resolve_image_path,
     )
-    from tests._producer_fixtures import unreadable_manifest, write_image
+    from tests._producer_fixtures import (
+        unreadable_manifest,
+        without_bands,
+        write_image,
+    )
 
     raw = write_image(grouped_dir.images_dir / "cap.jpg", (4, 4))
-    unreadable_manifest(grouped_dir.manifest)
+    unreadable_manifest(grouped_dir.manifest, without_bands)
 
     with pytest.raises(UnreadableBandGroupError) as refused:
         resolve_image_path(raw)
