@@ -31,18 +31,24 @@ _bound: SqliteBackend | None = None
 def bind(backend: SqliteBackend | None = None) -> SqliteBackend:
     """Bind this process's backend and return it: ``backend``, or a new :class:`SqliteBackend`.
 
-    Construction refuses with ``BackendUnavailableError`` when cross-process exclusion is
-    unavailable.
+    Closes the backend it replaces, unless that is ``backend`` itself. Construction refuses with
+    ``BackendUnavailableError`` when cross-process exclusion is unavailable, and then the
+    bound backend stays bound and open.
     """
     global _bound
+    replaced = _bound
     _bound = backend if backend is not None else SqliteBackend()
+    if replaced is not None and replaced is not _bound:
+        replaced.close()
     return _bound
 
 
 def unbind() -> None:
-    """Drop the bound backend."""
+    """Drop the bound backend, closing it; a no-op when none is bound."""
     global _bound
-    _bound = None
+    dropped, _bound = _bound, None
+    if dropped is not None:
+        dropped.close()
 
 
 def _backend() -> SqliteBackend:
