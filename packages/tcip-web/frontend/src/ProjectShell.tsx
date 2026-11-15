@@ -108,10 +108,16 @@ export function ProjectShell() {
       const { event } = ev;
       // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
       if (event.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
+        const project = useStore.getState().openProject?.id;
         void applyAnnotateFocus(event, () => true).catch(() => {
-          useStore
-            .getState()
-            .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");
+          useStore.getState().raiseNotification({
+            kind: "failure",
+            level: "error",
+            text: {
+              sentence: "Agent tried to focus the Annotate tab, but it couldn't be applied.",
+            },
+            context: { project },
+          });
         });
         return;
       }
@@ -148,20 +154,28 @@ export function ProjectShell() {
 
   // Hydrate the subject registry whenever the dataset selection changes.
   useEffect(() => {
-    const held = useStore.getState().gui.dataset;
-    if (!projectRoot || registryCapture === null || held === null) return;
+    const { gui, openProject, raiseNotification, releaseNotification } = useStore.getState();
+    const held = gui.dataset;
+    if (!openProject || registryCapture === null || held === null) return;
     const { dataset_root: datasetRoot, date, subject } = held;
+    const context = { project: openProject.id, target: date };
+    const loadKey = `registry-load:${openProject.id}:${registryCapture}`;
     void (async () => {
       try {
         const reg = await subjectsApi.load(datasetRoot, date);
         adoptLoad(reg);
+        releaseNotification(loadKey);
         const declared = useStore.getState().registry.subjects;
         if (reg.unreadable.length) {
-          useStore
-            .getState()
-            .pushToast(
-              `${reg.unreadable.length} label document(s) could not be read: ${reg.unreadable.join(", ")}`,
-            );
+          raiseNotification({
+            kind: "failure",
+            level: "error",
+            text: {
+              sentence: `${reg.unreadable.length} label document(s) could not be read: ${reg.unreadable.join(", ")}`,
+            },
+            context,
+            key: `label-documents:${openProject.id}:${registryCapture}`,
+          });
         }
         // Default the active authoring subject to the selection's subject when it exists in the
         // registry, else the first declared subject: a shape can't be authored with none set.
@@ -174,7 +188,13 @@ export function ProjectShell() {
         }
       } catch (err) {
         console.warn("registry hydrate failed", err);
-        useStore.getState().pushToast("Could not load the registry for this project.");
+        raiseNotification({
+          kind: "failure",
+          level: "error",
+          text: { sentence: "Could not load the registry for this project." },
+          context,
+          key: loadKey,
+        });
       }
     })();
   }, [projectRoot, registryCapture]);
