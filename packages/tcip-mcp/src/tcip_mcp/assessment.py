@@ -1042,10 +1042,11 @@ def _scalar(
 ) -> tuple[ScalarEvidence, list[FailureName]]:
     """Return the scalar criterion over the holdout side and its failures.
 
-    Each sample's one predicted rank or value is scored against its table row
-    (:func:`~tcip_mcp.pipelines.data.datasets.table_values`). A pass that returns other than one
-    prediction per sample, and a prediction carrying no output, refuse by name; a regression
-    delivery is scored by the revision's own ``regression_criterion``.
+    Each sample's one predicted rank or value, as the head emitted it, is scored against its table
+    row (:func:`~tcip_mcp.pipelines.data.datasets.table_values`), the truth read as an integer
+    rank for an ordinal checkpoint. A pass that returns other than one prediction per sample, and
+    a prediction carrying no output, refuse by name; a regression delivery is scored by the
+    revision's own ``regression_criterion``.
     """
     from tcip_mcp.pipelines.data.datasets import table_values
     from tcip_mcp.pipelines.inference.passes import HeadPass
@@ -1056,7 +1057,7 @@ def _scalar(
     from tcip_mcp.pipelines.training.evaluation import quadratic_weighted_kappa
 
     ordinal = p.checkpoint.task == "ordinal"
-    suffix, cast_to = ("_ranks", int) if ordinal else ("_values", float)
+    suffix, cast_truth = ("_ranks", int) if ordinal else ("_values", float)
     predictions = p.predict([s.image for s in hold])
     if len(predictions) != len(hold):
         raise AssessmentRefusedError(
@@ -1082,8 +1083,8 @@ def _scalar(
         held.append(
             {
                 "image_id": digest_of[sample.location],
-                "true": cast_to(truth),
-                "predicted": cast_to(values[0][0]),
+                "true": cast_truth(truth),
+                "predicted": values[0][0],
             }
         )
     if ordinal:
