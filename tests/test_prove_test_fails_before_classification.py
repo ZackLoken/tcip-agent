@@ -1,8 +1,15 @@
-"""Tests for tools/prove_test_fails_before.py's failure classification.
+"""Tests for tools/prove_test_fails_before.py: its verdicts, options and scratch directory.
 
-A baseline failure that does not reach the code under test is told apart from one at the guard's
-own assertion. Each case builds a two-revision scratch repository (a baseline commit the fault
-sits in, a second commit with the fix and the guard test) and runs the real script against it.
+Most cases build a two-revision scratch repository (a baseline commit the fault sits in, a second
+commit with the fix and the guard test) and run the real script against it. They cover:
+
+- the failure classification, a baseline failure that does not reach the code under test told
+  apart from one at the guard's own assertion;
+- ``--test-rev``, over a third revision that removes the test;
+- ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched;
+- ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
+- the run's scratch directory, where the baseline's temporary root lies and the line printed when
+  the directory cannot be removed.
 """
 
 from __future__ import annotations
