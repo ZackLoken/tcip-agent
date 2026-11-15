@@ -364,5 +364,19 @@
     },
     "discovered": ["bud"],
     "unreadable": []
+  },
+  "registry_unreadable": {
+    "registry": {
+      "kind": "stored",
+      "version": "<version n3>",
+      "subjects": {
+        "bud": {
+          "description": "one bud",
+          "attributes": { "opening": { "type": "categorical", "values": ["closed", "open"] } }
+        }
+      }
+    },
+    "discovered": ["bud"],
+    "unreadable": ["b"]
   }
 }

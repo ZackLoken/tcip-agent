@@ -155,6 +155,27 @@ describe("a switch this page starts", () => {
 });
 
 describe("startOpen", () => {
+  it("warns, naming the project, when the recent projects list was not updated behind an open", async () => {
+    localStorage.setItem("tcip.recent_projects", "{}");
+    try {
+      await openWithDefaults(RIDGE);
+    } finally {
+      localStorage.removeItem("tcip.recent_projects");
+    }
+
+    expect(useStore.getState().openProject).toEqual(openedAs(RIDGE).project);
+    expect(useStore.getState().notifications).toContainEqual(
+      expect.objectContaining({
+        kind: "notice",
+        level: "warning",
+        sentence:
+          "Opened, but the recent projects list was not updated: " +
+          "the recent-projects list in this browser does not hold project ids: {}",
+        context: { project: RIDGE.record.id, target: RIDGE.record.display_name },
+      }),
+    );
+  });
+
   it("raises a failure of the project naming the label document when the selection carries a label_problem", async () => {
     vi.mocked(api.dataset.select).mockResolvedValue(TROUBLED_SELECT_ANSWER);
     const [{ name: date }] = VALLEY.tree.captures;

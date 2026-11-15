@@ -597,6 +597,31 @@ describe("ProjectPicker", () => {
     );
   });
 
+  it("warns, naming the project, when the recent projects list was not updated behind a removal", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue(LISTING);
+    vi.mocked(api.projects.remove).mockResolvedValue(PROJECT_FIXTURES.removed);
+    localStorage.setItem("tcip.recent_projects", "{}");
+    render(<ProjectPicker />);
+
+    fireEvent.click(await screen.findByText(VALLEY.record.display_name));
+    fireEvent.click(screen.getByText("Remove…"));
+    fireEvent.change(screen.getByLabelText("Type the project name to confirm"), {
+      target: { value: VALLEY.record.display_name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => expect(useStore.getState().notifications).toHaveLength(2));
+    localStorage.removeItem("tcip.recent_projects");
+    expect(useStore.getState().notifications[0]).toMatchObject({
+      kind: "notice",
+      level: "warning",
+      sentence:
+        "Removed, but the recent projects list was not updated: " +
+        "the recent-projects list in this browser does not hold project ids: {}",
+      context: { project: VALLEY.record.id, target: VALLEY.record.display_name },
+    });
+  });
+
   it("renames a project's display name by its id", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(LISTING);
     const { renamed } = PROJECT_FIXTURES;
@@ -617,5 +642,15 @@ describe("ProjectPicker", () => {
       display_name: renamed.record.display_name,
       user: "grower",
     });
+    await waitFor(() =>
+      expect(useStore.getState().notifications).toEqual([
+        expect.objectContaining({
+          kind: "notice",
+          level: "info",
+          sentence: `Renamed ${VALLEY.record.display_name} to ${renamed.record.display_name}.`,
+          context: { project: VALLEY.record.id, target: VALLEY.record.display_name },
+        }),
+      ]),
+    );
   });
 });

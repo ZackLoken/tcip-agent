@@ -27,7 +27,8 @@ import type { Refusal } from "@/test/refusals";
  *  and the refusal of a save naming a stale version token; then from the subjects routes, what
  *  the load route served before any registry was stored, the registry it served once its subject
  *  was declared bare, a save growing it, the
- *  refusal of a second one whose line failed, and the registry the load route then served. */
+ *  refusal of a second one whose line failed, the registry the load route then served, and what
+ *  it served once a second image's label document was damaged. */
 // A JSON import reads each tuple as an array, which no tuple type admits without `unknown`.
 export const LABEL_ANSWERS = produced as unknown as {
   saved: SavedLabels;
@@ -41,6 +42,7 @@ export const LABEL_ANSWERS = produced as unknown as {
   registry_stale: Refusal<string>;
   registry_audit_gap: Refusal<AuditGapRefusal & { committed: true; what: RegistrySave }>;
   registry_loaded: Awaited<ReturnType<typeof subjectsApi.load>>;
+  registry_unreadable: Awaited<ReturnType<typeof subjectsApi.load>>;
 };
 
 const [BOX, POLYGON, POINT, RATING] = LABEL_ANSWERS.loaded.annotations;

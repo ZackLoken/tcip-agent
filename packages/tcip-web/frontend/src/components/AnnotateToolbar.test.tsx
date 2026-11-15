@@ -776,6 +776,27 @@ describe("AnnotateToolbar review queue", () => {
     expect(useStore.getState().notifications).toHaveLength(1);
   });
 
+  it("lists a failed read of the job as its one entry and drops the held job", async () => {
+    openTestProject(QUEUE_SELECTION);
+    useStore.getState().setReviewQueue(LAUNCHED);
+    vi.spyOn(api.annotate, "queueJob").mockRejectedValue(new TypeError("Failed to fetch"));
+    renderToolbar();
+
+    await waitFor(
+      () =>
+        expect(useStore.getState().notifications).toEqual([
+          expect.objectContaining({
+            kind: "job",
+            level: "error",
+            sentence: "Failed to fetch",
+            key: `review-queue:${LAUNCHED.job_id}`,
+          }),
+        ]),
+      { timeout: 5000 },
+    );
+    expect(useStore.getState().annotateUi.reviewQueue).toBeNull();
+  });
+
   it("offers a held queue only on the capture it ranked", () => {
     useStore.getState().setReviewQueue(COMPLETED);
     useStore.getState().setImageFilter("queue");

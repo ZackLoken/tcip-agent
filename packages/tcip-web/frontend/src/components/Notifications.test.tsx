@@ -158,6 +158,7 @@ describe("the refused visits", () => {
     useStore.getState().setUser("jordan");
     openTestProject();
     renderOpenHost();
+    const told = announcements(screen.getByRole("alert"));
     const s = useStore.getState();
     for (const image of ["a.jpg", "b.jpg"]) {
       s.startImageSessionTracking(image, Date.now() - 2000);
@@ -169,9 +170,7 @@ describe("the refused visits", () => {
     const said = `Not recorded (${refused.body.detail}): a.jpg, b.jpg`;
     const entry = screen.getByRole("listitem");
     expect(within(entry).getByText(said)).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      `Not recorded (${refused.body.detail}): a.jpg`,
-    );
+    expect(told).toEqual([`Not recorded (${refused.body.detail}): a.jpg`]);
     fireEvent.click(
       within(entry).getByRole("button", { name: (name) => name.startsWith(dismissLabel(said)) }),
     );
