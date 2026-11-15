@@ -140,13 +140,15 @@ class _Reference:
         First each retained ground truth whose original, or whose copy under ``run_dir``, no
         longer digests to the digest recorded for it, by its stored spelling, then each reference
         source whose pixels no longer digest to the source digest recorded for its sample
-        (:func:`~tcip_mcp.pipelines.data.selection.source_digests`), or a source file gone, by
-        its path.
+        (:func:`~tcip_mcp.pipelines.data.selection.source_digests`); or a source that no longer
+        resolves to one logical image, by the resolver's sentence naming it; or a source file
+        gone after it resolved, by its path.
         """
         from tcip_mcp.pipelines.data.selection import (
             moved_ground_truth,
             source_digests,
         )
+        from tcip_mcp.pipelines.image_utils import LogicalImageError
 
         moved = [
             str(ground_truth_record(f.ground_truth))
@@ -158,6 +160,8 @@ class _Reference:
         samples = {s.sample: s.source_digest for s in self.samples}
         try:
             now = source_digests(samples)
+        except LogicalImageError as exc:
+            return [*moved, str(exc)]
         except FileNotFoundError as exc:
             return [*moved, str(exc.filename)]
         return [

@@ -16,7 +16,10 @@ from tcip_annotation.json_io import (
 from tcip_annotation.matching import Matching
 from tcip_mcp.buckets import Bucket, read_bucket
 from tcip_mcp.dataset_layout import label_key_of, source_root
-from tcip_mcp.pipelines.image_utils import image_path_dimensions
+from tcip_mcp.pipelines.image_utils import (
+    LogicalImageError,
+    image_path_dimensions,
+)
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import BoundProject
@@ -59,7 +62,7 @@ def read_annotations(
         return {"error": f"Image not found: {image_path}"}
     try:
         w, h = image_path_dimensions(image_path)
-    except (OSError, ValueError) as exc:
+    except (LogicalImageError, OSError, ValueError) as exc:
         return {"error": str(exc)}
 
     result: dict = {"image": image_path, "width": w, "height": h}
@@ -128,7 +131,7 @@ def save_annotations(
         return {"error": f"Image not found: {image_path}"}
     try:
         w, h = image_path_dimensions(image_path)
-    except (OSError, ValueError) as exc:
+    except (LogicalImageError, OSError, ValueError) as exc:
         return {"error": str(exc)}
 
     try:
@@ -357,6 +360,7 @@ def score_predictions(
             str(p), found, iou_threshold, conf_threshold, entry
         )
     except (
+        LogicalImageError,
         UnreadableLabelDocumentError,
         TraitUnknownError,
         ValueError,

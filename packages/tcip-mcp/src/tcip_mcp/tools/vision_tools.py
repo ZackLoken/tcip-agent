@@ -377,6 +377,7 @@ def _viz_annotations(project: Path, image_path: str, *, task: VizTask) -> dict:
 
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
         resolve_image_path,
         source_path_of,
     )
@@ -385,9 +386,9 @@ def _viz_annotations(project: Path, image_path: str, *, task: VizTask) -> dict:
         source = resolve_image_path(image_path)
         anns = _labels_at(label_key_of(source_path_of(source)))
     except (
+        LogicalImageError,
         UnreadableLabelDocumentError,
         ValueError,
-        FileNotFoundError,
     ) as exc:
         return {"error": str(exc)}
     if anns is None:
@@ -458,6 +459,7 @@ def _viz_predictions(
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
         resolve_image_path,
         source_path_of,
     )
@@ -477,9 +479,9 @@ def _viz_predictions(
             }
         preds = read_predictions(pred_key).annotations
     except (
+        LogicalImageError,
         UnreadableLabelDocumentError,
         ValueError,
-        FileNotFoundError,
     ) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
@@ -543,6 +545,7 @@ def _viz_comparison(
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
         resolve_image_path,
         source_path_of,
     )
@@ -569,6 +572,7 @@ def _viz_comparison(
             trait=None,
         )
     except (
+        LogicalImageError,
         UnreadableLabelDocumentError,
         ValueError,
         FileNotFoundError,
@@ -757,6 +761,7 @@ def render_failure_cases(
 
     """
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
 
     try:
         worst, by_stem = _ranked(
@@ -765,6 +770,7 @@ def render_failure_cases(
             (shortfall_weight, surplus_weight, confidence_weight),
         )
     except (
+        LogicalImageError,
         UnreadableLabelDocumentError,
         ValueError,
         FileNotFoundError,
@@ -976,6 +982,7 @@ def capture_live_canvas(
         }
 
     from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
         logical_image_name,
         resolve_image_path,
     )
@@ -1003,7 +1010,7 @@ def capture_live_canvas(
     )
     try:
         source = resolve_image_path(src_image)
-    except (FileNotFoundError, ValueError) as exc:
+    except LogicalImageError as exc:
         return {"error": str(exc)}
     read = _display_of(SourceHeader(source), max_edge=max_edge, region=region)
     try:
@@ -1086,7 +1093,10 @@ def overlay_reference_grid(
         tile_size: Cell edge in native pixels; omitted derives a legible default.
 
     """
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
+        resolve_image_path,
+    )
     from tcip_mcp.pipelines.reference_grid import (
         derive_pointing_tile_size,
         grid_geometry,
@@ -1098,7 +1108,7 @@ def overlay_reference_grid(
         return {"error": f"Image not found: {image_path}"}
     try:
         source = resolve_image_path(img)
-    except (FileNotFoundError, ValueError) as exc:
+    except LogicalImageError as exc:
         return {"error": str(exc)}
 
     display = _display_of(SourceHeader(source))

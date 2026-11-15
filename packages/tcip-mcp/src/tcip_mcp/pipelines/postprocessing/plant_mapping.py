@@ -2106,7 +2106,7 @@ def verify_mapping_inputs(
     disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
     image folder is absent. The named dates' folders are enumerated once, in one walk
     (``image_utils.scan_captures`` over ``list_logical_images``, refusing by name on
-    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError`); an enumerated stem the
+    :class:`~tcip_mcp.pipelines.image_utils.LogicalImageError`); an enumerated stem the
     mapping's own assignment rows for that date do not name refuses, naming the date, the file(s)
     and the rebuild remedy. A recorded stem no longer enumerated is disclosed as
     ``"<date>/<name>"``, using the recorded row's own file name; so is a recorded,
@@ -2137,7 +2137,7 @@ def verify_mapping_inputs(
     by name.
     """
     from tcip_mcp.pipelines.image_utils import (
-        AmbiguousImageStemError,
+        LogicalImageError,
         list_logical_images,
         logical_image_name,
         scan_captures,
@@ -2163,7 +2163,7 @@ def verify_mapping_inputs(
             list_logical_images,
             [date for date in build.dates if date in buckets],
         )
-    except AmbiguousImageStemError as exc:
+    except LogicalImageError as exc:
         raise MappingDeliveryError(str(exc)) from exc
 
     captures_unverified: list[str] = []

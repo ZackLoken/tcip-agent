@@ -482,6 +482,76 @@ def test_a_label_document_whose_image_is_gone_refuses_the_export(
     assert not destination.exists()
 
 
+def test_a_band_group_missing_a_band_refuses_the_import_with_its_sentence(
+    tmp_path: Path,
+) -> None:
+    """An exported band group that lost a band refuses the import of its labels, writing nothing.
+
+    The import answers the sentence the group's own resolution refuses with.
+    """
+    import numpy as np
+    import tifffile
+
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tests._producer_fixtures import write_band_group
+
+    root = _project(tmp_path / "first", _photographs(tmp_path / "raw"))
+    images_dir = image_dir(root, FIRST)
+    bands = {
+        "Green": images_dir / "plot7_G.tif",
+        "Red": images_dir / "plot7_R.tif",
+    }
+    for band, fill in zip(bands.values(), (111, 222), strict=True):
+        tifffile.imwrite(str(band), np.full((SIZE, SIZE), fill, np.uint16))
+    manifest = write_band_group(
+        images_dir, "plot7", bands, central_wavelength_nm=None
+    )
+    label_image(
+        manifest, [{"subject": "leaf", "bbox": [4, 4, 20, 20]}], project=root
+    )
+    container = tmp_path / "labels.zip"
+    _export(root, container)
+    bands["Red"].unlink()
+    with pytest.raises(Exception) as incomplete:
+        resolve_image_path(manifest)
+    before = _stored(root)
+
+    answer = import_labels(root, str(container), str(root), actor=BREEDER)
+
+    assert answer == {"error": str(incomplete.value)}
+    assert _stored(root) == before
+
+
+def test_a_capture_holding_two_images_of_one_stem_refuses_the_export_and_the_import(
+    tmp_path: Path, exported: tuple[Path, Path]
+) -> None:
+    """Two images of one stem in a capture refuse the export and the import, each writing nothing.
+
+    Each answers the sentence the capture's enumeration refuses with.
+    """
+    from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
+        list_logical_images,
+    )
+    from tests._producer_fixtures import write_image
+
+    first, container = exported
+    write_image(image_dir(first, FIRST) / "boxes.jpg", (SIZE, SIZE))
+    with pytest.raises(LogicalImageError) as ambiguous:
+        list_logical_images(image_dir(first, FIRST))
+    destination = tmp_path / "again.zip"
+    before = _stored(first)
+
+    exporting = export_labels(
+        first, str(first), str(destination), actor=BREEDER
+    )
+    importing = import_labels(first, str(container), str(first), actor=BREEDER)
+
+    assert exporting == importing == {"error": str(ambiguous.value)}
+    assert not destination.exists()
+    assert _stored(first) == before
+
+
 def test_the_coco_door_decides_no_image_fact_of_its_own(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

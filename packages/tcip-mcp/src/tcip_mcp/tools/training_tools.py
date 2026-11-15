@@ -2375,11 +2375,16 @@ def evaluate_model(
         }
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
 
     try:
         admitted = admit(images_dir, labels_dir, scope=scope)
         require_admitted(admitted)
-    except (ValueError, UnreadableLabelDocumentError) as exc:
+    except (
+        LogicalImageError,
+        ValueError,
+        UnreadableLabelDocumentError,
+    ) as exc:
         return {
             "error": f"the ground truth of images_dir={images_dir!r} with "
             f"labels_dir={labels_dir!r} admits nothing to evaluate: {exc}"

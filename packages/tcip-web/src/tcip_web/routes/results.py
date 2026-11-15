@@ -129,6 +129,7 @@ def build_plant_mapping(
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.identity import actor
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
@@ -154,7 +155,7 @@ def build_plant_mapping(
         plant_mapping.UngeoreferencedCaptureError,
     ) as exc:
         raise HTTPException(exc.status, str(exc)) from exc
-    except ValueError as exc:
+    except (LogicalImageError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
 

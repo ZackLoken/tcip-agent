@@ -12,7 +12,6 @@ from PIL import Image
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import (
     MANIFEST_EXT,
-    BandGroupIncompleteError,
     BandGroupRef,
     read_band_group_manifest,
 )
@@ -28,6 +27,8 @@ __all__ = [
     "BandGroupIncompleteError",
     "BandGroupRef",
     "IMAGE_EXTS",
+    "ImageNotNamedError",
+    "LogicalImageError",
     "bucket_logical_identities",
     "image_dimensions",
     "list_logical_images",
@@ -46,7 +47,23 @@ __all__ = [
 ]
 
 
-class AmbiguousImageStemError(ValueError):
+class LogicalImageError(Exception):
+    """A failed logical-image resolution of a path, or a failed enumeration of a folder.
+
+    The resolver (:func:`resolve_image_paths`) and the enumerator (:func:`list_logical_images`)
+    refuse only through its subclasses, none of which is a builtin error.
+    """
+
+
+class ImageNotNamedError(LogicalImageError):
+    """A path names no logical image: no image of its name, or a band of a grouped capture."""
+
+
+class BandGroupIncompleteError(LogicalImageError):
+    """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk."""
+
+
+class AmbiguousImageStemError(LogicalImageError):
     """A directory holds more than one logical identity under one case-folded stem.
 
     The fold is :func:`stem_collision_key`'s. The identities are two raw files (``foo.jpg``,
@@ -221,10 +238,10 @@ def resolve_image_paths(
     """Resolve the logical image each of ``paths`` names, each directory scanned once.
 
     The scan is :func:`scan_identities`: a ``.bandgroup`` manifest's grouped capture, a raw image
-    its own file. Refuses ``FileNotFoundError`` for a path naming no logical image, naming the
-    manifest that claims it when it is a band of a grouped capture;
+    its own file. Refuses :class:`ImageNotNamedError` for a path naming no logical image, naming
+    the manifest that claims it when it is a band of a grouped capture;
     :class:`AmbiguousImageStemError` when its own stem names more than one;
-    ``BandGroupIncompleteError`` for a grouped capture missing a band.
+    :class:`BandGroupIncompleteError` for a grouped capture missing a band.
     """
     named_paths = [Path(p) for p in paths]
     scanned = {
@@ -242,7 +259,7 @@ def resolve_image_paths(
                 if isinstance(first, BandGroupRef)
                 and path in first.bands.values()
             ]
-            raise FileNotFoundError(
+            raise ImageNotNamedError(
                 f"{path} names no logical image"
                 + (
                     f": it is a band of the grouped capture {owners[0]}; name the manifest"

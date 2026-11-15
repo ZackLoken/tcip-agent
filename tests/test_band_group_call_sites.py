@@ -141,9 +141,9 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
 ) -> None:
     """The channel probe raises ``BandGroupIncompleteError`` on a stale manifest, not a default."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_root, label_key
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncompleteError
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tcip_mcp.pipelines.data.selection import Sample, WholeSource
+    from tcip_mcp.pipelines.image_utils import BandGroupIncompleteError
     from tests._producer_fixtures import write_band_group
 
     images_dir = image_root(tmp_path)
@@ -307,9 +307,33 @@ def test_visualize_annotations_on_a_grouped_capture(
     assert Path(result["image_path"]).is_file()
 
 
-def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
+def _resolver_sentence(path: Path) -> str:
+    """Return the sentence ``resolve_image_path`` refuses ``path`` with."""
+    from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
+        resolve_image_path,
+    )
+
+    with pytest.raises(LogicalImageError) as refused:
+        resolve_image_path(path)
+    return str(refused.value)
+
+
+def _stray(grouped_dataset: GroupedDataset) -> Path:
+    """Write a file whose suffix names no image into the grouped capture's folder; return it."""
+    stray = grouped_dataset.images_dir / "notes.txt"
+    stray.write_bytes(b"field notes")
+    return stray
+
+
+def test_each_render_of_a_band_member_or_a_stray_file_answers_the_resolvers_sentence(
     tmp_path: Path, grouped_dataset: GroupedDataset
 ) -> None:
+    """The annotation, prediction and comparison renders answer the resolver's sentence.
+
+    A band member's sentence names its manifest; a file whose suffix names no image is answered
+    the same way, as naming no logical image.
+    """
     from tcip_mcp.tools.vision_tools import (
         AnnotationsRender,
         ComparisonRender,
@@ -317,43 +341,41 @@ def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
         visualize,
     )
 
-    member = str(grouped_dataset.bands["Green"])
-    for render in (
-        AnnotationsRender(source="annotations", path=member),
-        PredictionsRender(source="predictions", path=member, bucket="preds"),
-        ComparisonRender(
-            source="comparison",
-            path=member,
-            bucket="preds",
-            iou_threshold=IOU_THRESHOLD,
-        ),
-    ):
-        result = visualize(tmp_path, render)
-        assert "capture_001.bandgroup" in result["error"], (render, result)
-        assert "name the manifest" in result["error"]
+    for refused in (grouped_dataset.bands["Green"], _stray(grouped_dataset)):
+        path = str(refused)
+        for render in (
+            AnnotationsRender(source="annotations", path=path),
+            PredictionsRender(source="predictions", path=path, bucket="preds"),
+            ComparisonRender(
+                source="comparison",
+                path=path,
+                bucket="preds",
+                iou_threshold=IOU_THRESHOLD,
+            ),
+        ):
+            result = visualize(tmp_path, render)
+            assert result == {"error": _resolver_sentence(refused)}, render
+    member = _resolver_sentence(grouped_dataset.bands["Green"])
+    assert "capture_001.bandgroup" in member
+    assert "name the manifest" in member
 
 
 def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_serves_its_manifest(
     client: TestClient, opened: OpenProject, grouped_dataset: GroupedDataset
 ) -> None:
-    """A door naming one band of a grouped capture answers the resolver's refusal as its error.
+    """A door naming no logical image answers the resolver's refusal as its error.
 
     ``read_annotations``, ``save_annotations``, ``overlay_reference_grid``,
     ``capture_live_canvas`` and ``score_predictions`` are called through the server, the canvas
     pushed through the backend's own route and a bucket published for the manifest; each answers
-    the sentence ``resolve_image_path`` raises for the band, as it answers a path that is not a
-    file, and each serves the group's manifest.
+    the sentence ``resolve_image_path`` raises for one band of the group and for a file whose
+    suffix names no image, and each serves the group's manifest.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tests._producer_fixtures import published_document
     from tests._server_calls import decoded_answer, results_through_handshake
     from tests._web_fixtures import bound_to
     from tests.test_canvas_liveview import _payload
-
-    member = str(grouped_dataset.bands["Green"])
-    with pytest.raises(FileNotFoundError) as refused:
-        resolve_image_path(member)
 
     published_document(
         opened.root,
@@ -399,7 +421,11 @@ def test_each_image_door_answers_a_band_member_with_the_resolvers_sentence_and_s
         assert not any(result.is_error for result in results), results
         return [decoded_answer(result) for result in results]
 
-    assert answers(member) == [{"error": str(refused.value)}] * 5
+    for refused in (grouped_dataset.bands["Green"], _stray(grouped_dataset)):
+        assert (
+            answers(str(refused))
+            == [{"error": _resolver_sentence(refused)}] * 5
+        )
     served = answers(str(grouped_dataset.manifest))
     assert [answer.get("error") for answer in served] == [None] * 5, served
 

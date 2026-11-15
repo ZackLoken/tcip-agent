@@ -294,6 +294,7 @@ async def select_dataset(req: CaptureChoice) -> SelectAnswer:
     advisory, never a refusal: a brand-new annotation on an unlabeled date starts empty.
     """
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.image_utils import LogicalImageError
 
     project, held = store.held_state()
     root = allowed_path(req.dataset_root)
@@ -326,7 +327,7 @@ async def select_dataset(req: CaptureChoice) -> SelectAnswer:
                 current_image_index=resumed,
             )
         )
-    except ValueError as exc:
+    except (LogicalImageError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     await store.mutate(lambda _held: {"dataset": selection}, project=project)
 

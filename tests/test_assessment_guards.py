@@ -1186,6 +1186,69 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
     assert source in str(refused.value)
 
 
+def test_a_reference_source_removed_after_the_assessment_answers_for_nothing_naming_it(
+    tmp_path: Path,
+) -> None:
+    """The gate refuses a bucket whose reference source was removed after its assessment.
+
+    The refusal carries the sentence the source's resolution now refuses with, naming its path.
+    """
+    from tcip_mcp.assessment import read_assessment
+    from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
+    from tcip_mcp.operationalization import latest_confirmed
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+
+    chain = run_the_chain(tmp_path, experiment_id="exp-removed-source")
+    assessment = read_assessment(tmp_path, chain.assessment["assessment_id"])
+    source = Path(assessment.reference.samples[0].sample.source)
+    source.unlink()
+    with pytest.raises(Exception) as gone:
+        resolve_image_path(source)
+
+    with pytest.raises(DeliveryRefusedError, match="changed since") as refused:
+        gate(
+            tmp_path,
+            [chain.read()],
+            delivery_kind="per_image_count",
+            revision=latest_confirmed(fx.COUNT_TRAIT, tmp_path),
+            result=Result((), (), population=()),
+        )
+    assert str(gone.value) in str(refused.value)
+    assert str(source) in str(gone.value)
+
+
+def test_an_assessment_over_a_reference_holding_two_images_of_one_stem_answers_it(
+    tmp_path: Path,
+) -> None:
+    """``assess_checkpoint`` answers a reference whose images each share a stem with another.
+
+    The answer is the sentence one reference image's resolution refuses with.
+    """
+    from tcip_mcp.pipelines.image_utils import (
+        LogicalImageError,
+        resolve_image_path,
+    )
+    from tests._chain_fixtures import trained_detector
+    from tests._producer_fixtures import write_image
+
+    _root, images_dir, selection_dir, checkpoint = trained_detector(
+        tmp_path, experiment_id="exp-ambiguous-reference"
+    )
+    images = sorted(images_dir.iterdir())
+    for image in images:
+        write_image(image.with_suffix(".bmp"), (IMG, IMG))
+    sentences = set()
+    for image in images:
+        with pytest.raises(LogicalImageError) as ambiguous:
+            resolve_image_path(image)
+        sentences.add(str(ambiguous.value))
+
+    answered = assess(tmp_path, checkpoint, selection_dir)
+
+    assert answered.keys() == {"error"}, answered
+    assert answered["error"] in sentences, answered
+
+
 # -- a missing fact refuses by name -----------------------------------------------------
 
 
