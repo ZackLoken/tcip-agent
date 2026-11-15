@@ -623,6 +623,43 @@ def build_bespoke_classifier(
     )
 
 
+class FractionalOrdinalHead(OrdinalHead):
+    """The shipped ordinal head emitting each rank :data:`SHORTFALL` below its integer count.
+
+    A rank above 0 is therefore never whole: truncation takes it to the rank below and rounding
+    to the nearest rank takes it back to the count. The shortfall is under one half so rounding
+    never meets a tie, and a count of 0 emits -0.3, which truncation and rounding both take to 0.
+    """
+
+    SHORTFALL = 0.3
+
+    def decode(
+        self, outputs: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        """Return the shipped head's decode with its rank less :data:`SHORTFALL`."""
+        decoded = super().decode(outputs)
+        decoded[self.target_key] = (
+            decoded[self.target_key].float() - self.SHORTFALL
+        )
+        return decoded
+
+
+def _over_ordinal_head(
+    head: type[OrdinalHead],
+    *,
+    num_ranks: int,
+    image_mean: list[float],
+    image_std: list[float],
+    in_chans: int,
+) -> BespokeComposed:
+    """Build a :class:`BespokeComposed` of a ResNet-18, a pooling neck and a ``head``."""
+    bb = _resnet18(in_chans)
+    neck = GlobalAvgPoolNeck(bb.out_channels)
+    return BespokeComposed(
+        bb, neck, head(neck.out_channels, num_ranks), image_mean, image_std
+    )
+
+
 def build_bespoke_ordinal(
     *,
     num_ranks: int,
@@ -630,14 +667,29 @@ def build_bespoke_ordinal(
     image_std: list[float],
     in_chans: int = 3,
 ) -> BespokeComposed:
-    bb = _resnet18(in_chans)
-    neck = GlobalAvgPoolNeck(bb.out_channels)
-    return BespokeComposed(
-        bb,
-        neck,
-        OrdinalHead(neck.out_channels, num_ranks),
-        image_mean,
-        image_std,
+    return _over_ordinal_head(
+        OrdinalHead,
+        num_ranks=num_ranks,
+        image_mean=image_mean,
+        image_std=image_std,
+        in_chans=in_chans,
+    )
+
+
+def build_bespoke_fractional_ordinal(
+    *,
+    num_ranks: int,
+    image_mean: list[float],
+    image_std: list[float],
+    in_chans: int = 3,
+) -> BespokeComposed:
+    """Build :func:`build_bespoke_ordinal`'s model over a :class:`FractionalOrdinalHead`."""
+    return _over_ordinal_head(
+        FractionalOrdinalHead,
+        num_ranks=num_ranks,
+        image_mean=image_mean,
+        image_std=image_std,
+        in_chans=in_chans,
     )
 
 
