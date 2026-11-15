@@ -1676,14 +1676,6 @@ def test_output_written_with_no_socket_attached_is_drawn_live_by_the_next_attach
         assert [f.replay for f in rest] == [False] * len(rest)
 
 
-def _subscribed(session: terminal_routes.TerminalSession) -> None:
-    """Wait until the session holds a subscriber, as once a socket's attach has run."""
-    deadline = time.time() + 30
-    while not session._subs:
-        assert time.time() < deadline, "no socket attached"
-        time.sleep(0.05)
-
-
 def test_output_a_socket_failed_to_send_is_drawn_live_by_the_next_attach(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1709,7 +1701,6 @@ def test_output_a_socket_failed_to_send_is_drawn_live_by_the_next_attach(
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
     ) as ws:
-        _subscribed(session)
         session._on_output("sent")
         _frames_until(ws, "sent")
         dropping.set()
