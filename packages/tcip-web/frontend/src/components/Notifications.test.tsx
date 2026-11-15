@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionsApi } from "@/api/sessions";
 import { CONNECTION_LOST, StateSocket } from "@/api/ws";
 import {
+  NotificationItem,
   NotificationsButton,
   NotificationsLiveRegion,
   NotificationsPane,
@@ -291,5 +292,39 @@ describe("a failure", () => {
 
     act(() => useStore.getState().holdCondition("connection", CONNECTION_LOST));
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent(/Error, condition, .*, ongoing/);
+  });
+});
+
+describe("an entry in place", () => {
+  it("offers the action its placing control supplies, which the same entry in the area does not", () => {
+    const reload = vi.fn();
+    render(
+      <>
+        <NotificationItem
+          placement="in place"
+          entryKey="annotate-reload:a.jpg"
+          afterDismiss={() => {}}
+          action={{ label: "Reload", run: reload }}
+        />
+        <NotificationsPane />
+      </>,
+    );
+    act(() =>
+      useStore.getState().raiseNotification({
+        kind: "failure",
+        level: "error",
+        text: { sentence: "The labels changed since they loaded." },
+        context: { project: "valley", target: "a.jpg" },
+        key: "annotate-reload:a.jpg",
+      }),
+    );
+
+    fireEvent.click(
+      within(screen.getByTestId("entry-in-place")).getByRole("button", { name: "Reload" }),
+    );
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(
+      within(screen.getByRole("listitem")).queryByRole("button", { name: "Reload" }),
+    ).toBeNull();
   });
 });
