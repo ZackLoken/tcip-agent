@@ -124,7 +124,6 @@ export function NotificationItem(props: Placement) {
       </div>
     );
   }
-  const condition = entry.kind === "condition";
   const meta = [word, entry.kind, entry.context.target].filter(Boolean).join(", ");
   return (
     <li className="flex items-start gap-2 py-2.5 pr-2">
@@ -136,7 +135,7 @@ export function NotificationItem(props: Placement) {
         <p className="mt-1 text-[11px] text-tcip-muted tabular-nums">
           {meta}, <time dateTime={at.toISOString()}>{time}</time>
           {count}
-          {condition && (holding[entry.key] === entry.id ? ", ongoing" : ", ended")}
+          {entry.condition && (holding[entry.condition] === entry.id ? ", ongoing" : ", ended")}
         </p>
         {action && <div className="mt-2">{action}</div>}
       </div>

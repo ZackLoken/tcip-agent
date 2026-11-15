@@ -51,11 +51,15 @@ export interface EntryAction {
  *  `textOf` reads either. */
 type EntryText = { sentence: string; refusals?: never } | { refusals: Refusal[]; sentence?: never };
 
-/** What an entry is and the key it stands on: a condition's occurrence stands on the condition's
- *  name; a failure, a notice or a job on the key its producer gave, until it is released or a
- *  differing failure takes the key. */
+/** The kinds of entry a producer raises, beside a condition's occurrence. */
+type RaisedKind = "failure" | "notice" | "job";
+
+/** What an entry is: a condition's occurrence, naming its condition; or a failure, a notice or a
+ *  job, standing on the key its producer gave until the key is released or a raise stating
+ *  another text takes it, and offering its action only while it stands there. */
 type EntryStanding =
-  { kind: "condition"; key: ConditionName } | { kind: "failure" | "notice" | "job"; key?: string };
+  | { kind: "condition"; condition: ConditionName; key?: never; action?: never }
+  | { kind: RaisedKind; key?: string; action?: EntryAction; condition?: never };
 
 /** One entry of the notifications area. */
 export type NotificationEntry = EntryText &
@@ -67,12 +71,11 @@ export type NotificationEntry = EntryText &
     /** How many times it was raised. */
     count: number;
     context: EntryContext;
-    action?: EntryAction;
   };
 
 /** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal. */
 export interface Raised {
-  kind: "failure" | "notice" | "job";
+  kind: RaisedKind;
   level: MessageLevel;
   text: { sentence: string } | { refusal: Refusal };
   context: EntryContext;
@@ -103,7 +106,8 @@ export interface NotificationsSlice {
    * entry, announced once. An entry raised again carries the latest raise's action.
    */
   raiseNotification: (raised: Raised) => void;
-  /** End what stands on `key`: its entry stays listed until dismissed, standing on no key. */
+  /** End what stands on `key`: its entry stays listed until dismissed, standing on no key and
+   *  offering no action. */
   releaseNotification: (key: string) => void;
   dismissNotification: (id: number) => void;
   /** Count every entry listed now as seen. */
@@ -129,19 +133,15 @@ export function textOf(entry: EntryText): string {
 const sameContext = (a: EntryContext, b: EntryContext): boolean =>
   a.project === b.project && a.target === b.target;
 
-/** Whether `entry` is the failure, notice or job standing on `key`. */
-const standsOn = (entry: NotificationEntry, key: string): boolean =>
-  entry.kind !== "condition" && entry.key === key;
-
 /** The listed entry standing on `key`, null when none does. */
 export const selectStanding =
   (key: string) =>
   (s: AppState): NotificationEntry | null =>
-    s.notifications.find((e) => standsOn(e, key)) ?? null;
+    s.notifications.find((e) => e.key === key) ?? null;
 
-/** `entry` standing on no key. */
+/** `entry` standing on no key, so offering no action. */
 const unkeyed = (entry: NotificationEntry): NotificationEntry =>
-  ({ ...entry, key: undefined }) as NotificationEntry;
+  ({ ...entry, key: undefined, action: undefined }) as NotificationEntry;
 
 let nextEntryId = 1;
 
@@ -172,7 +172,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
       const entry: NotificationEntry = {
         id: nextEntryId++,
         kind: "condition",
-        key: condition,
+        condition,
         level: CONDITION_LEVEL[condition],
         time: Date.now(),
         count: 1,
@@ -234,7 +234,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
   releaseNotification: (key) =>
     set((s) =>
       selectStanding(key)(s)
-        ? { notifications: s.notifications.map((e) => (standsOn(e, key) ? unkeyed(e) : e)) }
+        ? { notifications: s.notifications.map((e) => (e.key === key ? unkeyed(e) : e)) }
         : s,
     ),
 

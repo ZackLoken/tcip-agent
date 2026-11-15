@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
+import { subjectsApi } from "@/api/subjects";
 import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
@@ -11,6 +12,7 @@ import { useStore } from "@/store";
 import { loadOf } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
 import { measureWindow, PANE_FOCUS } from "@/test/dock";
+import { LABEL_ANSWERS } from "@/test/labels";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
@@ -123,6 +125,72 @@ describe("App panel events", () => {
     act(() => subscribed?.[1](banner));
 
     expect(screen.getByText(banner.event.text)).toBeInTheDocument();
+  });
+});
+
+describe("App shell failures", () => {
+  const CAPTURE = SUBJECT_SELECT_ANSWER.selection;
+  const CONTEXT = { project: VALLEY.record.id, target: CAPTURE.date };
+
+  /** Render the shell over Valley farm open on the produced capture. */
+  function renderOnCapture() {
+    answerAnnotateReads();
+    useStore.setState((s) => ({
+      openProject: VALLEY_OPENED.project,
+      gui: { ...s.gui, dataset: CAPTURE },
+    }));
+    render(<App />);
+  }
+
+  it("lists label documents that will not read as a failure of the project and capture", async () => {
+    const { registry_unreadable: loaded } = LABEL_ANSWERS;
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(loaded);
+    renderOnCapture();
+
+    await waitFor(() =>
+      expect(useStore.getState().notifications).toContainEqual(
+        expect.objectContaining({
+          kind: "failure",
+          sentence: `1 label document(s) could not be read: ${loaded.unreadable.join(", ")}`,
+          context: CONTEXT,
+        }),
+      ),
+    );
+  });
+
+  it("lists a failed registry load as a failure of the project and capture", async () => {
+    vi.spyOn(subjectsApi, "load").mockRejectedValue(new TypeError("Failed to fetch"));
+    renderOnCapture();
+
+    await waitFor(() =>
+      expect(useStore.getState().notifications).toContainEqual(
+        expect.objectContaining({
+          kind: "failure",
+          sentence: "Could not load the registry for this project.",
+          context: CONTEXT,
+        }),
+      ),
+    );
+  });
+
+  it("lists an agent focus that could not be applied as a failure of the open project", async () => {
+    vi.mocked(api.dataset.select).mockRejectedValue(new Error("selection refused"));
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    render(<App />);
+    await screen.findByRole("tablist");
+
+    const app = stateSocket.subscribePanel.mock.calls.find(([p]) => p === "app");
+    act(() => app?.[1](PANEL_EVENTS.annotate_focus));
+
+    await waitFor(() =>
+      expect(useStore.getState().notifications).toEqual([
+        expect.objectContaining({
+          kind: "failure",
+          sentence: "Agent tried to focus the Annotate tab, but it couldn't be applied.",
+          context: { project: VALLEY.record.id },
+        }),
+      ]),
+    );
   });
 });
 
@@ -324,6 +392,7 @@ describe("App refused open", () => {
 
     toggleArea();
     await PANE_FOCUS.heading();
+    expect(area().getByRole("listitem")).toHaveTextContent(`Error, failure, ${VALLEY_NAME}`);
     fireEvent.click(area().getByRole("button", { name: /^Dismiss: backend refused/ }));
     expect(cardLine()).not.toBeInTheDocument();
     expect(useStore.getState().notifications).toEqual([]);
@@ -343,6 +412,7 @@ describe("App refused open", () => {
     await waitFor(() => expect(open).toHaveBeenCalledTimes(3));
     expect(cardLine()).not.toBeInTheDocument();
     expect(useStore.getState().notifications).toHaveLength(1);
+    expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
 
     await act(() => Promise.resolve(retried.resolve(VALLEY_OPENED)));
     await waitFor(() => expect(cardLine()).toHaveTextContent("selection refused"));
@@ -363,6 +433,39 @@ describe("App refused open", () => {
     expect(cardLine()).not.toBeInTheDocument();
     expect(listedSentences()).toEqual(["backend refused again"]);
     expect(area().getAllByRole("listitem")).toHaveLength(1);
+    expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("counts a Retry refused the same way on the one entry, which the card shows in place", async () => {
+    vi.mocked(api.projects.open).mockRejectedValue(new Error("backend refused"));
+    render(<App />);
+    fireEvent.click(await screen.findByText(VALLEY_NAME));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused"));
+
+    fireEvent.click(within(cardLine()!).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused, 2 times"));
+
+    toggleArea();
+    await PANE_FOCUS.heading();
+    expect(area().getByRole("listitem")).toHaveTextContent(/backend refused.*, 2 times/);
+    expect(useStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("leaves the card's line and the entry's Retry once the same card is chosen again, the entry staying listed", async () => {
+    vi.mocked(api.projects.open).mockRejectedValue(new Error("backend refused"));
+    render(<App />);
+    fireEvent.click(await screen.findByText(VALLEY_NAME));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused"));
+
+    fireEvent.click(screen.getByText(VALLEY_NAME));
+
+    expect(cardLine()).not.toBeInTheDocument();
+    toggleArea();
+    await PANE_FOCUS.heading();
+    expect(area().getByRole("listitem")).toHaveTextContent("backend refused");
+    expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 });
 
