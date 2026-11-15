@@ -52,8 +52,13 @@ describe("index.css component layer", () => {
       "tcip-btn-danger",
       "tcip-input",
       "tcip-select",
+      "isolate",
     ]);
     root = postcss.parse(optimize(built).code);
+  });
+
+  it("compiles the utility that makes the dock a stacking layer to an isolation rule", () => {
+    expect(declsFor(root, ".isolate").get("isolation")).toBe("isolate");
   });
 
   // .tcip-btn-primary/.tcip-btn-danger inherit via `@apply tcip-btn`, and

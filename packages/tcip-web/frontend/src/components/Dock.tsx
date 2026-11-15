@@ -14,7 +14,7 @@ export function Dock({ model, work }: { model: Model; work: ReactNode }) {
     [work],
   );
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="relative isolate min-h-0 flex-1">
       <Layout model={model} factory={factory} />
     </div>
   );
