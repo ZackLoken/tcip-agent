@@ -1676,6 +1676,91 @@ def test_output_written_with_no_socket_attached_is_drawn_live_by_the_next_attach
         assert [f.replay for f in rest] == [False] * len(rest)
 
 
+def test_output_a_socket_failed_to_send_is_drawn_live_by_the_next_attach(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What a socket was sent replays, and what its failed send left unsent is drawn live."""
+    wire_stub_spawn(monkeypatch, StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    send_text = WebSocket.send_text
+    first: list[WebSocket] = []
+    dropping, failed = threading.Event(), threading.Event()
+
+    async def dropping_send_text(self: WebSocket, data: str) -> None:
+        if not first:
+            first.append(self)
+        if self is first[0] and dropping.is_set():
+            failed.set()
+            raise WebSocketDisconnect(1006)
+        await send_text(self, data)
+
+    monkeypatch.setattr(WebSocket, "send_text", dropping_send_text)
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws:
+        session._on_output("sent")
+        _frames_until(ws, "sent")
+        dropping.set()
+        session._on_output("lost")
+        assert failed.wait(timeout=30)
+    _no_socket_attached(session)
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws2:
+        frames = _frames_until(ws2, "lost")
+    assert [(f.data, f.replay) for f in frames] == [
+        ("sent", True),
+        ("lost", False),
+    ]
+
+
+def test_output_a_dropped_backlog_held_is_drawn_live_by_the_next_attach(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Output a full queue dropped, closing its socket with 1013, reaches the next attach live."""
+    wire_stub_spawn(monkeypatch, StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    send_text = WebSocket.send_text
+    first: list[WebSocket] = []
+    parked, release = threading.Event(), threading.Event()
+
+    async def parked_send_text(self: WebSocket, data: str) -> None:
+        if not first:
+            first.append(self)
+        if self is first[0]:
+            parked.set()
+            await asyncio.to_thread(release.wait, 30)
+        await send_text(self, data)
+
+    queue_max = terminal_routes.QUEUE_MAX_CHUNKS
+    monkeypatch.setattr(terminal_routes, "QUEUE_MAX_CHUNKS", 1)
+    monkeypatch.setattr(WebSocket, "send_text", parked_send_text)
+    try:
+        with client.websocket_connect(
+            f"ws://127.0.0.1/api/terminal/ws/{sid}"
+        ) as ws:
+            assert parked.wait(timeout=30)
+            session._on_output("first")
+            session._on_output("second")
+            release.set()
+            assert _read_until_closed(ws) == ("", 1013)
+    finally:
+        release.set()
+    _no_socket_attached(session)
+    monkeypatch.setattr(terminal_routes, "QUEUE_MAX_CHUNKS", queue_max)
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws2:
+        frames = _frames_until(ws2, "second")
+    assert [(f.data, f.replay) for f in frames] == [("firstsecond", False)]
+
+
 def test_resize_does_not_crash_stream(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
@@ -2630,7 +2715,10 @@ def test_output_after_the_ended_close_reaches_no_socket(
         )
         session._on_output("late output")
         await asyncio.sleep(0)
-        return [queue.get_nowait() for _ in range(queue.qsize())]
+        return [
+            item if isinstance(item, tuple) else item.frame
+            for item in (queue.get_nowait() for _ in range(queue.qsize()))
+        ]
 
     assert asyncio.run(offered()) == [
         terminal_routes.TerminalHeldFrame(count=0),
