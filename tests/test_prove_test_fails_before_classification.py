@@ -1,8 +1,15 @@
-"""Tests for tools/prove_test_fails_before.py's failure classification.
+"""Tests for tools/prove_test_fails_before.py: its verdicts, options and scratch directory.
 
-A baseline failure that does not reach the code under test is told apart from one at the guard's
-own assertion. Each case builds a two-revision scratch repository (a baseline commit the fault
-sits in, a second commit with the fix and the guard test) and runs the real script against it.
+Most cases build a two-revision scratch repository (a baseline commit the fault sits in, a second
+commit with the fix and the guard test) and run the real script against it. They cover:
+
+- the failure classification, a baseline failure that does not reach the code under test told
+  apart from one at the guard's own assertion;
+- ``--test-rev``, over a third revision that removes the test;
+- ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched;
+- ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
+- the run's scratch directory, where the baseline's temporary root lies and the line printed when
+  the directory cannot be removed.
 """
 
 from __future__ import annotations
@@ -10,6 +17,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -1003,3 +1012,123 @@ def test_a_key_error_on_a_package_result_guards(tmp_path: Path) -> None:
     assert "GUARDS" in result.stdout
     assert "[behavioral]" in result.stdout
     assert "KeyError" in result.stdout
+
+
+# ── the run's scratch directory ──────────────────────────────────────────────
+
+SCRATCH_REMOVAL_LINE = "scratch directory left in place"
+
+SUBJECT_REFUSING_ITS_OWN_REPOSITORY = (
+    "from pathlib import Path\n"
+    "\n"
+    "REPO = Path(__file__).resolve().parent.parent\n"
+    "\n"
+    "\n"
+    "def accept_root(root):\n"
+    "    root = Path(root).resolve()\n"
+    "    if root.is_relative_to(REPO):\n"
+    "        raise ValueError(f'{root} is under the repository ({REPO})')\n"
+    "    return root\n"
+)
+
+TEST_OF_THE_SUBJECT = (
+    "import importlib.util\n"
+    "from pathlib import Path\n"
+    "\n"
+    "\n"
+    "def _subject():\n"
+    "    path = Path(__file__).resolve().parent.parent / 'tools' / 'subject.py'\n"
+    "    spec = importlib.util.spec_from_file_location('subject', path)\n"
+    "    module = importlib.util.module_from_spec(spec)\n"
+    "    spec.loader.exec_module(module)\n"
+    "    return module\n"
+    "\n"
+    "\n"
+    "def test_a_root_outside_the_repository_is_accepted(tmp_path):\n"
+    "    assert _subject().accept_root(tmp_path) == tmp_path.resolve()\n"
+)
+
+TEST_LEAVING_AN_UNREMOVABLE_FILE = (
+    "import stat\n"
+    "\n"
+    "\n"
+    "def test_leaves_a_file_its_directory_cannot_drop(tmp_path):\n"
+    "    locked = tmp_path / 'locked'\n"
+    "    locked.mkdir()\n"
+    "    held = locked / 'held.txt'\n"
+    "    held.write_text('held')\n"
+    "    held.chmod(stat.S_IREAD)\n"
+    "    locked.chmod(stat.S_IREAD | stat.S_IEXEC)\n"
+)
+
+
+def _make_removable(root: Path) -> None:
+    for dirpath, _dirnames, filenames in os.walk(root):
+        os.chmod(dirpath, stat.S_IRWXU)
+        for name in filenames:
+            os.chmod(Path(dirpath) / name, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def test_the_baseline_runs_temporary_root_lies_outside_the_materialized_tree(
+    tmp_path: Path,
+) -> None:
+    """A test given its ``tmp_path`` is never given one inside the baseline tree.
+
+    A subject that finds its repository from its own file location and refuses a root under it
+    accepts the test's ``tmp_path``, so the test passes at the baseline and the verdict is VACUOUS.
+    """
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "tools" / "subject.py", SUBJECT_REFUSING_ITS_OWN_REPOSITORY)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    _write(repo / "tests" / "test_subject.py", TEST_OF_THE_SUBJECT)
+    _commit_all(repo, "double actually doubles")
+
+    result = _run(repo, "tests/test_subject.py", baseline)
+
+    assert result.returncode == EXIT["VACUOUS"], result.stdout + result.stderr
+    assert "VACUOUS" in result.stdout
+    assert SCRATCH_REMOVAL_LINE not in result.stderr
+
+
+def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scratch directory the tool cannot remove is named on standard error, verdict unchanged.
+
+    The baseline run's test leaves a read-only file where removal fails; the run's own temporary
+    folder is redirected under ``tmp_path`` so the directory left behind is found there and removed
+    by this test.
+    """
+    scratch_root = tmp_path / "t"
+    scratch_root.mkdir()
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(scratch_root))
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    _write(
+        repo / "tests" / "test_widgets.py", TEST_LEAVING_AN_UNREMOVABLE_FILE
+    )
+    _commit_all(repo, "double actually doubles")
+
+    try:
+        result = _run(repo, "tests/test_widgets.py", baseline)
+        left = sorted(scratch_root.glob("failbefore-*"))
+
+        assert result.returncode == EXIT["VACUOUS"], (
+            result.stdout + result.stderr
+        )
+        assert len(left) == 1, result.stdout + result.stderr
+        assert SCRATCH_REMOVAL_LINE in result.stderr, (
+            result.stdout + result.stderr
+        )
+        assert str(left[0]) in result.stderr
+    finally:
+        for leftover in scratch_root.glob("failbefore-*"):
+            _make_removable(leftover)
+            shutil.rmtree(leftover)

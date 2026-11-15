@@ -77,6 +77,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
@@ -560,15 +561,18 @@ def run_capturing_outcome(
     expr: str,
     env: dict[str, str],
     outcome_json: Path,
+    basetemp: Path,
     timeout: int,
     per_test_timeout: float | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict | None]:
     """Run pytest in `tree` and return its process plus what it observed.
 
-    The observation is None if it reported none.
+    The child's temporary root is `basetemp`, which the caller places outside `tree` so a test's
+    `tmp_path` never lies under the baseline's own repository. The observation is None if it
+    reported none.
     """
-    # The child session keeps its temporary root inside this run's own tree: pytest deletes all
-    # but the last few roots under the shared one, including another session's, at every start.
+    # basetemp is this run's own folder: pytest deletes all but the last few roots under the
+    # shared one, including another session's, at every start.
     cmd = [
         sys.executable,
         "-m",
@@ -582,7 +586,7 @@ def run_capturing_outcome(
         "--rootdir",
         str(tree),
         "--basetemp",
-        str(tree / ".pytest-basetemp"),
+        str(basetemp),
     ]
     if expr:
         cmd += ["-k", expr]
@@ -976,6 +980,7 @@ def main() -> int:
     tree = tmp / "tree"
     outcome_json = tmp / "outcome.json"
     current_test_path = tmp / "current_test.txt"
+    basetemp = tmp / "pytest-basetemp"
     try:
         materialize(rev, tree)
         record["test_tree_overlay"] = {
@@ -1009,6 +1014,7 @@ def main() -> int:
                 args.expr,
                 env,
                 outcome_json,
+                basetemp,
                 args.timeout,
                 per_test_timeout=args.per_test_timeout,
             )
@@ -1079,9 +1085,30 @@ def main() -> int:
         verdict, why = _classify(observed, baseline_precedes)
         record.update(verdict=verdict, why=why)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        _remove_scratch_directory(tmp)
 
     return _report(record, args.json_out)
+
+
+def _remove_scratch_directory(path: Path) -> None:
+    """Remove `path` and everything under it, naming on standard error any that stays.
+
+    When something cannot be removed, one line names the directory left in place and the first
+    path that could not be removed. Nothing is raised, so the verdict already reached stands.
+    """
+    refused: list[str] = []
+
+    def record(
+        _function: Callable[..., object], failed: str, error: BaseException
+    ) -> None:
+        refused.append(f"{failed} ({error})")
+
+    shutil.rmtree(path, onexc=record)
+    if refused:
+        print(
+            f"scratch directory left in place: {path}; first path not removed: {refused[0]}",
+            file=sys.stderr,
+        )
 
 
 def _report(record: dict, json_out: str | None) -> int:
