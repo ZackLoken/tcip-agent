@@ -14,7 +14,6 @@ export interface ReconnectingSocketOptions {
   isTerminal?: (data: string) => boolean;
   /** True when a frame resets the backoff to its floor; without it, opening resets it. */
   resetsBackoff?: (data: string) => boolean;
-  onConnecting?: () => void;
   onOpen?: () => void;
   /** `opened` is whether this attempt ever reached onopen. */
   onClose?: (event: CloseEvent, opened: boolean) => void;
@@ -89,7 +88,6 @@ export function createReconnectingSocket(opts: ReconnectingSocketOptions): Recon
     if (stopped || terminated || connecting) return;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     connecting = true;
-    opts.onConnecting?.();
     let url: string;
     try {
       // Only a provider that returns a promise costs an await; a synchronous one must not pick
