@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -114,6 +114,22 @@ describe("ProjectPicker", () => {
       date: VALLEY.tree.captures.at(-1)!.name,
     });
     expect(useStore.getState().openProject).toEqual(openedAs(VALLEY).project);
+  });
+
+  it("rings the chosen date on the selected card's rail alone, though another card holds a capture of that name", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue(LISTING);
+    render(<ProjectPicker />);
+
+    fireEvent.click(await screen.findByText(RIDGE.record.display_name));
+    const { date } = useStore.getState().openChoice;
+    expect(VALLEY.tree.captures.map((capture) => capture.name)).toContain(date);
+
+    const ringed = (project: typeof VALLEY) =>
+      within(screen.getByRole("button", { name: project.record.display_name }))
+        .getAllByTestId("season-tick")
+        .filter((tick) => tick.className.includes("ring-2"));
+    expect(ringed(RIDGE)).toHaveLength(1);
+    expect(ringed(VALLEY)).toHaveLength(0);
   });
 
   it("lists a project created while the picker is on screen without a reload", async () => {
