@@ -76,7 +76,7 @@ export function TopBar() {
   return (
     <div className="h-topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 border-b border-tcip-border bg-tcip-panel shrink-0">
       <img
-        src="/assets/si_logo.png"
+        src="/assets/WHITE_SI_logo_SIDESTACKED.png"
         alt="Savanna Institute"
         className="h-9 w-auto select-none justify-self-start"
         draggable={false}

@@ -12,6 +12,15 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+describe("TopBar logo", () => {
+  it("shows the white side-stacked logo the dark bar calls for", () => {
+    render(<TopBar />);
+    const logos = screen.getAllByRole("img", { name: "Savanna Institute" });
+    expect(logos).toHaveLength(1);
+    expect(logos[0]).toHaveAttribute("src", "/assets/WHITE_SI_logo_SIDESTACKED.png");
+  });
+});
+
 describe("TopBar connection notice", () => {
   it("shows nothing while the socket is connected", () => {
     useStore.setState({ wsStatus: "connected" });
