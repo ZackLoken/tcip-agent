@@ -560,15 +560,18 @@ def run_capturing_outcome(
     expr: str,
     env: dict[str, str],
     outcome_json: Path,
+    basetemp: Path,
     timeout: int,
     per_test_timeout: float | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict | None]:
     """Run pytest in `tree` and return its process plus what it observed.
 
-    The observation is None if it reported none.
+    The child's temporary root is `basetemp`, which the caller places outside `tree` so a test's
+    `tmp_path` never lies under the baseline's own repository. The observation is None if it
+    reported none.
     """
-    # The child session keeps its temporary root inside this run's own tree: pytest deletes all
-    # but the last few roots under the shared one, including another session's, at every start.
+    # basetemp is this run's own folder: pytest deletes all but the last few roots under the
+    # shared one, including another session's, at every start.
     cmd = [
         sys.executable,
         "-m",
@@ -582,7 +585,7 @@ def run_capturing_outcome(
         "--rootdir",
         str(tree),
         "--basetemp",
-        str(tree / ".pytest-basetemp"),
+        str(basetemp),
     ]
     if expr:
         cmd += ["-k", expr]
@@ -976,6 +979,7 @@ def main() -> int:
     tree = tmp / "tree"
     outcome_json = tmp / "outcome.json"
     current_test_path = tmp / "current_test.txt"
+    basetemp = tmp / "pytest-basetemp"
     try:
         materialize(rev, tree)
         record["test_tree_overlay"] = {
@@ -1009,6 +1013,7 @@ def main() -> int:
                 args.expr,
                 env,
                 outcome_json,
+                basetemp,
                 args.timeout,
                 per_test_timeout=args.per_test_timeout,
             )

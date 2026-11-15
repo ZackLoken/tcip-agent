@@ -1003,3 +1003,59 @@ def test_a_key_error_on_a_package_result_guards(tmp_path: Path) -> None:
     assert "GUARDS" in result.stdout
     assert "[behavioral]" in result.stdout
     assert "KeyError" in result.stdout
+
+
+# ── the run's scratch directory ──────────────────────────────────────────────
+
+SUBJECT_REFUSING_ITS_OWN_REPOSITORY = (
+    "from pathlib import Path\n"
+    "\n"
+    "REPO = Path(__file__).resolve().parent.parent\n"
+    "\n"
+    "\n"
+    "def accept_root(root):\n"
+    "    root = Path(root).resolve()\n"
+    "    if root.is_relative_to(REPO):\n"
+    "        raise ValueError(f'{root} is under the repository ({REPO})')\n"
+    "    return root\n"
+)
+
+TEST_OF_THE_SUBJECT = (
+    "import importlib.util\n"
+    "from pathlib import Path\n"
+    "\n"
+    "\n"
+    "def _subject():\n"
+    "    path = Path(__file__).resolve().parent.parent / 'tools' / 'subject.py'\n"
+    "    spec = importlib.util.spec_from_file_location('subject', path)\n"
+    "    module = importlib.util.module_from_spec(spec)\n"
+    "    spec.loader.exec_module(module)\n"
+    "    return module\n"
+    "\n"
+    "\n"
+    "def test_a_root_outside_the_repository_is_accepted(tmp_path):\n"
+    "    assert _subject().accept_root(tmp_path) == tmp_path.resolve()\n"
+)
+
+
+def test_the_baseline_runs_temporary_root_lies_outside_the_materialized_tree(
+    tmp_path: Path,
+) -> None:
+    """A test given its ``tmp_path`` is never given one inside the baseline tree.
+
+    A subject that finds its repository from its own file location and refuses a root under it
+    accepts the test's ``tmp_path``, so the test passes at the baseline and the verdict is VACUOUS.
+    """
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "tools" / "subject.py", SUBJECT_REFUSING_ITS_OWN_REPOSITORY)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    _write(repo / "tests" / "test_subject.py", TEST_OF_THE_SUBJECT)
+    _commit_all(repo, "double actually doubles")
+
+    result = _run(repo, "tests/test_subject.py", baseline)
+
+    assert result.returncode == EXIT["VACUOUS"], result.stdout + result.stderr
+    assert "VACUOUS" in result.stdout
