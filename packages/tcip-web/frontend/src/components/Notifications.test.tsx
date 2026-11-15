@@ -16,12 +16,24 @@ import { FakeWebSocket, lastSocket } from "@/test/webSocket";
 
 const initialStoreState = useStore.getState();
 
-/** The notifications host as App mounts it, under strict mode as `main.tsx` renders it. */
-function renderHost(onClose = () => {}) {
+/** The notifications host as App mounts it while the area is closed, the button and the live
+ *  region, under strict mode as `main.tsx` renders it. */
+function renderClosedHost() {
   return render(
     <StrictMode>
       <NotificationsButton open={false} onToggle={() => {}} />
-      <NotificationsPane onClose={onClose} />
+      <NotificationsLiveRegion />
+    </StrictMode>,
+  );
+}
+
+/** The notifications host as App mounts it while the area is open: the button, the pane the
+ *  dock holds and the live region, under strict mode. */
+function renderOpenHost() {
+  return render(
+    <StrictMode>
+      <NotificationsButton open onToggle={() => {}} />
+      <NotificationsPane />
       <NotificationsLiveRegion />
     </StrictMode>,
   );
@@ -58,7 +70,7 @@ describe("the lost connection", () => {
   afterEach(() => vi.useRealTimers());
 
   it("with the area closed raises one entry, announced once through every retry, and its mark clears once it reconnects", async () => {
-    renderHost();
+    renderClosedHost();
     const told = announcements(screen.getByRole("alert"));
     const socket = new StateSocket();
     socket.connect();
@@ -78,7 +90,7 @@ describe("the lost connection", () => {
 
     act(() => lastSocket().open());
     expect(screen.queryByTestId("condition-mark")).not.toBeInTheDocument();
-    expect(within(screen.getByRole("listitem")).getByText(/ended/)).toBeInTheDocument();
+    expect(useStore.getState().holding.connection).toBeUndefined();
     socket.close();
   });
 });
@@ -89,13 +101,15 @@ describe("the stale bundle", () => {
   it("is an entry carrying the backend's sentence, and ends once a frame states none", () => {
     vi.spyOn(useStore.getState(), "mergeSnapshot").mockImplementation(() => {});
     vi.stubGlobal("WebSocket", FakeWebSocket);
-    renderHost();
+    renderOpenHost();
     const socket = new StateSocket();
     socket.connect();
     act(() => lastSocket().open());
 
     act(() => lastSocket().message(JSON.stringify({ ...PRODUCED_ENVELOPE, bundle: SENTENCE })));
-    expect(within(screen.getByRole("listitem")).getByText(SENTENCE)).toBeInTheDocument();
+    const entry = screen.getByRole("listitem");
+    expect(within(entry).getByText(SENTENCE)).toBeInTheDocument();
+    expect(entry).toHaveTextContent(/Notice, .*, ongoing/);
     expect(screen.getByRole("status")).toHaveTextContent(SENTENCE);
     expect(screen.getByTestId("condition-mark")).toBeInTheDocument();
 
@@ -111,7 +125,7 @@ describe("the unconfirmed visits", () => {
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(new TypeError("Failed to fetch"));
     useStore.getState().setUser("jordan");
     openTestProject();
-    renderHost();
+    renderOpenHost();
     const s = useStore.getState();
     s.startImageSessionTracking("a.jpg", Date.now() - 2000);
     s.closeSessionInterval();
@@ -119,6 +133,7 @@ describe("the unconfirmed visits", () => {
     await act(flush);
     const entry = screen.getByRole("listitem");
     expect(entry).toHaveTextContent(/Could not confirm these visits were recorded.*a\.jpg/);
+    expect(entry).toHaveTextContent(/Error, .*, ongoing/);
 
     fireEvent.click(within(entry).getByRole("button", { name: /^Dismiss: / }));
     s.startImageSessionTracking("b.jpg", Date.now() - 2000);
@@ -134,16 +149,12 @@ describe("the unconfirmed visits", () => {
 });
 
 describe("the notifications area", () => {
-  it("counts an entry new until the area is seen, and closes on Escape", () => {
-    const onClose = vi.fn();
-    renderHost(onClose);
+  it("counts an entry new until the area is seen", () => {
+    renderClosedHost();
     act(() => useStore.getState().holdCondition("bundle", "rebuild the bundle"));
     expect(screen.getByRole("button", { name: /^Notifications, 1 new/ })).toBeInTheDocument();
 
     act(() => useStore.getState().markNotificationsSeen());
     expect(screen.getByRole("button", { name: /^Notifications, a problem/ })).toBeInTheDocument();
-
-    fireEvent.keyDown(screen.getByRole("heading", { name: "Notifications" }), { key: "Escape" });
-    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

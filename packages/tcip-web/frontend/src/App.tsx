@@ -70,15 +70,11 @@ function App() {
       requestAnimationFrame(() => document.getElementById(NOTIFICATIONS_HEADING_ID)?.focus());
     }
   }, [model]);
-  const close = useCallback(() => {
-    if (notificationsOpen(model)) toggleNotifications(model);
-    button.current?.focus();
-  }, [model]);
 
   return (
     <div ref={rootRef} className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
       <TopBar notifications={<NotificationsButton ref={button} open={open} onToggle={toggle} />} />
-      <Dock model={model} work={<Work />} onClose={close} />
+      <Dock model={model} work={<Work />} />
       <Toasts />
       <NotificationsLiveRegion />
     </div>

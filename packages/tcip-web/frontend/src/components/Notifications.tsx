@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef } from "react";
+import { forwardRef } from "react";
 
 import { dismissLabel } from "@/lib/dismissLabel";
 import { useStore } from "@/store";
@@ -7,6 +7,7 @@ import {
   selectHoldingLevel,
   selectNewCount,
 } from "@/store/slices/notifications";
+import { LEVELS } from "@/store/slices/toasts";
 
 export const NOTIFICATIONS_HEADING_ID = "notifications-heading";
 
@@ -42,7 +43,7 @@ export const NotificationsButton = forwardRef<
         <span
           aria-hidden="true"
           data-testid="condition-mark"
-          className={`h-2 w-2 rounded-full ${holdingLevel === "error" ? "bg-tcip-fp" : "bg-tcip-fn"}`}
+          className={`h-2 w-2 rounded-full ${LEVELS[holdingLevel].mark}`}
         />
       )}
       Notifications
@@ -60,24 +61,16 @@ export const NotificationsButton = forwardRef<
 
 function NotificationItem({ entry, ongoing }: { entry: NotificationEntry; ongoing: boolean }) {
   const dismiss = useStore((s) => s.dismissNotification);
+  const { word, tone, mark } = LEVELS[entry.level];
   const at = new Date(entry.time);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
-    <li
-      className={`flex items-start gap-2 border-l-2 py-2.5 pl-3 pr-2 ${
-        entry.level === "error" ? "border-tcip-fp" : "border-tcip-fn"
-      }`}
-    >
-      <div className="min-w-0 flex-1">
-        <p
-          className={`break-words text-[13px] leading-snug ${
-            entry.level === "error" ? "tcip-problem" : "text-tcip-fg"
-          }`}
-        >
-          {entry.sentence}
-        </p>
+    <li className="flex items-start gap-2 py-2.5 pr-2">
+      <span aria-hidden="true" className={`w-0.5 self-stretch rounded-full ${mark}`} />
+      <div className="min-w-0 flex-1 pl-1">
+        <p className={`break-words text-[13px] leading-snug ${tone}`}>{entry.sentence}</p>
         <p className="mt-1 text-[11px] text-tcip-muted tabular-nums">
-          <time dateTime={at.toISOString()}>{time}</time>
+          {word}, <time dateTime={at.toISOString()}>{time}</time>
           {ongoing ? ", ongoing" : ", ended"}
         </p>
       </div>
@@ -96,26 +89,14 @@ function NotificationItem({ entry, ongoing }: { entry: NotificationEntry; ongoin
 }
 
 /** The notifications area's content: every listed entry, newest first, each in one entry
- *  component with its time, sentence, whether its condition still holds and its dismiss
- *  control. Escape closes the area. */
-export function NotificationsPane({ onClose }: { onClose: () => void }) {
+ *  component with its level, time, sentence, whether its condition still holds and its dismiss
+ *  control. */
+export function NotificationsPane() {
   const entries = useStore((s) => s.notifications);
   const holding = useStore((s) => s.holding);
-  const area = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    const element = area.current;
-    if (!element) return;
-    const closeOnEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    element.addEventListener("keydown", closeOnEscape);
-    return () => element.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   return (
     <section
-      ref={area}
       aria-labelledby={NOTIFICATIONS_HEADING_ID}
       className="flex min-h-full flex-col bg-tcip-panel text-tcip-fg"
     >
@@ -146,17 +127,17 @@ export function NotificationsPane({ onClose }: { onClose: () => void }) {
 }
 
 /** The application's one standing live region: it announces each new entry once as it is
- *  raised, an error assertively and anything else politely, whether or not the area is open. */
+ *  raised, at its level's politeness, whether or not the area is open. */
 export function NotificationsLiveRegion() {
   const announced = useStore((s) => s.announced);
-  const assertive = announced?.level === "error";
+  const live = announced && LEVELS[announced.level].live;
   return (
     <div className="sr-only">
       <div role="status" aria-live="polite">
-        {announced && !assertive && <span key={announced.id}>{announced.sentence}</span>}
+        {announced && live === "polite" && <span key={announced.id}>{announced.sentence}</span>}
       </div>
       <div role="alert" aria-live="assertive">
-        {announced && assertive && <span key={announced.id}>{announced.sentence}</span>}
+        {announced && live === "assertive" && <span key={announced.id}>{announced.sentence}</span>}
       </div>
     </div>
   );

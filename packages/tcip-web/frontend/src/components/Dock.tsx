@@ -8,19 +8,10 @@ import { WORK } from "@/lib/dock";
 
 /** The docking layout under the top bar: `work` fills the work area, and the notifications area
  *  is its pane. */
-export function Dock({
-  model,
-  work,
-  onClose,
-}: {
-  model: Model;
-  work: ReactNode;
-  onClose: () => void;
-}) {
+export function Dock({ model, work }: { model: Model; work: ReactNode }) {
   const factory = useCallback(
-    (node: TabNode) =>
-      node.getComponent() === WORK ? work : <NotificationsPane onClose={onClose} />,
-    [work, onClose],
+    (node: TabNode) => (node.getComponent() === WORK ? work : <NotificationsPane />),
+    [work],
   );
   return (
     <div className="relative min-h-0 flex-1">

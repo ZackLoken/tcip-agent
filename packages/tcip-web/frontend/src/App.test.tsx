@@ -6,6 +6,7 @@ import { sessionsApi } from "@/api/sessions";
 import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
+import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { loadOf } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
@@ -185,8 +186,30 @@ describe("App notifications area", () => {
 
     fireEvent.keyDown(heading, { key: "Escape" });
     expect(button).toHaveAttribute("aria-expanded", "false");
-    expect(button).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Notifications" })).toHaveFocus());
     expect(screen.getByText("Open a project")).toBeInTheDocument();
+  });
+
+  it("announces a condition raised while the area was never opened", async () => {
+    vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(new TypeError("Failed to fetch"));
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    render(<App />);
+    await screen.findByRole("tablist");
+
+    const s = useStore.getState();
+    act(() => {
+      s.startImageSessionTracking("a.jpg", Date.now() - 2000);
+      s.closeSessionInterval();
+      postHeldContributions();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /Could not confirm these visits were recorded.*a\.jpg/,
+      ),
+    );
+    expect(screen.queryByRole("heading", { name: "Notifications" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /a problem is ongoing/ })).toBeInTheDocument();
   });
 
   it("opens and closes over the project shell without remounting it", async () => {
