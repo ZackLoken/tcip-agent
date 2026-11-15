@@ -945,107 +945,122 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum() -> None:
     ]
 
 
-def _built(
-    scheduler_block: dict, selection_metric: str = "mae"
-) -> tuple[LRScheduler, SGD]:
-    """Return the scheduler the trainer builds for ``scheduler_block``, and its SGD optimizer.
+TORCH_SCHEDULER: dict[str, tuple[type[LRScheduler], str | None]] = {
+    "cosine": (torch.optim.lr_scheduler.CosineAnnealingLR, "T_max"),
+    "plateau": (torch.optim.lr_scheduler.ReduceLROnPlateau, None),
+    "onecycle": (torch.optim.lr_scheduler.OneCycleLR, "total_steps"),
+    "step": (torch.optim.lr_scheduler.StepLR, None),
+}
+"""Each schedule type's torch class, and the keyword it takes the block's horizon under.
 
-    The config is :func:`_unrun`'s with an SGD optimizer, ``scheduler_block`` and selection on
-    ``selection_metric``; the optimizer is built here over a two-input linear layer at the
-    config's head rate and momentum, and the scheduler by ``generic_trainer._build_scheduler``
-    in that metric's direction.
+The class is the reference a built scheduler is compared with.
+"""
+OFF_TORCH_DEFAULT: dict[str, dict[str, object]] = {
+    "cosine": {},
+    "plateau": {
+        "threshold": 1e-3,
+        "threshold_mode": "abs",
+        "cooldown": 2,
+        "min_lr": 1e-5,
+        "eps": 1e-7,
+    },
+    "onecycle": {
+        "pct_start": 0.4,
+        "anneal_strategy": "linear",
+        "base_momentum": 0.8,
+        "max_momentum": 0.9,
+        "div_factor": 10.0,
+        "final_div_factor": 100.0,
+        "three_phase": True,
+    },
+    "step": {},
+}
+"""Settings stated over the sample block wherever the sample equals the torch class's default."""
+
+
+SCHEDULER_CASES: list[tuple[str, str, str | None, dict[str, object]]] = [
+    ("cosine", "mae", None, {}),
+    ("plateau", "mae", "min", {}),
+    ("plateau", "r_squared", "max", {}),
+    ("onecycle", "mae", None, {"cycle_momentum": True}),
+    ("onecycle", "mae", None, {"cycle_momentum": False}),
+    ("step", "mae", None, {}),
+]
+"""The comparison's cases: schedule type, selection metric, the plateau's expected ``mode`` and
+the settings stated over :data:`OFF_TORCH_DEFAULT`."""
+
+
+def test_the_comparison_covers_each_schedule_type_the_union_admits() -> None:
+    """The kinds of :data:`SCHEDULER_CASES` are the types the scheduler union admits."""
+    assert {kind for kind, *_ in SCHEDULER_CASES} == set(SCHEDULER_TYPES)
+
+
+@pytest.mark.parametrize(
+    ("kind", "selection_metric", "mode", "stated"), SCHEDULER_CASES
+)
+def test_a_built_scheduler_is_the_torch_class_built_at_the_block_it_states(
+    kind: str,
+    selection_metric: str,
+    mode: str | None,
+    stated: dict[str, object],
+) -> None:
+    """The scheduler built for a block has the state of its torch class built at that block.
+
+    The block states every field of its type, each off torch's default except ``mode`` and
+    ``cycle_momentum``, which the two one-cycle cases state both ways. The reference is the
+    torch class built directly over an identical SGD optimizer at the block's fields, the
+    horizon under its torch keyword and a plateau's ``mode`` from the run's selection
+    direction. The two schedulers and their optimizers are compared by their state dicts.
     """
+    import inspect
+
     from torch import nn
 
     from tcip_mcp.pipelines.schemas import train_config
     from tests._training_values import sgd_optimizer
 
+    block = schedule(kind, **{**OFF_TORCH_DEFAULT[kind], **stated})
     spec = train_config(
         _unrun(
             optimizer=sgd_optimizer(),
-            scheduler=scheduler_block,
+            scheduler=block,
             evaluation=evaluation_block(selection_metric=selection_metric),
         )
     )
     assert spec.optimizer is not None and spec.scheduler is not None
-    optimizer = torch.optim.SGD(
-        nn.Linear(2, 1).parameters(),
-        lr=spec.optimizer.head_lr,
-        momentum=spec.optimizer.momentum,
+    torch_class, horizon_keyword = TORCH_SCHEDULER[kind]
+    settings = {
+        name: value
+        for name, value in block.items()
+        if name not in {"type", "rationale"}
+    }
+    if horizon_keyword is not None:
+        settings[horizon_keyword] = settings.pop("horizon_epochs")
+    if mode is not None:
+        settings["mode"] = mode
+    defaults = inspect.signature(torch_class).parameters
+    assert all(
+        settings[name] != defaults[name].default
+        for name in settings
+        if name not in {"mode", "cycle_momentum"}
+        and defaults[name].default is not inspect.Parameter.empty
     )
-    return gt._build_scheduler(
-        optimizer,
+
+    def optimizer() -> SGD:
+        return torch.optim.SGD(
+            nn.Linear(2, 1).parameters(),
+            lr=spec.optimizer.head_lr,
+            momentum=spec.optimizer.momentum,
+        )
+
+    built_optimizer, reference_optimizer = optimizer(), optimizer()
+    built = gt._build_scheduler(
+        built_optimizer,
         spec.scheduler,
         direction=selection_of(spec.evaluation.selection_metric)[1],
-    ), optimizer
-
-
-@pytest.mark.parametrize(
-    ("selection_metric", "mode"), [("mae", "min"), ("r_squared", "max")]
-)
-def test_a_plateau_schedule_builds_at_every_setting_it_states(
-    selection_metric: str, mode: str
-) -> None:
-    """A plateau schedule builds at every setting it states.
-
-    Each setting a plateau block states is the one the torch scheduler holds, and it watches
-    in the direction of the run's selection metric.
-    """
-    scheduler, _ = _built(
-        schedule(
-            "plateau",
-            factor=0.4,
-            patience=5,
-            threshold=1e-3,
-            threshold_mode="abs",
-            cooldown=2,
-            min_lr=1e-5,
-            eps=1e-7,
-        ),
-        selection_metric,
     )
+    reference = torch_class(reference_optimizer, **settings)
 
-    assert (
-        scheduler.mode,
-        scheduler.factor,
-        scheduler.patience,
-        scheduler.threshold,
-        scheduler.threshold_mode,
-        scheduler.cooldown,
-        scheduler.min_lrs,
-        scheduler.eps,
-    ) == (mode, 0.4, 5, 1e-3, "abs", 2, [1e-5], 1e-7)
-
-
-def test_a_onecycle_schedule_builds_at_every_setting_it_states() -> None:
-    """A one-cycle schedule builds at every setting it states.
-
-    Each setting a one-cycle block states is the one the torch scheduler holds: its horizon,
-    its phases and where the first ends, its annealing, its momentum cycle and both rate
-    divisors.
-    """
-    scheduler, optimizer = _built(
-        schedule(
-            "onecycle",
-            max_lr=2e-2,
-            horizon_epochs=10,
-            pct_start=0.4,
-            anneal_strategy="linear",
-            cycle_momentum=True,
-            base_momentum=0.8,
-            max_momentum=0.9,
-            div_factor=10.0,
-            final_div_factor=100.0,
-            three_phase=True,
-        )
-    )
-    (group,) = optimizer.param_groups
-
-    assert scheduler.total_steps == 10
-    assert len(scheduler._schedule_phases) == 3
-    assert scheduler._schedule_phases[0]["end_step"] == pytest.approx(3.0)
-    assert scheduler._anneal_func_type == "linear"
-    assert scheduler.cycle_momentum is True
-    assert (group["base_momentum"], group["max_momentum"]) == (0.8, 0.9)
-    assert group["initial_lr"] == pytest.approx(2e-3)
-    assert group["min_lr"] == pytest.approx(2e-5)
+    assert type(built) is torch_class
+    assert built.state_dict() == reference.state_dict()
+    assert built_optimizer.state_dict() == reference_optimizer.state_dict()

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Unpack, cast
 
 import numpy as np
 import torch
+from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
 from tcip_mcp.experiments import BATCH_LOSS_KEY
@@ -53,6 +54,7 @@ from tcip_mcp.pipelines.schemas import (
     StageSpec,
     StatedDetectorGeometry,
     StatedDirection,
+    StepSchedule,
     TrainConfigSchema,
     TrainGeometry,
     TraitRevisionRef,
@@ -569,6 +571,25 @@ def _save_checkpoint(
 # ====================================================================
 
 
+_SCHEDULER_CLASSES: dict[
+    type[BaseModel],
+    tuple[type[torch.optim.lr_scheduler.LRScheduler], dict[str, str]],
+] = {
+    CosineSchedule: (
+        torch.optim.lr_scheduler.CosineAnnealingLR,
+        {"horizon_epochs": "T_max"},
+    ),
+    PlateauSchedule: (torch.optim.lr_scheduler.ReduceLROnPlateau, {}),
+    OneCycleSchedule: (
+        torch.optim.lr_scheduler.OneCycleLR,
+        {"horizon_epochs": "total_steps"},
+    ),
+    StepSchedule: (torch.optim.lr_scheduler.StepLR, {}),
+}
+"""Each schedule class's torch class, and the torch keyword under which each block field torch
+names otherwise goes."""
+
+
 def _build_scheduler(
     optimizer: torch.optim.Optimizer,
     spec: SchedulerSpec,
@@ -577,43 +598,20 @@ def _build_scheduler(
 ) -> torch.optim.lr_scheduler.LRScheduler:
     """Build the scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) over ``optimizer``.
 
-    It runs at every setting ``spec`` carries, a horizon-bound one over the block's own
-    ``horizon_epochs``, a plateau one watching the selection value in its ``direction``
-    (``schemas.selection_of``).
+    The torch class takes every field ``spec`` states but ``type`` and ``rationale``, each by
+    its own name but for the ones ``_SCHEDULER_CLASSES`` renames; a plateau one also watches the
+    selection value in its ``direction`` (``schemas.selection_of``).
     """
-    if isinstance(spec, CosineSchedule):
-        return torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=spec.horizon_epochs, eta_min=spec.eta_min
-        )
-    elif isinstance(spec, PlateauSchedule):
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="max" if direction == "higher" else "min",
-            factor=spec.factor,
-            patience=spec.patience,
-            threshold=spec.threshold,
-            threshold_mode=spec.threshold_mode,
-            cooldown=spec.cooldown,
-            min_lr=spec.min_lr,
-            eps=spec.eps,
-        )
-    elif isinstance(spec, OneCycleSchedule):
-        return torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            max_lr=spec.max_lr,
-            total_steps=spec.horizon_epochs,
-            pct_start=spec.pct_start,
-            anneal_strategy=spec.anneal_strategy,
-            cycle_momentum=spec.cycle_momentum,
-            base_momentum=spec.base_momentum,
-            max_momentum=spec.max_momentum,
-            div_factor=spec.div_factor,
-            final_div_factor=spec.final_div_factor,
-            three_phase=spec.three_phase,
-        )
-    return torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=spec.step_size, gamma=spec.gamma
-    )
+    scheduler_class, renames = _SCHEDULER_CLASSES[type(spec)]
+    settings = {
+        renames.get(name, name): value
+        for name, value in spec.model_dump(
+            exclude={"type", "rationale"}
+        ).items()
+    }
+    if scheduler_class is torch.optim.lr_scheduler.ReduceLROnPlateau:
+        settings["mode"] = "max" if direction == "higher" else "min"
+    return scheduler_class(optimizer, **settings)
 
 
 # ====================================================================
