@@ -132,13 +132,14 @@ def test_a_glob_that_selects_a_readable_manifest_does_not_read_an_unselected_one
 
     assert isinstance(manifest, IngestManifest), manifest
     assert manifest.found == manifest.copied == 3
-    assert sorted(
-        p.name for p in image_dir(project, UNDATED_BUCKET).iterdir()
-    ) == [
+    placed = image_dir(project, UNDATED_BUCKET)
+    assert sorted(Path(f.dest).name for f in manifest.files) == [
         "a.bandgroup",
         "a_Green.tif",
         "a_Red.tif",
     ]
+    assert all(Path(f.dest).parent == placed for f in manifest.files)
+    assert not any(p.name.startswith("b") for p in placed.iterdir())
 
 
 def test_a_source_folder_whose_manifest_reads_is_ingested_with_its_bands_beside_it(
