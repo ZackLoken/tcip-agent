@@ -73,9 +73,19 @@ _BACKLOG_CLOSE = (1013, "output backlog dropped; reconnect")
 _SURVIVED = "The agent process could not be stopped and stays attached to this session."
 
 
-def _offer(
-    queue: asyncio.Queue, item: TerminalServedFrame | tuple[int, str]
-) -> None:
+@dataclasses.dataclass(frozen=True)
+class _Offered:
+    """A frame queued for one subscriber, and how much of the session's output its sending covers.
+
+    ``reaches`` counts the characters of the session's output, from its first, that this frame
+    and every frame ahead of it in the queue cover.
+    """
+
+    frame: TerminalServedFrame
+    reaches: int
+
+
+def _offer(queue: asyncio.Queue, item: _Offered | tuple[int, str]) -> None:
     """Enqueue a frame, or a ``(code, reason)`` close, for one subscriber (on its loop).
 
     On overflow, drop the backlog and leave the close ``item`` is, or else the backlog close.
@@ -316,8 +326,10 @@ class TerminalSession:
         self._project: OpenProject | None = None
         self._lock = threading.Lock()
         self._scrollback = ""
-        # How many of the scrollback's newest characters no subscriber was offered.
-        self._unoffered = 0
+        # How many characters of output the session has written, the scrollback's trimmed ones
+        # included, and how many of them a socket has sent through its newest character.
+        self._written = 0
+        self._sent = 0
         self._inputs: Queue[pty_host.Input] = Queue()
         # ws-id → (queue, that websocket's event loop)
         self._subs: dict[
@@ -650,18 +662,23 @@ class TerminalSession:
     def _show(self, data: str) -> None:
         """Keep ``data`` in the scrollback and offer it to every subscriber; under the lock.
 
-        With no subscriber it stays unoffered, to be drawn live by the next :meth:`attach`.
+        It stays unsent until a socket sends it (:meth:`note_sent`), and :meth:`attach` draws
+        what no socket sent as live output.
         """
         self._scrollback = (self._scrollback + data)[-SCROLLBACK_MAX_CHARS:]
+        self._written += len(data)
         self._broadcast(TerminalOutputFrame(data=data, replay=False))
-        self._unoffered = (
-            0
-            if self._subs
-            else min(self._unoffered + len(data), len(self._scrollback))
-        )
+
+    def note_sent(self, reaches: int) -> None:
+        """Record that a socket sent output through the ``reaches``th character written."""
+        with self._lock:
+            self._sent = max(self._sent, reaches)
 
     def _broadcast(self, item: TerminalServedFrame | tuple[int, str]) -> None:
         """Offer ``item`` to every subscriber, dropping one whose loop is gone; under the lock."""
+        offered = (
+            item if isinstance(item, tuple) else _Offered(item, self._written)
+        )
         dead: list[int] = []
         for sub_id, (queue, loop) in self._subs.items():
             if loop.is_closed():
@@ -669,7 +686,7 @@ class TerminalSession:
                 continue
             try:
                 # FIFO across calls → the pump drains in byte order.
-                loop.call_soon_threadsafe(_offer, queue, item)
+                loop.call_soon_threadsafe(_offer, queue, offered)
             except RuntimeError:
                 dead.append(sub_id)
         for sub_id in dead:
@@ -691,12 +708,12 @@ class TerminalSession:
     def attach(self) -> tuple[int, asyncio.Queue]:
         """Register a subscriber; returns ``(sub_id, queue)``.
 
-        The queue starts with the scrollback, unless it is empty: the part some subscriber was
-        already offered as a replay frame, then the part none was offered as a live frame. Then
-        comes how many requests the session holds (:meth:`_held`). All is taken atomically with
-        the registration, so output can be neither lost (arrived after the snapshot, before
-        registration) nor duplicated. Once the session ended (the backend no longer holds it),
-        the queue holds the ended close alone and nothing is registered.
+        The queue starts with the scrollback, unless it is empty: the part a socket sent as a
+        replay frame, then the part none sent as a live frame. Then comes how many requests the
+        session holds (:meth:`_held`). All is taken atomically with the registration, so output
+        can be neither lost (arrived after the snapshot, before registration) nor duplicated.
+        Once the session ended (the backend no longer holds it), the queue holds the ended close
+        alone and nothing is registered.
         """
         queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX_CHUNKS)
         loop = asyncio.get_running_loop()
@@ -705,17 +722,21 @@ class TerminalSession:
             if self.id not in _SESSIONS:
                 queue.put_nowait(_ENDED_CLOSE)
             else:
-                offered = len(self._scrollback) - self._unoffered
-                for data, replay in (
-                    (self._scrollback[:offered], True),
-                    (self._scrollback[offered:], False),
+                split = max(
+                    self._sent - (self._written - len(self._scrollback)), 0
+                )
+                for data, replay, reaches in (
+                    (self._scrollback[:split], True, self._sent),
+                    (self._scrollback[split:], False, self._written),
                 ):
                     if data:
                         queue.put_nowait(
-                            TerminalOutputFrame(data=data, replay=replay)
+                            _Offered(
+                                TerminalOutputFrame(data=data, replay=replay),
+                                reaches,
+                            )
                         )
-                self._unoffered = 0
-                queue.put_nowait(self._held())
+                queue.put_nowait(_Offered(self._held(), self._written))
                 self._subs[sub_id] = (queue, loop)
         return sub_id, queue
 
@@ -786,9 +807,9 @@ _FRAME: TypeAdapter[TerminalFrame] = TypeAdapter(TerminalFrame)
 class TerminalOutputFrame(BaseModel):
     """Text of the session's terminal stream, as its scrollback keeps it.
 
-    ``replay`` is true for output some subscriber was already offered, which an attach offers
-    again, and false for output no subscriber was offered, so a rail draws the first without
-    answering the queries in it.
+    ``replay`` is true for output some socket already sent, which an attach sends again, and
+    false for output no socket sent, so a rail draws the first without answering the queries in
+    it.
     """
 
     type: Literal["output"] = "output"
@@ -1126,15 +1147,21 @@ def submit_to_session(session_id: str, req: SubmitRequest) -> None:
     session.deliver()
 
 
-async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
-    """Drain the queue in order as the socket's single writer."""
+async def _pump(
+    queue: asyncio.Queue, websocket: WebSocket, session: TerminalSession
+) -> None:
+    """Drain the queue in order as the socket's single writer.
+
+    Each frame sent is noted to ``session`` (:meth:`TerminalSession.note_sent`).
+    """
     while True:
         item = await queue.get()
         if isinstance(item, tuple):
             code, reason = item
             await websocket.close(code=code, reason=reason)
             return
-        await websocket.send_text(item.model_dump_json())
+        await websocket.send_text(item.frame.model_dump_json())
+        session.note_sent(item.reaches)
 
 
 @router.websocket("/ws/{session_id}")
@@ -1153,7 +1180,7 @@ async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
     sub_id, queue = session.attach()
     pump_task: asyncio.Task | None = None
     try:
-        pump_task = asyncio.create_task(_pump(queue, websocket))
+        pump_task = asyncio.create_task(_pump(queue, websocket, session))
         async for text in websocket.iter_text():
             try:
                 frame = _FRAME.validate_json(text)
