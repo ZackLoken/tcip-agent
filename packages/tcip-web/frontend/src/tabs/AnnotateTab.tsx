@@ -655,6 +655,7 @@ export function AnnotateTab() {
             visible: annotateUi.visible,
             colorFor: subjectColor,
             proposals: drawnProposals,
+            pendingPrompts: annotateUi.pendingPrompts,
           })
         : null,
     });
@@ -690,6 +691,7 @@ export function AnnotateTab() {
     activeSubject,
     annotateUi.visible,
     annotateUi.cut,
+    annotateUi.pendingPrompts,
     annotateUi.draggingVertex,
     drawing,
     cutStart,

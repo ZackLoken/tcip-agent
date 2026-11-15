@@ -74,10 +74,19 @@ vi.mock("react-konva", () => ({
       data-shadow={props.shadowColor}
     />
   ),
-  Line: (props: { stroke?: string; points?: number[]; opacity?: number; shadowColor?: string }) => (
+  Line: (props: {
+    stroke?: string;
+    points?: number[];
+    closed?: boolean;
+    dash?: number[];
+    opacity?: number;
+    shadowColor?: string;
+  }) => (
     <div
       data-testid="k-line"
       data-stroke={props.stroke}
+      data-closed={props.closed ? "true" : undefined}
+      data-dash={props.dash ? "true" : undefined}
       data-points={props.points?.join(",")}
       data-opacity={props.opacity}
       data-shadow={props.shadowColor}
@@ -2843,32 +2852,224 @@ describe("AnnotateTab review symbology", () => {
     });
   });
 
-  it("the agent's mirror and the canvas state the same colors and the same focus", async () => {
-    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
-    await mountReviewing(true);
-    await down();
-    act(() => notifyCanvasStateRequest());
-    await flush();
+  describe("the agent's mirror and the canvas", () => {
+    /** One item as either side states it: its kind, stroke, whether it draws dashed, whether the
+     *  focus halo is under it, and its label. */
+    interface Mark {
+      kind: string;
+      stroke: string | null;
+      dashed: boolean;
+      halo: boolean;
+      label: string | null;
+    }
 
-    const distinct = (values: (string | null | undefined)[]) => [...new Set(values)].sort();
-    const pushed = pushSpy.mock.calls.at(-1)?.[0].shapes ?? [];
-    // The canvas also draws the halo and the focused box's handles; the colors it uses for items
-    // are the colors the mirror states, and so are the labels.
-    expect(distinct(pushed.filter((s) => s.tag !== "flag").map((s) => s.color))).toEqual(
-      distinct(strokes().filter((s) => s !== FOCUS_HALO.color)),
-    );
-    expect(pushed.filter((s) => s.halo)).toHaveLength(1);
-    // The flag is one mark on each side: the glyph on the canvas, the glyph and comment mirrored.
-    const flagged = pushed.filter((s) => s.tag === "flag");
-    expect(flagged).toHaveLength(1);
-    const [{ target }] = ANNOTATE_ANSWERS.review_flagged.flags.map((f) => f.request);
-    const point = target && "point" in target ? target.point : undefined;
-    expect(flagged[0]).toMatchObject({ color: FLAG_MARK.color, points: [point] });
-    const canvasLabels = screen.getAllByTestId("k-text").map((t) => t.getAttribute("data-text"));
-    expect(canvasLabels).toContain(FLAG_MARK.glyph);
-    expect(distinct(pushed.filter((s) => s.label && s.tag !== "flag").map((s) => s.label))).toEqual(
-      distinct(canvasLabels.filter((t) => t !== FLAG_MARK.glyph)),
-    );
+    /** The items the mocked canvas draws, in draw order: each Konva node folded into the item it
+     *  belongs to (a halo into the item it sits under, a point's four ticks and core into one
+     *  point, a label's two copies into one label), the corner handles and vertex dots dropped. A
+     *  node that fits no item is refused. */
+    const drawnMarks = (): Mark[] => {
+      const marks: Mark[] = [];
+      let halo = false;
+      const nodes = Array.from(
+        screen.getByTestId("canvas-stage").querySelectorAll<HTMLElement>('[data-testid^="k-"]'),
+      );
+      for (let i = 0; i < nodes.length; i++) {
+        const { testid, stroke, fill, dash, closed, text } = nodes[i].dataset;
+        const item = (kind: string, color: string | undefined, dashed: boolean) => {
+          marks.push({ kind, stroke: color ?? null, dashed, halo, label: null });
+          halo = false;
+        };
+        if (testid === "k-rect") {
+          if (fill) continue;
+          if (stroke === FOCUS_HALO.color) halo = true;
+          else item("box", stroke, !!dash);
+        } else if (testid === "k-line" && closed) {
+          if (stroke === FOCUS_HALO.color) halo = true;
+          else item("polygon", stroke, !!dash);
+        } else if (testid === "k-line") {
+          const ticks = nodes.slice(i, i + 4);
+          const core = nodes[i + 4];
+          if (
+            ticks.length < 4 ||
+            ticks.some((t) => t.dataset.testid !== "k-line" || t.dataset.closed) ||
+            core?.dataset.testid !== "k-circle"
+          ) {
+            throw new Error("an open line the canvas draws is not a point's ticks");
+          }
+          item("point", stroke, !!dash);
+          i += 4;
+        } else if (testid === "k-circle") {
+          if (!fill) halo = true;
+        } else if (testid === "k-text") {
+          const labeled = nodes[++i].dataset;
+          if (labeled.text === FLAG_MARK.glyph && labeled.fill === FLAG_MARK.color) {
+            item("point", FLAG_MARK.color, false);
+            marks[marks.length - 1].label = FLAG_MARK.glyph;
+          } else if (marks.length > 0) {
+            marks[marks.length - 1].label = labeled.text ?? null;
+          } else {
+            throw new Error(`the canvas draws the label ${text} over nothing`);
+          }
+        } else {
+          throw new Error(`the canvas draws a ${testid} this reading does not place`);
+        }
+      }
+      return marks;
+    };
+
+    /** The items the last full push states, in its order; a flag's label is its glyph on the
+     *  canvas and the glyph with its comment in the mirror, so a flag is read by its glyph. */
+    const pushedMarks = (pushed: ReturnType<typeof canvasPushes>): Mark[] =>
+      pushed.map((s) => ({
+        kind: s.kind,
+        stroke: s.color,
+        dashed: !!s.dash,
+        halo: !!s.halo,
+        label:
+          s.tag === "flag" && s.label?.startsWith(`${FLAG_MARK.glyph} `)
+            ? FLAG_MARK.glyph
+            : (s.label ?? null),
+      }));
+
+    let pushSpy: MockInstance<typeof api.canvas.pushState>;
+    const canvasPushes = () => pushSpy.mock.calls.at(-1)?.[0].shapes ?? [];
+
+    /** Mount over the flagged review document with its bucket as the Predictions and a staged
+     *  bucket of polygon proposals as the Proposals, its first box focused. */
+    async function mountWithBoth() {
+      pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
+      loadSpy.mockImplementation(() => Promise.resolve(LOADED.review_flagged));
+      changeSelection({ bucket: BUCKET });
+      vi.spyOn(api.annotate, "stagings").mockResolvedValue(ANNOTATE_ANSWERS.stagings);
+      const proposalsSpy = vi
+        .spyOn(api.annotate, "proposals")
+        .mockImplementation((_, bucket) =>
+          Promise.resolve(bucket === BUCKET ? served() : ANNOTATE_ANSWERS.staged_proposals),
+        );
+      await mountTab();
+      await waitFor(() => expect(proposalsSpy).toHaveBeenCalledTimes(2));
+      await flush();
+      act(() => useStore.getState().setFocus({ kind: "box", index: 0 }));
+      await flush();
+    }
+
+    const hold = () =>
+      act(() => {
+        const { setPrompt, addPromptPoint, addPromptBox, setFoundBoxes } = useStore.getState();
+        setPrompt(true);
+        addPromptPoint([120, 130]);
+        addPromptBox([200, 200, 260, 280]);
+        setFoundBoxes([[400, 400, 440, 450]]);
+      });
+    const labelsOff = () => act(() => useStore.getState().setVisible(false));
+    const view = (name: "toolbar-view-proposals" | "toolbar-view-predictions") =>
+      fireEvent.click(screen.getByText(name));
+
+    const dotted = (marks: Mark[], kind: string) =>
+      marks.filter((m) => m.dashed && m.kind === kind);
+    const HELD = { stroke: subjectColor(SUBJECT), dashed: true, halo: false, label: null };
+    const held = [
+      { kind: "point", ...HELD },
+      { kind: "box", ...HELD },
+      { kind: "box", ...HELD },
+    ];
+
+    // Each case names the state it sets and what the canvas then holds, so a state that drew
+    // nothing could not pass for agreement.
+    const CASES: [string, () => void, (drawn: Mark[]) => void][] = [
+      [
+        "every View toggle on",
+        () => {},
+        (drawn) => {
+          expect(dotted(drawn, "polygon").length).toBeGreaterThan(0);
+          expect(dotted(drawn, "box").length).toBeGreaterThan(0);
+          expect(drawn.some((m) => !m.dashed && m.kind === "box")).toBe(true);
+          expect(drawn.some((m) => m.stroke === FLAG_MARK.color)).toBe(true);
+        },
+      ],
+      [
+        "Labels off",
+        labelsOff,
+        (drawn) => {
+          expect(dotted(drawn, "polygon").length).toBeGreaterThan(0);
+          expect(dotted(drawn, "box").length).toBeGreaterThan(0);
+          expect(drawn.some((m) => !m.dashed && m.stroke !== FLAG_MARK.color)).toBe(false);
+          expect(drawn.some((m) => m.stroke === FLAG_MARK.color)).toBe(true);
+        },
+      ],
+      [
+        "Proposals off",
+        () => view("toolbar-view-proposals"),
+        (drawn) => {
+          expect(dotted(drawn, "polygon")).toHaveLength(0);
+          expect(dotted(drawn, "box").length).toBeGreaterThan(0);
+        },
+      ],
+      [
+        "Predictions off",
+        () => view("toolbar-view-predictions"),
+        (drawn) => {
+          expect(dotted(drawn, "box")).toHaveLength(0);
+          expect(dotted(drawn, "polygon").length).toBeGreaterThan(0);
+        },
+      ],
+      [
+        "a held prompt point and boxes",
+        hold,
+        (drawn) => expect(drawn.slice(-held.length)).toEqual(held),
+      ],
+      [
+        "Labels off over a held prompt",
+        () => {
+          labelsOff();
+          hold();
+        },
+        (drawn) => {
+          expect(drawn.slice(-held.length)).toEqual(held);
+          expect(drawn.some((m) => !m.dashed && m.stroke !== FLAG_MARK.color)).toBe(false);
+        },
+      ],
+      [
+        "the polygon tool",
+        () => act(() => useStore.getState().setMode("polygon")),
+        (drawn) => expect(drawn.some((m) => !m.dashed && m.kind === "polygon")).toBe(true),
+      ],
+    ];
+
+    it.each(CASES)("state the same items in the same order under %s", async (_, apply, holds) => {
+      await mountWithBoth();
+      apply();
+      await flush();
+      act(() => notifyCanvasStateRequest());
+      await flush();
+
+      const drawn = drawnMarks();
+      holds(drawn);
+      expect(pushedMarks(canvasPushes())).toEqual(drawn);
+    });
+
+    it("the mirror states the flag's place and comment beside the canvas's glyph", async () => {
+      await mountWithBoth();
+      act(() => notifyCanvasStateRequest());
+      await flush();
+      const [flag] = canvasPushes().filter((s) => s.tag === "flag");
+      const [{ text, target }] = ANNOTATE_ANSWERS.review_flagged.flags.map((f) => f.request);
+      const point = target && "point" in target ? target.point : undefined;
+      expect(flag).toMatchObject({ points: [point], label: `${FLAG_MARK.glyph} ${text}` });
+    });
+
+    it("a prompt placed on a settled canvas is pushed without the agent asking", async () => {
+      await mountWithBoth();
+      act(() => notifyCanvasStateRequest());
+      await flush();
+      expect(canvasPushes().some((s) => s.tag === "held_prompt")).toBe(false);
+
+      hold();
+      await waitFor(
+        () => expect(canvasPushes().filter((s) => s.tag === "held_prompt")).toHaveLength(3),
+        { timeout: 3000 },
+      );
+    });
   });
 });
 

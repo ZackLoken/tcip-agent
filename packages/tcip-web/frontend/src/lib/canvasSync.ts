@@ -12,13 +12,13 @@
  * Shapes are display-resolved and display-filtered: each carries the exact hex color / dash /
  * label the GUI renders, read from the one symbology module the overlays draw with, and the
  * builders ask the canvas's own visibility and focus rules (mode filters, active-class filter,
- * derived detect boxes, the labels toggle, the shown proposals), so the server-side render
- * (capture_live_canvas) draws what the canvas shows; the render's line widths, tick marks and
- * vertex dots are its own, scaled to the frame it draws on.
+ * derived detect boxes, the labels toggle over the committed shapes, the shown proposals, the held
+ * prompts), so the server-side render (capture_live_canvas) draws what the canvas shows, in its
+ * order; the render's line widths, tick marks and vertex dots are its own, scaled to the frame it
+ * draws on.
  */
 
 import type {
-  Authorship,
   CanvasClass,
   CanvasStatePayload,
   CaptureImage,
@@ -42,13 +42,17 @@ import {
   CASING,
   dashUnitsFor,
   DRAFT_DASH,
+  draftColor,
   FLAG_MARK,
   FOCUS_HALO,
   lineStyleOf,
+  type LineStyle,
   outlineColor,
+  PROMPT_POINT_STYLE,
   proposalLabel,
 } from "@/lib/symbology";
 import type { CanvasState } from "@/store/slices/canvas";
+import type { AnnotateUiState } from "@/store/slices/registryStatus";
 import type {
   CanvasContent,
   DrawingBox,
@@ -154,11 +158,11 @@ export function shapeVisible(args: {
   return args.mode === ownMode && (args.focused || args.subject === args.activeSubject);
 }
 
-/** The line style, casing and focus halo a mirrored shape carries, from the symbology's own
- *  rules. */
-function strokeOf(authorship: Authorship | undefined, focused: boolean) {
+/** The dash, casing and focus halo a mirrored shape of line `style` carries, from the symbology's
+ *  own rules. */
+function strokeOf(style: LineStyle, focused: boolean) {
   return {
-    dash: dashUnitsFor(lineStyleOf(authorship)) ?? null,
+    dash: dashUnitsFor(style) ?? null,
     casing: { color: CASING.color, opacity: CASING.opacity, width_factor: CASING.widthFactor },
     halo: focused
       ? {
@@ -170,10 +174,11 @@ function strokeOf(authorship: Authorship | undefined, focused: boolean) {
   };
 }
 
-/** Annotate-tab shapes, mirroring the canvas: the labels toggle hides every committed shape and
- *  never a draft, each committed shape draws by `shapeVisible`, and polygon mode adds the drawing
- *  in progress and the pending cut. Colors, line styles, the halo and labels come from the symbology module: the focused item
- *  and the unpaired proposals are the labeled ones. */
+/** Annotate-tab shapes, mirroring the canvas in its draw order: the shown proposals, the committed
+ *  shapes, the flag marks, the polygon drawing in progress and the pending cut, the held prompts,
+ *  then the box being dragged out. Each committed shape draws by `shapeVisible`, and the labels
+ *  toggle hides the committed shapes alone. Colors, line styles, the halo and labels come from the
+ *  symbology module: the focused item and the unpaired proposals are the labeled ones. */
 export function buildAnnotateShapes(
   args: ToolContent & {
     /** The strokes of the polygon in progress and the pending cut (`draftStrokes`). */
@@ -193,12 +198,13 @@ export function buildAnnotateShapes(
     colorFor: (subject: string) => string;
     /** The proposals the canvas shows. */
     proposals?: Proposal[];
+    /** The points and boxes held for the segmenter, as the store holds them. */
+    pendingPrompts?: AnnotateUiState["pendingPrompts"];
   },
 ): CanvasShape[] {
-  const d = args.drawingBox ? boxDraft(args.drawingBox, args.colorFor) : null;
-  const drafts: CanvasShape[] = [
-    ...(args.draft ?? []).map(({ points, color, vertices, label }) => ({
-      kind: "polyline" as const,
+  const polylines: CanvasShape[] = (args.draft ?? []).map(
+    ({ points, color, vertices, label }): CanvasShape => ({
+      kind: "polyline",
       points: rPts(points),
       color,
       dash: DRAFT_DASH,
@@ -207,31 +213,54 @@ export function buildAnnotateShapes(
       label: label ?? null,
       vertices,
       tag: "in_progress",
+    }),
+  );
+  const heldColor = draftColor(args.activeSubject);
+  const heldBoxes = [...(args.pendingPrompts?.boxes ?? []), ...(args.pendingPrompts?.found ?? [])];
+  const prompts: CanvasShape[] = [
+    ...(args.pendingPrompts?.points ?? []).map(([x, y]): CanvasShape => ({
+      kind: "point",
+      points: [[r1(x), r1(y)]],
+      color: heldColor,
+      ...strokeOf(PROMPT_POINT_STYLE, false),
+      label: null,
+      tag: "held_prompt",
     })),
-    ...(d
-      ? [
-          {
-            kind: "box" as const,
-            xyxy: d.bounds.map(r1) as [number, number, number, number],
-            color: d.color,
-            dash: DRAFT_DASH,
-            casing: null,
-            halo: null,
-            label: null,
-            fill: false,
-            tag: "in_progress",
-          },
-        ]
-      : []),
+    ...heldBoxes.map(([x1, y1, x2, y2]): CanvasShape => ({
+      kind: "box",
+      xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
+      color: heldColor,
+      dash: DRAFT_DASH,
+      casing: null,
+      halo: null,
+      label: null,
+      fill: false,
+      tag: "held_prompt",
+    })),
   ];
-  // The labels toggle hides every committed shape; a draft is never gated by it, as on the canvas.
-  if (!args.visible) return drafts;
+  const dragged = args.drawingBox ? boxDraft(args.drawingBox, args.colorFor) : null;
+  const dragging: CanvasShape[] = dragged
+    ? [
+        {
+          kind: "box",
+          xyxy: dragged.bounds.map(r1) as [number, number, number, number],
+          color: dragged.color,
+          dash: DRAFT_DASH,
+          casing: null,
+          halo: null,
+          label: null,
+          fill: false,
+          tag: "in_progress",
+        },
+      ]
+    : [];
 
   const statuses = args.matches ?? NO_MATCHES;
   const focused = args.focused ?? null;
   const isFocused = (shape: ReviewItem["shape"], i: number) => focusesAnnotation(focused, shape, i);
-  const shapes: CanvasShape[] = [];
+  // The labels toggle hides the committed shapes alone, as AnnotationShapes does.
   const visible = (kind: "box" | "derived" | "polygon" | "point", subject: string, at: boolean) =>
+    args.visible &&
     shapeVisible({
       kind,
       mode: args.mode,
@@ -240,6 +269,10 @@ export function buildAnnotateShapes(
       focused: at,
     });
 
+  const shapes: CanvasShape[] = [];
+  const proposed: CanvasShape[] = [];
+  const flagged: CanvasShape[] = [];
+
   args.boxes.forEach((b, i) => {
     const boxFocused = isFocused("box", i);
     if (!visible("box", b.subject, boxFocused)) return;
@@ -247,7 +280,7 @@ export function buildAnnotateShapes(
       kind: "box",
       xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
       color: outlineColor(b.subject, statuses.boxes[i] ?? null),
-      ...strokeOf(b.authorship, boxFocused),
+      ...strokeOf(lineStyleOf(b.authorship), boxFocused),
       label: boxFocused ? authorshipLabel(b.subject, b.authorship) : null,
       fill: false,
       tag: "gt",
@@ -261,7 +294,7 @@ export function buildAnnotateShapes(
       kind: "box",
       xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
       color: outlineColor(p.subject, statuses.polygons[i] ?? null),
-      ...strokeOf(p.authorship, false),
+      ...strokeOf(lineStyleOf(p.authorship), false),
       label: null,
       fill: false,
       tag: "gt",
@@ -275,7 +308,7 @@ export function buildAnnotateShapes(
         kind: "polygon",
         points: rPts(ring),
         color: outlineColor(p.subject, statuses.polygons[i] ?? null),
-        ...strokeOf(p.authorship, polygonFocused),
+        ...strokeOf(lineStyleOf(p.authorship), polygonFocused),
         label: ri === 0 && polygonFocused ? authorshipLabel(p.subject, p.authorship) : null,
         fill: false,
         tag: "gt",
@@ -291,7 +324,7 @@ export function buildAnnotateShapes(
       kind: "point",
       points: [[r1(p.x), r1(p.y)]],
       color: outlineColor(p.subject, statuses.points[i] ?? null),
-      ...strokeOf(p.authorship, pointFocused),
+      ...strokeOf(lineStyleOf(p.authorship), pointFocused),
       label: pointFocused ? authorshipLabel(p.subject, p.authorship) : null,
       tag: "gt",
     });
@@ -300,13 +333,13 @@ export function buildAnnotateShapes(
     const proposalFocused = focusesProposal(focused, p.index, p.bucket);
     const base = {
       color: outlineColor(p.subject, proposalMatch(p)),
-      ...strokeOf("tool", proposalFocused),
+      ...strokeOf("dotted", proposalFocused),
       tag: "proposal",
     };
     const label = proposalLabel(p, proposalFocused);
     const { boxes, polygons, points } = annotationsToCanvas([p]);
     boxes.forEach((b) =>
-      shapes.push({
+      proposed.push({
         kind: "box",
         xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
         ...base,
@@ -316,7 +349,7 @@ export function buildAnnotateShapes(
     );
     polygons.forEach((poly) =>
       poly.rings.forEach((ring, i) =>
-        shapes.push({
+        proposed.push({
           kind: "polygon",
           points: rPts(ring),
           ...base,
@@ -326,11 +359,11 @@ export function buildAnnotateShapes(
       ),
     );
     points.forEach((pt) =>
-      shapes.push({ kind: "point", points: [[r1(pt.x), r1(pt.y)]], ...base, label }),
+      proposed.push({ kind: "point", points: [[r1(pt.x), r1(pt.y)]], ...base, label }),
     );
   });
   (args.flagMarks ?? []).forEach(({ at, flag }) =>
-    shapes.push({
+    flagged.push({
       kind: "point",
       points: [[r1(at[0]), r1(at[1])]],
       color: FLAG_MARK.color,
@@ -341,7 +374,7 @@ export function buildAnnotateShapes(
       tag: "flag",
     }),
   );
-  return [...shapes, ...drafts];
+  return [...proposed, ...shapes, ...flagged, ...polylines, ...prompts, ...dragging];
 }
 
 /* ── agent "push now" request (capture_live_canvas refresh ping) ─────────────── */

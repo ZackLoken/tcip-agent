@@ -29,7 +29,7 @@ interface RegistryState {
   discovered: string[];
 }
 
-interface AnnotateUiState {
+export interface AnnotateUiState {
   /** Show annotation overlays (Visible checkbox). */
   visible: boolean;
   /** Snap toggle (polygon mode). */
