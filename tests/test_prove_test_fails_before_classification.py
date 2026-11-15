@@ -1061,6 +1061,7 @@ TEST_LEAVING_READ_ONLY_FILES = (
     "    packed = objects / 'cdef'\n"
     "    packed.write_text('packed')\n"
     "    packed.chmod(stat.S_IREAD)\n"
+    "    objects.chmod(stat.S_IREAD | stat.S_IEXEC)\n"
 )
 
 # Holds a file open until the release file appears, then closes it and writes the done file. The
@@ -1157,8 +1158,8 @@ def test_a_scratch_directory_holding_read_only_files_is_removed(
 ) -> None:
     """A scratch directory holding read-only files is removed, silently.
 
-    The baseline run's test leaves a read-only file and a read-only file in a nested directory,
-    the shape of the object files git writes under ``.git``; no scratch directory remains and no
+    The baseline run's test leaves a read-only file and a read-only file in a directory set read
+    and execute only, which a plain removal cannot delete; no scratch directory remains and no
     removal line is printed.
     """
     result, scratch_root = _run_baseline_leaving(
