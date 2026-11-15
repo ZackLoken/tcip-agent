@@ -213,6 +213,22 @@ describe("StateSocket lost connection", () => {
     expect(useStore.getState().holding.connection).toBeUndefined();
     expect(useStore.getState().notifications).toHaveLength(1);
   });
+
+  it.each([
+    ["close", (socket: StateSocket) => socket.close()],
+    ["resync", (socket: StateSocket) => socket.resync()],
+  ])("raises no lost connection from a %s of an open socket", (_name, end) => {
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().open();
+
+    end(socket);
+    vi.advanceTimersByTime(60_000);
+
+    expect(useStore.getState().notifications).toEqual([]);
+    expect(useStore.getState().announced).toBeNull();
+    socket.close();
+  });
 });
 
 describe("StateSocket.subscribePanel", () => {
