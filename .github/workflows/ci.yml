@@ -220,7 +220,7 @@ jobs:
           set -o pipefail
           pytest "$REMOVAL" "$SEAM" "$UNC" -v --timeout=300 | tee project-removal-windows-output.txt
 
-      - name: Prove all three selected tests passed by node id, not a bare count
+      - name: Prove each selected test passed by node id, not a bare count
         run: |
           for node in "$REMOVAL" "$SEAM" "$UNC"; do
             grep -qF "$node PASSED" project-removal-windows-output.txt || {
