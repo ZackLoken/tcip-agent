@@ -266,8 +266,8 @@ def tie_segments_to_plants(
     ``position_error_m``, the error bound in meters the project states for its registry positions;
     a segment holding a plant whose clearance is smaller is left untied naming that plant.
 
-    Refuses by name: a raster whose CRS states no meters per unit; a registry with a blank or
-    duplicate ``plant_id``
+    Refuses by name: a raster whose CRS states no meters per unit; a registry with a duplicate
+    ``plant_id``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`); a plant
     inside more than one segment; a segment containing more than one plant; no in-frame plant in
     the registry at all. Plants are partitioned first through

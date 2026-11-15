@@ -342,17 +342,7 @@ def assignment_is_attributed(
 
 
 def require_named_plants(plants: list[PlantRecord]) -> None:
-    """Refuse (``ValueError``) a registry carrying a blank or duplicate ``plant_id``.
-
-    Blank is :func:`assignment_is_attributed`'s rule; the refusal names the offending accession or
-    names.
-    """
-    for p in plants:
-        if not assignment_is_attributed(p):
-            raise ValueError(
-                f"the plant registry carries a blank plant_id (accession {p.accession_name!r}); "
-                "every plant this delivery attributes detections to must carry a plant_id"
-            )
+    """Refuse (``ValueError``) a registry carrying a duplicate ``plant_id``, naming the ids."""
     counts = Counter(p.plant_id for p in plants)
     duplicates = sorted(n for n, k in counts.items() if k > 1)
     if duplicates:
