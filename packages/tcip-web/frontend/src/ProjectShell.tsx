@@ -154,17 +154,15 @@ export function ProjectShell() {
 
   // Hydrate the subject registry whenever the dataset selection changes.
   useEffect(() => {
-    const { gui, openProject, raiseNotification, releaseNotification } = useStore.getState();
+    const { gui, openProject, raiseNotification } = useStore.getState();
     const held = gui.dataset;
     if (!openProject || registryCapture === null || held === null) return;
     const { dataset_root: datasetRoot, date, subject } = held;
     const context = { project: openProject.id, target: date };
-    const loadKey = `registry-load:${openProject.id}:${registryCapture}`;
     void (async () => {
       try {
         const reg = await subjectsApi.load(datasetRoot, date);
         adoptLoad(reg);
-        releaseNotification(loadKey);
         const declared = useStore.getState().registry.subjects;
         if (reg.unreadable.length) {
           raiseNotification({
@@ -174,7 +172,6 @@ export function ProjectShell() {
               sentence: `${reg.unreadable.length} label document(s) could not be read: ${reg.unreadable.join(", ")}`,
             },
             context,
-            key: `label-documents:${openProject.id}:${registryCapture}`,
           });
         }
         // Default the active authoring subject to the selection's subject when it exists in the
@@ -193,7 +190,6 @@ export function ProjectShell() {
           level: "error",
           text: { sentence: "Could not load the registry for this project." },
           context,
-          key: loadKey,
         });
       }
     })();

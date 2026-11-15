@@ -153,8 +153,8 @@ export interface RegistryStatusSlice {
   resumeSessionInterval: () => void;
   /** Close the visit open now and forget the recorded session, as `following` (null for none)
    *  becomes the open project; every held contribution of another project is retired and the
-   *  person told in one failure per departed project and outcome: never sent, not recorded; sent
-   *  with no settling answer, recording not confirmed. The condition of unconfirmed contributions
+   *  person told in one failure of the departed project per outcome: never sent, not recorded;
+   *  sent with no settling answer, recording not confirmed. The condition of unconfirmed contributions
    *  follows (`noticeUnconfirmed`). */
   leaveProjectSession: (following: string | null) => void;
   /** Retire `contribution` from the held and unconfirmed contributions; the condition of
@@ -414,20 +414,15 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
       [false, "Not recorded, as their project was switched away from"],
       [true, "Recording not confirmed before their project was switched away from"],
     ] as const;
-    for (const project of new Set(departed.map((c) => c.project_id))) {
-      for (const [sent, sentence] of said) {
-        const images = departed
-          .filter((c) => c.project_id === project && holds(unconfirmedContributions, c) === sent)
-          .map((c) => c.image_name)
-          .join(", ");
-        if (images) {
-          raiseNotification({
-            kind: "failure",
-            level: "error",
-            text: { sentence: `${sentence}: ${images}` },
-            context: { project },
-          });
-        }
+    for (const [sent, sentence] of said) {
+      const left = departed.filter((c) => holds(unconfirmedContributions, c) === sent);
+      if (left.length) {
+        raiseNotification({
+          kind: "failure",
+          level: "error",
+          text: { sentence: `${sentence}: ${left.map((c) => c.image_name).join(", ")}` },
+          context: { project: left[0].project_id },
+        });
       }
     }
   },
