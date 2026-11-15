@@ -13,6 +13,23 @@ import { acknowledgmentOf, DELIVERY_RECORDS, disclosureOf } from "@/test/deliver
 
 afterEach(cleanup);
 
+describe("DeliveryEventsPanel producer", () => {
+  it("shows the event id, the whole checkpoint digest and the checkpoint origin", () => {
+    const served = DELIVERY_RECORDS.validated;
+    const { event_id, producer } = served.event;
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
+    const row = screen.getByTestId(`delivery-${event_id}`);
+
+    expect(within(row).getByText("Event").nextElementSibling).toHaveTextContent(event_id);
+    expect(within(row).getByText("Checkpoint").nextElementSibling).toHaveTextContent(
+      producer.checkpoint_sha256,
+    );
+    expect(within(row).getByText("Checkpoint origin").nextElementSibling).toHaveTextContent(
+      producer.origin,
+    );
+  });
+});
+
 describe("DeliveryEventsPanel bucket findings", () => {
   it("names the assessment behind a validated bucket", () => {
     const served = DELIVERY_RECORDS.validated;

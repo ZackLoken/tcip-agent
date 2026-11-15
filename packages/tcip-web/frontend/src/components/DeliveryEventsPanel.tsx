@@ -35,8 +35,14 @@ function DeliveryEventRow({
         <span className="ml-auto text-[13px] text-tcip-muted">{record.produced_at}</span>
       </div>
       <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[13px]">
+        <dt className="text-tcip-muted">Event</dt>
+        <dd className="break-all font-mono">{record.event_id}</dd>
         <dt className="text-tcip-muted">Door</dt>
         <dd className="font-mono">{record.door}</dd>
+        <dt className="text-tcip-muted">Checkpoint</dt>
+        <dd className="break-all font-mono">{record.producer.checkpoint_sha256}</dd>
+        <dt className="text-tcip-muted">Checkpoint origin</dt>
+        <dd className="font-mono">{record.producer.origin}</dd>
         <dt className="text-tcip-muted">Output path</dt>
         <dd>{record.output_path}</dd>
         <dt className="text-tcip-muted">Validated</dt>
