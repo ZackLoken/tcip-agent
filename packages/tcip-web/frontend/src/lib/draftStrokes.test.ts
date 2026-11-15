@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { boxDraft, draftStrokes } from "@/lib/draftStrokes";
-import { NO_SUBJECT_DRAFT_COLOR } from "@/lib/symbology";
 
 describe("boxDraft", () => {
   it("orders the bounds whichever corner the drag started at and takes its subject's color", () => {
@@ -38,11 +37,6 @@ describe("draftStrokes", () => {
         vertices: false,
       },
     ]);
-  });
-
-  it("draws in the neutral draft color while no subject is active", () => {
-    const [stroke] = draftStrokes({ ...none, currentPolygon: [[1, 1]], polygonColor: null });
-    expect(stroke.color).toBe(NO_SUBJECT_DRAFT_COLOR);
   });
 
   it("lays a pending cut as its start with a tail to the cursor, in the cut's own color", () => {

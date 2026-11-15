@@ -196,7 +196,7 @@ describe("buildAnnotateShapes", () => {
     const draft = draftStrokes({
       mode: "polygon",
       currentPolygon: [],
-      polygonColor: null,
+      polygonColor: RED,
       cutStart: { point: [3, 4], color: "#123456" },
       cursor: [5, 6],
     });

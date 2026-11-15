@@ -6,6 +6,7 @@ import {
   dashAt,
   dashFor,
   DOTTED_DASH,
+  draftColor,
   DRAFT_DASH,
   FLAG_MARK,
   legendRows,
@@ -13,6 +14,7 @@ import {
   MATCH_COLORS,
   MATCH_TYPES,
   MATCH_WORDS,
+  NO_SUBJECT_DRAFT_COLOR,
   outlineColor,
   personBacked,
   proposalLabel,
@@ -49,6 +51,11 @@ describe("outline color says match type while reviewing and subject otherwise", 
       expect(outlineColor("fruit", match)).toBe(MATCH_COLORS[match]);
     }
     expect(outlineColor("fruit", null)).toBe(subjectColor("fruit"));
+  });
+
+  it("a shape being drawn takes the active subject's color and the neutral draft color with none", () => {
+    expect(draftColor("fruit")).toBe(subjectColor("fruit"));
+    expect(draftColor(null)).toBe(NO_SUBJECT_DRAFT_COLOR);
   });
 
   it("the match colors and the flag mark are distinct from each other", () => {
