@@ -52,6 +52,7 @@ import {
   PROPOSAL_STYLE,
   proposalLabel,
 } from "@/lib/symbology";
+import type { HostSize } from "@/lib/viewGeometry";
 import type { CanvasState } from "@/store/slices/canvas";
 import type { AnnotateUiState } from "@/store/slices/registryStatus";
 import type {
@@ -120,12 +121,12 @@ const rPts = (pts: [number, number][]): [number, number][] => pts.map(([x, y]) =
 /** The visible image region (image coords) from the pan/zoom view + canvas host size. */
 export function computeViewport(
   view: ViewState,
-  host: { w: number; h: number },
+  host: HostSize,
   imgW: number,
   imgH: number,
 ): Viewport | null {
   const s = view.scale;
-  if (host.w <= 1 || host.h <= 1 || !imgW || !imgH) return null;
+  if (!imgW || !imgH) return null;
   const x = -view.offset_x / s;
   const y = -view.offset_y / s;
   const x1 = Math.max(0, x);

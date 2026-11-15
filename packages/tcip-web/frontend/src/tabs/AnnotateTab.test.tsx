@@ -22,6 +22,7 @@ import {
   MATCH_WORDS,
   proposalLabel,
 } from "@/lib/symbology";
+import type { HostSize } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import type { AnnotateView } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -112,9 +113,9 @@ vi.mock("react-konva", () => ({
 // What the stand-in stage measures and serves, for a test to set before it renders or to report
 // anew once it has: `size` is the host size it reports, `facts` the base serve's facts.
 const stage = vi.hoisted(() => ({
-  size: null as { w: number; h: number } | null,
+  size: null as HostSize | null,
   facts: null as LoadedImage | null,
-  reportSize: (_size: { w: number; h: number } | null) => {},
+  reportSize: (_size: HostSize | null) => {},
 }));
 vi.mock("@/components/Canvas/CanvasStage", async () => {
   const { useEffect } = await import("react");
@@ -123,7 +124,7 @@ vi.mock("@/components/Canvas/CanvasStage", async () => {
       children?: React.ReactNode;
       overlay?: React.ReactNode;
       imageUrl?: string | null;
-      onHostSize: (size: { w: number; h: number } | null) => void;
+      onHostSize: (size: HostSize | null) => void;
       onBaseFacts: (facts: LoadedImage | null) => void;
       onPixelDown?: (x: number, y: number, ev: unknown) => void;
       onPixelMove?: (x: number, y: number, ev: unknown) => void;
@@ -1269,7 +1270,7 @@ describe("AnnotateTab host size", () => {
   const SMALLEST = { w: Math.floor(IMG_W * 0.3), h: Math.floor(IMG_H * 0.25) };
 
   /** Mount over the first image at scale 1, in a host smaller than the image. */
-  async function mountInHost(size: { w: number; h: number }) {
+  async function mountInHost(size: HostSize) {
     stage.size = size;
     useStore.getState().setView({ scale: 1, offset_x: 0, offset_y: 0 });
     render(<AnnotateTab />);
