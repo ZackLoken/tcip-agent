@@ -29,8 +29,8 @@ function isFocusableControl(tgt: EventTarget | null): boolean {
   return !!role && FOCUSABLE_ROLES.has(role);
 }
 
-/** Whether the page's key listeners leave a keydown alone: one aimed at a control that owns its
- *  own key handling, or one that fell in a modal dialog or in a docked pane. */
+/** Whether a keydown is aimed at a control that owns its own key handling, or fell in a modal
+ *  dialog or in a docked pane. */
 export function leavesKeydownAlone(e: KeyboardEvent): boolean {
   return isFocusableControl(e.target) || keydownInModal(e) || keydownInPane(e);
 }

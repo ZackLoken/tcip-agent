@@ -10,7 +10,7 @@ import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { loadOf } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
-import { measureWindow } from "@/test/dock";
+import { measureWindow, PANE_FOCUS } from "@/test/dock";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
@@ -166,7 +166,7 @@ describe("App notifications area", () => {
     expect(screen.queryByTestId("condition-mark")).not.toBeInTheDocument();
 
     fireEvent.click(button);
-    const heading = await screen.findByRole("heading", { name: "Notifications" });
+    const heading = await PANE_FOCUS.heading();
     expect(heading).toBeVisible();
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText(/Nothing to report/)).toBeVisible();
@@ -206,7 +206,7 @@ describe("App notifications area", () => {
     const button = screen.getByRole("button", { name: "Notifications" });
 
     fireEvent.click(button);
-    await screen.findByRole("heading", { name: "Notifications" });
+    await PANE_FOCUS.heading();
     fireEvent.click(button);
 
     expect(button).toHaveAttribute("aria-expanded", "false");

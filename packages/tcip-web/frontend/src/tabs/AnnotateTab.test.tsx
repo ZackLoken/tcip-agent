@@ -1713,7 +1713,7 @@ describe("AnnotateTab with the notifications pane open", () => {
 
   it("the same keys on the canvas, pane open, still delete the selection and cancel the polygon", async () => {
     const stage = await renderPolygonCanvas([POLY_A, POLY_B], openPane());
-    await screen.findByRole("heading", { name: "Notifications" });
+    await PANE_FOCUS.heading();
     selectWithPolygonInProgress(stage);
 
     fireEvent.keyDown(document.body, { key: "Delete" });
@@ -1730,7 +1730,7 @@ describe("AnnotateTab with the notifications pane open", () => {
         <HelpOverlay activeTab="annotate" />
       </>,
     );
-    const heading = await screen.findByRole("heading", { name: "Notifications" });
+    const heading = await PANE_FOCUS.heading();
     heading.focus();
 
     fireEvent.keyDown(heading, { key: "?" });
