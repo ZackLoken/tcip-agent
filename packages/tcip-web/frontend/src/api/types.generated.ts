@@ -1373,6 +1373,10 @@ export interface ImageEntry {
   activity: "new_annotation" | "review" | "negative_confirmation";
 }
 
+export interface ImagesUncounted {
+  problem: string;
+}
+
 export interface InferenceJobFrame {
   type: "progress" | "final";
   job: InferenceJob;
@@ -1731,7 +1735,7 @@ export interface ReadProject {
   kind: "read";
   record: ProjectRecord;
   tree: TreeContents;
-  image_count: number;
+  image_count: number | ImagesUncounted;
 }
 
 export type ReadRefusal = Invalid | Unreadable;

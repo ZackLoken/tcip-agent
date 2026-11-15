@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image
+from pydantic import BaseModel
 
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import (
@@ -28,8 +29,11 @@ __all__ = [
     "BandGroupRef",
     "IMAGE_EXTS",
     "ImageNotNamedError",
+    "ImagesUncounted",
     "LogicalImageError",
+    "UnreadableBandGroupError",
     "bucket_logical_identities",
+    "image_count",
     "image_dimensions",
     "list_logical_images",
     "load_image",
@@ -61,6 +65,14 @@ class ImageNotNamedError(LogicalImageError):
 
 class BandGroupIncompleteError(LogicalImageError):
     """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk."""
+
+
+class UnreadableBandGroupError(LogicalImageError):
+    """A directory holds a ``.bandgroup`` manifest that will not read.
+
+    The manifest names the directory's band files, so none of its files can be told apart from a
+    member; raised from the reader's own error.
+    """
 
 
 class AmbiguousImageStemError(LogicalImageError):
@@ -103,19 +115,23 @@ def scan_identities(d: Path) -> dict[str, list[Path | BandGroupRef]]:
     The scan is one manifest glob and one ``d.iterdir()`` walk with one extension test; a key's
     list holds more than one entry exactly when it is ambiguous.
 
-    A readable manifest is one identity under its own exact stem, its parsed
-    :class:`BandGroupRef`; its band files are that identity's members and no identity of their
-    own. An unreadable or corrupt manifest claims nothing and is no identity. Every other file
-    with a suffix in :data:`IMAGE_EXTS` that no readable manifest claims is one raw identity under
-    its own exact stem, its own path.
+    A manifest is one identity under its own exact stem, its parsed :class:`BandGroupRef`; its
+    band files are that identity's members and no identity of their own. Every other file with a
+    suffix in :data:`IMAGE_EXTS` that no manifest claims is one raw identity under its own exact
+    stem, its own path. A manifest that will not read, its bytes or its record, refuses the whole
+    directory with :class:`UnreadableBandGroupError`.
     """
     identities: dict[str, list[Path | BandGroupRef]] = {}
     claimed: set[Path] = set()
     for mp in sorted(d.glob(f"*{MANIFEST_EXT}")):
         try:
             ref = read_band_group_manifest(mp)
-        except (OSError, ValueError):
-            continue
+        except (OSError, ValueError) as exc:
+            raise UnreadableBandGroupError(
+                f"the band-group manifest {mp} will not read ({exc}), so no file in {d} can "
+                "be told apart from one of its bands and none is listed: repair or delete the "
+                "manifest to let a later detection pass group the bands again."
+            ) from exc
         identities.setdefault(stem_collision_key(ref.stem), []).append(ref)
         claimed.update(ref.bands.values())
     for p in sorted(d.iterdir()):
@@ -135,7 +151,8 @@ def bucket_logical_identities(images_dir: str | Path) -> dict[str, list[Path]]:
 
     A key held by more than one identity is ambiguous. Each list entry is one identity's own
     defining path (a ``.bandgroup`` manifest's path, or a raw file's own path); an absent
-    directory answers empty. Never raises on an ambiguous key.
+    directory answers empty. Never raises on an ambiguous key; raises what
+    :func:`scan_identities` raises.
     """
     d = Path(images_dir)
     if not d.is_dir():
@@ -166,18 +183,50 @@ def scan_captures[T](
     }
 
 
-def logical_image_counts(root: str | Path) -> dict[str, int]:
+class ImagesUncounted(BaseModel):
+    """Logical images that are not counted, and why: each refusal that stopped a capture's count."""
+
+    problem: str
+
+
+def _counted(images_dir: Path) -> int | ImagesUncounted:
+    """Count the logical images in ``images_dir`` (:func:`bucket_logical_identities`).
+
+    Each identity of an ambiguous stem is counted; a directory refused with
+    :class:`UnreadableBandGroupError` answers that refusal's sentence.
+    """
+    try:
+        found = bucket_logical_identities(images_dir)
+    except UnreadableBandGroupError as exc:
+        return ImagesUncounted(problem=str(exc))
+    return sum(len(ids) for ids in found.values())
+
+
+def logical_image_counts(
+    root: str | Path,
+) -> dict[str, int | ImagesUncounted]:
     """Count the logical images each capture under the dataset root ``root`` holds, by capture.
 
-    The captures are :func:`scan_captures`'; each is counted by :func:`bucket_logical_identities`,
-    each identity of an ambiguous stem counted.
+    The captures are :func:`scan_captures`', every one of them a key; each is counted by
+    :func:`_counted`.
     """
-    return {
-        capture: sum(len(ids) for ids in found.values())
-        for capture, found in scan_captures(
-            root, bucket_logical_identities
-        ).items()
-    }
+    return scan_captures(root, _counted)
+
+
+def image_count(
+    counts: dict[str, int | ImagesUncounted],
+) -> int | ImagesUncounted:
+    """Return the total of :func:`logical_image_counts`' ``counts``.
+
+    When a capture is uncounted the answer is :class:`ImagesUncounted` carrying each uncounted
+    capture's problem, in capture order, never a partial total.
+    """
+    problems = [
+        c.problem for c in counts.values() if isinstance(c, ImagesUncounted)
+    ]
+    if problems:
+        return ImagesUncounted(problem=" ".join(problems))
+    return sum(c for c in counts.values() if isinstance(c, int))
 
 
 def list_logical_images(
@@ -186,8 +235,9 @@ def list_logical_images(
     """Return every logical image in ``images_dir``, by exact stem.
 
     Built from :func:`scan_identities`: a :class:`BandGroupRef` for a manifest identity, that
-    file's own path for a raw one. Raises :class:`AmbiguousImageStemError` naming every ambiguous
-    key's own paths; the returned mapping is keyed by the exact stem.
+    file's own path for a raw one. Raises what :func:`scan_identities` raises, and
+    :class:`AmbiguousImageStemError` naming every ambiguous key's own paths; the returned mapping
+    is keyed by the exact stem.
     """
     d = Path(images_dir)
     if not d.is_dir():
@@ -241,7 +291,9 @@ def resolve_image_paths(
     its own file. Refuses :class:`ImageNotNamedError` for a path naming no logical image, naming
     the manifest that claims it when it is a band of a grouped capture;
     :class:`AmbiguousImageStemError` when its own stem names more than one;
-    :class:`BandGroupIncompleteError` for a grouped capture missing a band.
+    :class:`BandGroupIncompleteError` for a grouped capture missing a band; and
+    :class:`UnreadableBandGroupError` for every path in a directory holding a manifest that will
+    not read.
     """
     named_paths = [Path(p) for p in paths]
     scanned = {

@@ -325,7 +325,8 @@ def selection_for(choice: DatasetChoice) -> DatasetSelection:
 
     Each image is placed at the path its scan found it at
     (:func:`~tcip_mcp.pipelines.image_utils.source_path_of`); the index is clamped to them. Raises
-    ``LogicalImageError`` for a capture the enumerator refuses (two images of one stem), and
+    ``LogicalImageError`` for a capture the enumerator refuses (two images of one stem, a
+    band-group manifest that will not read), and
     ``ValueError`` for a ``date`` that is no capture name.
     """
     from tcip_mcp.pipelines.image_utils import (

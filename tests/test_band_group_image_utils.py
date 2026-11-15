@@ -138,15 +138,21 @@ def test_resolve_image_path_stale_group_raises_band_group_incomplete(
         resolve_image_path(grouped_dir.manifest)
 
 
-def test_list_logical_images_skips_a_corrupt_manifest_without_raising(
-    tmp_path: Path,
+def test_list_logical_images_refuses_a_directory_whose_manifest_will_not_read(
+    grouped_dir: GroupedDataset,
 ) -> None:
-    from tcip_mcp.pipelines.image_utils import list_logical_images
+    """The enumerator refuses the whole directory, naming the manifest, and lists none of it."""
+    from tcip_mcp.pipelines.image_utils import (
+        UnreadableBandGroupError,
+        list_logical_images,
+    )
+    from tests._producer_fixtures import unreadable_manifest
 
-    d = image_root(tmp_path)
-    d.mkdir()
-    (d / "broken.bandgroup").write_text("not json", encoding="utf-8")
-    assert list_logical_images(d) == {}
+    unreadable_manifest(grouped_dir.manifest)
+
+    with pytest.raises(UnreadableBandGroupError) as refused:
+        list_logical_images(grouped_dir.images_dir)
+    assert str(grouped_dir.manifest) in str(refused.value)
 
 
 def test_list_logical_images_on_missing_dir_returns_empty(
@@ -250,25 +256,22 @@ def test_list_logical_images_refuses_a_case_variant_stem_pair(
     assert "Foo.jpg" in message and "foo.png" in message
 
 
-def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file_lists_it(
-    tmp_path: Path,
+def test_resolving_a_raw_file_beside_a_same_stem_manifest_that_will_not_read_refuses(
+    grouped_dir: GroupedDataset,
 ) -> None:
-    """A raw file beside a corrupt manifest of the same stem is listed.
+    """The resolver refuses ``cap.jpg`` beside ``cap.bandgroup`` once the manifest will not read."""
+    from tcip_mcp.pipelines.image_utils import (
+        UnreadableBandGroupError,
+        resolve_image_path,
+    )
+    from tests._producer_fixtures import unreadable_manifest, write_image
 
-    Beside ``broken.bandgroup`` holding no JSON, the stem ``broken`` lists once, as
-    ``broken.jpg``.
-    """
-    from tcip_mcp.pipelines.image_utils import list_logical_images
-    from tests._producer_fixtures import write_image
+    raw = write_image(grouped_dir.images_dir / "cap.jpg", (4, 4))
+    unreadable_manifest(grouped_dir.manifest)
 
-    d = image_root(tmp_path)
-    d.mkdir()
-    (d / "broken.bandgroup").write_text("not json", encoding="utf-8")
-    raw = write_image(d / "broken.jpg", (4, 4))
-
-    logical = list_logical_images(d)
-    assert set(logical) == {"broken"}
-    assert logical["broken"] == raw
+    with pytest.raises(UnreadableBandGroupError) as refused:
+        resolve_image_path(raw)
+    assert str(grouped_dir.manifest) in str(refused.value)
 
 
 def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(

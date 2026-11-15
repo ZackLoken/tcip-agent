@@ -8,7 +8,8 @@ for them, the answer ``POST /api/projects/invariances`` gives for one correction
 that route's refusal of a block whose rotation is out of range, the second's open answer, and,
 with the second open, the refusal ``POST /api/canvas/state`` gives a push naming the first are
 written. A second session
-lays down the project picker's workspace (:func:`_picker`). Every answer, each refusal with its
+lays down the project picker's workspace (:func:`_picker`), and a third lists a project whose
+band-group manifest will not read (:func:`_uncounted`). Every answer, each refusal with its
 status, is written normalized (``fixture_session.normalized``) to :data:`GENERATED_PATH`.
 
     python -m tools.generate_project_fixture
@@ -45,8 +46,44 @@ them and published over, the newest holding no label."""
 
 
 def produce() -> dict[str, JsonValue]:
-    """Return the answers of :func:`_corrections` and of :func:`_picker`, each its own session."""
-    return {**_corrections(), **_picker()}
+    """Return the answers of :func:`_corrections`, :func:`_picker` and :func:`_uncounted`.
+
+    Each runs in its own session.
+    """
+    return {**_corrections(), **_picker(), **_uncounted()}
+
+
+def _uncounted() -> dict[str, JsonValue]:
+    """List a project whose band-group manifest will not read in a scratch session; return it.
+
+    ``Hill block`` holds a grouped capture of :data:`CAPTURES`' first date whose manifest's record
+    is written back without its bands, beside ``Ridge farm`` holding one image of that date; the
+    workspace is listed (``picker_uncounted``), normalized by :data:`INSTANTS`, each minted
+    project id read as its name.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._producer_fixtures import (
+        unreadable_manifest,
+        write_grouped_capture,
+        write_image,
+    )
+    from tests._web_fixtures import named_project
+
+    date = CAPTURES[0]
+    with scratch_session() as (workspace, client):
+        hill = named_project(workspace / "hill", "Hill block")
+        manifest, _bands = write_grouped_capture(
+            image_dir(hill.root, date), "capture_001", ("Green", "Red"), 16
+        )
+        unreadable_manifest(manifest)
+        ridge = named_project(workspace / "ridge", "Ridge farm")
+        write_image(image_dir(ridge.root, date) / "a.jpg")
+        return normalized(
+            {"picker_uncounted": answered(client, "list_projects", 200)},
+            workspace,
+            instants=INSTANTS,
+            minted={hill.id: "<hill block id>", ridge.id: "<ridge farm id>"},
+        )
 
 
 def _picker() -> dict[str, JsonValue]:

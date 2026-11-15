@@ -472,6 +472,20 @@ def write_grouped_capture(
     return manifest, files
 
 
+def unreadable_manifest(manifest: Path) -> Path:
+    """Write ``manifest``'s own record back without its ``bands``, which its model refuses.
+
+    ``manifest`` is one :func:`write_band_group` wrote; returns it.
+    """
+    from tcip_store import decode_value, encode_record
+
+    document = decode_value(manifest.read_bytes())
+    assert isinstance(document, dict), document
+    del document["bands"]
+    manifest.write_bytes(encode_record(document))
+    return manifest
+
+
 def labeled_grouped_capture(root: Path, capture: str) -> GroupedDataset:
     """Write a grouped capture and a photograph into ``root``'s ``capture``, each labeled.
 

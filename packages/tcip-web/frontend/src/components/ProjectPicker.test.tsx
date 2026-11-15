@@ -7,6 +7,7 @@ import { readRefusalText } from "@/api/http";
 import {
   type OpenAnswer,
   type ProjectsListing,
+  READ,
   type SnapshotProject,
   UNREAD,
 } from "@/api/types.generated";
@@ -39,6 +40,7 @@ const {
   picker: LISTING,
   picker_open: VALLEY_OPEN,
   picker_damaged: DAMAGED,
+  picker_uncounted: UNCOUNTED,
   empty_listing: NO_PROJECTS,
 } = PROJECT_FIXTURES;
 
@@ -77,6 +79,9 @@ describe("ProjectPicker", () => {
 
     expect(await screen.findByText(VALLEY.record.display_name)).toBeInTheDocument();
     expect(screen.getAllByText(VALLEY.record.site).length).toBeGreaterThan(0);
+    if (typeof VALLEY.image_count !== "number") {
+      throw new Error("the produced listing left Valley farm's images uncounted");
+    }
     expect(screen.getByText(`${VALLEY.image_count} image(s)`)).toBeInTheDocument();
     expect(screen.getByText(`${VALLEY.tree.captures.length} dates`)).toBeInTheDocument();
   });
@@ -531,6 +536,23 @@ describe("ProjectPicker", () => {
     expect(DAMAGED.open_id).not.toBeNull();
     expect(useStore.getState().openChoice.projectId).toBeFalsy();
     expect(document.querySelectorAll('[aria-pressed="true"]')).toHaveLength(0);
+  });
+
+  it("states an uncounted project's problem on its card, which still opens", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue(UNCOUNTED);
+    render(<ProjectPicker />);
+
+    const hill = UNCOUNTED.projects.find(
+      (p) => p.kind === READ && p.record.display_name === "Hill block",
+    );
+    if (hill?.kind !== READ || typeof hill.image_count === "number") {
+      throw new Error("the produced listing counted Hill block's images");
+    }
+    fireEvent.click(await screen.findByText(hill.record.display_name));
+
+    expect(screen.getByText(hill.image_count.problem)).toBeInTheDocument();
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
   });
 
   it("keeps the project the person chose over the preselection", async () => {

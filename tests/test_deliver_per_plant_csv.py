@@ -1848,38 +1848,47 @@ def _built_through_the_server(
     )
 
 
-def _leave_no_image(folder: Path) -> None:
-    """Make ``folder`` holding no image: nothing at all."""
-    folder.mkdir(parents=True)
-
-
-def _leave_an_unreadable_manifest(folder: Path) -> None:
-    """Make ``folder`` holding no image: one band-group manifest that will not read."""
-    folder.mkdir(parents=True)
-    (folder / "broken.bandgroup").write_text("not json", encoding="utf-8")
-
-
-@pytest.mark.parametrize(
-    "leave",
-    [_leave_no_image, _leave_an_unreadable_manifest],
-    ids=["an_empty_folder", "an_unreadable_manifest_alone"],
-)
 def test_a_build_with_no_dates_stated_leaves_out_a_date_holding_no_image(
-    tmp_path: Path, leave: Callable[[Path], None]
+    tmp_path: Path,
 ) -> None:
     """A build stating no dates covers the dates holding an image and names the one left out.
 
-    The listed folder holding no image, empty or holding only a manifest that will not read, has
-    no entry in the answer's ``per_date`` and is named in its ``dates_without_images``.
+    The listed folder holding nothing has no entry in the answer's ``per_date`` and is named in
+    its ``dates_without_images``.
     """
     dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
-    leave(image_dir(dataset_root, EMPTY))
+    image_dir(dataset_root, EMPTY).mkdir(parents=True)
 
     built = _built_through_the_server(tmp_path, dataset_root, registry)
 
     assert isinstance(built, dict) and "dates_without_images" in built, built
     assert built["dates_without_images"] == [EMPTY]
     assert list(built["per_date"]) == [FIRST, SECOND]
+
+
+def test_a_build_with_no_dates_stated_refuses_a_date_whose_band_group_manifest_will_not_read(
+    tmp_path: Path,
+) -> None:
+    """A build stating no dates answers a listed capture whose manifest will not read as its error.
+
+    The capture holds a grouped capture whose manifest's record is written back without its
+    bands; the error names the manifest.
+    """
+    from tests._producer_fixtures import (
+        unreadable_manifest,
+        write_grouped_capture,
+    )
+
+    dataset_root, registry = _registered(tmp_path, TWO_PLANTS, CAPTURES)
+    manifest, _bands = write_grouped_capture(
+        image_dir(dataset_root, EMPTY), "broken", ("Green", "Red"), 4
+    )
+    unreadable_manifest(manifest)
+
+    built = _built_through_the_server(tmp_path, dataset_root, registry)
+
+    assert isinstance(built, dict) and set(built) == {"error"}, built
+    assert str(manifest) in str(built["error"])
 
 
 def test_the_build_and_the_label_import_refuse_an_unlisted_date_in_one_sentence(

@@ -991,18 +991,18 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
         ),
     ],
 )
-def test_a_malformed_manifest_refuses_and_is_no_identity(
+def test_a_malformed_manifest_refuses_its_read_and_its_directorys_scan(
     tmp_path: Path, malform: Callable[[dict], object]
 ) -> None:
-    """A manifest its record's fields refuse raises ``ValueError`` and claims nothing.
+    """A manifest its record's fields refuse raises ``ValueError``, and the scan of it refuses.
 
-    The manifest is the writer's, one field then removed or replaced; the scan lists no identity
-    under its stem and each band file as its own.
+    The manifest is the writer's, one field then removed or replaced; the scan raises
+    ``UnreadableBandGroupError`` naming it, from the reader's refusal.
     """
     from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
     from tcip_mcp.pipelines.image_utils import (
+        UnreadableBandGroupError,
         scan_identities,
-        stem_collision_key,
     )
     from tcip_store import decode_value, encode_record
     from tests._producer_fixtures import write_band_group
@@ -1022,12 +1022,13 @@ def test_a_malformed_manifest_refuses_and_is_no_identity(
     malform(document)
     manifest.write_bytes(encode_record(document))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as cause:
         read_band_group_manifest(manifest)
-    identities = scan_identities(d)
-    assert stem_collision_key("cap") not in identities
-    for band in bands.values():
-        assert identities[stem_collision_key(band.stem)] == [band]
+    with pytest.raises(UnreadableBandGroupError) as refused:
+        scan_identities(d)
+    assert str(manifest) in str(refused.value)
+    assert refused.value.__cause__ is not None
+    assert str(refused.value.__cause__) == str(cause.value)
 
 
 # ── ingest_images ──────────────────────────────────────────────────────────────────────

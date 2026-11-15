@@ -565,5 +565,65 @@
         "scale": true
       }
     }
+  },
+  "picker_uncounted": {
+    "workspace": "/scratch/workspace",
+    "open_id": null,
+    "projects": [
+      {
+        "root": "/scratch/workspace/ridge",
+        "modified": 946684801.0,
+        "kind": "read",
+        "record": {
+          "id": "<ridge farm id>",
+          "display_name": "Ridge farm",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        },
+        "tree": {
+          "captures": [{ "name": "2026-02-11", "date": "2026-02-11" }],
+          "subjects": [],
+          "subjects_by_date": { "2026-02-11": [] },
+          "buckets_by_date": { "2026-02-11": [] },
+          "label_problem": null
+        },
+        "image_count": 1
+      },
+      {
+        "root": "/scratch/workspace/hill",
+        "modified": 946684800.0,
+        "kind": "read",
+        "record": {
+          "id": "<hill block id>",
+          "display_name": "Hill block",
+          "site": "north orchard",
+          "invariances": {
+            "horizontal_flip": true,
+            "vertical_flip": true,
+            "rotation": 180.0,
+            "color": true,
+            "intensity": true,
+            "scale": true
+          }
+        },
+        "tree": {
+          "captures": [{ "name": "2026-02-11", "date": "2026-02-11" }],
+          "subjects": [],
+          "subjects_by_date": { "2026-02-11": [] },
+          "buckets_by_date": { "2026-02-11": [] },
+          "label_problem": null
+        },
+        "image_count": {
+          "problem": "the band-group manifest /scratch/workspace/hill/images/2026-02-11/capture_001.bandgroup will not read (/scratch/workspace/hill/images/2026-02-11/capture_001.bandgroup: bands: Field required), so no file in /scratch/workspace/hill/images/2026-02-11 can be told apart from one of its bands and none is listed: repair or delete the manifest to let a later detection pass group the bands again."
+        }
+      }
+    ]
   }
 }
