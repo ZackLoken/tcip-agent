@@ -978,21 +978,25 @@ OFF_TORCH_DEFAULT: dict[str, dict[str, object]] = {
 """Settings stated over the sample block wherever the sample equals the torch class's default."""
 
 
-def test_every_schedule_type_has_a_torch_reference() -> None:
-    """The comparison below covers each type the scheduler union admits, and no other."""
-    assert set(TORCH_SCHEDULER) == set(SCHEDULER_TYPES)
+SCHEDULER_CASES: list[tuple[str, str, str | None, dict[str, object]]] = [
+    ("cosine", "mae", None, {}),
+    ("plateau", "mae", "min", {}),
+    ("plateau", "r_squared", "max", {}),
+    ("onecycle", "mae", None, {"cycle_momentum": True}),
+    ("onecycle", "mae", None, {"cycle_momentum": False}),
+    ("step", "mae", None, {}),
+]
+"""The comparison's cases: schedule type, selection metric, the plateau's expected ``mode`` and
+the settings stated over :data:`OFF_TORCH_DEFAULT`."""
+
+
+def test_the_comparison_covers_each_schedule_type_the_union_admits() -> None:
+    """The kinds of :data:`SCHEDULER_CASES` are the types the scheduler union admits."""
+    assert {kind for kind, *_ in SCHEDULER_CASES} == set(SCHEDULER_TYPES)
 
 
 @pytest.mark.parametrize(
-    ("kind", "selection_metric", "mode", "stated"),
-    [
-        ("cosine", "mae", None, {}),
-        ("plateau", "mae", "min", {}),
-        ("plateau", "r_squared", "max", {}),
-        ("onecycle", "mae", None, {"cycle_momentum": True}),
-        ("onecycle", "mae", None, {"cycle_momentum": False}),
-        ("step", "mae", None, {}),
-    ],
+    ("kind", "selection_metric", "mode", "stated"), SCHEDULER_CASES
 )
 def test_a_built_scheduler_is_the_torch_class_built_at_the_block_it_states(
     kind: str,

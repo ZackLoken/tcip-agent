@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Unpack, cast
 
 import numpy as np
 import torch
+from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
 from tcip_mcp.experiments import BATCH_LOSS_KEY
@@ -42,14 +43,18 @@ from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 from tcip_mcp.pipelines.schemas import (
     CENTER_MATCH_COMPARABILITY_KEYS,
     VAL_METRIC_PREFIX,
+    CosineSchedule,
     DataSpec,
     DefaultTrainerRegime,
     DetectorGeometry,
     HorizonSchedule,
+    OneCycleSchedule,
+    PlateauSchedule,
     SchedulerSpec,
     StageSpec,
     StatedDetectorGeometry,
     StatedDirection,
+    StepSchedule,
     TrainConfigSchema,
     TrainGeometry,
     TraitRevisionRef,
@@ -567,21 +572,22 @@ def _save_checkpoint(
 
 
 _SCHEDULER_CLASSES: dict[
-    str, tuple[type[torch.optim.lr_scheduler.LRScheduler], dict[str, str]]
+    type[BaseModel],
+    tuple[type[torch.optim.lr_scheduler.LRScheduler], dict[str, str]],
 ] = {
-    "cosine": (
+    CosineSchedule: (
         torch.optim.lr_scheduler.CosineAnnealingLR,
         {"horizon_epochs": "T_max"},
     ),
-    "plateau": (torch.optim.lr_scheduler.ReduceLROnPlateau, {}),
-    "onecycle": (
+    PlateauSchedule: (torch.optim.lr_scheduler.ReduceLROnPlateau, {}),
+    OneCycleSchedule: (
         torch.optim.lr_scheduler.OneCycleLR,
         {"horizon_epochs": "total_steps"},
     ),
-    "step": (torch.optim.lr_scheduler.StepLR, {}),
+    StepSchedule: (torch.optim.lr_scheduler.StepLR, {}),
 }
-"""Each ``schemas.SCHEDULER_TYPES`` entry's torch class, and the torch keyword under which each
-block field torch names otherwise goes."""
+"""Each schedule class's torch class, and the torch keyword under which each block field torch
+names otherwise goes."""
 
 
 def _build_scheduler(
@@ -596,7 +602,7 @@ def _build_scheduler(
     its own name but for the ones ``_SCHEDULER_CLASSES`` renames; a plateau one also watches the
     selection value in its ``direction`` (``schemas.selection_of``).
     """
-    scheduler_class, renames = _SCHEDULER_CLASSES[spec.type]
+    scheduler_class, renames = _SCHEDULER_CLASSES[type(spec)]
     settings = {
         renames.get(name, name): value
         for name, value in spec.model_dump(
