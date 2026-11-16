@@ -1085,10 +1085,11 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     monkeypatch: pytest.MonkeyPatch,
     opened_client: TestClient,
 ) -> None:
-    """The run listing names a launched run's selection metric and its best value.
+    """The run listing lists a run the agent launched unended, then its selection metric and best.
 
-    A launched (subprocess-delegated) run's row carries the metric the trainer itself
-    stamped on its metrics-log rows, and a finite best value read back beside it.
+    A launched (subprocess-delegated) run is listed unended as its launch answers; once it ends,
+    its row carries the metric the trainer itself stamped on its metrics-log rows, and a finite
+    best value read back beside it.
     """
     import math
 
@@ -1099,13 +1100,20 @@ def test_list_runs_route_names_the_run_s_selection_metric(
 
     no_tensorboard(monkeypatch)
 
+    from tcip_mcp.experiments import FINAL_STATES
+    from tcip_web.routes.training import list_runs_route
+
     result = launch_training(
         tmp_path, _regression_config(tmp_path), actor=None
     )
     assert isinstance(result, RunLaunched), result
+    (launched,) = (
+        r
+        for r in list_runs_route().runs
+        if r.experiment_id == result.experiment_id
+    )
+    assert launched.state not in FINAL_STATES, launched
     run_to_end(tmp_path, result.experiment_id)
-
-    from tcip_web.routes.training import list_runs_route
 
     by_id = {
         r["experiment_id"]: r for r in list_runs_route().model_dump()["runs"]
