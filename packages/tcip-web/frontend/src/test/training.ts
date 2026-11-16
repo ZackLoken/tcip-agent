@@ -28,7 +28,7 @@ type Answer<K extends keyof typeof trainingApi> = Awaited<ReturnType<(typeof tra
  *  carrier is unverified, a ranking by a metric no checkpoint carries (three tool dicts the route
  *  lifts), a TensorBoard over a run with no logs, and one over a failed run with no logs. */
 interface Refusals {
-  no_project_refusal: Refusal<string>;
+  unopened: Refusal<string>;
   refused_relaunch: Refusal<{ message: string; issues: string[] }>;
   unverified_refusal: Refusal<{ message: string; all_unverified: boolean }>;
   absent_metric_refusal: Refusal<{ message: string }>;

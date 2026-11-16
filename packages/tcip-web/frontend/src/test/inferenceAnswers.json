@@ -1,5 +1,5 @@
 {
-  "no_project": {
+  "unopened": {
     "status": 409,
     "body": { "detail": "no project is open; open one from the project list first" }
   },

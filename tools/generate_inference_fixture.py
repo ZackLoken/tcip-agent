@@ -11,7 +11,7 @@ request model, and runs on the route's own worker, which holds at each pause of 
 (``inference_tools.infer``) is the platform's own for every pass but the one whose bucket the
 launch under :data:`HELD` answers, whose engine reports one image done and ends once canceled.
 
-The job listing asked for before the project opens is refused (``no_project``). A pass over
+The job listing asked for before the project opens is refused (``unopened``). A pass over
 the copy, which its launch admits, is listed through ``GET /api/inference/jobs``
 running before its engine starts (``failing_started``); the copy is then overwritten by bytes no
 registry names, and the pass fails on the platform's own engine, its stream ending on the failure
@@ -114,7 +114,7 @@ def produce() -> dict[str, JsonValue]:
         scratch_session() as (workspace, client),
         pytest.MonkeyPatch.context() as patch,
     ):
-        served["no_project"] = answered(client, "list_jobs", 409)
+        served["unopened"] = answered(client, "list_jobs", 409)
         root = workspace / "inference"
         opened(client, named_project(root, "Inference"))
         for i in range(IMAGES):

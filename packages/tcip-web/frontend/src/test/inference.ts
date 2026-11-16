@@ -9,7 +9,7 @@ import produced from "@/test/inferenceAnswers.json";
 import type { Refusal } from "@/test/refusals";
 
 /** What `tools/generate_inference_fixture.py` received from the inference routes. The job listing
- *  asked for before a project opens is refused (`no_project`). A pass that
+ *  asked for before a project opens is refused (`unopened`). A pass that
  *  fails is listed running before its engine starts (`failing_started`) and streams its failure
  *  (`failing_final`). A held pass is launched (`launched`) and listed beside the failed one before
  *  its engine reports (`held_started`) and at one image of nine (`running`), as its stream sends it
@@ -20,7 +20,7 @@ import type { Refusal } from "@/test/refusals";
 // A JSON import reads the status as a string, which the literal union admits only through
 // `unknown`.
 export const INFERENCE_ANSWERS = produced as unknown as {
-  no_project: Refusal<string>;
+  unopened: Refusal<string>;
   failing_started: InferenceJobs;
   failing_final: InferenceJobFrame;
   launched: InferenceJob;

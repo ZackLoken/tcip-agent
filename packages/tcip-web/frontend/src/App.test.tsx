@@ -667,13 +667,13 @@ describe("App job listings", () => {
     {
       tab: "training",
       read: () => vi.mocked(trainingApi.listRuns),
-      refusal: TRAINING_REFUSALS.no_project_refusal,
+      refusal: TRAINING_REFUSALS.unopened,
       failed: "Could not load training runs",
     },
     {
       tab: "inference",
       read: () => vi.mocked(inferenceApi.listJobs),
-      refusal: INFERENCE_ANSWERS.no_project,
+      refusal: INFERENCE_ANSWERS.unopened,
       failed: "Could not load inference jobs",
     },
   ] as const)(
