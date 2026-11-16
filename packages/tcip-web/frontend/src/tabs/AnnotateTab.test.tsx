@@ -561,6 +561,7 @@ describe("AnnotateTab save/load race", () => {
     await flush();
     await act(() => Promise.resolve(save.reject(new DOMException("aborted", "AbortError"))));
     expect(screen.queryByText(/Save canceled/)).not.toBeInTheDocument();
+    expect(listed()).toEqual([]);
   });
 
   describe("a save from an editor that has since unmounted", () => {
@@ -2443,10 +2444,17 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
 
     it("goes from the canvas when the image changes, and stays listed", async () => {
       await mountAndDraw(2);
+      // The next image's proposals read never lands, so nothing but its own key can hide this.
+      const stagings = vi
+        .spyOn(api.annotate, "stagings")
+        .mockImplementation((path) =>
+          path === IMG2 ? new Promise(() => {}) : Promise.resolve({ buckets: [] }),
+        );
       act(() => changeSelection({ current_image_index: 1 }));
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
       await flush();
 
+      expect(stagings).toHaveBeenCalledWith(IMG2);
       expect(onCanvas()).toHaveLength(0);
       expect(listed()).toEqual([expect.objectContaining({ sentence: TOO_SMALL })]);
     });
@@ -3887,8 +3895,9 @@ describe("AnnotateTab engine prompt", () => {
     expect(propose).not.toHaveBeenCalled();
     const [dropped, kept] = ANNOTATE_ANSWERS.found.boxes;
     expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([dropped, kept]);
-    // The held boxes are drawn on the canvas, so the find raises no entry.
+    // The held boxes are drawn on the canvas, so the find raises no message.
     expect(listed()).toEqual([]);
+    expect(useStore.getState().toasts).toEqual([]);
 
     fireEvent.contextMenu(stage(), { clientX: dropped[0] + 10, clientY: dropped[1] + 10 });
     await flush();
@@ -3944,7 +3953,7 @@ describe("AnnotateTab engine prompt", () => {
     ]);
   });
 
-  it("shows the answered proposals under their shape's tool and focuses the first, the bucket unselected, raising no entry", async () => {
+  it("shows the answered proposals under their shape's tool and focuses the first, the bucket unselected, raising no message", async () => {
     const { stagings, proposals } = await mountArmed("point");
     stagings.mockResolvedValue(ANNOTATE_ANSWERS.stagings);
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
@@ -3956,6 +3965,7 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().gui.dataset?.bucket).toBeNull();
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-view-proposals", "true");
     expect(listed()).toEqual([]);
+    expect(useStore.getState().toasts).toEqual([]);
     await waitFor(() =>
       expect(useStore.getState().canvas.focus).toEqual({
         kind: "proposal",
