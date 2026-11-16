@@ -1215,27 +1215,47 @@ def test_head_already_on_the_integration_branch_is_refused(
 ) -> None:
     repo, _ = _fixed_double(tmp_path)
     git(repo, "branch", "trunk")
+    record_path = tmp_path / "record.json"
 
-    result = _tool(repo, "tests/test_widgets.py", "--integration", "trunk")
+    result = _tool(
+        repo,
+        "tests/test_widgets.py",
+        "--integration",
+        "trunk",
+        "--json",
+        str(record_path),
+    )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
     assert "HEAD is already contained in trunk" in why
     assert "Name the pre-change revision with --baseline" in why
+    assert "baseline" not in json.loads(
+        record_path.read_text(encoding="utf-8")
+    )
 
 
 def test_an_integration_branch_that_does_not_exist_is_refused(
     tmp_path: Path,
 ) -> None:
     repo, _ = _fixed_double(tmp_path)
+    record_path = tmp_path / "record.json"
 
     result = _tool(
-        repo, "tests/test_widgets.py", "--integration", "no_such_branch"
+        repo,
+        "tests/test_widgets.py",
+        "--integration",
+        "no_such_branch",
+        "--json",
+        str(record_path),
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert "no merge-base of HEAD and --integration no_such_branch" in _why(
         result
+    )
+    assert "baseline" not in json.loads(
+        record_path.read_text(encoding="utf-8")
     )
 
 
