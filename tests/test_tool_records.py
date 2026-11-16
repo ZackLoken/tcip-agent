@@ -245,12 +245,11 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tcip_mcp.tools.proposal_tools import _staging_key_for, stage_proposals
+    from tests._record_damage_fixtures import stripped_of_its_engine
 
     image, _candidate, proposed = _proposed(tmp_path, monkeypatch)
     key = _staging_key_for(str(image), proposed.staging_id)
-    stored = dict(ts.read(key))
-    del stored["engine"]
-    ts.replace(key, stored)
+    refusal = stripped_of_its_engine(key)
 
     result = stage_proposals(
         tmp_path,
@@ -260,8 +259,7 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
     )
 
     assert result == {
-        "error": f"proposal run {proposed.staging_id!r} staged for {image.stem}: "
-        "engine: Field required"
+        "error": f"proposal run {proposed.staging_id!r} staged for {image.stem}: {refusal}"
     }
 
 

@@ -38,7 +38,10 @@ from tests._producer_fixtures import (
     unregistered_refusal,
     write_image,
 )
-from tests._record_damage_fixtures import made_undecodable
+from tests._record_damage_fixtures import (
+    made_undecodable,
+    stripped_of_its_engine,
+)
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 from tools.fixture_session import ended
 
@@ -1672,15 +1675,7 @@ def test_a_doors_error_answers_400_carrying_its_text(
     assert "no checkpoint at the stated name" in resp.json()["detail"]
 
 
-def _stripped_of_its_engine(key: tcip_store.Key) -> str:
-    """Store the record at ``key`` without its ``engine``; return the refusal reading it earns."""
-    stored = dict(tcip_store.read(key))
-    del stored["engine"]
-    tcip_store.replace(key, stored)
-    return "engine: Field required"
-
-
-@pytest.mark.parametrize("damage", [_stripped_of_its_engine, made_undecodable])
+@pytest.mark.parametrize("damage", [stripped_of_its_engine, made_undecodable])
 def test_a_staging_record_that_will_not_read_answers_400_as_the_tool_does(
     opened_client: TestClient,
     opened_project: Path,

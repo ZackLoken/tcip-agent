@@ -114,6 +114,14 @@ def made_undecodable(key: ts.Key) -> str:
     return store_sentence(key)
 
 
+def stripped_of_its_engine(key: ts.Key) -> str:
+    """Store the record at ``key`` without its ``engine``; return the refusal reading it earns."""
+    stored = dict(ts.read(key))
+    del stored["engine"]
+    ts.replace(key, stored)
+    return "engine: Field required"
+
+
 def damage_log_entry(key: ts.Key, position: int, data: bytes) -> None:
     """Overwrite the entry at ``position`` in the log at ``key`` with ``data``.
 
