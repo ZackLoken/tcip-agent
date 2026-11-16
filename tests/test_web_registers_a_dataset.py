@@ -517,13 +517,10 @@ def test_a_registry_whose_bytes_will_not_decode_stands_as_its_mappings_refusal(
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_registry_key,
     )
-    from tests._record_damage_fixtures import UNDECODABLE, damage_record
+    from tests._record_damage_fixtures import made_undecodable
 
     root, _dataset_id = _mapped(opened_project)
-    key = plant_registry_key(opened_project, "reg")
-    damage_record(key, UNDECODABLE)
-    with pytest.raises(tcip_store.DecodeError) as refusal:
-        tcip_store.read(key)
+    refusal = made_undecodable(plant_registry_key(opened_project, "reg"))
 
     placed = _identity(opened_client, root)["identity"]["mappings"]["placed"]
 
@@ -533,7 +530,7 @@ def test_a_registry_whose_bytes_will_not_decode_stands_as_its_mappings_refusal(
             "plant_registry": "reg",
             "registry": {
                 "kind": "registry_refused",
-                "refusal": str(refusal.value),
+                "refusal": refusal,
             },
         }
     ]

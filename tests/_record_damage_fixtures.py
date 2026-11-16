@@ -11,6 +11,8 @@ import sqlite3
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+import pytest
+
 import tcip_store as ts
 from tcip_store.file_backend import _DATABASE_SIDECARS, database_file
 from tcip_store.sqlite_backend import encode_parts
@@ -94,6 +96,22 @@ def damage_record(key: ts.Key, data: bytes) -> None:
         )
     finally:
         conn.close()
+
+
+def store_sentence(key: ts.Key) -> str:
+    """Return the sentence the store raises as ``DecodeError`` for a direct read of ``key``.
+
+    Asserts the read raises it.
+    """
+    with pytest.raises(ts.DecodeError) as refused:
+        ts.read(key)
+    return str(refused.value)
+
+
+def made_undecodable(key: ts.Key) -> str:
+    """Overwrite the record at ``key`` with :data:`UNDECODABLE`; return :func:`store_sentence`."""
+    damage_record(key, UNDECODABLE)
+    return store_sentence(key)
 
 
 def damage_log_entry(key: ts.Key, position: int, data: bytes) -> None:

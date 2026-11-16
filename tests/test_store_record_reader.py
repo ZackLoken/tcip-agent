@@ -23,6 +23,7 @@ from tcip_mcp.tools.meta_tools import (
 from tests._record_damage_fixtures import (
     UNDECODABLE,
     damage_record,
+    store_sentence,
     unopenable_database,
 )
 
@@ -40,13 +41,6 @@ def _reported(project: Path) -> tcip_store.Key:
         project, category="missing_tool", detail="read back", actor=None
     )
     return memory_key(FrictionReport, str(project), made["id"])
-
-
-def _decode_sentence(key: tcip_store.Key) -> str:
-    """Return the sentence the store's own read raises for the record at ``key``."""
-    with pytest.raises(tcip_store.DecodeError) as refused:
-        tcip_store.read(key)
-    return str(refused.value)
 
 
 def test_a_produced_record_reads_back_as_its_model_by_a_store_or_a_transaction_read(
@@ -102,7 +96,7 @@ def test_an_undecodable_record_raises_the_stores_sentence_naming_its_key(
 
     assert refused.value.served == tcip_store.RefusedRead(
         where=PLACE,
-        refusal=tcip_store.Unreadable(message=_decode_sentence(key)),
+        refusal=tcip_store.Unreadable(message=store_sentence(key)),
     )
     assert key.parts[0] in str(refused.value)
 
@@ -170,10 +164,10 @@ def test_an_undecodable_memory_record_and_flags_record_answer_one_refusal_at_the
     (unread,) = [e for e in memory["entries"] if e["id"] == report.parts[0]]
     assert unread["reason"]["refusal"] == {
         "kind": "unreadable",
-        "message": _decode_sentence(report),
+        "message": store_sentence(report),
     }
     assert loaded.status_code == 400, loaded.text
-    assert loaded.json()["detail"].endswith(f": {_decode_sentence(flags)}")
+    assert loaded.json()["detail"].endswith(f": {store_sentence(flags)}")
 
 
 def test_a_label_document_in_a_database_that_will_not_open_answers_the_editors_400(
@@ -236,7 +230,7 @@ def test_a_confirmation_over_an_undecodable_trait_record_answers_the_readers_sen
     )
 
     assert refused.value.served.refusal == tcip_store.Unreadable(
-        message=_decode_sentence(key)
+        message=store_sentence(key)
     )
     assert "'bud_opening'" in refused.value.served.where
     assert resp.status_code == 400, resp.text

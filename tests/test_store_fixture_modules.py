@@ -3,7 +3,8 @@
 ``unopenable_database``, ``damage_log_entry`` and ``damage_last_log_entry`` of
 ``tests._record_damage_fixtures`` are exercised here, and a scan over the test tree
 finds no test spelling the same steps out again, nor opening a root's database in autocommit
-beside ``connected``, nor binding a backend with a lock wait of its own beside
+beside ``connected``, nor keeping the store's decode sentence from a ``pytest.raises`` block
+beside ``store_sentence``, nor binding a backend with a lock wait of its own beside
 ``tests._busy_store_fixtures``.
 """
 
@@ -21,6 +22,8 @@ from tests._record_damage_fixtures import (
     NON_DATABASE,
     damage_last_log_entry,
     damage_log_entry,
+    made_undecodable,
+    store_sentence,
     unopenable_database,
 )
 
@@ -31,6 +34,9 @@ TEST_TREE = Path(__file__).resolve().parent
 DAMAGE_FIXTURES = "_record_damage_fixtures.py"
 DAMAGING_SQL = re.compile(r"\bupdate\s+(records|log_entries)\b", re.IGNORECASE)
 AUTOCOMMIT_OPEN = re.compile(r"\bisolation_level\s*=\s*None\b")
+KEPT_DECODE_ERROR = re.compile(
+    r"pytest\.raises\(\s*(?:\w+\.)?DecodeError\s*\)\s*as\b"
+)
 BACKEND_WITH_WAIT = re.compile(r"SqliteBackend\(\s*lock_timeout_s")
 CHILD_PROCESS_PROGRAM = "test_concurrent_audit_appends.py"
 
@@ -227,6 +233,21 @@ def test_the_last_log_entry_is_damaged_and_the_cursor_returned_is_past_it(
     assert page.cursor == past
 
 
+def test_a_record_made_undecodable_answers_the_sentence_the_store_raises_reading_it(
+    tmp_path: Path,
+) -> None:
+    """The returned sentence is the one a read of the damaged record raises, as it still does."""
+    key = _record_key(tmp_path)
+    ts.replace(key, {"n": 1})
+
+    sentence = made_undecodable(key)
+
+    assert sentence
+    with pytest.raises(ts.DecodeError, match=re.escape(sentence)):
+        ts.read(key)
+    assert store_sentence(key) == sentence
+
+
 def test_no_test_writes_the_sql_that_damages_a_record_or_a_log_entry() -> None:
     """Only the damage fixtures hold the statements that rewrite a stored record or log entry."""
     found = [
@@ -256,6 +277,23 @@ def test_no_test_opens_a_root_s_database_in_autocommit_by_hand() -> None:
     assert not found, (
         "these open a database directly; use "
         f"tests._record_damage_fixtures.connected: {found}"
+    )
+
+
+def test_no_test_keeps_the_store_s_decode_sentence_from_a_raises_block() -> (
+    None
+):
+    """Only the damage fixtures capture the store's ``DecodeError`` to read its sentence."""
+    found = [
+        f"{name}:{source.count(chr(10), 0, match.start()) + 1}"
+        for name, source in _test_sources()
+        if name != DAMAGE_FIXTURES
+        for match in KEPT_DECODE_ERROR.finditer(source)
+    ]
+
+    assert not found, (
+        "these keep the store's decode sentence by hand; use store_sentence or made_undecodable "
+        f"from tests._record_damage_fixtures: {found}"
     )
 
 
