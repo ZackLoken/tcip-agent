@@ -26,7 +26,6 @@ import { answerPhrase, invarianceName } from "@/lib/invariances";
 import { tell } from "@/lib/tell";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
-import { selectStanding } from "@/store/slices/notifications";
 
 // A date's match radius as the breeder reads it, from the record's own source.
 function radiusPhrase(radius: MatchRadius): string {
@@ -275,8 +274,10 @@ function DatasetIdentityPanel({
   const readKey = identityKey("read", projectId, datasetRoot);
   const registerKey = identityKey("register", projectId, datasetRoot);
   const user = useStore((s) => s.user);
-  const readFailed = useStore((s) => selectStanding(readKey)(s) !== null);
+  const retryButton = useRef<HTMLButtonElement>(null);
   const [read, setRead] = useState<RootIdentity | null>(null);
+  // Whether a read failed with none landing since, which keeps the panel and its Retry shown.
+  const [readRefused, setReadRefused] = useState(false);
   const [crop, setCrop] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -289,18 +290,20 @@ function DatasetIdentityPanel({
         .identity(datasetRoot)
         .then((answer) => {
           useStore.getState().releaseNotification(readKey);
+          setReadRefused(false);
           setRead(answer);
           adopt(answer);
         })
-        .catch((e: unknown) =>
+        .catch((e: unknown) => {
+          setReadRefused(true);
           tell(
             "failure",
             "error",
             `Could not read the dataset identity: ${messageOf(e)}`,
             datasetRoot,
             readKey,
-          ),
-        );
+          );
+        });
     },
     [datasetRoot, readKey],
   );
@@ -315,7 +318,31 @@ function DatasetIdentityPanel({
     refresh();
   }, [refresh]);
 
-  if (!read && !readFailed) return null;
+  if (!read) {
+    if (!readRefused) return null;
+    return (
+      <div className="tcip-panel p-5">
+        <div className="tcip-heading mb-3">Dataset identity</div>
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <NotificationItem
+              placement="in place"
+              entryKey={readKey}
+              afterDismiss={() => retryButton.current?.focus()}
+            />
+          </div>
+          <button
+            ref={retryButton}
+            type="button"
+            className="tcip-btn h-6 shrink-0 px-2 text-[12px]"
+            onClick={refresh}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
   const readFailure = (
     <NotificationItem
       placement="in place"
@@ -324,14 +351,6 @@ function DatasetIdentityPanel({
       afterDismiss={() => document.getElementById(CROP_INPUT_ID)?.focus()}
     />
   );
-  if (!read) {
-    return (
-      <div className="tcip-panel p-5">
-        <div className="tcip-heading mb-3">Dataset identity</div>
-        {readFailure}
-      </div>
-    );
-  }
   const state = read.identity;
   const stored = state.kind === REGISTERED ? state.identity.crop : null;
 

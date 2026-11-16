@@ -715,11 +715,33 @@ describe("SetupTab dataset identity", () => {
       }),
     ]);
 
-    fireEvent.click(within(line).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(identityPanel()).getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
     expect(identity).toHaveBeenCalledTimes(2);
     expect(within(identityPanel()).queryByTestId("entry-in-place")).toBeNull();
+  });
+
+  it("keeps the identity panel and its Retry once a failed first read is dismissed, focus on Retry", async () => {
+    // What fetch rejects with when the backend cannot be reached.
+    const identity = vi
+      .spyOn(api.dataset, "identity")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(IDENTITY_ANSWERS.unregistered);
+
+    render(<SetupTab />);
+    await screen.findByText("Dataset identity");
+    const line = within(identityPanel()).getByTestId("entry-in-place");
+    fireEvent.click(within(line).getByRole("button", { name: /^Dismiss: Could not read/ }));
+
+    const retry = within(identityPanel()).getByRole("button", { name: "Retry" });
+    expect(within(identityPanel()).queryByTestId("entry-in-place")).toBeNull();
+    expect(retry).toHaveFocus();
+
+    fireEvent.click(retry);
+
+    expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
+    expect(identity).toHaveBeenCalledTimes(2);
   });
 
   it("rereads the identity when the confirmation opens, listing a mapping built since", async () => {
