@@ -51,7 +51,7 @@ export const NotificationsButton = forwardRef<
           className={`h-2 w-2 rounded-full ${LEVELS[holdingLevel].mark}`}
         />
       )}
-      <Bell aria-hidden="true" size={16} />
+      <Bell aria-hidden="true" className="tcip-icon" />
       {fresh > 0 && (
         <span
           aria-hidden="true"

@@ -115,7 +115,7 @@ export function TopBar({ notifications }: { notifications: ReactNode }) {
                 : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
             }`}
           >
-            <Terminal aria-hidden="true" size={16} />
+            <Terminal aria-hidden="true" className="tcip-icon" />
             {handingOff && (
               <span
                 aria-hidden="true"
