@@ -175,26 +175,17 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
     record of the project it replaces, will not read, its detail the
     :class:`~tcip_store.RefusedRead` naming the record and why, and 409 carrying the answer when
     the open committed and a departed session's audit line could not be written
-    (:class:`~tcip_web.routes.audit_gap.AuditGapRefusal`). Each 404 and each 409 but the
-    audit-gap one leaves the backend holding the id and the refusal's sentence
-    (:meth:`~tcip_web.state.StateStore.refuse_open`).
+    (:class:`~tcip_web.routes.audit_gap.AuditGapRefusal`).
     """
     from tcip_store import ReadRefusedError
 
     actor(req.user)
-    try:
-        root, record = await anyio.to_thread.run_sync(
-            workspace_project, req.id
-        )
-    except HTTPException as exc:
-        store.refuse_open(req.id, str(exc.detail))
-        raise
+    root, record = await anyio.to_thread.run_sync(workspace_project, req.id)
     project = OpenProject(root, record.id)
     answer = OpenAnswer(project=SnapshotProject.of(project))
     try:
         await store.open_project(project)
     except ReadRefusedError as exc:
-        store.refuse_open(req.id, str(exc))
         raise HTTPException(409, exc.served.model_dump()) from exc
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, committed=True, what=answer) from exc

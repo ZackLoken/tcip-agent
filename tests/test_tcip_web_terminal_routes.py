@@ -47,8 +47,6 @@ from tests._terminal_fixtures import (
 from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from starlette.testclient import WebSocketTestSession, httpx
 
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
@@ -1150,27 +1148,6 @@ def test_the_codex_overrides_carry_any_project_path_as_toml_reads_it_back() -> (
     assert parsed["args"] == list(pty_host.mcp_server(project).args)
 
 
-def _wait_until(
-    session: terminal_routes.TerminalSession,
-    holds: Callable[[str], bool],
-    what: str,
-    timeout: float = 30,
-) -> str:
-    """Return the session's scrollback once ``holds`` accepts it, polling up to ``timeout`` s.
-
-    Raises AssertionError naming ``what`` when the timeout passes without it.
-    """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        text = session.scrollback_snapshot()
-        if holds(text):
-            return text
-        time.sleep(0.1)
-    raise AssertionError(
-        f"never saw {what}; got: {session.scrollback_snapshot()[-500:]!r}"
-    )
-
-
 def _wait_for(
     session: terminal_routes.TerminalSession, needle: str, timeout: float = 30
 ) -> str:
@@ -1178,8 +1155,14 @@ def _wait_for(
 
     Raises AssertionError naming the needle when the timeout passes without it.
     """
-    return _wait_until(
-        session, lambda text: needle in text, repr(needle), timeout
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        text = session.scrollback_snapshot()
+        if needle in text:
+            return text
+        time.sleep(0.1)
+    raise AssertionError(
+        f"never saw {needle!r}; got: {session.scrollback_snapshot()[-500:]!r}"
     )
 
 
@@ -1223,148 +1206,47 @@ def pastes_after(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _first_turn_of_a_launch(client: TestClient) -> list[str]:
-    """Launch through the create route and return the lines the fake agent echoed for its turn.
-
-    The turn is read once an echoed line ends with the opening request, so a terminal's own echo
-    of the paste, which carries no ``echo:`` prefix, is not taken for the agent's.
-    """
-    sid = client.post(
-        "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
-    ).json()["session_id"]
-    text = _wait_until(
-        terminal_routes._SESSIONS[sid],
-        lambda text: any(
-            line.endswith(terminal_routes.OPENING_REQUEST)
-            for line in _echoes(text)
-        ),
-        "an echoed line ending with the opening request",
-    )
-    return _echoes(text)
-
-
-def test_a_launch_after_a_refused_open_and_an_open_that_was_then_removed_is_told_no_refusal(
-    client: TestClient,
-    tmp_path: Path,
-    pastes_after: None,
+def test_a_launch_for_no_project_writes_nothing_to_its_agent_before_a_request_is_submitted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A project opened after a refused open is no longer the last open the person tried.
+    """A launch with no project open pastes nothing once its composer is live.
 
-    The project is removed once open, so the launch has no project again and its agent is
-    given the opening request alone.
+    An open of an id no project holds was refused first, and the agent is given nothing of it.
     """
     refused = client.post(
         "/api/projects/open", json={"id": "0" * 12, "user": "grower"}
     )
     assert refused.status_code == 404
-    other = named_project(tmp_path.parent / "hill_block", "Hill block")
-    opened = client.post(
-        "/api/projects/open", json={"id": other.id, "user": "grower"}
-    )
-    assert opened.status_code == 200, opened.text
-    removed = client.post(
-        "/api/projects/remove",
-        json={"id": other.id, "confirm_name": "Hill block", "user": "grower"},
-    )
-    assert removed.status_code == 200, removed.text
-
-    assert _first_turn_of_a_launch(client) == [
-        f"echo:{terminal_routes.OPENING_REQUEST}"
+    pty = StubPty(survives=False)
+    wire_stub_spawn(monkeypatch, pty)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
     ]
+    session = terminal_routes._SESSIONS[sid]
+
+    session._on_output("\x1b[?2004h" + pty_host.PROVIDERS[0].composer_ready)
+    _written_through(session)
+
+    assert [write for write in pty.writes if write] == []
 
 
-def test_a_launch_after_an_open_of_an_id_no_project_holds_tells_its_agent_the_refusal(
+def test_a_launch_for_no_project_gives_its_agent_the_submitted_request_alone(
     client: TestClient,
     pastes_after: None,
 ) -> None:
-    """The agent's first turn names the id the refused open named and the route's own sentence.
+    """A launch with no project open gives its agent the submitted request and nothing else.
 
-    The open route answered 404 and its detail is the sentence; the opening request follows on
-    the same line.
-    """
-    refused = client.post(
-        "/api/projects/open", json={"id": "0" * 12, "user": "grower"}
-    )
-    assert refused.status_code == 404
-
-    [line] = _first_turn_of_a_launch(client)
-
-    assert "0" * 12 in line
-    assert refused.json()["detail"] in line
-    assert line.endswith(terminal_routes.OPENING_REQUEST)
-
-
-def test_a_launch_after_an_open_whose_gui_state_is_refused_tells_its_agent_the_refused_read(
-    client: TestClient,
-    made: OpenProject,
-    pastes_after: None,
-) -> None:
-    """The agent's first turn names the project and the sentence its GUI state's reader raises.
-
-    The snapshot ``write_gui_snapshot`` wrote has its tab changed to one outside the
-    vocabulary, the open route answers 409, and the opening request follows on the same line.
-    """
-    import tcip_store
-    from tcip_mcp.web_client import (
-        GUI_STATE_DEFAULTS,
-        gui_snapshot_key,
-        read_gui_snapshot,
-        write_gui_snapshot,
-    )
-
-    write_gui_snapshot(made.root, GUI_STATE_DEFAULTS)
-    key = gui_snapshot_key(made.root)
-    tcip_store.replace(
-        key, tcip_store.read(key) | {"active_tab": "not-a-real-tab"}
-    )
-    with pytest.raises(ValueError) as refusal:
-        read_gui_snapshot(made.root)
-    refused = client.post(
-        "/api/projects/open", json={"id": made.id, "user": "grower"}
-    )
-    assert refused.status_code == 409
-
-    [line] = _first_turn_of_a_launch(client)
-
-    assert made.id in line
-    assert str(refusal.value) in line
-    assert line.endswith(terminal_routes.OPENING_REQUEST)
-
-
-def test_a_launch_for_no_project_is_pasted_its_opening_request_with_nothing_submitted(
-    client: TestClient,
-    pastes_after: None,
-) -> None:
-    """A launch with no project open gives its agent the opening request alone, unprompted.
-
-    It is pasted once the agent turned paste on and its composer is live, and never earlier.
+    It reaches the agent once the agent turned paste on, and never earlier.
     """
     sid = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
     ).json()["session_id"]
-
-    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
-    text = _wait_for(terminal_routes._SESSIONS[sid], opening)
-    assert _echoes(text) == [opening]
-    assert "EARLY_INPUT" not in text
-
-
-def test_a_launch_for_no_project_delivers_its_opening_request_before_a_submitted_request(
-    client: TestClient,
-    pastes_after: None,
-) -> None:
-    """The opening request reaches the agent first, then a request a person submitted."""
-    sid = client.post(
-        "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
-    ).json()["session_id"]
-    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
-    _wait_for(terminal_routes._SESSIONS[sid], opening)
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "first request"}
     )
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:first request")
-    assert _echoes(text) == [opening, "echo:first request"]
+    assert _echoes(text) == ["echo:first request"]
     assert "EARLY_INPUT" not in text
 
 
@@ -1438,14 +1320,12 @@ def test_overlapping_creates_deliver_the_request_once(
         answers = list(pool.map(create, range(2)))
     sid = answers[0]["session_id"]
     assert answers[1]["session_id"] == sid
-    opening = f"echo:{terminal_routes.OPENING_REQUEST}"
-    _wait_for(terminal_routes._SESSIONS[sid], opening)
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "tab request"}
     )
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:tab request")
-    assert _echoes(text) == [opening, "echo:tab request"]
+    assert _echoes(text) == ["echo:tab request"]
 
 
 class _Startup(NamedTuple):
