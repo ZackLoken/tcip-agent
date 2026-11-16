@@ -306,6 +306,24 @@ describe("TrainingTab sweeps", () => {
     );
   });
 
+  it("shows a sweep's failed Cancel in place under the sweep's own row, apart from its trials", async () => {
+    openTestProject();
+    listing();
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(trainingApi, "cancel").mockRejectedValue(new TypeError("Failed to fetch"));
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByRole("button", { name: `Cancel ${searched.sweep_id}` }));
+
+    const group = screen.getByRole("group", sweepGroupNamed);
+    const line = await within(group).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent("Cancel failed: Failed to fetch");
+    expect(line.closest("li")).toBe(group.closest("li"));
+    expect(
+      screen.getByRole("button", { name: `Cancel ${searched.sweep_id}` }),
+    ).toHaveAccessibleDescription("Cancel failed: Failed to fetch");
+  });
+
   it("streams a selected trial's metrics, and shows a selected sweep's board without a stream", async () => {
     openTestProject();
     listing();

@@ -158,8 +158,9 @@ const selectControlId = (id: string) => `select-${id}`;
 const compareToggleId = (id: string) => `compare-${id}`;
 
 /** The id of the text of the failure standing on the Cancel of the run or sweep `id`, which
- *  describes that Cancel button. */
-const cancelFailureId = (id: string) => `cancel-error-${id}`;
+ *  describes that Cancel button; `id` is encoded so one holding a space stays one token of the
+ *  button's `aria-describedby`. */
+const cancelFailureId = (id: string) => `cancel-error-${encodeURIComponent(id)}`;
 
 function RunItem({
   run,
