@@ -1,5 +1,6 @@
 /**
- * Annotate-tab toolbar, one row in three groups: the tool mode (Point, Box, Polygon) with the
+ * Annotate-tab toolbar, three groups that break onto further lines as the work area narrows: the
+ * tool mode (Point, Box, Polygon) with the
  * engine prompt; the subject picker, the Edit menu (Snap, Stream, Cut, Undo, Redo), the View menu
  * (Labels, Proposals, Predictions), Save and the band picker for a multispectral image; then the
  * image stepper with its filter by annotation status or a review queue's rank order, whose select
@@ -266,9 +267,9 @@ export function AnnotateToolbar({
 
   return (
     <div className="shrink-0 border-b border-tcip-border bg-tcip-panel">
-      <div className="h-topbar flex items-center gap-3 px-3">
+      <div className="min-h-topbar flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-1">
         <div
-          className="inline-flex gap-0.5 rounded border border-tcip-border bg-tcip-bg p-0.5"
+          className="inline-flex flex-wrap gap-0.5 rounded border border-tcip-border bg-tcip-bg p-0.5"
           role="group"
           aria-label="Tool"
         >
@@ -290,81 +291,94 @@ export function AnnotateToolbar({
 
         <EnginePrompt proposing={proposing} onPhrase={onPhrase} onPropose={onPropose} />
 
-        <Divider />
+        <div className="flex min-w-0 items-center gap-3">
+          <Divider />
 
-        {/* Subject picker */}
-        <div className="relative">
-          <button
-            id={SUBJECT_CONTROL_ID}
-            type="button"
-            onClick={() => setSubjectMenuOpen((o) => !o)}
-            aria-expanded={subjectMenuOpen}
-            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-tcip-fg hover:border-tcip-border-hover"
-          >
-            <span
-              className="h-2.5 w-2.5 rounded-xs"
-              style={{ background: activeSubject ? subjectColor(activeSubject) : "#666" }}
-              aria-hidden
-            />
-            <span className="font-semibold">{activeSubject ?? "select subject"}</span>
-            <span className="font-mono text-tcip-muted">({activeCount})</span>
-            <svg viewBox="0 0 10 10" width="9" height="9" fill="none" aria-hidden="true">
-              <path
-                d="M2 4l3 3 3-3"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-tcip-muted"
+          {/* Subject picker */}
+          <div className="relative min-w-0">
+            <button
+              id={SUBJECT_CONTROL_ID}
+              type="button"
+              onClick={() => setSubjectMenuOpen((o) => !o)}
+              aria-expanded={subjectMenuOpen}
+              className="flex h-[30px] max-w-full items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-tcip-fg hover:border-tcip-border-hover"
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-xs"
+                style={{ background: activeSubject ? subjectColor(activeSubject) : "#666" }}
+                aria-hidden
               />
-            </svg>
-          </button>
-          {subjectMenuOpen && (
-            <>
-              <div
-                role="presentation"
-                className="fixed inset-0 z-10"
-                onClick={() => setSubjectMenuOpen(false)}
-              />
-              <div className="absolute left-0 top-full z-20 mt-1 max-h-[75vh] w-72 overflow-auto rounded-md border border-tcip-border bg-tcip-panel py-1 shadow-lg">
-                {subjectNames.map((name) => (
-                  <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
-                    <span
-                      className="h-3.5 w-3.5 shrink-0 rounded-xs border border-tcip-border"
-                      style={{ background: subjectColor(name) }}
-                      aria-hidden
-                    />
+              <span className="truncate font-semibold" title={activeSubject ?? undefined}>
+                {activeSubject ?? "select subject"}
+              </span>
+              <span className="shrink-0 font-mono text-tcip-muted">({activeCount})</span>
+              <svg
+                viewBox="0 0 10 10"
+                width="9"
+                height="9"
+                fill="none"
+                aria-hidden="true"
+                className="shrink-0"
+              >
+                <path
+                  d="M2 4l3 3 3-3"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-tcip-muted"
+                />
+              </svg>
+            </button>
+            {subjectMenuOpen && (
+              <>
+                <div
+                  role="presentation"
+                  className="fixed inset-0 z-10"
+                  onClick={() => setSubjectMenuOpen(false)}
+                />
+                <div className="absolute left-0 top-full z-20 mt-1 max-h-[75vh] w-72 overflow-auto rounded-md border border-tcip-border bg-tcip-panel py-1 shadow-lg">
+                  {subjectNames.map((name) => (
+                    <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
+                      <span
+                        className="h-3.5 w-3.5 shrink-0 rounded-xs border border-tcip-border"
+                        style={{ background: subjectColor(name) }}
+                        aria-hidden
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveSubject(name);
+                          setSubjectMenuOpen(false);
+                        }}
+                        className="flex flex-1 items-center py-1 text-left text-tcip-fg"
+                      >
+                        <span className={name === activeSubject ? "font-semibold" : ""}>
+                          {name}
+                        </span>
+                        <span className="ml-auto font-mono text-tcip-muted">
+                          {subjectCounts.get(name) ?? 0}
+                        </span>
+                      </button>
+                    </div>
+                  ))}
+                  <div className="mt-1 border-t border-tcip-border pt-1">
                     <button
                       type="button"
                       onClick={() => {
-                        setActiveSubject(name);
                         setSubjectMenuOpen(false);
+                        void addNewSubject();
                       }}
-                      className="flex flex-1 items-center py-1 text-left text-tcip-fg"
+                      className="w-full px-2 py-1 text-left text-tcip-accent hover:bg-tcip-hover"
                     >
-                      <span className={name === activeSubject ? "font-semibold" : ""}>{name}</span>
-                      <span className="ml-auto font-mono text-tcip-muted">
-                        {subjectCounts.get(name) ?? 0}
-                      </span>
+                      New subject
                     </button>
                   </div>
-                ))}
-                <div className="mt-1 border-t border-tcip-border pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSubjectMenuOpen(false);
-                      void addNewSubject();
-                    }}
-                    className="w-full px-2 py-1 text-left text-tcip-accent hover:bg-tcip-hover"
-                  >
-                    New subject
-                  </button>
+                  <AttributePanel focused={focused} />
                 </div>
-                <AttributePanel focused={focused} />
-              </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
         </div>
 
         <MenuButton label="Edit" pressed={annotateUi.snap || annotateUi.stream || annotateUi.cut}>
@@ -467,77 +481,78 @@ export function AnnotateToolbar({
           />
         )}
 
-        <div className="flex-1" />
-
-        <Divider />
-
-        <Stepper
-          label="Image"
-          noun="image"
-          name={imageName}
-          position={nav.position}
-          total={nav.total}
-          canPrev={nav.canPrev}
-          canNext={nav.canNext}
-          onStep={nav.stepImage}
-          onJump={nav.jumpToPosition}
-        />
-
-        {dataset && (
-          <div className="relative">
-            <select
-              aria-label="Images"
-              className="tcip-select h-[30px]"
-              value={nav.filter}
-              onChange={(e) =>
-                e.target.value === RANK_QUEUE
-                  ? setLaunching(true)
-                  : setImageFilter(e.target.value as ImageFilter)
-              }
-              title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"} or in a review queue's rank order`}
-            >
-              {IMAGE_FILTERS.filter((f) => f !== "queue" || nav.ranked !== null).map((f) => (
-                <option key={f} value={f}>
-                  {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f, nav.ranked ?? []).length})`}
-                </option>
-              ))}
-              <option value={RANK_QUEUE} disabled={ranking}>
-                {ranking ? "ranking a review queue" : "rank a review queue"}
-              </option>
-            </select>
-            {launching && (
-              <>
-                <div
-                  role="presentation"
-                  className="fixed inset-0 z-10"
-                  onClick={() => setLaunching(false)}
-                />
-                <div className="absolute right-0 top-full z-20 mt-1 rounded-md border border-tcip-border bg-tcip-panel shadow-lg">
-                  <ReviewQueueLaunch onLaunched={() => setLaunching(false)} />
-                </div>
-              </>
-            )}
+        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div className="flex items-center gap-3">
+            <Divider />
+            <Stepper
+              label="Image"
+              noun="image"
+              name={imageName}
+              position={nav.position}
+              total={nav.total}
+              canPrev={nav.canPrev}
+              canNext={nav.canNext}
+              onStep={nav.stepImage}
+              onJump={nav.jumpToPosition}
+            />
           </div>
-        )}
 
-        <label
-          className="flex items-center gap-1.5"
-          title={
-            !dataset?.subject
-              ? "Select a subject first"
-              : subjectState !== null
-                ? `Every ${dataset.subject} on this image is annotated (c)`
-                : "Loading this image's labels"
-          }
-        >
-          <input
-            type="checkbox"
-            checked={finished}
-            onChange={(e) => onComplete(e.target.checked)}
-            disabled={!imageName || subjectState === null || !dataset?.subject}
-          />
-          {subjectState === "negative" ? "Complete (none)" : "Complete"}
-        </label>
+          {dataset && (
+            <div className="relative">
+              <select
+                aria-label="Images"
+                className="tcip-select h-[30px]"
+                value={nav.filter}
+                onChange={(e) =>
+                  e.target.value === RANK_QUEUE
+                    ? setLaunching(true)
+                    : setImageFilter(e.target.value as ImageFilter)
+                }
+                title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"} or in a review queue's rank order`}
+              >
+                {IMAGE_FILTERS.filter((f) => f !== "queue" || nav.ranked !== null).map((f) => (
+                  <option key={f} value={f}>
+                    {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f, nav.ranked ?? []).length})`}
+                  </option>
+                ))}
+                <option value={RANK_QUEUE} disabled={ranking}>
+                  {ranking ? "ranking a review queue" : "rank a review queue"}
+                </option>
+              </select>
+              {launching && (
+                <>
+                  <div
+                    role="presentation"
+                    className="fixed inset-0 z-10"
+                    onClick={() => setLaunching(false)}
+                  />
+                  <div className="absolute right-0 top-full z-20 mt-1 rounded-md border border-tcip-border bg-tcip-panel shadow-lg">
+                    <ReviewQueueLaunch onLaunched={() => setLaunching(false)} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <label
+            className="flex items-center gap-1.5"
+            title={
+              !dataset?.subject
+                ? "Select a subject first"
+                : subjectState !== null
+                  ? `Every ${dataset.subject} on this image is annotated (c)`
+                  : "Loading this image's labels"
+            }
+          >
+            <input
+              type="checkbox"
+              checked={finished}
+              onChange={(e) => onComplete(e.target.checked)}
+              disabled={!imageName || subjectState === null || !dataset?.subject}
+            />
+            {subjectState === "negative" ? "Complete (none)" : "Complete"}
+          </label>
+        </div>
       </div>
     </div>
   );

@@ -53,7 +53,7 @@ export function BandPicker({
   const channels = single ? (["r"] as const) : (["r", "g", "b"] as const);
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <span className="tcip-label">{single ? "Band" : "Bands"}</span>
       {channels.map((channel) => (
         <select

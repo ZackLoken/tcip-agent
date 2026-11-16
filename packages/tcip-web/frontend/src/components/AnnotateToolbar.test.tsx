@@ -267,8 +267,9 @@ describe("AnnotateToolbar draw mode", () => {
   it("groups the tools and prompt, the editing menus and Save, and the image controls", () => {
     renderToolbar();
     const row = screen.getByRole("group", { name: "Tool" }).parentElement!;
-    const order = Array.from(row.children, (child) =>
-      child.getAttribute("aria-hidden") === "true" ? "|" : (child.textContent ?? ""),
+    const order = Array.from(
+      row.querySelectorAll('div[aria-hidden="true"], button, label'),
+      (el) => (el.getAttribute("aria-hidden") === "true" ? "|" : (el.textContent ?? "")),
     );
     expect(order.filter((o) => o === "|")).toHaveLength(2);
     expect(order.indexOf("|")).toBeGreaterThan(order.findIndex((o) => o.includes("Point")));

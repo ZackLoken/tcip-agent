@@ -32,7 +32,7 @@ export function Stepper({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
       <span className="tcip-label">{label}</span>
       {name !== null && (
         <span className="max-w-[150px] truncate font-mono text-[13px] text-tcip-fg" title={name}>

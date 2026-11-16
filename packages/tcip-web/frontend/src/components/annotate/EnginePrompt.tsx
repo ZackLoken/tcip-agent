@@ -26,7 +26,7 @@ export function EnginePrompt({
       role="group"
       aria-label="Prompt"
       aria-busy={proposing}
-      className={`inline-flex items-center gap-1.5 rounded border p-0.5 ${
+      className={`inline-flex flex-wrap items-center gap-1.5 rounded border p-0.5 ${
         armed ? "border-tcip-accent bg-tcip-accent/15" : "border-tcip-border bg-tcip-bg"
       }`}
     >
@@ -57,7 +57,7 @@ export function EnginePrompt({
       {armed && (
         <>
           <form
-            className="flex items-center gap-1.5"
+            className="flex flex-wrap items-center gap-1.5"
             onSubmit={(e) => {
               e.preventDefault();
               if (canFind) onPhrase(phrase.trim());

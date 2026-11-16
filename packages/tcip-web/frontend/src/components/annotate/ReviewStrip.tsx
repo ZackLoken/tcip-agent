@@ -77,7 +77,7 @@ export function ReviewStrip({
 }) {
   const K = ANNOTATE_KEYS;
   return (
-    <div className="flex h-9 shrink-0 items-center gap-3 border-b border-tcip-border bg-tcip-panel px-3 text-[13px]">
+    <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-tcip-border bg-tcip-panel px-3 py-px text-[13px]">
       {reviewing && (
         <>
           <label
@@ -130,92 +130,96 @@ export function ReviewStrip({
         </>
       )}
 
-      <div className="flex-1" />
-
-      <div className="relative flex items-center gap-1.5" role="group" aria-label="Decide">
-        <button
-          type="button"
-          className="tcip-btn h-7 text-[13px]"
-          disabled={!canAccept}
-          onClick={onAccept}
-          title={`${K.accept.desc} (${K.accept.label})`}
+      <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div
+          className="relative flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label="Decide"
         >
-          Accept
-        </button>
-        {reviewing && acceptAllCount > 0 && (
           <button
             type="button"
             className="tcip-btn h-7 text-[13px]"
-            onClick={onAcceptAll}
-            title="Accept every proposal shown on this image"
+            disabled={!canAccept}
+            onClick={onAccept}
+            title={`${K.accept.desc} (${K.accept.label})`}
           >
-            {`Accept all (${acceptAllCount})`}
+            Accept
           </button>
-        )}
-        <button
-          type="button"
-          className="tcip-btn h-7 text-[13px]"
-          disabled={focused?.kind !== "proposal"}
-          onClick={onEdit}
-          title={`${K.edit.desc} (${K.edit.label})`}
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          className="tcip-btn h-7 text-[13px]"
-          disabled={!canReject}
-          onClick={onReject}
-          title={`${K.reject.desc} (${K.reject.label})`}
-        >
-          Reject
-        </button>
-        <button
-          type="button"
-          className="tcip-btn h-7 text-[13px]"
-          aria-expanded={flagsOpen}
-          onClick={() => onFlagsOpen(!flagsOpen)}
-          title={`${K.flag.desc} (${K.flag.label})`}
-        >
-          Flag{flagCount > 0 ? ` (${flagCount})` : ""}
-        </button>
-        {flagsOpen && (
-          <FlagPanel
-            target={itemName(focused) ?? "this image"}
-            flags={flags}
-            onRaise={onFlag}
-            onResolve={onResolve}
-            onClose={() => onFlagsOpen(false)}
-          />
-        )}
-      </div>
+          {reviewing && acceptAllCount > 0 && (
+            <button
+              type="button"
+              className="tcip-btn h-7 text-[13px]"
+              onClick={onAcceptAll}
+              title="Accept every proposal shown on this image"
+            >
+              {`Accept all (${acceptAllCount})`}
+            </button>
+          )}
+          <button
+            type="button"
+            className="tcip-btn h-7 text-[13px]"
+            disabled={focused?.kind !== "proposal"}
+            onClick={onEdit}
+            title={`${K.edit.desc} (${K.edit.label})`}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className="tcip-btn h-7 text-[13px]"
+            disabled={!canReject}
+            onClick={onReject}
+            title={`${K.reject.desc} (${K.reject.label})`}
+          >
+            Reject
+          </button>
+          <button
+            type="button"
+            className="tcip-btn h-7 text-[13px]"
+            aria-expanded={flagsOpen}
+            onClick={() => onFlagsOpen(!flagsOpen)}
+            title={`${K.flag.desc} (${K.flag.label})`}
+          >
+            Flag{flagCount > 0 ? ` (${flagCount})` : ""}
+          </button>
+          {flagsOpen && (
+            <FlagPanel
+              target={itemName(focused) ?? "this image"}
+              flags={flags}
+              onRaise={onFlag}
+              onResolve={onResolve}
+              onClose={() => onFlagsOpen(false)}
+            />
+          )}
+        </div>
 
-      <Stepper
-        label="Item"
-        noun="item"
-        name={itemName(focused)}
-        position={position}
-        total={total}
-        canPrev={total > 0}
-        canNext={total > 0}
-        onStep={onStep}
-        onJump={onJump}
-      />
-      <label className="flex items-center gap-1.5 text-tcip-muted">
-        Step
-        <select
-          aria-label="Step through"
-          className="tcip-select h-7 text-[13px]"
-          value={scope}
-          onChange={(e) => onScope(e.target.value as StepScope)}
-        >
-          {STEP_SCOPES.map((s) => (
-            <option key={s} value={s}>
-              {`${STEP_SCOPE_WORDS[s]} (${scopeCounts[s]})`}
-            </option>
-          ))}
-        </select>
-      </label>
+        <Stepper
+          label="Item"
+          noun="item"
+          name={itemName(focused)}
+          position={position}
+          total={total}
+          canPrev={total > 0}
+          canNext={total > 0}
+          onStep={onStep}
+          onJump={onJump}
+        />
+        <label className="flex items-center gap-1.5 text-tcip-muted">
+          Step
+          <select
+            aria-label="Step through"
+            className="tcip-select h-7 text-[13px]"
+            value={scope}
+            onChange={(e) => onScope(e.target.value as StepScope)}
+          >
+            {STEP_SCOPES.map((s) => (
+              <option key={s} value={s}>
+                {`${STEP_SCOPE_WORDS[s]} (${scopeCounts[s]})`}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
     </div>
   );
 }
