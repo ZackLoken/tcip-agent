@@ -640,7 +640,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
   });
 
-  it("guard: a stale conflict for a since-left image is listed naming it, with nothing on the new image's canvas", async () => {
+  it("a stale conflict for a since-left image is listed naming it, with nothing on the new image's canvas", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -674,7 +674,7 @@ describe("AnnotateTab save/load race", () => {
     ]);
   });
 
-  it("guard: a save failing after its own image was reloaded is listed naming that image, with nothing on the canvas", async () => {
+  it("a save failing after its own image was reloaded is listed naming that image, with nothing on the canvas", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -938,7 +938,7 @@ describe("AnnotateTab point tool", () => {
     expect(useStore.getState().canvas.dirty).toBe(true);
   });
 
-  it("guard: refuses to place a point with no subject selected, and says so once on the canvas", async () => {
+  it("refuses to place a point with no subject selected, and says so once on the canvas", async () => {
     await mountPointMode();
     act(() => useStore.getState().setActiveSubject(null));
     fireEvent.click(stage(), { clientX: 10, clientY: 10 });
@@ -1272,7 +1272,7 @@ describe("AnnotateTab entries on the canvas", () => {
     );
   });
 
-  it("guard: a version conflict offers Reload on the canvas, which reloads the image, and none in the area", async () => {
+  it("a version conflict offers Reload on the canvas, which reloads the image, and none in the area", async () => {
     await refusedSave(await versionConflict());
 
     const [entry] = onCanvas();
@@ -1289,7 +1289,7 @@ describe("AnnotateTab entries on the canvas", () => {
     expect(inArea()).toHaveTextContent(CONFLICT_SENTENCE);
   });
 
-  it("guard: another save failure stands on the canvas offering no Reload", async () => {
+  it("another save failure stands on the canvas offering no Reload", async () => {
     await refusedSave(new Error("network down"));
 
     const [entry] = onCanvas();
@@ -1297,7 +1297,7 @@ describe("AnnotateTab entries on the canvas", () => {
     expect(within(entry).queryByRole("button", { name: "Reload" })).toBeNull();
   });
 
-  it("guard: a failure standing for one image is gone from the canvas as the next is stepped to, before its load lands", async () => {
+  it("a failure standing for one image is gone from the canvas as the next is stepped to, before its load lands", async () => {
     await refusedSave(new Error("network down"));
     expect(onCanvas()).toHaveLength(1);
 
@@ -2097,7 +2097,7 @@ describe("Cut gesture", () => {
   /** The refusal the canvas shows in place for the image in view. */
   const refusalOnCanvas = () => screen.getByTestId("entry-in-place");
 
-  it("guard: with none selected, the first click is refused on the canvas", async () => {
+  it("with none selected, the first click is refused on the canvas", async () => {
     const stage = await renderPolygonCanvas();
     act(() => useStore.getState().setCut(true));
     fireEvent.click(stage, { clientX: 500, clientY: 500, button: 0 });
@@ -2387,7 +2387,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     expect(listed()).toHaveLength(0);
   });
 
-  describe("guard: a freshly drawn box smaller than the minimum", () => {
+  describe("a freshly drawn box smaller than the minimum", () => {
     const TOO_SMALL = "Box too small to keep. Drag out a bigger area.";
 
     /** Mount over the first image and drag a box from (100, 100) by `side` on each axis. */
@@ -4046,7 +4046,7 @@ describe("AnnotateTab engine prompt", () => {
     ]);
   });
 
-  it("guard: a refused prompt is refused on the canvas, carrying the route's text", async () => {
+  it("a refused prompt is refused on the canvas, carrying the route's text", async () => {
     const { propose } = await mountArmed("point");
     const refusal = ANNOTATE_ANSWERS.engine_refusal;
     propose.mockRejectedValue(await thrown(refusal));
