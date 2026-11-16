@@ -87,7 +87,8 @@ answers with anything but 2xx is printed the same way, as a sentence with the an
 body, never raised.
 `TerminalSession.deliver`
 decides when a paste goes and what it carries; a launch, with no project open or one, pastes
-nothing the person did not submit. Each launch probes the version its harness declares
+nothing ahead of the first request the person submits, and the session's only text of its own is
+the hand-off request a switch of harness asks for. Each launch probes the version its harness declares
 and records it, so a harness updated in place is seen at its next launch. No timer-free signal tells
 a launch whose sequence never arrives from one still starting, and a sequence that moved earlier
 still pastes early. The child's environment is this process's own less every variable
