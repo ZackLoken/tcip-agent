@@ -324,7 +324,7 @@ function DatasetIdentityPanel({
       <div className="tcip-panel p-5">
         <div className="tcip-heading mb-3">Dataset identity</div>
         <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 empty:hidden">
             <NotificationItem
               placement="in place"
               entryKey={readKey}
