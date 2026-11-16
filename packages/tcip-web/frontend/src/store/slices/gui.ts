@@ -50,8 +50,7 @@ export interface GuiSlice {
   /** This backend process's launch identity, from the envelope; a change accepts a lower
    *  wsVersion instead of dropping it as a stale replay (a restarted backend's own snapshot). */
   wsEpoch: string | null;
-  /** The image the Annotate canvas last showed, kept across the tab's unmount so the tab tells,
-   *  by its path, when it mounts and at each change of image, that this image left the view. */
+  /** The image the Annotate canvas last showed, kept past the tab's unmount. */
   canvasShownImage: CaptureImage | null;
 
   patchGui: (partial: Partial<GuiState>) => void;
