@@ -96,12 +96,21 @@ def _fixed_double(
     repository at its head and the baseline revision.
     """
     repo = scratch_repo(tmp_path)
+    return repo, _double_repo(repo, test_source)
+
+
+def _double_repo(repo: Path, test_source: str = DOUBLE_GUARD) -> str:
+    """Commit a no-op ``double`` in ``repo``, then the fix beside ``test_source``.
+
+    The fix commit holds ``test_source`` as ``tests/test_widgets.py`` and changes ``widgets.py``
+    alone besides. Returns the baseline revision.
+    """
     write(repo / "widgets.py", "def double(x):\n    return x\n")
     baseline = commit_all(repo, "double is a no-op")
     write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
     write(repo / "tests" / "test_widgets.py", test_source)
     commit_all(repo, "double actually doubles")
-    return repo, baseline
+    return baseline
 
 
 def _redirect_temporary_folder(
@@ -2633,19 +2642,6 @@ def test_a_vitest_file_with_no_node_on_the_path_is_refused(
     assert _why(result).startswith(f"REFUSED: {NO_NODE_SENTENCE}")
 
 
-def _double_repo(repo: Path) -> str:
-    """Commit a no-op ``double`` in ``widgets.py``, then the fix and its guard; return the baseline.
-
-    The change between the two commits touches no frontend file.
-    """
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = commit_all(repo, "double is a no-op")
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    write(repo / "tests" / "test_widgets.py", DOUBLE_GUARD)
-    commit_all(repo, "double actually doubles")
-    return baseline
-
-
 def test_a_pytest_file_in_a_repository_holding_frontend_files_with_no_node_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2672,8 +2668,7 @@ def test_a_pytest_file_in_a_repository_holding_no_frontend_runs_without_node(
 ) -> None:
     """No path judged lies under the frontend, so ``node`` is never asked for and the run guards."""
     _redirect_temporary_folder(tmp_path, monkeypatch)
-    repo = scratch_repo(tmp_path)
-    baseline = _double_repo(repo)
+    repo, baseline = _fixed_double(tmp_path)
     _leave_only_git_on_the_path(monkeypatch)
 
     result = _run(repo, "tests/test_widgets.py", baseline)
