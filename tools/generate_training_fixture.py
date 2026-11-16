@@ -35,11 +35,14 @@ once every scene ran; the detail of every listed run, sweep and trial; once a ru
 dataset of its own is opened and that dataset's images removed (:data:`MOVED_RUN`), its data
 choices (``moved_split_choices``); once a run bound to a selection of its own is opened and that
 selection's record damaged (:data:`BOUND_RUN`), its data choices
-(``refused_bound_split_choices``); and, once the default trainer completes a regression run over
-:data:`VERIFIED_FRAMES` (:data:`VERIFIED_RUN`, ``tests._verified_checkpoint_fixtures.worker_run``),
-the comparison of it and the unstamped run (``compare_verified``) and their ranking by
-:data:`VERIFIED_METRIC` with unverified checkpoints left out (``verified_best``), the one ranking
-that does not include them. A refusal is kept with its status.
+(``refused_bound_split_choices``); the relaunch, bound to no selection, of a run whose split is
+drawn over a dataset holding frames with no label document (:data:`DRAWN_RUN`), whose answer
+carries the share of images that will not train (``drawn_relaunch``); and, once the default
+trainer completes a regression run over :data:`VERIFIED_FRAMES` (:data:`VERIFIED_RUN`,
+``tests._verified_checkpoint_fixtures.worker_run``), the comparison of it and the unstamped run
+(``compare_verified``) and their ranking by :data:`VERIFIED_METRIC` with unverified checkpoints
+left out (``verified_best``), the one ranking that does not include them. A refusal is kept with
+its status.
 
     python -m tools.generate_training_fixture
 """
@@ -138,6 +141,14 @@ UNDECLARED_RUN = "train-undeclared"
 UNSTAMPED_RUN = "train-unstamped"
 """The id of a completed run whose checkpoint carries no metric while its log carries one."""
 
+DRAWN_RUN = "train-drawn"
+"""The id of a run whose split is drawn over a dataset holding :data:`UNLABELED_FRAMES` frames with
+no label document, which its relaunch is answered with the share of images that will not train."""
+
+UNLABELED_FRAMES = 2
+"""The frames of the drawn run's dataset that carry no label document, so they will not train,
+beside the :data:`DATASET_FRAMES` labeled ones; a sample count."""
+
 VERIFIED_RUN = "train-verified"
 """The id of a regression run the default trainer completes, so its checkpoint's metrics are the
 trainer's."""
@@ -228,7 +239,7 @@ def produce() -> dict[str, JsonValue]:
         FRAME_STATISTICS,
         training_config,
     )
-    from tests._producer_fixtures import beat, fake_popen
+    from tests._producer_fixtures import beat, fake_popen, write_image
     from tests._record_damage_fixtures import damage_record
     from tests._training_values import drawn_split
     from tests._verified_checkpoint_fixtures import (
@@ -544,6 +555,30 @@ def produce() -> dict[str, JsonValue]:
         damage_record(selection_key(bound_selection), b"[]")
         served["refused_bound_split_choices"] = split_choices(BOUND_RUN)
 
+        drawn_images = detection_images(
+            workspace / "drawn-data", scope, n=DATASET_FRAMES
+        )
+        for frame in range(UNLABELED_FRAMES):
+            write_image(
+                Path(drawn_images["images_dir"]) / f"unlabeled{frame}.png",
+                (64, 48),
+            )
+        opened_run(
+            root,
+            training_config(
+                root, BUILT_DETECTOR, {**drawn_images, **SCOPED_DATA}
+            ),
+            experiment_id=DRAWN_RUN,
+        )
+        with pytest.MonkeyPatch.context() as patch:
+            fake_popen(patch, [])
+            served["drawn_relaunch"] = answered(
+                client,
+                "relaunch_route",
+                200,
+                RelaunchPayload(relaunched_from=DRAWN_RUN, user=ACTOR),
+            )
+
         verified_images, verified_values = write_regression_dataset(
             workspace / "verified", *zip(*VERIFIED_FRAMES, strict=True)
         )
@@ -575,6 +610,9 @@ def produce() -> dict[str, JsonValue]:
                 sweep: "<sweep id>",
                 agent_run: "<agent run id>",
                 relaunched: "<relaunched run id>",
+                RunLaunched.model_validate(
+                    served["drawn_relaunch"]
+                ).experiment_id: "<drawn relaunch id>",
                 SweepLaunched.model_validate(
                     sweep_relaunch
                 ).sweep_id: "<relaunched sweep id>",
