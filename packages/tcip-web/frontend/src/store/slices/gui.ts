@@ -3,6 +3,7 @@ import type { StateCreator } from "zustand";
 import {
   type CaptureImage,
   GUI_STATE_DEFAULTS,
+  type RefusedChoice,
   type SnapshotProject,
   type StateSnapshotMessage,
 } from "@/api/types.generated";
@@ -20,6 +21,15 @@ import type { DatasetSelection, GuiState, Mode, TabName, ViewState } from "@/sto
  *  whose own position the browser adopts. */
 function datasetIdentityChanged(a: DatasetSelection, b: DatasetSelection): boolean {
   return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
+}
+
+/** ``gui`` holding ``dataset`` and ``refused_choice``, the pair the backend owns, set together. */
+function holding(
+  gui: GuiState,
+  dataset: DatasetSelection | null,
+  refused_choice: RefusedChoice | null,
+): GuiState {
+  return { ...gui, dataset, refused_choice };
 }
 
 /** The tab a project opens on: the one last worked in, else the default tab. */
@@ -62,12 +72,14 @@ export interface GuiSlice {
   /** Adopt a new dataset selection of ``project`` in one store update, restoring the selection's
    *  saved position when the user has been here before (else the selection's own values).
    *  Establishes the new identity locally so a same-identity backend snapshot keeps the restored
-   *  index instead of resetting it to 0. */
+   *  index instead of resetting it to 0. A selection empties the refused choice; a null one, for
+   *  which no select answered, keeps the refused choice the page holds for the open ``project``
+   *  and holds none for another. */
   applyRestoredDataset: (sel: DatasetSelection | null, project: SnapshotProject) => void;
   /**
-   * Apply a backend state snapshot by ownership: the backend owns the dataset selection and the
-   * open project; the browser owns navigation/view/mode/subject state and keeps its own copy. The
-   * envelope's project and epoch are adopted in this one update.
+   * Apply a backend state snapshot by ownership: the backend owns the dataset selection, the
+   * refused choice and the open project; the browser owns navigation/view/mode/subject state and
+   * keeps its own copy. The envelope's project and epoch are adopted in this one update.
    */
   mergeSnapshot: (envelope: StateSnapshotMessage) => void;
   setActiveTab: (tab: TabName) => void;
@@ -85,7 +97,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   canvasShownImage: null,
 
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
-  clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: null } })),
+  clearDataset: () => set((s) => ({ gui: holding(s.gui, null, null) })),
 
   saveCurrentDatasetUi: () => {
     const s = get();
@@ -100,17 +112,16 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
     set((s) => {
       const restored = sel && loadDatasetUi(datasetKey(project, sel));
       return {
-        gui: {
-          ...s.gui,
-          active_tab: landingTab(project),
-          dataset:
-            sel && restored && sel.images.length
-              ? {
-                  ...sel,
-                  current_image_index: Math.max(0, Math.min(restored.index, sel.images.length - 1)),
-                }
-              : sel,
-        },
+        gui: holding(
+          { ...s.gui, active_tab: landingTab(project) },
+          sel && restored && sel.images.length
+            ? {
+                ...sel,
+                current_image_index: Math.max(0, Math.min(restored.index, sel.images.length - 1)),
+              }
+            : sel,
+          sel === null && project.id === s.openProject?.id ? s.gui.refused_choice : null,
+        ),
         openProject: project,
       };
     });
@@ -132,7 +143,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       if (project?.id !== s.openProject?.id) {
         adoptedOther = true;
         return {
-          gui: project ? adoptedGui(incoming, project) : { ...local, dataset: null },
+          gui: project ? adoptedGui(incoming, project) : holding(local, null, null),
           openProject: project,
           wsVersion: nextVersion,
           wsEpoch: epoch,
@@ -140,7 +151,11 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       }
 
       if (!inDs) {
-        return { gui: { ...local, dataset: null }, wsVersion: nextVersion, wsEpoch: epoch };
+        return {
+          gui: holding(local, null, incoming.refused_choice),
+          wsVersion: nextVersion,
+          wsEpoch: epoch,
+        };
       }
 
       // Boot hydration: no local dataset to protect, so adopt the persisted mode/filters/position;
@@ -157,23 +172,24 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         // New dataset selection: adopt it wholesale (including its index). The active tab stays
         // put.
         return {
-          gui: { ...local, dataset: inDs },
+          gui: holding(local, inDs, incoming.refused_choice),
           wsVersion: nextVersion,
           wsEpoch: epoch,
         };
       }
       // Same capture: the backend's selection and images, at the user's own position in them.
       return {
-        gui: {
-          ...local,
-          dataset: {
+        gui: holding(
+          local,
+          {
             ...inDs,
             current_image_index: Math.min(
               local.dataset.current_image_index,
               Math.max(0, inDs.images.length - 1),
             ),
           },
-        },
+          incoming.refused_choice,
+        ),
         wsVersion: nextVersion,
         wsEpoch: epoch,
       };

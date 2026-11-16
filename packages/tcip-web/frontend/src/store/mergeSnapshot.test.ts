@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 
-import type { StateSnapshotMessage } from "@/api/types.generated";
+import type { RefusedChoice, StateSnapshotMessage } from "@/api/types.generated";
 import { recordLastTab } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import type { DatasetSelection, GuiState } from "@/store/types";
 import {
   DS_BUCKET,
   GROUPED_SELECTION,
+  LATER_SELECTION,
+  openTestProject,
   RAW_SELECTION,
+  REFUSED_ENVELOPE,
+  RESELECTED_ENVELOPE,
   SELECTED_SUBJECT as SUBJECT,
   selected,
   type SelectionChange,
@@ -36,6 +40,7 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
     view: { scale: 1, offset_x: 0, offset_y: 0 },
     mode: "box",
     active_subject: SUBJECT,
+    refused_choice: null,
     ...over,
   };
 }
@@ -245,6 +250,84 @@ describe("mergeSnapshot ownership model", () => {
   });
 });
 
+describe("the refused choice, held with the dataset as the backend's pair", () => {
+  const { refused_choice: REFUSED } = REFUSED_ENVELOPE.state;
+
+  /** Open the test project holding no dataset and `refused`, at the produced envelopes' version
+   *  and epoch. */
+  function hold(refused: RefusedChoice | null) {
+    openTestProject(null);
+    useStore.setState((st) => ({
+      gui: { ...st.gui, refused_choice: refused },
+      wsVersion: REFUSED_ENVELOPE.version,
+      wsEpoch: REFUSED_ENVELOPE.epoch,
+    }));
+  }
+
+  it("is adopted from an envelope for the project already open carrying no dataset", () => {
+    hold(null);
+
+    s().mergeSnapshot(REFUSED_ENVELOPE);
+
+    expect(REFUSED).not.toBeNull();
+    expect(s().gui.refused_choice).toEqual(REFUSED);
+    expect(s().gui.dataset).toBeNull();
+  });
+
+  it("is emptied by a select's answer applied before its envelope arrives", () => {
+    hold(REFUSED);
+
+    s().applyRestoredDataset(LATER_SELECTION, PROJECT);
+
+    expect(s().gui.refused_choice).toBeNull();
+    expect(s().gui.dataset?.date).toBe(LATER_SELECTION.date);
+  });
+
+  it("is kept by a null selection applied for the open project, for which no select answered", () => {
+    hold(null);
+    s().mergeSnapshot(REFUSED_ENVELOPE);
+
+    s().applyRestoredDataset(null, PROJECT);
+
+    expect(s().gui.refused_choice).toEqual(REFUSED);
+    expect(s().gui.dataset).toBeNull();
+  });
+
+  it("is not carried to another project by a null selection applied for it", () => {
+    hold(REFUSED);
+
+    s().applyRestoredDataset(null, OTHER);
+
+    expect(s().gui.refused_choice).toBeNull();
+    expect(s().openProject).toEqual(OTHER);
+  });
+
+  it("is emptied by an envelope for another project", () => {
+    hold(REFUSED);
+
+    s().mergeSnapshot(stateEnvelope({ version: 1, project: OTHER }));
+
+    expect(s().gui.refused_choice).toBeNull();
+  });
+
+  it("is emptied by an envelope naming no project", () => {
+    hold(REFUSED);
+
+    s().mergeSnapshot(stateEnvelope({ version: 1, project: null }));
+
+    expect(s().gui.refused_choice).toBeNull();
+  });
+
+  it("is emptied by an envelope carrying a selection", () => {
+    hold(REFUSED);
+
+    s().mergeSnapshot(RESELECTED_ENVELOPE);
+
+    expect(s().gui.refused_choice).toBeNull();
+    expect(s().gui.dataset).toEqual(RESELECTED_ENVELOPE.state.dataset);
+  });
+});
+
 describe("applyRestoredDataset", () => {
   beforeEach(() => {
     useStore.setState({ gui: snapshot({ dataset: dataset() }), openProject: PROJECT });
@@ -262,5 +345,15 @@ describe("clearDataset", () => {
     useStore.setState({ gui: snapshot({ dataset: dataset() }) });
     s().clearDataset();
     expect(s().gui.dataset).toBeNull();
+  });
+
+  it("clears a refused choice the page holds", () => {
+    const { refused_choice: refused } = REFUSED_ENVELOPE.state;
+    expect(refused).not.toBeNull();
+    useStore.setState({ gui: snapshot({ dataset: null, refused_choice: refused }) });
+
+    s().clearDataset();
+
+    expect(s().gui.refused_choice).toBeNull();
   });
 });

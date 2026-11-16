@@ -9,6 +9,8 @@ import { useStore } from "@/store";
 import { selectStanding } from "@/store/slices/notifications";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import {
+  openTestProject,
+  REFUSED_ENVELOPE,
   SELECTED_SUBJECT as SUBJECT,
   selected,
   stateEnvelope,
@@ -41,10 +43,15 @@ const [{ name: LATER }] = VALLEY.tree.captures;
 
 const SELECT_ANSWER = SUBJECT_SELECT_ANSWER;
 
-/** Open the listed project `p` on the produced capture of photographs, or on none. */
+/** Open the listed project `p` on the produced capture of photographs, or on none, no capture
+ *  refused. */
 function openOn(p: ReadProject, captured = true) {
   useStore.setState((st) => ({
-    gui: { ...st.gui, dataset: captured ? selected({ subject: SUBJECT }) : null },
+    gui: {
+      ...st.gui,
+      dataset: captured ? selected({ subject: SUBJECT }) : null,
+      refused_choice: null,
+    },
     openProject: openedAs(p).project,
   }));
 }
@@ -170,6 +177,21 @@ describe("footer open state", () => {
     expect(await screen.findByText(VALLEY.record.display_name)).toBeInTheDocument();
     expect(screen.getByText("No dated images")).toBeInTheDocument();
     expect(screen.queryByTitle("Switch date")).not.toBeInTheDocument();
+  });
+
+  it("states the saved capture the backend could not list where its date would be", () => {
+    const { refused_choice: refused } = REFUSED_ENVELOPE.state;
+    if (refused === null) throw new Error("the produced reopen refused no capture");
+    openTestProject(null);
+    useStore.setState({ wsVersion: REFUSED_ENVELOPE.version, wsEpoch: REFUSED_ENVELOPE.epoch });
+    useStore.getState().mergeSnapshot(REFUSED_ENVELOPE);
+
+    render(<ProjectBreadcrumb />);
+
+    const line = screen.getByText(`${refused.choice.date} cannot be listed`);
+    expect(line).toHaveAttribute("title", refused.sentence);
+    expect(screen.queryByText(refused.sentence)).not.toBeInTheDocument();
+    expect(screen.queryByText("No dated images")).not.toBeInTheDocument();
   });
 
   it("reads Loading in place of the project name until the listing answers", () => {

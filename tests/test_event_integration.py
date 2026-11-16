@@ -429,36 +429,21 @@ class TestPostPanelEventRoute:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The event ``focus_human_attention`` posts sets the advisory state it names."""
-        from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
-        from tcip_mcp.web_client import PanelEventAnswer, PanelEventTaken
-        from tests._web_fixtures import bound_to
+        from tests._web_fixtures import posted_focus
 
-        posted: dict = {}
-
-        def _capture(
-            target: BoundProject, panel: Panel, event: PanelEvent
-        ) -> PanelEventAnswer:
-            posted.update(project_id=target.id, panel=panel, event=event)
-            return PanelEventTaken(url="u")
-
-        monkeypatch.setattr(web_client, "post_panel_event", _capture)
-        res = focus_human_attention(
-            bound_to(opened),
-            str(data_dir.root),
-            "bud",
-            "2-11-26",
-            mode="point",
-            image_index=2,
-        )
-        assert "error" not in res, res
-        assert isinstance(posted["event"], AnnotateFocus)
-
-        resp = _post(
+        resp = posted_focus(
             opened_client,
-            posted["panel"],
-            posted["event"],
-            posted["project_id"],
+            opened,
+            monkeypatch,
+            lambda bound: focus_human_attention(
+                bound,
+                str(data_dir.root),
+                "bud",
+                "2-11-26",
+                mode="point",
+                image_index=2,
+            ),
         )
         assert resp.status_code == 200, resp.text
         state = opened_client.get("/api/state").json()

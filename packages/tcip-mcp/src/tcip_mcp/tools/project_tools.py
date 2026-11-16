@@ -482,9 +482,11 @@ def view_gui_state(project: Path) -> dict:
     """Read the GUI state the human last left in this project.
 
     The state comes from its GUI snapshot (``web_client.read_gui_snapshot``): the tab, the mode
-    and the dataset selection, ``None`` while no capture is chosen, whose ``images`` entry at
-    ``current_image_index`` is the image in view. A ``note`` stands in for all of it when the GUI
-    has persisted nothing for this project; a snapshot that will not read raises.
+    and the dataset selection, whose ``images`` entry at ``current_image_index`` is the image in
+    view. The selection is ``None`` while no capture is chosen or the chosen one would not list;
+    ``refused_choice`` then holds that chosen capture and the sentence it was refused with. A
+    ``note`` stands in for all of it when the GUI has persisted nothing for this project; a
+    snapshot that will not read raises.
     """
     from tcip_mcp.web_client import read_gui_snapshot
 

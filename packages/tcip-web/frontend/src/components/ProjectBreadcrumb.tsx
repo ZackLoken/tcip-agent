@@ -21,6 +21,7 @@ const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "results"]);
 
 export function ProjectBreadcrumb() {
   const dataset = useStore((s) => s.gui.dataset);
+  const refused = useStore((s) => s.gui.refused_choice);
   const openProject = useStore((s) => s.openProject);
   const user = useStore((s) => s.user);
   const clearDataset = useStore((s) => s.clearDataset);
@@ -131,6 +132,10 @@ export function ProjectBreadcrumb() {
         >
           {dataset.date}
         </button>
+      ) : refused ? (
+        <span title={refused.sentence} className="font-mono tcip-problem">
+          {refused.choice.date} cannot be listed
+        </span>
       ) : (
         <span className="font-mono text-tcip-muted">No dated images</span>
       )}

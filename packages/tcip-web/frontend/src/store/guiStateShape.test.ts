@@ -40,6 +40,7 @@ describe("adopting a different dataset selection", () => {
         view: { scale: 2, offset_x: 30, offset_y: 70 },
         mode: "polygon",
         active_subject: subject,
+        refused_choice: null,
       },
       openProject: project,
       wsVersion: 4,
@@ -51,6 +52,7 @@ describe("adopting a different dataset selection", () => {
       view: { scale: 1, offset_x: 0, offset_y: 0 },
       mode: "box",
       active_subject: focused,
+      refused_choice: null,
     };
 
     s().mergeSnapshot(stateEnvelope({ state: incoming, version: 5, project }));

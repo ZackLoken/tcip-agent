@@ -95,8 +95,11 @@ class NoSelectionError(ValueError):
 def selected(state: GuiState) -> DatasetSelection:
     """Return ``state``'s capture selection.
 
-    Raises :class:`NoSelectionError` naming the select route when none is selected.
+    Raises :class:`NoSelectionError` when none is held: carrying the sentence the chosen capture
+    was refused with while ``state`` holds a refused choice, else naming the select route.
     """
+    if state.refused_choice is not None:
+        raise NoSelectionError(state.refused_choice.sentence)
     if state.dataset is None:
         raise NoSelectionError(
             "no capture is selected; select one through /api/dataset/select"

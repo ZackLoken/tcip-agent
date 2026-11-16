@@ -1,7 +1,7 @@
 """The agent reads the GUI state the web backend persisted through ``view_gui_state``.
 
-The dataset selection the agent reads for the project it acts on equals the one a reopened
-backend store holds.
+The dataset selection and the refused choice the agent reads for the project it acts on equal the
+ones a reopened backend store holds.
 """
 
 from __future__ import annotations
@@ -59,6 +59,11 @@ def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(
 
     assert reopened.state.dataset is not None
     assert ctx["dataset"] == reopened.state.dataset.model_dump(mode="json")
+    assert (
+        ctx["refused_choice"]
+        == reopened.state.model_dump(mode="json")["refused_choice"]
+        is None
+    )
     assert (
         ctx["dataset"]["subject"] == "bud"
         and ctx["dataset"]["date"] == "2026-02-11"

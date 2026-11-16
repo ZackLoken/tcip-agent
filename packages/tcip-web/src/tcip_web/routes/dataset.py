@@ -286,7 +286,9 @@ class SelectAnswer(BaseModel):
 
 @router.post("/select")
 async def select_dataset(req: CaptureChoice) -> SelectAnswer:
-    """Set the open project's ``GuiState.dataset`` selection; broadcasts a state delta.
+    """Set the open project's ``GuiState.dataset`` selection, emptying its refused choice.
+
+    Broadcasts a state delta.
 
     Answers 409 while no project is open, and 400 for a bucket name no bucket is published
     under, a ``date`` that is no capture name or a capture holding two images of one stem.
@@ -329,7 +331,10 @@ async def select_dataset(req: CaptureChoice) -> SelectAnswer:
         )
     except (LogicalImageError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    await store.mutate(lambda _held: {"dataset": selection}, project=project)
+    await store.mutate(
+        lambda _held: {"dataset": selection, "refused_choice": None},
+        project=project,
+    )
 
     found, unreadable = capture_subjects(root, req.date)
     return SelectAnswer(

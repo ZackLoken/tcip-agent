@@ -6,7 +6,8 @@
       "view": { "scale": 1.0, "offset_x": 0.0, "offset_y": 0.0 },
       "mode": "box",
       "active_subject": null,
-      "dataset": null
+      "dataset": null,
+      "refused_choice": null
     },
     "version": 0,
     "type": "state_snapshot",
@@ -179,5 +180,53 @@
       { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
       { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
     ]
+  },
+  "refused_envelope": {
+    "state": {
+      "active_tab": "annotate",
+      "view": { "scale": 1.0, "offset_x": 0.0, "offset_y": 0.0 },
+      "mode": "box",
+      "active_subject": null,
+      "dataset": null,
+      "refused_choice": {
+        "choice": {
+          "dataset_root": "/scratch/workspace/valley/refused",
+          "subject": null,
+          "date": "2026-01-09",
+          "bucket": null,
+          "current_image_index": 0
+        },
+        "sentence": "/scratch/workspace/valley/refused/images/2026-01-09: ['/scratch/workspace/valley/refused/images/2026-01-09/A.png', '/scratch/workspace/valley/refused/images/2026-01-09/a.jpg'] name more than one logical image under one case-folded stem, refusing to silently keep one. Rename so each logical image has its own stem."
+      }
+    },
+    "version": 0,
+    "type": "state_snapshot",
+    "project": { "id": "<valley id>", "path": "/scratch/workspace/valley" },
+    "epoch": "<epoch n0>",
+    "bundle": null
+  },
+  "reselected_envelope": {
+    "state": {
+      "active_tab": "annotate",
+      "view": { "scale": 1.0, "offset_x": 0.0, "offset_y": 0.0 },
+      "mode": "box",
+      "active_subject": null,
+      "dataset": {
+        "dataset_root": "/scratch/workspace/valley/ds",
+        "subject": null,
+        "date": "2026-01-08",
+        "bucket": null,
+        "current_image_index": 0,
+        "images": [
+          { "path": "/scratch/workspace/valley/ds/images/2026-01-08/img1.jpg", "name": "img1.jpg" }
+        ]
+      },
+      "refused_choice": null
+    },
+    "version": 0,
+    "type": "state_snapshot",
+    "project": { "id": "<valley id>", "path": "/scratch/workspace/valley" },
+    "epoch": "<epoch n0>",
+    "bundle": null
   }
 }
