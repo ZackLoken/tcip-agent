@@ -1024,6 +1024,19 @@ describe("App job entries", () => {
     expect(listedSentences()).toContain(RUN_RUNNING);
   });
 
+  it("tells a run a later answer first lists interrupted nothing, nor its end after", async () => {
+    await watchFromMeta([{ runs: [], sweeps: [] }, STALLED_LISTING, TRAINING_LISTING], []);
+    const aboutStreamed = () =>
+      useStore.getState().notifications.filter((e) => e.context.target === streamed);
+
+    await next(RUN_REFRESH_MS);
+    expect(listedSentences()).toContain(`Training run ${RUNS.agent.experiment_id}: running`);
+    expect(aboutStreamed()).toEqual([]);
+
+    await next(RUN_REFRESH_MS);
+    expect(aboutStreamed()).toEqual([]);
+  });
+
   it("tells nothing when another project opens and its listings answer empty, and what changed once the first opens again", async () => {
     const valley = [LISTING_BEFORE_FAILURE, TRAINING_LISTING];
     const inValley = () => useStore.getState().openProject?.id === VALLEY.record.id;
