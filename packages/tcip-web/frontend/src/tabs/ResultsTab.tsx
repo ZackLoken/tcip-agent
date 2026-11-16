@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -35,11 +35,13 @@ import {
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { ErrorRetry } from "@/components/ErrorRetry";
+import { NotificationItem } from "@/components/Notifications";
 import { TabHeading } from "@/components/TabHeading";
 import { useMappingNames } from "@/hooks/useMappingNames";
 import { deliveredDatesLine, unverifiedCapturesLine } from "@/lib/disclosureLines";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { bucketsForDate } from "@/lib/openProject";
+import { tell } from "@/lib/tell";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
@@ -56,6 +58,10 @@ function auditGapExportMessage(savedPath: string, detail: string): string {
     `again is a second delivery with its own event. ${detail}`
   );
 }
+
+/** The key what the last export of `kind` told stands on in the project `projectId`. */
+const exportKey = (kind: "phenology" | "count", projectId: string | undefined) =>
+  `results-export-${kind}:${projectId}`;
 
 /** What a measurement's plant mapping disclosed: its delivered dates and what it could not verify
  *  at delivery time. */
@@ -74,6 +80,11 @@ function MappingDisclosureLines({ disclosure }: { disclosure: PlantMappingDisclo
 export function ResultsTab() {
   const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = useStore(selectDatasetRoot);
+  const projectId = useStore((s) => s.openProject?.id);
+  const phenologyExportKey = exportKey("phenology", projectId);
+  const countExportKey = exportKey("count", projectId);
+  const computeButton = useRef<HTMLButtonElement>(null);
+  const countExportButton = useRef<HTMLButtonElement>(null);
 
   // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");
@@ -250,6 +261,7 @@ export function ResultsTab() {
     if (!lastInputs || answer === null) return;
     const { validation } = answer;
     if (validation.kind === SHOWN_UNVALIDATED && !ackReason.trim()) return;
+    useStore.getState().releaseNotification(phenologyExportKey);
     try {
       const body: ExportCsvPayload = {
         ...lastInputs,
@@ -270,7 +282,13 @@ export function ResultsTab() {
     } catch (e) {
       const committed = committedOf<SavedExport>(e);
       if (committed) {
-        useStore.getState().pushToast(auditGapExportMessage(committed.saved_path, messageOf(e)));
+        tell(
+          "notice",
+          "warning",
+          auditGapExportMessage(committed.saved_path, messageOf(e)),
+          lastInputs.trait,
+          phenologyExportKey,
+        );
         return;
       }
       // The download door refuses through the same structured family, so it lands in the panel.
@@ -279,7 +297,13 @@ export function ResultsTab() {
         setOperationalizationRefusal(refusal);
         return;
       }
-      useStore.getState().pushToast(`CSV export failed: ${messageOf(e)}`);
+      tell(
+        "failure",
+        "error",
+        `CSV export failed: ${messageOf(e)}`,
+        lastInputs.trait,
+        phenologyExportKey,
+      );
     }
   }
 
@@ -297,6 +321,8 @@ export function ResultsTab() {
     setCountError(null);
     setCountOperationalizationRefusal(null);
     setCountExported(null);
+    useStore.getState().releaseNotification(countExportKey);
+    const filename = countFilename.trim();
     try {
       const delivery: ExportCountCsvPayload["delivery"] =
         countKind === "per_image_count"
@@ -321,7 +347,7 @@ export function ResultsTab() {
             };
       const body: ExportCountCsvPayload = {
         delivery,
-        filename: countFilename.trim(),
+        filename,
         user: useStore.getState().user,
         acknowledgment:
           countGateRefusal?.shipping.kind === ACKNOWLEDGEABLE
@@ -343,7 +369,13 @@ export function ResultsTab() {
     } catch (e) {
       const committed = committedOf<SavedExport>(e);
       if (committed) {
-        setCountError(auditGapExportMessage(committed.saved_path, messageOf(e)));
+        tell(
+          "notice",
+          "warning",
+          auditGapExportMessage(committed.saved_path, messageOf(e)),
+          filename,
+          countExportKey,
+        );
         return;
       }
       const opRefusal = refusalOf<OperationalizationRefusal>(e, OPERATIONALIZATION);
@@ -567,6 +599,11 @@ export function ResultsTab() {
           </div>
 
           <div className="flex flex-col gap-2">
+            <NotificationItem
+              placement="in place"
+              entryKey={countExportKey}
+              afterDismiss={() => countExportButton.current?.focus()}
+            />
             {countError && <div className="tcip-problem">{countError}</div>}
             {countOperationalizationRefusal && (
               <div className="tcip-problem">{countOperationalizationRefusal.message}</div>
@@ -593,6 +630,7 @@ export function ResultsTab() {
               </div>
             )}
             <button
+              ref={countExportButton}
               className="tcip-btn-primary"
               onClick={() => void exportCountCsv()}
               disabled={
@@ -720,6 +758,7 @@ export function ResultsTab() {
                 )}
                 {answer && <MappingDisclosureLines disclosure={answer.plant_mapping} />}
                 <button
+                  ref={computeButton}
                   className="tcip-btn-primary"
                   onClick={() => void compute()}
                   disabled={loading}
@@ -781,6 +820,11 @@ export function ResultsTab() {
                     </div>
                   </div>
                 )}
+                <NotificationItem
+                  placement="in place"
+                  entryKey={phenologyExportKey}
+                  afterDismiss={() => computeButton.current?.focus()}
+                />
               </div>
             </div>
             {error && <div className="mt-2 tcip-problem">{error}</div>}

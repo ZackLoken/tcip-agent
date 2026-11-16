@@ -28,8 +28,16 @@ import {
   disclosureOf,
   RESULTS_ANSWERS,
 } from "@/test/deliveryRecords";
+import { entriesSaying } from "@/test/notifications";
 import { fetchAnswers, thrown } from "@/test/refusals";
-import { DATASET_TREES, DS_BUCKET, DS_DATE, openTestProject, RAW_SELECTION } from "@/test/store";
+import {
+  DATASET_TREES,
+  DS_BUCKET,
+  DS_DATE,
+  openTestProject,
+  RAW_SELECTION,
+  TEST_PROJECT,
+} from "@/test/store";
 import { TERMINAL_ANSWERS } from "@/test/terminal";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
@@ -45,6 +53,10 @@ const [VALIDATED_ROW] = VALIDATED.milestones;
 
 /** The trait the produced results listing confirms. */
 const [{ trait: TRAIT }] = TRAIT_LISTINGS.results.traits;
+
+/** The Phenology panel, which holds the CSV export's buttons. */
+const phenologyPanel = () =>
+  screen.getByRole("heading", { name: "Phenology" }).closest(".tcip-panel") as HTMLElement;
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
@@ -273,7 +285,7 @@ describe("ResultsTab evidence gate", () => {
     expect(screen.getByText("valid")).toBeInTheDocument();
   });
 
-  it("toasts the second-delivery sentence naming the saved path when the CSV export's audit line is lost", async () => {
+  it("shows the second-delivery sentence naming the saved path as a warning in place beside the CSV buttons when the export's audit line is lost", async () => {
     mockDatasetTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
     const gap = RESULTS_ANSWERS.export_audit_gap.body.detail;
@@ -285,31 +297,39 @@ describe("ResultsTab evidence gate", () => {
     await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
 
-    await waitFor(() => {
-      const toast = useStore.getState().toasts.at(-1)?.message ?? "";
-      expect(toast).toContain(gap.what.saved_path);
-      expect(toast).toContain("already written");
-      expect(toast).toContain("second delivery");
-      expect(toast).toContain(gap.message);
-    });
+    const line = await within(phenologyPanel()).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(`The file is already written at ${gap.what.saved_path},`);
+    expect(line).toHaveTextContent("second delivery");
+    expect(line).toHaveTextContent(gap.message);
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ kind: "notice", level: "warning", count: 1 }),
+    ]);
+    // A long sentence's dismiss control is named by its first words.
+    expect(
+      within(line).getByRole("button", {
+        name: /^Dismiss: The file is already written at… \(\d\d:\d\d/,
+      }),
+    ).toBeInTheDocument();
   });
 
   it.each([
     ["says nothing committed", TERMINAL_ANSWERS.start_audit_gap],
     ["says a change committed and names no file", RESULTS_ANSWERS.mapping_audit_gap],
-  ])("toasts a failed CSV export for an audit-gap refusal that %s", async (_name, gap) => {
+  ])("shows a failed CSV export in place for an audit-gap refusal that %s", async (_name, gap) => {
     mockDatasetTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
     vi.spyOn(resultsApi, "downloadCsv").mockRejectedValue(await thrown(gap));
+    const sentence = `CSV export failed: ${gap.body.detail.message}`;
 
     await renderAndCompute();
     await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
 
-    await waitFor(() => {
-      const toast = useStore.getState().toasts.at(-1)?.message ?? "";
-      expect(toast).toBe(`CSV export failed: ${gap.body.detail.message}`);
-    });
+    const line = await within(phenologyPanel()).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(sentence);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({ kind: "failure", level: "error" }),
+    ]);
   });
 
   it("shows the row count only after a compute", async () => {
@@ -766,7 +786,7 @@ describe("ResultsTab count export", () => {
     expect(delivery).toMatchObject({ position_error_m: null, canopy_subject: "" });
   });
 
-  it("shows the second-delivery sentence naming the saved path when the count export's audit line is lost", async () => {
+  it("shows the second-delivery sentence naming the saved path as a warning in place when the count export's audit line is lost", async () => {
     const panel = await renderCountPanel();
     const gap = RESULTS_ANSWERS.count_export_audit_gap.body.detail;
     vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(
@@ -778,11 +798,18 @@ describe("ResultsTab count export", () => {
     fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
-    const errorText = await within(panel).findByText((content) =>
-      content.startsWith(`The file is already written at ${gap.what.saved_path},`),
-    );
-    expect(errorText.textContent).toContain("second delivery");
-    expect(errorText.textContent).toContain(gap.message);
+    const line = await within(panel).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(`The file is already written at ${gap.what.saved_path},`);
+    expect(line).toHaveTextContent("second delivery");
+    expect(line).toHaveTextContent(gap.message);
+    expect(within(panel).getAllByText(/already written/)).toHaveLength(1);
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "warning",
+        context: { project: TEST_PROJECT.id, target: "counts.csv" },
+      }),
+    ]);
   });
 
   it.each([
