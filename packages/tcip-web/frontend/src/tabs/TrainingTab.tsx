@@ -414,9 +414,15 @@ export function TrainingTab() {
       selection_dir: selectionDir,
       user: useStore.getState().user,
     });
+    const target = result.kind === "sweep" ? result.sweep_id : result.experiment_id;
+    for (const warning of result.warnings) tell("notice", "warning", warning, target);
+    if (result.kind === "run" && result.tensorboard.kind === "failed") {
+      const { error } = result.tensorboard;
+      tell("notice", "warning", `TensorBoard did not start with the launch: ${error}`, target);
+    }
     setPickerOpen(false);
     listRunsNow();
-    setSelectedRun(result.kind === "sweep" ? result.sweep_id : result.experiment_id);
+    setSelectedRun(target);
   }
 
   const streaming = selectedRun !== null && !selectedSweep;

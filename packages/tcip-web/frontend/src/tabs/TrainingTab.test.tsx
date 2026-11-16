@@ -28,6 +28,7 @@ import {
   BATCH_FRAMES,
   CANCEL,
   COMPARISONS,
+  DRAWN_RELAUNCH,
   LISTING_BEFORE_FAILURE,
   METRIC_FRAMES,
   RUN_RELAUNCH,
@@ -835,6 +836,61 @@ describe("TrainingTab launch picker", () => {
         user: "jordan",
       }),
     );
+  });
+
+  /** Start the unlaunched run as recorded from the open picker, the relaunch door answering
+   *  `answer`; return the notices the person has been told about `answer`'s run. */
+  async function noticesOfStartAnswering(answer: typeof RUN_RELAUNCH) {
+    openTestProject();
+    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(SPLIT_CHOICES);
+    const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(answer);
+    const picker = await openPicker();
+    fireEvent.click(within(picker).getByText(id));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(relaunchSpy).toHaveBeenCalled());
+    const target = answer.kind === "sweep" ? answer.sweep_id : answer.experiment_id;
+    await waitFor(() => expect(screen.queryByText("Runs and sweeps in this project")).toBeNull());
+    return useStore
+      .getState()
+      .notifications.filter((e) => e.kind === "notice" && e.context.target === target);
+  }
+
+  it("tells a started run's TensorBoard that did not start as a warning, with the failure's error", async () => {
+    if (RUN_RELAUNCH.kind !== "run" || RUN_RELAUNCH.tensorboard.kind !== "failed") {
+      throw new Error("the produced run relaunch holds no failed TensorBoard");
+    }
+    const { error } = RUN_RELAUNCH.tensorboard;
+
+    const notices = await noticesOfStartAnswering(RUN_RELAUNCH);
+
+    expect(notices).toHaveLength(1);
+    const [notice] = notices;
+    expect(notice.sentence).toContain(error);
+    expect(notice).toMatchObject({
+      level: "warning",
+      count: 1,
+      context: { project: TEST_PROJECT.id, target: RUN_RELAUNCH.experiment_id },
+    });
+    expect(notice.key).toBeUndefined();
+  });
+
+  it("tells each warning of a started run's answer whole, the share of images that will not train among them", async () => {
+    if (DRAWN_RELAUNCH.kind !== "run") throw new Error("the produced drawn relaunch is no run");
+    const { experiment_id, warnings } = DRAWN_RELAUNCH;
+    expect(warnings.some((w) => /candidate images .* will not train/.test(w))).toBe(true);
+
+    const notices = await noticesOfStartAnswering(DRAWN_RELAUNCH);
+
+    for (const warning of warnings) {
+      expect(notices.filter((e) => e.sentence === warning)).toEqual([
+        expect.objectContaining({
+          level: "warning",
+          count: 1,
+          context: { project: TEST_PROJECT.id, target: experiment_id },
+        }),
+      ]);
+    }
   });
 
   it("starts a recorded sweep again by its id, with no data choice to fetch", async () => {
