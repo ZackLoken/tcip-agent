@@ -497,6 +497,19 @@ describe("ProjectPicker", () => {
       await act(() => startOpen(RIDGE, ridgeDate, null, null));
       expect(within(screen.getByTestId("entry-in-place")).getByText(/ridge refused/)).toBeVisible();
     });
+
+    it("dismissed on its card, moves focus to that card's Open button", async () => {
+      vi.mocked(api.projects.list).mockResolvedValue(LISTING);
+      vi.mocked(api.projects.open).mockRejectedValueOnce(new Error("valley refused"));
+      render(<ProjectPicker />);
+      fireEvent.click(await screen.findByText(VALLEY.record.display_name));
+      await act(() => startOpen(VALLEY, null, null, null));
+
+      const entry = screen.getByTestId("entry-in-place");
+      fireEvent.click(within(entry).getByRole("button", { name: /^Dismiss: valley refused/ }));
+      expect(screen.queryByTestId("entry-in-place")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open" })).toHaveFocus();
+    });
   });
 
   it("marks the project the listing names as open", async () => {
