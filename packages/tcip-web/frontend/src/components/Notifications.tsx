@@ -3,6 +3,7 @@ import { forwardRef, useId } from "react";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { useStore } from "@/store";
 import {
+  type EntryAction,
   LEVELS,
   type NotificationEntry,
   selectHoldingLevel,
@@ -62,16 +63,17 @@ export const NotificationsButton = forwardRef<
 });
 
 /** Where an entry is shown: in the notifications area, or in place beside the control it stands
- *  for, where it is the entry standing on `entryKey` and `afterDismiss` puts focus back. */
+ *  for, where it is the entry standing on `entryKey`, `afterDismiss` puts focus back, and
+ *  `action`, when given, is the placing control's own, offered beside the entry's. */
 type Placement =
   | { placement: "area"; entry: NotificationEntry }
-  | { placement: "in place"; entryKey: string; afterDismiss: () => void };
+  | { placement: "in place"; entryKey: string; afterDismiss: () => void; action?: EntryAction };
 
 /**
  * The one entry component. In the area it shows the entry's text, level, kind, target, time,
  * count, action and dismiss control, and whether a condition still holds; in place it shows the
- * entry standing on its key, while one is listed, with its text, count, action and dismiss
- * control, and nothing when none stands.
+ * entry standing on its key, while one is listed, with its text, count, action, the placing
+ * control's action and dismiss control, and nothing when none stands.
  */
 export function NotificationItem(props: Placement) {
   const standing = useStore((s) =>
@@ -87,16 +89,17 @@ export function NotificationItem(props: Placement) {
   const at = new Date(entry.time);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const count = entry.count > 1 ? `, ${entry.count} times` : "";
-  const action = entry.action && (
+  const offer = ({ label, run }: EntryAction) => (
     <button
       type="button"
       className="tcip-btn h-6 shrink-0 px-2 text-[12px]"
       aria-describedby={textId}
-      onClick={entry.action.run}
+      onClick={run}
     >
-      {entry.action.label}
+      {label}
     </button>
   );
+  const action = entry.action && offer(entry.action);
   const dismissControl = (
     <button
       type="button"
@@ -120,6 +123,7 @@ export function NotificationItem(props: Placement) {
           {count && <span className="text-tcip-muted">{count}</span>}
         </p>
         {action}
+        {props.action && offer(props.action)}
         {dismissControl}
       </div>
     );

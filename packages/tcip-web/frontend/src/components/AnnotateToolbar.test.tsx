@@ -17,7 +17,7 @@ import type { ImageBands, ScorerEntry } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { NO_BAND_CHOICE, type BandChoice } from "@/lib/bandSelection";
-import { adoptLoad } from "@/lib/registrySave";
+import { adoptLoad, refusedRegistryKey, SUBJECT_CONTROL_ID } from "@/lib/registrySave";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
@@ -438,6 +438,46 @@ describe("AnnotateToolbar subject authoring", () => {
     expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
   });
 
+  it("stands a refused new subject on the dataset's new-subject key, shown by the canvas and not the toolbar, until the next add lands", async () => {
+    seedDataset();
+    act(() => adoptLoad(REGISTRY_LOADED));
+    const stale = LABEL_ANSWERS.registry_stale;
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockRejectedValueOnce(await thrown(stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(REGISTRY_LOADED);
+    answerPrompt("husk", "one husk", "husk", "one husk");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
+
+    const key = refusedRegistryKey("new subject", useStore.getState().gui.dataset!.dataset_root);
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        sentence: `Could not add the subject: ${stale.body.detail}`,
+        key,
+      }),
+    ]);
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+
+    saveSpy.mockResolvedValue(REGISTRY_SAVED);
+    openSubjectMenu();
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ key: undefined }),
+    ]);
+  });
+
+  it("gives the subject control the id focus returns to once a refused new subject is dismissed", () => {
+    seedDataset();
+    renderToolbar();
+    expect(screen.getByRole("button", { name: /select subject/ })).toHaveAttribute(
+      "id",
+      SUBJECT_CONTROL_ID,
+    );
+  });
+
   it("reverts the optimistically set active subject when the save is refused", async () => {
     seedDataset();
     act(() => {
@@ -611,6 +651,25 @@ describe("AnnotateToolbar review queue", () => {
     await screen.findByRole("option", { name: "combined" });
     await screen.findByRole("option", { name: MODEL.entry.name });
   }
+
+  it("lists a failed scorers read in the notifications area, standing on no key", async () => {
+    openTestProject(QUEUE_SELECTION);
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue(REGISTERED_MODELS);
+    vi.spyOn(api.annotate, "scorers").mockRejectedValue(new Error("network down"));
+    renderToolbar();
+    fireEvent.change(imagesSelect(), { target: { value: "rank_queue" } });
+
+    await waitFor(() =>
+      expect(useStore.getState().notifications).toEqual([
+        expect.objectContaining({
+          kind: "failure",
+          level: "error",
+          sentence: "Could not read the scorers: network down",
+          key: undefined,
+        }),
+      ]),
+    );
+  });
 
   it("launches with the values the person states, none prefilled, and walks the completed queue in rank order", async () => {
     openTestProject(QUEUE_SELECTION);

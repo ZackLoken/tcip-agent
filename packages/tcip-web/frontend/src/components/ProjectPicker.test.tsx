@@ -497,6 +497,19 @@ describe("ProjectPicker", () => {
       await act(() => startOpen(RIDGE, ridgeDate, null, null));
       expect(within(screen.getByTestId("entry-in-place")).getByText(/ridge refused/)).toBeVisible();
     });
+
+    it("dismissed on its card, moves focus to that card's Open button", async () => {
+      vi.mocked(api.projects.list).mockResolvedValue(LISTING);
+      vi.mocked(api.projects.open).mockRejectedValueOnce(new Error("valley refused"));
+      render(<ProjectPicker />);
+      fireEvent.click(await screen.findByText(VALLEY.record.display_name));
+      await act(() => startOpen(VALLEY, null, null, null));
+
+      const entry = screen.getByTestId("entry-in-place");
+      fireEvent.click(within(entry).getByRole("button", { name: /^Dismiss: valley refused/ }));
+      expect(screen.queryByTestId("entry-in-place")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open" })).toHaveFocus();
+    });
   });
 
   it("marks the project the listing names as open", async () => {
@@ -622,7 +635,7 @@ describe("ProjectPicker", () => {
     });
   });
 
-  it("renames a project's display name by its id", async () => {
+  it("renames a project's display name by its id, closing the dialog and raising no entry", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(LISTING);
     const { renamed } = PROJECT_FIXTURES;
     vi.mocked(api.projects.rename).mockResolvedValue(renamed);
@@ -642,15 +655,7 @@ describe("ProjectPicker", () => {
       display_name: renamed.record.display_name,
       user: "grower",
     });
-    await waitFor(() =>
-      expect(useStore.getState().notifications).toEqual([
-        expect.objectContaining({
-          kind: "notice",
-          level: "info",
-          sentence: `Renamed ${VALLEY.record.display_name} to ${renamed.record.display_name}.`,
-          context: { project: VALLEY.record.id, target: VALLEY.record.display_name },
-        }),
-      ]),
-    );
+    await waitFor(() => expect(screen.queryByLabelText("New name")).not.toBeInTheDocument());
+    expect(useStore.getState().notifications).toEqual([]);
   });
 });

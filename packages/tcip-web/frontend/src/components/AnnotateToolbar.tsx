@@ -26,7 +26,7 @@ import {
   type ImageFilter,
 } from "@/lib/imageFilter";
 import { currentImage } from "@/lib/paths";
-import { saveRegistry } from "@/lib/registrySave";
+import { refusedRegistryKey, saveRegistry, SUBJECT_CONTROL_ID } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
@@ -259,6 +259,7 @@ export function AnnotateToolbar({
     const landed = await saveRegistry(
       { ...registry, [trimmed]: { description } },
       "Could not add the subject",
+      refusedRegistryKey("new subject", dataset?.dataset_root ?? ""),
     );
     if (!landed && projectRoot && dataset) setActiveSubject(previousSubject);
   }
@@ -294,6 +295,7 @@ export function AnnotateToolbar({
         {/* Subject picker */}
         <div className="relative">
           <button
+            id={SUBJECT_CONTROL_ID}
             type="button"
             onClick={() => setSubjectMenuOpen((o) => !o)}
             aria-expanded={subjectMenuOpen}
