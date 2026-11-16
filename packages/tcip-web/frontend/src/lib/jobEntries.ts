@@ -85,8 +85,8 @@ function levelOf(state: string): MessageLevel {
  * The first answer tells each running or pending job; a later one tells a job not watched that
  * is running or pending now, or ended and not listed before. A job not watched that reads stalled
  * is neither told nor watched. A job told running or pending is watched: a
- * sentence changed since the last told updates its standing entry in place, and none is raised
- * once its entry is dismissed. Its end, its state becoming or leaving stalled, and its absence
+ * sentence other than its standing entry's updates that entry in place, and none is raised once
+ * its entry is dismissed. Its end, its state becoming or leaving stalled, and its absence
  * from an answer are told again, announced as new; an end or an absence also ends the watch and
  * releases the entry's key, so the same end answered again tells nothing.
  */
@@ -112,10 +112,11 @@ export function tellJobs<N extends ListingName>(
         raises.push({ ...raise, retell: true });
     } else if (over || stalled(state) !== stalled(seen.state)) {
       raises.push({ ...raise, retell: true });
-    } else if (sentence !== seen.sentence && selectStanding(key(id))(useStore.getState())) {
-      raises.push({ ...raise, retell: false });
+    } else {
+      const standing = selectStanding(key(id))(useStore.getState());
+      if (standing && standing.sentence !== sentence) raises.push({ ...raise, retell: false });
     }
-    if (!over) watched[id] = { name, state, sentence };
+    if (!over) watched[id] = { name, state };
   }
   const listedIds = listed.map((j) => j.id);
   for (const [id, { name }] of Object.entries(before?.watched ?? {})) {

@@ -26,10 +26,10 @@ export const NO_JOB_LISTINGS: JobListings = {
 };
 
 /** What one listing's last answer for a project told: the ids it listed, and each job still
- *  watched with its name as the person reads it and the state and the sentence last read. */
+ *  watched with its name as the person reads it and the state last read. */
 export interface JobsTold {
   listed: string[];
-  watched: Record<string, { name: string; state: string; sentence: string }>;
+  watched: Record<string, { name: string; state: string }>;
 }
 
 export interface JobListingsSlice {
