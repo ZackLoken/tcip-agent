@@ -1047,6 +1047,18 @@ describe("App job entries", () => {
     expect(alert()).toHaveTextContent(RUN_FAILED);
   });
 
+  it("counts a job told again as seen while the area is open over it", async () => {
+    await watchFromMeta([LISTING_BEFORE_FAILURE, TRAINING_LISTING], []);
+    fireEvent.click(notificationsButton());
+    await settle();
+    expect(notificationsButton()).toHaveAccessibleName("Notifications");
+
+    await next(RUN_REFRESH_MS);
+
+    expect(listedSentences()).toContain(RUN_FAILED);
+    expect(notificationsButton()).toHaveAccessibleName("Notifications");
+  });
+
   it("tells nothing of a run a first listing already lists ended", async () => {
     await watchFromMeta([TRAINING_LISTING], []);
 
