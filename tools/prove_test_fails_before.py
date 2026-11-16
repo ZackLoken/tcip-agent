@@ -107,6 +107,7 @@ REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
 FRONTEND = "packages/tcip-web/frontend"
 TEST_FILE_RULE = f"{FRONTEND}/scripts/testFiles.mjs"
+INSTALL = REPO / FRONTEND / "node_modules"
 PLUGIN_MODULE = "_fail_before_outcome"
 OUTCOME_ENV = "FAIL_BEFORE_OUTCOME_JSON"
 CURRENT_TEST_ENV = "FAIL_BEFORE_CURRENT_TEST"
@@ -767,25 +768,24 @@ def _read_outcome(outcome_json: Path) -> dict | None:
     return observed
 
 
-def link_install(tree: Path) -> None:
-    """Link ``tree``'s frontend ``node_modules`` to this checkout's frontend install.
+def link_install(tree: Path) -> Path:
+    """Link ``tree``'s frontend ``node_modules`` to ``INSTALL``; return the link.
 
     :class:`RefusalError` when that install holds no vitest, naming the command that installs it, or
     when the link cannot be made, with the system's error.
     """
-    install = REPO / FRONTEND / "node_modules"
-    if not (install / "vitest" / "package.json").is_file():
+    if not (INSTALL / "vitest" / "package.json").is_file():
         raise RefusalError(
             f"{FRONTEND} has no installed vitest; run `npm ci` in {FRONTEND}."
         )
+    link = tree / INSTALL.relative_to(REPO)
     try:
-        os.symlink(
-            install, tree / FRONTEND / "node_modules", target_is_directory=True
-        )
+        os.symlink(INSTALL, link, target_is_directory=True)
     except OSError as error:
         raise RefusalError(
-            f"the baseline tree's link to {install} could not be made: {error}"
+            f"the baseline tree's link to {INSTALL} could not be made: {error}"
         ) from error
+    return link
 
 
 def run_vitest_capturing_outcome(
@@ -797,13 +797,13 @@ def run_vitest_capturing_outcome(
 ) -> tuple[subprocess.CompletedProcess[str], dict | None]:
     """Run vitest over ``test_file`` in ``tree``'s frontend and return its process and observation.
 
-    vitest is the one this checkout's frontend install holds, run with its root at the tree's
-    frontend, the outcome reporter written into ``tree``, and ``expr`` as its test name pattern.
-    Its results cache is off and its configuration is loaded without a bundled copy, since each
-    would be written under the tree's ``node_modules``, the link into the install. The observation
-    is None if it reported none.
+    vitest is the one ``INSTALL`` holds, run with its root at the tree's frontend, the outcome
+    reporter written into ``tree``, and ``expr`` as its test name pattern. Its results cache is off
+    and its configuration is loaded without a bundled copy, since each would be written under the
+    tree's ``node_modules``, the link into the install. The observation is None if it reported
+    none.
     """
-    package = REPO / FRONTEND / "node_modules" / "vitest"
+    package = INSTALL / "vitest"
     entry = json.loads((package / "package.json").read_text(encoding="utf-8"))[
         "bin"
     ]["vitest"]
@@ -1241,6 +1241,7 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
     outcome_json = tmp / "outcome.json"
     current_test_path = tmp / "current_test.txt"
     basetemp = tmp / "pytest-basetemp"
+    link: Path | None = None
     try:
         materialize(rev, tree)
         record["test_tree_overlay"] = {
@@ -1250,7 +1251,7 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
             "files": _overlay_test_tree(tree, args.test_rev),
         }
         if runner == "vitest":
-            link_install(tree)
+            link = link_install(tree)
             run = functools.partial(
                 run_vitest_capturing_outcome,
                 tree,
@@ -1378,15 +1379,15 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
         verdict, why = _classify(observed, baseline_precedes)
         record.update(verdict=verdict, why=why)
     finally:
-        _remove_scratch_directory(scratch, tree / FRONTEND / "node_modules")
+        _remove_scratch_directory(scratch, link)
 
     return _report(record, args.json_out)
 
 
 def _remove_scratch_directory(
-    scratch: tempfile.TemporaryDirectory[str], link: Path
+    scratch: tempfile.TemporaryDirectory[str], link: Path | None
 ) -> None:
-    """Remove ``link`` when it is a symbolic link, then the temporary directory `scratch`.
+    """Remove ``link``, the one :func:`link_install` made if any, then the directory `scratch`.
 
     The directory goes with everything under it; read-only paths are made writable and retried by
     the library's own removal. When the link or anything else cannot be removed, the directory is
@@ -1395,7 +1396,7 @@ def _remove_scratch_directory(
     verdict already reached stands.
     """
     try:
-        if link.is_symlink():
+        if link is not None:
             link.unlink()
         scratch.cleanup()
     except OSError as error:
