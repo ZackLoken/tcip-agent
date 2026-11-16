@@ -72,7 +72,9 @@ export interface GuiSlice {
   /** Adopt a new dataset selection of ``project`` in one store update, restoring the selection's
    *  saved position when the user has been here before (else the selection's own values).
    *  Establishes the new identity locally so a same-identity backend snapshot keeps the restored
-   *  index instead of resetting it to 0. */
+   *  index instead of resetting it to 0. A selection empties the refused choice; a null one, for
+   *  which no select answered, keeps the refused choice the page holds for the open ``project``
+   *  and holds none for another. */
   applyRestoredDataset: (sel: DatasetSelection | null, project: SnapshotProject) => void;
   /**
    * Apply a backend state snapshot by ownership: the backend owns the dataset selection, the
@@ -118,7 +120,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
                 current_image_index: Math.max(0, Math.min(restored.index, sel.images.length - 1)),
               }
             : sel,
-          null,
+          sel === null && project.id === s.openProject?.id ? s.gui.refused_choice : null,
         ),
         openProject: project,
       };

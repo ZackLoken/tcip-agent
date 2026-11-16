@@ -283,6 +283,25 @@ describe("the refused choice, held with the dataset as the backend's pair", () =
     expect(s().gui.dataset?.date).toBe(LATER_SELECTION.date);
   });
 
+  it("is kept by a null selection applied for the open project, for which no select answered", () => {
+    hold(null);
+    s().mergeSnapshot(REFUSED_ENVELOPE);
+
+    s().applyRestoredDataset(null, PROJECT);
+
+    expect(s().gui.refused_choice).toEqual(REFUSED);
+    expect(s().gui.dataset).toBeNull();
+  });
+
+  it("is not carried to another project by a null selection applied for it", () => {
+    hold(REFUSED);
+
+    s().applyRestoredDataset(null, OTHER);
+
+    expect(s().gui.refused_choice).toBeNull();
+    expect(s().openProject).toEqual(OTHER);
+  });
+
   it("is emptied by an envelope for another project", () => {
     hold(REFUSED);
 
