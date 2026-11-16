@@ -1,2 +1,2 @@
-/** The agent's name as the rail's header shows it and as the top bar's agent button titles itself. */
+/** The agent's name, as a person reads it. */
 export const AGENT_NAME = "TCIP Agent";
