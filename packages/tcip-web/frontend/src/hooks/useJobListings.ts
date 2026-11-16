@@ -28,22 +28,24 @@ const LISTINGS: {
 
 /** Read the listing `name` for the project `project` names until `project` changes or the
  *  caller unmounts, holding each answer and each failure, and reading now whenever
- *  `askListing(name)` is called. A failed read keeps the listing last answered. */
+ *  `askListing(name)` is called. A failed read keeps the listing last answered. With no project
+ *  open the listing is read once, and again only when asked. */
 function useListing<N extends ListingName>(name: N, project: string | null): void {
   useEffect(() => {
     const { read, intervalMs } = LISTINGS[name];
     const { holdListing } = useStore.getState();
+    const again = project !== null;
     const loop = pollLoop({
       read,
       intervalMs,
       readFirstNow: true,
       onAnswer: (answer) => {
         holdListing(name, project, answer, null);
-        return true;
+        return again;
       },
       onFailure: (error) => {
         holdListing(name, project, useStore.getState().jobListings[name].answer, messageOf(error));
-        return true;
+        return again;
       },
     });
     const unsubscribe = useStore.subscribe((s, prev) => {

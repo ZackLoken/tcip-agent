@@ -20,7 +20,8 @@ import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import { changeSelection, stateEnvelope, SUBJECT_SELECT_ANSWER } from "@/test/store";
-import { RUNS, TRAINING_LISTING } from "@/test/training";
+import { thrown } from "@/test/refusals";
+import { RUNS, TRAINING_LISTING, TRAINING_REFUSALS } from "@/test/training";
 
 // The state socket and the active-tab sync stand in for App's network effects.
 const stateSocket = vi.hoisted(() => ({
@@ -658,6 +659,44 @@ describe("App job listings", () => {
       });
 
       expect(read()).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    {
+      tab: "training",
+      read: () => vi.mocked(trainingApi.listRuns),
+      refusal: TRAINING_REFUSALS.no_project_refusal,
+      failed: "Could not load training runs",
+    },
+    {
+      tab: "inference",
+      read: () => vi.mocked(inferenceApi.listJobs),
+      refusal: INFERENCE_ANSWERS.no_project,
+      failed: "Could not load inference jobs",
+    },
+  ] as const)(
+    "with no project open reads the $tab listing once across a minute, and once more on its Retry",
+    async ({ tab, read, refusal, failed }) => {
+      const refused = await thrown(refusal);
+      read().mockRejectedValue(refused);
+      const message = `${failed}: ${refusal.body.detail}`;
+      act(() => useStore.getState().setActiveTab(tab));
+      vi.useFakeTimers();
+      render(<App />);
+      await vi.waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(read()).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(within(screen.getByText(message)).getByRole("button", { name: "Retry" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(read()).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(message)).toBeInTheDocument();
     },
   );
 

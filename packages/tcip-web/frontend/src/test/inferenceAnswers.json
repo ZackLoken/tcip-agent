@@ -1,4 +1,8 @@
 {
+  "no_project": {
+    "status": 409,
+    "body": { "detail": "no project is open; open one from the project list first" }
+  },
   "failing_started": {
     "jobs": [
       {

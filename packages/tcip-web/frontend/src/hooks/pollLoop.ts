@@ -1,14 +1,15 @@
 /** Reading one thing again and again, one read at a time. */
 
-/** A running loop: `readNow` reads at once, or once more as soon as the read in flight answers;
- *  `stop` ends it, and an answer arriving after is dropped. */
+/** A running loop: `readNow` reads at once, or once more as soon as the read in flight answers,
+ *  whether or not a handler stopped the interval reads; `stop` ends it, and an answer arriving
+ *  after is dropped. */
 export interface PollLoop {
   readNow: () => void;
   stop: () => void;
 }
 
 /** What a loop reads and what it does with each outcome; each handler returns whether to read
- *  again. */
+ *  again after the interval. */
 export interface PollReads<T> {
   read: () => Promise<T>;
   /** The wait between one read's answer and the next read. */
@@ -21,8 +22,8 @@ export interface PollReads<T> {
 
 /**
  * Start a loop over `reads.read`: each read waits for the last one's answer, then the interval,
- * so no two reads are ever outstanding. The loop ends when a handler returns false or `stop` is
- * called, a handler's own call included.
+ * so no two reads are ever outstanding. A handler returning false leaves the loop reading only
+ * when `readNow` asks; `stop` ends it, a handler's own call included.
  */
 export function pollLoop<T>({
   read,
@@ -52,12 +53,10 @@ export function pollLoop<T>({
   function settle(again: boolean) {
     inFlight = false;
     if (stopped) return;
-    if (!again) {
-      stopped = true;
-    } else if (askedInFlight) {
+    if (askedInFlight) {
       askedInFlight = false;
       run();
-    } else {
+    } else if (again) {
       timer = setTimeout(run, intervalMs);
     }
   }
