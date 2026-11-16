@@ -2,7 +2,7 @@
  * The identity of the frontend source a bundle is built from, and the build record that carries it.
  *
  * The source is the files that shape the bundle: every file under the source directory
- * `tsconfig.json` includes first that is no test file (`isTestFile`), every file under `public`,
+ * (`sourceDirectory`) that is no test file (`isTestFile`), every file under `public`,
  * and the root's `index.html`,
  * `tsconfig.json`, `package.json`, `package-lock.json` and `vite.config.ts`. Its identity is a
  * SHA-256 over each file's root-relative POSIX path and the SHA-256 of its bytes, in path order;
@@ -20,7 +20,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { isTestFile } from "./routeReads.mjs";
+import { isTestFile, sourceDirectory } from "./testFiles.mjs";
 
 /** The build record's file name, written into the output directory. */
 export const BUILD_RECORD = "build.json";
@@ -54,7 +54,7 @@ function filesUnder(root, directory, keep = () => true) {
  * @param {string} root
  */
 export function sourceFiles(root) {
-  const [src] = JSON.parse(readFileSync(join(root, "tsconfig.json"), "utf8")).include;
+  const src = sourceDirectory(root);
   return [
     ...filesUnder(root, src, (entry) => !isTestFile(entry)),
     ...filesUnder(root, "public"),
