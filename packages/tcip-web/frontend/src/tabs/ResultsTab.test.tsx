@@ -301,6 +301,8 @@ describe("ResultsTab evidence gate", () => {
     expect(line).toHaveTextContent(`The file is already written at ${gap.what.saved_path},`);
     expect(line).toHaveTextContent("second delivery");
     expect(line).toHaveTextContent(gap.message);
+    // The count export's buttons, on the same tab, show nothing of the phenology export's.
+    expect(screen.getAllByTestId("entry-in-place")).toEqual([line]);
     expect(useStore.getState().notifications).toEqual([
       expect.objectContaining({ kind: "notice", level: "warning", count: 1 }),
     ]);
@@ -842,6 +844,9 @@ describe("ResultsTab count export", () => {
     expect(line).toHaveTextContent("second delivery");
     expect(line).toHaveTextContent(gap.message);
     expect(within(panel).getAllByText(/already written/)).toHaveLength(1);
+    // The phenology export's buttons, on the same tab, show nothing of the count export's.
+    expect(screen.getByRole("heading", { name: "Phenology" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("entry-in-place")).toEqual([line]);
     expect(useStore.getState().notifications).toEqual([
       expect.objectContaining({
         kind: "notice",
