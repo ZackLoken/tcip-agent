@@ -10,7 +10,9 @@ from pathlib import Path
 
 from tests import REPO_ROOT
 
-SCRIPT = REPO_ROOT / "tools" / "prove_test_fails_before.py"
+SCRIPT_RELATIVE_PATH = "tools/prove_test_fails_before.py"
+"""The fail-before script's path under a repository's root, this one's and each scratch copy's."""
+SCRIPT = REPO_ROOT / SCRIPT_RELATIVE_PATH
 SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
 
 
@@ -31,9 +33,10 @@ def write(path: Path, text: str) -> None:
 def scratch_repo(tmp_path: Path) -> Path:
     """Make a git repository holding nothing but the script under test; return its root."""
     repo = tmp_path / "scratch"
-    (repo / "tools").mkdir(parents=True)
+    copy = repo / SCRIPT_RELATIVE_PATH
+    copy.parent.mkdir(parents=True)
     (repo / "tests").mkdir()
-    write(repo / "tools" / "prove_test_fails_before.py", SCRIPT_SOURCE)
+    write(copy, SCRIPT_SOURCE)
     git(repo, "init", "-q")
     git(repo, "config", "user.email", "test@example.com")
     git(repo, "config", "user.name", "Test")

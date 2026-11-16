@@ -35,7 +35,13 @@ from pathlib import Path
 import pytest
 
 from tests import FRONTEND, REPO_ROOT
-from tests._scratch_repo_fixtures import commit_all, git, scratch_repo, write
+from tests._scratch_repo_fixtures import (
+    SCRIPT_RELATIVE_PATH,
+    commit_all,
+    git,
+    scratch_repo,
+    write,
+)
 from tools.prove_test_fails_before import OUTCOME_ENV, _failure_kind
 
 EXIT = {
@@ -52,7 +58,7 @@ def _tool(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
             sys.executable,
-            str(repo / "tools" / "prove_test_fails_before.py"),
+            str(repo / SCRIPT_RELATIVE_PATH),
             *args,
         ],
         cwd=str(repo),
@@ -1072,10 +1078,10 @@ def test_a_file_off_the_test_side_is_refused_naming_both_test_trees(
     """
     repo = scratch_repo(tmp_path)
     named = {
-        "relative": "tools/prove_test_fails_before.py",
-        "relative through ..": "tests/../tools/prove_test_fails_before.py",
+        "relative": SCRIPT_RELATIVE_PATH,
+        "relative through ..": f"tests/../{SCRIPT_RELATIVE_PATH}",
         "absolute through ..": str(
-            repo / "tests" / ".." / "tools" / "prove_test_fails_before.py"
+            repo / "tests" / ".." / SCRIPT_RELATIVE_PATH
         ),
     }[spelling]
 
@@ -1083,7 +1089,7 @@ def test_a_file_off_the_test_side_is_refused_naming_both_test_trees(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert "resolves to tools/prove_test_fails_before.py" in why
+    assert f"resolves to {SCRIPT_RELATIVE_PATH}" in why
     assert "outside tests/ and no test file under" in why
     assert FRONTEND_PATH in why
 
