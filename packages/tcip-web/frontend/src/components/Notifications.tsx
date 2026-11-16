@@ -63,11 +63,18 @@ export const NotificationsButton = forwardRef<
 });
 
 /** Where an entry is shown: in the notifications area, or in place beside the control it stands
- *  for, where it is the entry standing on `entryKey`, `afterDismiss` puts focus back, and
- *  `action`, when given, is the placing control's own, offered beside the entry's. */
+ *  for, where it is the entry standing on `entryKey`, `afterDismiss` puts focus back, `action`,
+ *  when given, is the placing control's own, offered beside the entry's, and `textId`, when
+ *  given, is the id its text takes so that control can be described by it. */
 type Placement =
   | { placement: "area"; entry: NotificationEntry }
-  | { placement: "in place"; entryKey: string; afterDismiss: () => void; action?: EntryAction };
+  | {
+      placement: "in place";
+      entryKey: string;
+      afterDismiss: () => void;
+      action?: EntryAction;
+      textId?: string;
+    };
 
 /**
  * The one entry component. In the area it shows the entry's text, level, kind, target, time,
@@ -81,7 +88,8 @@ export function NotificationItem(props: Placement) {
   );
   const holding = useStore((s) => s.holding);
   const dismiss = useStore((s) => s.dismissNotification);
-  const textId = useId();
+  const ownId = useId();
+  const textId = (props.placement === "in place" && props.textId) || ownId;
   if (!standing) return null;
   const entry = standing;
   const { word, tone, mark } = LEVELS[entry.level];
