@@ -4374,6 +4374,101 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
       await flush();
       expect(standing()).toEqual([GESTURE, PROMPT, FIND, "Could not load proposals: disk busy"]);
     });
+
+    /** Keep a box in the box tool, a gesture that succeeds. */
+    async function keepBox() {
+      act(() => useStore.getState().setMode("box"));
+      await dragBox(600, 600, 60);
+    }
+
+    /** Lay `polygons` on the canvas in the polygon tool, the one at `focus` selected, cut armed. */
+    function armCut(polygons: (typeof POLY_A)[], focus: number | null) {
+      act(() => {
+        useStore.getState().setMode("polygon");
+        seedPolygons(polygons);
+        if (focus !== null) useStore.getState().setFocus({ kind: "polygon", index: focus });
+        useStore.getState().setCut(true);
+      });
+    }
+
+    it("a Propose with no subject replaces the refused prompt alone", async () => {
+      act(() => useStore.getState().setActiveSubject(null));
+      propose();
+      await flush();
+      expect(standing()).toEqual([GESTURE, "Choose a subject first.", FIND, PROPOSALS]);
+    });
+
+    it("a Find with no subject replaces the refused find alone", async () => {
+      act(() => useStore.getState().setActiveSubject(null));
+      find();
+      await flush();
+      expect(standing()).toEqual([GESTURE, PROMPT, "Choose a subject first.", PROPOSALS]);
+    });
+
+    it("an undone resize replaces the refused gesture alone, and a kept box ends it alone", async () => {
+      await dragAddedCorner(11);
+      fireEvent.mouseUp(stage(), { clientX: 11, clientY: 11 });
+      await flush();
+      expect(standing()).toEqual([RESIZED, PROMPT, FIND, PROPOSALS]);
+
+      await keepBox();
+      expect(standing()).toEqual([PROMPT, FIND, PROPOSALS]);
+    });
+
+    it("a cut with no polygon selected replaces the refused gesture alone, and a kept box ends it alone", async () => {
+      armCut([POLY_A, POLY_B], null);
+      fireEvent.click(stage(), { clientX: 500, clientY: 500, button: 0 });
+      expect(standing()).toEqual([
+        expect.stringMatching(/^Select a polygon to cut/),
+        PROMPT,
+        FIND,
+        PROPOSALS,
+      ]);
+
+      await keepBox();
+      expect(standing()).toEqual([PROMPT, FIND, PROPOSALS]);
+    });
+
+    it("a cut whose polygon changed replaces the refused gesture alone, and a kept box ends it alone", async () => {
+      armCut([POLY_A, POLY_B], 0);
+      fireEvent.click(stage(), { clientX: 105, clientY: 0, button: 0 });
+      act(() => useStore.getState().setFocus({ kind: "polygon", index: 1 }));
+      fireEvent.click(stage(), { clientX: 105, clientY: 250, button: 0 });
+      expect(standing()).toEqual([
+        expect.stringMatching(/^The polygon changed since the first click/),
+        PROMPT,
+        FIND,
+        PROPOSALS,
+      ]);
+
+      await keepBox();
+      expect(standing()).toEqual([PROMPT, FIND, PROPOSALS]);
+    });
+
+    it("a cut across a shape of two parts replaces the refused gesture alone, and a kept box ends it alone", async () => {
+      armCut([{ ...POLY_A, rings: [POLY_A.rings[0], POLY_B.rings[0]] }], 0);
+      fireEvent.click(stage(), { clientX: 250, clientY: 250, button: 0 });
+      fireEvent.click(stage(), { clientX: 250, clientY: 450, button: 0 });
+      expect(standing()).toEqual([
+        expect.stringMatching(/^This shape covers 2 separate parts/),
+        PROMPT,
+        FIND,
+        PROPOSALS,
+      ]);
+
+      await keepBox();
+      expect(standing()).toEqual([PROMPT, FIND, PROPOSALS]);
+    });
+
+    it("a cut that misses its polygon replaces the refused gesture alone, and a kept box ends it alone", async () => {
+      armCut([POLY_A, POLY_B], 0);
+      fireEvent.click(stage(), { clientX: 105, clientY: 0, button: 0 });
+      fireEvent.click(stage(), { clientX: 105, clientY: 5, button: 0 });
+      expect(standing()).toEqual([CUT_MISSES_REFUSAL, PROMPT, FIND, PROPOSALS]);
+
+      await keepBox();
+      expect(standing()).toEqual([PROMPT, FIND, PROPOSALS]);
+    });
   });
 
   it("a refused gesture, prompt and find leave the canvas with their image, and stay listed on return", async () => {
