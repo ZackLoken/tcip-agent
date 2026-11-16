@@ -159,7 +159,7 @@ def pytest_runtest_logstart(nodeid, location):
     runs and fsynced, is the only way the caller learns which test was running when the
     process died.
     """
-    path = os.environ.get("FAIL_BEFORE_CURRENT_TEST")
+    path = os.environ.get(CURRENT_TEST_ENV)
     if not path:
         return
     with open(path, "w", encoding="utf-8") as fh:
@@ -240,7 +240,7 @@ def pytest_sessionfinish(session, exitstatus):
         if entry.get("outcome") in ("failed", "error"):
             entry["exc_typename"] = _exc_types.get((entry["nodeid"], entry["phase"]))
     _state["exitstatus"] = int(exitstatus)
-    with open(os.environ["FAIL_BEFORE_OUTCOME_JSON"], "w", encoding="utf-8") as fh:
+    with open(os.environ[OUTCOME_ENV], "w", encoding="utf-8") as fh:
         json.dump(_state, fh)
 '''
 
@@ -332,7 +332,7 @@ export default class FailBeforeOutcome {
     if (unhandledErrors.length > 0) {
       this.state.internal_error = unhandledErrors.map((error) => error.message).join("\n");
     }
-    writeFileSync(process.env.FAIL_BEFORE_OUTCOME_JSON, JSON.stringify(this.state));
+    writeFileSync(process.env[OUTCOME_ENV], JSON.stringify(this.state));
   }
 }
 """
@@ -712,8 +712,14 @@ def prove_tree_imports(
 
 
 def install_outcome_plugin(tree: Path) -> None:
-    """Drop the outcome-recording plugin into a materialized tree, where pytest will import it."""
-    (tree / f"{PLUGIN_MODULE}.py").write_text(PLUGIN_SOURCE, encoding="utf-8")
+    """Drop the outcome-recording plugin into a materialized tree, where pytest will import it.
+
+    The environment names it reads are this tool's constants, assigned at the module's end.
+    """
+    names = f"OUTCOME_ENV = {OUTCOME_ENV!r}\nCURRENT_TEST_ENV = {CURRENT_TEST_ENV!r}\n"
+    (tree / f"{PLUGIN_MODULE}.py").write_text(
+        f"{PLUGIN_SOURCE}\n\n{names}", encoding="utf-8"
+    )
 
 
 def run_capturing_outcome(
@@ -798,17 +804,20 @@ def run_vitest_capturing_outcome(
     """Run vitest over ``test_file`` in ``tree``'s frontend and return its process and observation.
 
     vitest is the one ``INSTALL`` holds, run with its root at the tree's frontend, the outcome
-    reporter written into ``tree``, and ``expr`` as its test name pattern. Its results cache is off
-    and its configuration is loaded without a bundled copy, since each would be written under the
-    tree's ``node_modules``, the link into the install. The observation is None if it reported
-    none.
+    reporter written into ``tree`` with the ``OUTCOME_ENV`` it reads assigned at its end, and
+    ``expr`` as its test name pattern. Its results cache is off and its configuration is loaded
+    without a bundled copy, since each would be written under the tree's ``node_modules``, the
+    link into the install. The observation is None if it reported none.
     """
     package = INSTALL / "vitest"
     entry = json.loads((package / "package.json").read_text(encoding="utf-8"))[
         "bin"
     ]["vitest"]
     reporter = tree / f"{PLUGIN_MODULE}.mjs"
-    reporter.write_text(REPORTER_SOURCE, encoding="utf-8")
+    reporter.write_text(
+        f"{REPORTER_SOURCE}\nconst OUTCOME_ENV = {json.dumps(OUTCOME_ENV)};\n",
+        encoding="utf-8",
+    )
     cmd = [
         _node(),
         str(package / entry),
@@ -848,7 +857,7 @@ def _is_timeout(headline: str) -> bool:
 
     That report is pytest-timeout's signal-method ``PYTEST_FAILURE_MESSAGE`` or vitest's ``Test
     timed out in <n>ms.``; a hang pytest-timeout's thread method reports through the
-    ``FAIL_BEFORE_CURRENT_TEST`` marker is not one.
+    ``CURRENT_TEST_ENV`` marker is not one.
 
     pytest-timeout's leading exception class is optional because pytest writes the headline both
     ways: bare where the timeout is the whole report, and prefixed ``Failed: `` where
