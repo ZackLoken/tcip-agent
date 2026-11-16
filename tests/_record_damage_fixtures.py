@@ -98,20 +98,15 @@ def damage_record(key: ts.Key, data: bytes) -> None:
         conn.close()
 
 
-def store_sentence(key: ts.Key) -> str:
-    """Return the sentence the store raises as ``DecodeError`` for a direct read of ``key``.
+def made_undecodable(key: ts.Key) -> str:
+    """Overwrite the record at ``key`` with :data:`UNDECODABLE`; return the store's sentence.
 
-    Asserts the read raises it.
+    The sentence is the ``DecodeError`` a direct read of ``key`` raises, which this asserts it does.
     """
+    damage_record(key, UNDECODABLE)
     with pytest.raises(ts.DecodeError) as refused:
         ts.read(key)
     return str(refused.value)
-
-
-def made_undecodable(key: ts.Key) -> str:
-    """Overwrite the record at ``key`` with :data:`UNDECODABLE`; return :func:`store_sentence`."""
-    damage_record(key, UNDECODABLE)
-    return store_sentence(key)
 
 
 def stripped_of_its_engine(key: ts.Key) -> str:

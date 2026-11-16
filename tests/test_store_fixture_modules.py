@@ -4,7 +4,7 @@
 ``tests._record_damage_fixtures`` are exercised here, and a scan over the test tree
 finds no test spelling the same steps out again, nor opening a root's database in autocommit
 beside ``connected``, nor keeping the store's decode sentence from a ``pytest.raises`` block
-beside ``store_sentence``, nor binding a backend with a lock wait of its own beside
+beside ``made_undecodable``, nor binding a backend with a lock wait of its own beside
 ``tests._busy_store_fixtures``.
 """
 
@@ -275,7 +275,7 @@ def test_no_test_keeps_the_store_s_decode_sentence_from_a_raises_block() -> (
     ]
 
     assert not found, (
-        "these keep the store's decode sentence by hand; use store_sentence or made_undecodable "
+        "these keep the store's decode sentence by hand; use made_undecodable "
         f"from tests._record_damage_fixtures: {found}"
     )
 

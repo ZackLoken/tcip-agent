@@ -1,7 +1,7 @@
 """The store's one record reader: a record read under the store's boundary and validated.
 
 Each record is written by the platform's own producer, then damaged through the store's own
-write (a wrong shape) or through ``damage_record`` (bytes that will not decode), and read back
+write (a wrong shape) or through ``made_undecodable`` (bytes that will not decode), and read back
 through ``tcip_store.read_record`` and through the doors of readers built on it: the memory
 reader and the trait reader call ``read_record``, the flags reader its raw half, ``read_raw``.
 """
@@ -21,9 +21,7 @@ from tcip_mcp.tools.meta_tools import (
     report_friction,
 )
 from tests._record_damage_fixtures import (
-    UNDECODABLE,
-    damage_record,
-    store_sentence,
+    made_undecodable,
     unopenable_database,
 )
 
@@ -89,14 +87,14 @@ def test_an_undecodable_record_raises_the_stores_sentence_naming_its_key(
 ) -> None:
     """A record whose bytes do not decode refuses with the store's sentence, naming its key."""
     key = _reported(project)
-    damage_record(key, UNDECODABLE)
+    sentence = made_undecodable(key)
 
     with pytest.raises(tcip_store.ReadRefusedError) as refused:
         tcip_store.read_record(tcip_store.read, key, FrictionReport, PLACE)
 
     assert refused.value.served == tcip_store.RefusedRead(
         where=PLACE,
-        refusal=tcip_store.Unreadable(message=store_sentence(key)),
+        refusal=tcip_store.Unreadable(message=sentence),
     )
     assert key.parts[0] in str(refused.value)
 
@@ -153,8 +151,8 @@ def test_an_undecodable_memory_record_and_flags_record_answer_one_refusal_at_the
         ),
     )
     flags = flag_key(image_label_key(image))
-    damage_record(report, UNDECODABLE)
-    damage_record(flags, UNDECODABLE)
+    report_sentence = made_undecodable(report)
+    flags_sentence = made_undecodable(flags)
 
     memory = load_project_memory(opened_project, MemoryKind.reports)
     loaded = client.get(
@@ -164,10 +162,10 @@ def test_an_undecodable_memory_record_and_flags_record_answer_one_refusal_at_the
     (unread,) = [e for e in memory["entries"] if e["id"] == report.parts[0]]
     assert unread["reason"]["refusal"] == {
         "kind": "unreadable",
-        "message": store_sentence(report),
+        "message": report_sentence,
     }
     assert loaded.status_code == 400, loaded.text
-    assert loaded.json()["detail"].endswith(f": {store_sentence(flags)}")
+    assert loaded.json()["detail"].endswith(f": {flags_sentence}")
 
 
 def test_a_label_document_in_a_database_that_will_not_open_answers_the_editors_400(
@@ -214,7 +212,7 @@ def test_a_confirmation_over_an_undecodable_trait_record_answers_the_readers_sen
 
     revision = traits.read_trait("bud_opening", opened_project).latest
     key = traits.trait_key(opened_project, "bud_opening")
-    damage_record(key, UNDECODABLE)
+    sentence = made_undecodable(key)
 
     with pytest.raises(tcip_store.ReadRefusedError) as refused:
         traits.read_trait("bud_opening", opened_project)
@@ -230,7 +228,7 @@ def test_a_confirmation_over_an_undecodable_trait_record_answers_the_readers_sen
     )
 
     assert refused.value.served.refusal == tcip_store.Unreadable(
-        message=store_sentence(key)
+        message=sentence
     )
     assert "'bud_opening'" in refused.value.served.where
     assert resp.status_code == 400, resp.text
