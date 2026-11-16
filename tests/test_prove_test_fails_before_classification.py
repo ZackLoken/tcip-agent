@@ -7,9 +7,11 @@ commit with the fix and the guard test) and run the real script against it. They
   apart from one at the guard's own assertion;
 - ``--test-rev``, over a third revision that removes the test;
 - ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched,
-  and its refusal beside ``--baseline`` or with no commit to snapshot;
+  and its refusal beside ``--baseline``, with no commit to snapshot, or when neither form makes one;
 - a command line naming no test file and a ``--test-rev`` naming no revision, each refused, and an
   exception the tool does not name, which exits with the tool's own failure code;
+- the test file's place and the tree it comes from, each way the baseline is chosen or refused,
+  the import proof over a tree holding a package, and each cause of a pytest run's verdict;
 - ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
   the directory cannot be removed;
@@ -23,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -33,7 +36,7 @@ import pytest
 
 from tests import FRONTEND, REPO_ROOT
 from tests._scratch_repo_fixtures import commit_all, git, scratch_repo, write
-from tools.prove_test_fails_before import _failure_kind
+from tools.prove_test_fails_before import OUTCOME_ENV, _failure_kind
 
 EXIT = {
     "GUARDS": 0,
@@ -793,13 +796,39 @@ def test_baseline_from_working_tree_together_with_baseline_is_refused(
 def test_a_snapshot_in_a_repository_with_no_commit_is_refused(
     tmp_path: Path,
 ) -> None:
-    """A snapshot that cannot be made is refused: the scratch repository has no commit."""
+    """A snapshot in a repository with no commit is refused on git's failure to read HEAD.
+
+    The refusal is git's own, before either form of the snapshot is tried.
+    """
     repo = scratch_repo(tmp_path)
 
     proc = _snapshot(repo, "tests/test_widgets.py")
 
-    assert _why(proc).startswith("REFUSED: "), proc.stdout + proc.stderr
+    why = _why(proc)
+    assert why.startswith("REFUSED: "), proc.stdout + proc.stderr
+    assert "git rev-parse HEAD failed" in why
+    assert "could not snapshot" not in why
     assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
+
+
+def test_a_snapshot_neither_form_can_make_is_refused(tmp_path: Path) -> None:
+    """A snapshot neither form makes is refused with the sentence naming both forms.
+
+    The repository has a commit and a clean tracked tree beside an untracked folder that is a
+    repository with no commit of its own, which ``git add -A`` refuses to stage, and ``git stash
+    create`` makes nothing of a clean tracked tree.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    commit_all(repo, "double is a no-op")
+    inner = repo / "inner"
+    inner.mkdir()
+    git(inner, "init", "-q")
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+
+    assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
+    assert "could not snapshot the working tree" in _why(proc)
 
 
 def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
@@ -976,6 +1005,654 @@ def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
     )
     assert "Traceback" in result.stderr
     assert _why(result) == "", result.stdout
+
+
+def test_a_refused_run_whose_record_cannot_be_written_exits_with_the_tools_own_code(
+    tmp_path: Path,
+) -> None:
+    """A refused run given ``--json`` a directory exits with the tool's own code, no verdict line.
+
+    The baseline names no commit, so the run is refused, and writing its record then raises.
+    """
+    repo, _ = _fixed_double(tmp_path)
+    record = tmp_path / "record"
+    record.mkdir()
+
+    result = _run(
+        repo,
+        "tests/test_widgets.py",
+        "no_such_revision",
+        "--json",
+        str(record),
+    )
+
+    assert result.returncode == EXIT["TOOL_FAILURE"], (
+        result.stdout + result.stderr
+    )
+    assert "Traceback" in result.stderr
+    assert _why(result) == "", result.stdout
+
+
+# ── the test file and the tree it comes from ─────────────────────────────────
+
+DOUBLE_GUARD = (
+    "def test_double_doubles():\n"
+    "    from widgets import double\n"
+    "    assert double(3) == 6\n"
+)
+
+
+def _fixed_double(
+    tmp_path: Path, test_source: str = DOUBLE_GUARD
+) -> tuple[Path, str]:
+    """Build a scratch repository whose baseline ``double`` is a no-op and whose head fixes it.
+
+    The head commit also holds ``test_source`` as ``tests/test_widgets.py``. Returns the
+    repository at its head and the baseline revision.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "tests" / "test_widgets.py", test_source)
+    commit_all(repo, "double actually doubles")
+    return repo, baseline
+
+
+def _baseline_line(result: subprocess.CompletedProcess) -> str:
+    """Return the ``baseline`` line ``result`` printed, stripped, or the empty string."""
+    return next(
+        (
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().startswith("baseline ")
+        ),
+        "",
+    )
+
+
+def test_a_test_file_outside_the_repository_is_refused(tmp_path: Path) -> None:
+    repo = scratch_repo(tmp_path)
+    outside = tmp_path / "elsewhere" / "test_widgets.py"
+    outside.parent.mkdir()
+    write(outside, "def test_passes():\n    assert True\n")
+
+    result = _tool(repo, str(outside))
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "is outside this repository" in _why(result)
+
+
+@pytest.mark.parametrize(
+    "spelling", ["relative", "relative through ..", "absolute through .."]
+)
+def test_a_file_off_the_test_side_is_refused_naming_both_test_trees(
+    tmp_path: Path, spelling: str
+) -> None:
+    """A file in the repository and off the test side is refused however it is spelled.
+
+    A spelling that reads as inside ``tests/`` before its ``..`` collapses is refused the same
+    way, and the sentence names the path it resolves to, ``tests/`` and the frontend.
+    """
+    repo = scratch_repo(tmp_path)
+    named = {
+        "relative": "tools/prove_test_fails_before.py",
+        "relative through ..": "tests/../tools/prove_test_fails_before.py",
+        "absolute through ..": str(
+            repo / "tests" / ".." / "tools" / "prove_test_fails_before.py"
+        ),
+    }[spelling]
+
+    result = _tool(repo, named)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert "resolves to tools/prove_test_fails_before.py" in why
+    assert "outside tests/ and no test file under" in why
+    assert FRONTEND_PATH in why
+
+
+def test_test_rev_without_a_baseline_is_refused(tmp_path: Path) -> None:
+    repo, _ = _fixed_double(tmp_path)
+
+    result = _tool(repo, "tests/test_widgets.py", "--test-rev", "HEAD")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "--test-rev needs an explicit --baseline" in _why(result)
+
+
+def test_a_test_file_the_test_rev_does_not_hold_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A test file present in the working tree and absent at ``--test-rev`` is refused."""
+    repo, baseline = _fixed_double(tmp_path)
+
+    result = _run(
+        repo, "tests/test_widgets.py", baseline, "--test-rev", baseline
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"tests/test_widgets.py does not exist at {baseline}" in _why(
+        result
+    )
+
+
+def test_a_test_file_absent_from_the_working_tree_is_refused(
+    tmp_path: Path,
+) -> None:
+    repo, baseline = _fixed_double(tmp_path)
+
+    result = _run(repo, "tests/test_absent.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "tests/test_absent.py does not exist in the working tree" in _why(
+        result
+    )
+
+
+# ── the baseline ─────────────────────────────────────────────────────────────
+
+
+def test_a_baseline_naming_no_commit_is_refused_and_recorded_without_one(
+    tmp_path: Path,
+) -> None:
+    repo, _ = _fixed_double(tmp_path)
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo,
+        "tests/test_widgets.py",
+        "no_such_revision",
+        "--json",
+        str(record_path),
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "--baseline no_such_revision does not name a commit here" in _why(
+        result
+    )
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["verdict"] == "REFUSED"
+    assert "baseline" not in record
+
+
+def test_an_uncommitted_source_change_takes_head_as_the_baseline(
+    tmp_path: Path,
+) -> None:
+    """With no ``--baseline``, a source change not yet committed makes HEAD the baseline."""
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    head = commit_all(repo, "double is a no-op")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "tests" / "test_widgets.py", DOUBLE_GUARD)
+
+    result = _tool(repo, "tests/test_widgets.py")
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert _baseline_line(result) == (
+        f"baseline      {head[:12]} (HEAD, because the change under test is uncommitted)"
+    )
+
+
+def test_a_committed_change_takes_its_merge_base_with_the_integration_branch(
+    tmp_path: Path,
+) -> None:
+    """With no ``--baseline`` and a clean tree, the merge-base with ``--integration`` is used.
+
+    The fix is committed on a branch cut from the branch the test names, so that branch's head
+    is the baseline.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
+    git(repo, "branch", "trunk")
+    git(repo, "checkout", "-q", "-b", "fix")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "tests" / "test_widgets.py", DOUBLE_GUARD)
+    commit_all(repo, "double actually doubles")
+
+    result = _tool(repo, "tests/test_widgets.py", "--integration", "trunk")
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert _baseline_line(result) == (
+        f"baseline      {baseline[:12]} (merge-base of HEAD and trunk)"
+    )
+
+
+def test_head_already_on_the_integration_branch_is_refused(
+    tmp_path: Path,
+) -> None:
+    repo, _ = _fixed_double(tmp_path)
+    git(repo, "branch", "trunk")
+
+    result = _tool(repo, "tests/test_widgets.py", "--integration", "trunk")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert "HEAD is already contained in trunk" in why
+    assert "Name the pre-change revision with --baseline" in why
+
+
+def test_an_integration_branch_that_does_not_exist_is_refused(
+    tmp_path: Path,
+) -> None:
+    repo, _ = _fixed_double(tmp_path)
+
+    result = _tool(
+        repo, "tests/test_widgets.py", "--integration", "no_such_branch"
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "no merge-base of HEAD and --integration no_such_branch" in _why(
+        result
+    )
+
+
+def test_a_baseline_whose_tree_cannot_be_archived_is_refused_with_gits_error(
+    tmp_path: Path,
+) -> None:
+    """A baseline commit missing one of its file objects resolves and is refused at its archive.
+
+    The object deleted is the baseline's ``widgets.py``, which differs at the head, so the diff
+    that finds the change reads no content of it and the archive is the first read that needs it.
+    """
+    repo, baseline = _fixed_double(tmp_path)
+    blob = git(repo, "rev-parse", f"{baseline}:widgets.py").strip()
+    loose = repo / ".git" / "objects" / blob[:2] / blob[2:]
+    loose.chmod(stat.S_IWRITE)
+    loose.unlink()
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert f"git archive {baseline} failed" in why
+    assert blob in why
+
+
+# ── the import proof ─────────────────────────────────────────────────────────
+
+GIZMO_GUARD = (
+    "def test_gizmo_doubles():\n"
+    "    from gizmo import double\n"
+    "    assert double(3) == 6\n"
+)
+
+
+def _gizmo_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, baseline_source: str
+) -> tuple[Path, str, Path]:
+    """Build a scratch repository holding the package ``packages/gizmo/src/gizmo``.
+
+    Its baseline ``__init__.py`` is ``baseline_source`` and its head's doubles, beside
+    ``GIZMO_GUARD``. The tool's temporary folder is redirected to a folder under ``tmp_path``.
+    Returns the repository at its head, the baseline revision and that folder.
+    """
+    scratch_root = tmp_path / "t"
+    scratch_root.mkdir()
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(scratch_root))
+    repo = scratch_repo(tmp_path)
+    package = repo / "packages" / "gizmo" / "src" / "gizmo"
+    package.mkdir(parents=True)
+    write(package / "__init__.py", baseline_source)
+    baseline = commit_all(repo, "the baseline's gizmo")
+    write(package / "__init__.py", "def double(x):\n    return x * 2\n")
+    write(repo / "tests" / "test_gizmo.py", GIZMO_GUARD)
+    commit_all(repo, "gizmo doubles")
+    return repo, baseline, scratch_root
+
+
+def test_a_package_in_the_tree_is_proved_imported_from_the_baseline_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A package under ``packages/*/src`` resolves inside the run's baseline tree, on the record."""
+    repo, baseline, scratch_root = _gizmo_repo(
+        tmp_path, monkeypatch, "def double(x):\n    return x\n"
+    )
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo, "tests/test_gizmo.py", baseline, "--json", str(record_path)
+    )
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    proof = json.loads(record_path.read_text(encoding="utf-8"))[
+        "harness_proof"
+    ]
+    assert proof["baseline_source_imported"] is True
+    resolved = Path(proof["resolved"]["gizmo"]).relative_to(
+        scratch_root.resolve()
+    )
+    assert resolved.parts[0].startswith("failbefore-")
+    assert resolved.parts[1:] == (
+        "tree",
+        "packages",
+        "gizmo",
+        "src",
+        "gizmo",
+        "__init__.py",
+    )
+
+
+def test_a_tree_holding_no_package_records_no_resolved_import(
+    tmp_path: Path,
+) -> None:
+    repo, baseline = _fixed_double(tmp_path)
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo, "tests/test_widgets.py", baseline, "--json", str(record_path)
+    )
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    proof = json.loads(record_path.read_text(encoding="utf-8"))[
+        "harness_proof"
+    ]
+    assert proof == {"resolved": {}, "baseline_source_imported": True}
+
+
+def test_a_baseline_package_that_raises_at_import_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, baseline, _ = _gizmo_repo(
+        tmp_path, monkeypatch, "raise RuntimeError('gizmo is not ready')\n"
+    )
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo, "tests/test_gizmo.py", baseline, "--json", str(record_path)
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "the baseline tree's own source is not what got imported" in _why(
+        result
+    )
+    proof = json.loads(record_path.read_text(encoding="utf-8"))[
+        "harness_proof"
+    ]
+    assert proof["baseline_source_imported"] is False
+    assert "IMPORT FAILED" in proof["resolved"]["gizmo"]
+    assert "gizmo is not ready" in proof["resolved"]["gizmo"]
+
+
+# ── the run ──────────────────────────────────────────────────────────────────
+
+
+def test_a_run_past_the_runs_timeout_is_refused_naming_the_runner_and_seconds(
+    tmp_path: Path,
+) -> None:
+    """A test that never returns ends the run at ``--timeout``, refused by runner and seconds."""
+    repo, baseline = _fixed_double(
+        tmp_path,
+        "import time\n"
+        "\n"
+        "\n"
+        "def test_never_returns():\n"
+        "    while True:\n"
+        "        time.sleep(1)\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline, "--timeout", "3")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "pytest did not finish within 3s" in _why(result)
+
+
+def test_a_run_that_ends_before_its_session_finishes_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A test ending the interpreter at once leaves no outcome record, and the run is refused."""
+    repo, baseline = _fixed_double(
+        tmp_path,
+        "import os\n\n\ndef test_ends_the_interpreter():\n    os._exit(0)\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "pytest reported no outcome record" in _why(result)
+
+
+def test_an_outcome_record_that_is_not_json_is_refused(tmp_path: Path) -> None:
+    """A test writing text that is not JSON where the record goes, then ending, is refused."""
+    repo, baseline = _fixed_double(
+        tmp_path,
+        "import os\n"
+        "\n"
+        "\n"
+        "def test_writes_the_record_itself():\n"
+        f"    with open(os.environ[{OUTCOME_ENV!r}], 'w') as record:\n"
+        "        record.write('not json')\n"
+        "    os._exit(0)\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "is not JSON" in _why(result)
+
+
+def test_an_internal_error_of_the_runner_is_refused(tmp_path: Path) -> None:
+    """A ``conftest.py`` hook raising during collection is pytest's internal error, refused."""
+    repo, baseline = _fixed_double(tmp_path)
+    write(
+        repo / "tests" / "conftest.py",
+        "def pytest_collection_modifyitems(items):\n"
+        "    raise RuntimeError('a hook that raises')\n",
+    )
+    commit_all(repo, "a hook that raises")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "the runner hit an internal or unhandled error" in _why(result)
+
+
+def test_a_module_that_raises_at_import_at_the_baseline_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A test module raising a ``KeyError`` at import at the baseline is a collection error."""
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "SETTINGS = {}\n")
+    baseline = commit_all(repo, "no settings")
+    write(repo / "widgets.py", "SETTINGS = {'color': 'red'}\n")
+    write(
+        repo / "tests" / "test_widgets.py",
+        "from widgets import SETTINGS\n"
+        "\n"
+        "COLOR = SETTINGS['color']\n"
+        "\n"
+        "\n"
+        "def test_the_color_is_red():\n"
+        "    assert COLOR == 'red'\n",
+    )
+    commit_all(repo, "a color setting")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "the baseline could not collect tests/test_widgets.py" in _why(
+        result
+    )
+
+
+def test_a_k_expression_matching_no_test_is_refused_as_nothing_selected(
+    tmp_path: Path,
+) -> None:
+    repo, baseline = _fixed_double(tmp_path)
+
+    result = _run(
+        repo, "tests/test_widgets.py", baseline, "-k", "no_such_test"
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "nothing was selected" in _why(result)
+
+
+def test_a_module_skipped_at_import_is_refused_as_nothing_selected(
+    tmp_path: Path,
+) -> None:
+    """A module ``pytest.importorskip`` skips at import collects no test, so nothing is selected.
+
+    It is not refused as every test skipped: no test of it was collected to be skipped.
+    """
+    repo, baseline = _fixed_double(
+        tmp_path,
+        "import pytest\n"
+        "\n"
+        "pytest.importorskip('no_such_module_anywhere')\n"
+        "\n"
+        "\n"
+        "def test_passes():\n"
+        "    assert True\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert "nothing was selected" in why
+    assert "were skipped" not in why
+
+
+SKIPPED_TEST = "\n\n@pytest.mark.skip(reason='not yet')\ndef test_{name}():\n    assert False\n"
+
+
+def test_every_test_skipped_at_setup_is_refused(tmp_path: Path) -> None:
+    repo, baseline = _fixed_double(
+        tmp_path,
+        "import pytest\n"
+        + SKIPPED_TEST.format(name="first")
+        + SKIPPED_TEST.format(name="second"),
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "all 2 selected tests were skipped" in _why(result)
+
+
+def test_a_pass_beside_a_skip_at_a_baseline_before_the_change_is_vacuous(
+    tmp_path: Path,
+) -> None:
+    repo, baseline = _fixed_double(
+        tmp_path,
+        "import pytest\n"
+        "\n"
+        "\n"
+        "def test_passes():\n"
+        "    assert True\n" + SKIPPED_TEST.format(name="skipped"),
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["VACUOUS"], result.stdout + result.stderr
+    assert "at a baseline shown to precede the change" in _why(result)
+
+
+def test_a_missing_import_failing_every_test_is_refused_quoting_it(
+    tmp_path: Path,
+) -> None:
+    """Every failure resting on a module the baseline lacks is refused, quoting the import."""
+    repo, baseline = _head_adds_color_double_and_gadgets(
+        tmp_path,
+        "def test_imports_a_gadget():\n"
+        "    from gadgets import GADGET\n"
+        "    assert GADGET == 1\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert "all 1 failing tests failed on a missing import or file" in why
+    assert "No module named 'gadgets'" in why
+
+
+def test_a_failure_at_a_baseline_no_source_change_follows_guards_with_the_caveat(
+    tmp_path: Path,
+) -> None:
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    write(repo / "tests" / "test_widgets.py", DOUBLE_GUARD)
+    commit_all(repo, "a test double does not pass")
+
+    result = _run(repo, "tests/test_widgets.py", "HEAD")
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "No source file differs between the baseline and the tree" in _why(
+        result
+    )
+
+
+def test_a_k_expression_selects_the_one_test_it_names_on_the_pytest_path(
+    tmp_path: Path,
+) -> None:
+    repo, baseline = _fixed_double(
+        tmp_path,
+        "def test_double_of_three():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n"
+        "\n"
+        "\n"
+        "def test_double_of_four():\n"
+        "    from widgets import double\n"
+        "    assert double(4) == 8\n",
+    )
+
+    result = _run(repo, "tests/test_widgets.py", baseline, "-k", "four")
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    why = _why(result)
+    assert "1 of 1 selected tests failed on the behavior" in why
+    assert "test_double_of_four" in why
+    assert "test_double_of_three" not in result.stdout
+
+
+def test_change_counts_a_declared_file_only_when_it_differs(
+    tmp_path: Path,
+) -> None:
+    """Each ``--change`` path that differs is counted, and only those, on the record.
+
+    A declared path identical at the baseline is named as not counted, and a changed path not
+    declared is not counted either.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    write(repo / "gadgets.py", "GADGET = 1\n")
+    write(repo / "helpers.py", "HELPER = 1\n")
+    baseline = commit_all(repo, "double is a no-op")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "helpers.py", "HELPER = 2\n")
+    write(repo / "tests" / "test_widgets.py", DOUBLE_GUARD)
+    commit_all(repo, "double actually doubles, the helper changes")
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo,
+        "tests/test_widgets.py",
+        baseline,
+        "--change",
+        "widgets.py",
+        "--change",
+        "gadgets.py",
+        "--json",
+        str(record_path),
+    )
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    change = json.loads(record_path.read_text(encoding="utf-8"))[
+        "change_under_test"
+    ]
+    assert change["source_files"] == ["widgets.py"]
+    assert (
+        "declared with --change and confirmed to differ"
+        in change["how_determined"]
+    )
+    assert change["how_determined"].endswith(
+        "declared but identical at the baseline, so not counted: gadgets.py"
+    )
 
 
 # ── --per-test-timeout ───────────────────────────────────────────────────────
