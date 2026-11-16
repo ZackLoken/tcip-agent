@@ -1024,16 +1024,15 @@ describe("App job entries", () => {
     expect(listedSentences()).toContain(RUN_RUNNING);
   });
 
-  it("tells nothing when another project's opening empties the listings, and what changed once the first opens again", async () => {
+  it("tells nothing when another project opens and its listings answer empty, and what changed once the first opens again", async () => {
     const valley = [LISTING_BEFORE_FAILURE, TRAINING_LISTING];
     const inValley = () => useStore.getState().openProject?.id === VALLEY.record.id;
     vi.mocked(trainingApi.listRuns).mockImplementation(() => {
-      const answer = inValley() ? valley.shift() : undefined;
+      if (!inValley()) return Promise.resolve({ runs: [], sweeps: [] });
+      const answer = valley.shift();
       return answer ? Promise.resolve(answer) : NO_ANSWER();
     });
-    vi.mocked(inferenceApi.listJobs).mockImplementation(() =>
-      inValley() ? Promise.resolve({ jobs: [] }) : NO_ANSWER(),
-    );
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [] });
     await watchFromMeta([], []);
     const told = useStore.getState().notifications;
     expect(told.map((e) => e.sentence)).toContain(RUN_RUNNING);
@@ -1044,6 +1043,7 @@ describe("App job entries", () => {
         .mergeSnapshot(stateEnvelope({ version: 1, project: openedAs(RIDGE).project })),
     );
     await settle();
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
     expect(useStore.getState().notifications).toEqual(told);
 
     act(() =>
