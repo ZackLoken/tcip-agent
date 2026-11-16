@@ -11,12 +11,19 @@ commit with the fix and the guard test) and run the real script against it. They
 - a command line naming no test file and a ``--test-rev`` naming no revision, each refused, and an
   exception the tool does not name, which exits with the tool's own failure code;
 - the test file's place and the tree it comes from, each way the baseline is chosen or refused,
-  the import proof over a tree holding a package, and each cause of a pytest run's verdict;
+  the import proof over a tree holding a package, one raising at import and one naming a file
+  outside the tree, and each cause of a pytest run's verdict;
 - ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
   the directory cannot be removed;
 - a vitest file under a scratch frontend whose installed packages are this checkout's, each verdict
-  and refusal it can reach, and a changed frontend test counted as the test side of a pytest run.
+  and refusal it can reach, ``--test-rev`` among them, except an outcome record that is not JSON,
+  a pass at a baseline no source change follows, and a failure there scoring GUARDS with the
+  caveat that no source file differs, which the pytest path alone holds; and a changed frontend
+  test counted as the test side of a pytest run;
+- ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
+  holding frontend files and for one in a repository holding none, and the frontend's test file
+  rule failing or answering with something that is not JSON.
 """
 
 from __future__ import annotations
@@ -42,7 +49,11 @@ from tests._scratch_repo_fixtures import (
     scratch_repo,
     write,
 )
-from tools.prove_test_fails_before import OUTCOME_ENV, _failure_kind
+from tools.prove_test_fails_before import (
+    OUTCOME_ENV,
+    TEST_FILE_RULE,
+    _failure_kind,
+)
 
 EXIT = {
     "GUARDS": 0,
@@ -90,12 +101,21 @@ def _fixed_double(
     repository at its head and the baseline revision.
     """
     repo = scratch_repo(tmp_path)
+    return repo, _double_repo(repo, test_source)
+
+
+def _double_repo(repo: Path, test_source: str = DOUBLE_GUARD) -> str:
+    """Commit a no-op ``double`` in ``repo``, then the fix beside ``test_source``.
+
+    The fix commit holds ``test_source`` as ``tests/test_widgets.py`` and changes ``widgets.py``
+    alone besides. Returns the baseline revision.
+    """
     write(repo / "widgets.py", "def double(x):\n    return x\n")
     baseline = commit_all(repo, "double is a no-op")
     write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
     write(repo / "tests" / "test_widgets.py", test_source)
     commit_all(repo, "double actually doubles")
-    return repo, baseline
+    return baseline
 
 
 def _redirect_temporary_folder(
@@ -330,6 +350,15 @@ CAUSE_CLAUSE = "A call that does not fit the baseline's code is one cause"
 FIXTURE_SENTENCE = "a fixture failed during setup"
 TEARDOWN_SENTENCE = "a fixture failed during teardown"
 UNREACHED_SENTENCE = "a missing import or file"
+IMPORT_PROOF_SENTENCE = (
+    "the baseline tree's own source is not what got imported"
+)
+INTERNAL_ERROR_SENTENCE = "the runner hit an internal or unhandled error"
+NOT_COLLECTED_SENTENCE = "the baseline could not collect"
+NOTHING_SELECTED_SENTENCE = "nothing was selected"
+ALL_SKIPPED_SENTENCE = "selected tests were skipped"
+RUN_TIMEOUT_SENTENCE = "did not finish within"
+NO_OUTCOME_SENTENCE = "reported no outcome record"
 
 
 def _one_call_repo(
@@ -1176,6 +1205,30 @@ def test_an_uncommitted_source_change_takes_head_as_the_baseline(
     assert "(HEAD, because the change under test is uncommitted)" in line
 
 
+def test_an_uncommitted_source_change_in_a_repository_with_no_commit_is_refused_by_git(
+    tmp_path: Path,
+) -> None:
+    """With no commit and no ``--baseline``, HEAD is read for the uncommitted source and refused.
+
+    The untracked tool copy is a source change, so HEAD is taken as the baseline, and git's own
+    refusal of that read is the reason, not the merge-base sentence.
+    """
+    repo = scratch_repo(tmp_path)
+    write(
+        repo / "tests" / "test_widgets.py",
+        "def test_passes():\n    assert True\n",
+    )
+
+    result = _tool(repo, "tests/test_widgets.py")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert why.startswith("REFUSED: git rev-parse HEAD failed: "), (
+        result.stdout
+    )
+    assert "no merge-base" not in why
+
+
 def test_a_committed_change_takes_its_merge_base_with_the_integration_branch(
     tmp_path: Path,
 ) -> None:
@@ -1364,15 +1417,41 @@ def test_a_baseline_package_that_raises_at_import_is_refused(
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the baseline tree's own source is not what got imported" in _why(
-        result
-    )
+    assert IMPORT_PROOF_SENTENCE in _why(result)
     proof = json.loads(record_path.read_text(encoding="utf-8"))[
         "harness_proof"
     ]
     assert proof["baseline_source_imported"] is False
     assert "IMPORT FAILED" in proof["resolved"]["gizmo"]
     assert "gizmo is not ready" in proof["resolved"]["gizmo"]
+
+
+def test_a_baseline_package_reporting_a_file_outside_the_tree_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A package that imports and names the standard library's ``os`` as its file is refused.
+
+    The import succeeds, so the refusal rests on the resolved path lying outside the baseline tree,
+    which the record carries.
+    """
+    repo, baseline, _ = _gizmo_repo(
+        tmp_path,
+        monkeypatch,
+        "import os\n\n__file__ = os.__file__\n\n\ndef double(x):\n    return x\n",
+    )
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo, "tests/test_gizmo.py", baseline, "--json", str(record_path)
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert IMPORT_PROOF_SENTENCE in _why(result)
+    proof = json.loads(record_path.read_text(encoding="utf-8"))[
+        "harness_proof"
+    ]
+    assert proof["baseline_source_imported"] is False
+    assert Path(proof["resolved"]["gizmo"]) == Path(os.__file__)
 
 
 # ── the run ──────────────────────────────────────────────────────────────────
@@ -1395,7 +1474,7 @@ def test_a_run_past_the_runs_timeout_is_refused_naming_the_runner_and_seconds(
     result = _run(repo, "tests/test_widgets.py", baseline, "--timeout", "3")
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "pytest did not finish within 3s" in _why(result)
+    assert f"pytest {RUN_TIMEOUT_SENTENCE} 3s" in _why(result)
 
 
 def test_a_run_that_ends_before_its_session_finishes_is_refused(
@@ -1410,7 +1489,7 @@ def test_a_run_that_ends_before_its_session_finishes_is_refused(
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "pytest reported no outcome record" in _why(result)
+    assert f"pytest {NO_OUTCOME_SENTENCE}" in _why(result)
 
 
 def test_an_outcome_record_that_is_not_json_is_refused(tmp_path: Path) -> None:
@@ -1445,7 +1524,7 @@ def test_an_internal_error_of_the_runner_is_refused(tmp_path: Path) -> None:
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the runner hit an internal or unhandled error" in _why(result)
+    assert INTERNAL_ERROR_SENTENCE in _why(result)
 
 
 def test_a_module_that_raises_at_import_at_the_baseline_is_refused(
@@ -1471,9 +1550,7 @@ def test_a_module_that_raises_at_import_at_the_baseline_is_refused(
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the baseline could not collect tests/test_widgets.py" in _why(
-        result
-    )
+    assert f"{NOT_COLLECTED_SENTENCE} tests/test_widgets.py" in _why(result)
 
 
 def test_a_k_expression_matching_no_test_is_refused_as_nothing_selected(
@@ -1486,7 +1563,7 @@ def test_a_k_expression_matching_no_test_is_refused_as_nothing_selected(
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "nothing was selected" in _why(result)
+    assert NOTHING_SELECTED_SENTENCE in _why(result)
 
 
 def test_a_module_skipped_at_import_is_refused_as_nothing_selected(
@@ -1511,8 +1588,8 @@ def test_a_module_skipped_at_import_is_refused_as_nothing_selected(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert "nothing was selected" in why
-    assert "were skipped" not in why
+    assert NOTHING_SELECTED_SENTENCE in why
+    assert ALL_SKIPPED_SENTENCE not in why
 
 
 SKIPPED_TEST = "\n\n@pytest.mark.skip(reason='not yet')\ndef test_{name}():\n    assert False\n"
@@ -1529,7 +1606,7 @@ def test_every_test_skipped_at_setup_is_refused(tmp_path: Path) -> None:
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "all 2 selected tests were skipped" in _why(result)
+    assert f"all 2 {ALL_SKIPPED_SENTENCE}" in _why(result)
 
 
 def test_a_pass_beside_a_skip_at_a_baseline_before_the_change_is_vacuous(
@@ -1565,7 +1642,7 @@ def test_a_missing_import_failing_every_test_is_refused_quoting_it(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert "all 1 failing tests failed on a missing import or file" in why
+    assert f"all 1 failing tests failed on {UNREACHED_SENTENCE}" in why
     assert "No module named 'gadgets'" in why
 
 
@@ -1923,6 +2000,7 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
 FRONTEND_PATH = FRONTEND.relative_to(REPO_ROOT).as_posix()
 INSTALL = FRONTEND / "node_modules"
 WIDGET_TEST = f"{FRONTEND_PATH}/src/widget.test.ts"
+VITEST_CONFIG = f"{FRONTEND_PATH}/vitest.config.mjs"
 
 
 def _scratch_frontend(repo: Path) -> Path:
@@ -1936,7 +2014,7 @@ def _scratch_frontend(repo: Path) -> Path:
     shutil.copytree(FRONTEND / "scripts", frontend / "scripts")
     write(frontend / "tsconfig.json", '{"include": ["src"]}\n')
     write(frontend / "package.json", '{"type": "module"}\n')
-    write(frontend / "vitest.config.mjs", "export default {};\n")
+    write(repo / VITEST_CONFIG, "export default {};\n")
     (frontend / "src").mkdir()
     write(repo / ".git" / "info" / "exclude", "node_modules\n")
     return frontend
@@ -2166,6 +2244,293 @@ def test_a_changed_frontend_test_alone_leaves_a_pytest_pass_indeterminate(
     assert "no source file differs" in _why(result)
 
 
+def test_a_vitest_file_taken_from_test_rev_guards(linked_repo: Path) -> None:
+    """A vitest file the head no longer holds is run from ``--test-rev`` and scores GUARDS."""
+    baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    fix = git(linked_repo, "rev-parse", "HEAD").strip()
+    (linked_repo / WIDGET_TEST).unlink()
+    commit_all(linked_repo, "remove the test")
+
+    result = _run(linked_repo, WIDGET_TEST, baseline, "--test-rev", fix)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "src/widget.test.ts::double doubles" in _why(result)
+
+
+def test_a_baseline_tree_already_holding_the_install_folder_is_refused_at_the_link(
+    linked_repo: Path,
+) -> None:
+    """A baseline tracking a file in the frontend's ``node_modules`` leaves no room for the link.
+
+    The materialized tree holds that folder where the link to the install goes, so the link is
+    refused with the system's error, which names the folder.
+    """
+    install = linked_repo / FRONTEND_PATH / "node_modules"
+    write(install / "tracked.txt", "tracked past the ignore\n")
+    git(linked_repo, "add", "-f", str(install / "tracked.txt"))
+    baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert "the baseline tree's link to" in why
+    assert "could not be made: [" in why
+    assert "node_modules'" in why.partition("could not be made: ")[2]
+
+
+def test_a_rejection_a_vitest_test_leaves_unhandled_is_refused_as_an_unhandled_error(
+    linked_repo: Path,
+) -> None:
+    """A test that passes and leaves a rejected promise unhandled is refused on vitest's report."""
+    baseline = _widget_repo(
+        linked_repo,
+        NO_OP_DOUBLE,
+        DOUBLE,
+        'import { expect, test } from "vitest";\n'
+        "\n"
+        'test("leaves a rejection", () => {\n'
+        '  Promise.reject(new Error("never handled"));\n'
+        "  expect(1).toBe(1);\n"
+        "});\n",
+    )
+    record_path = linked_repo.parent / "record.json"
+
+    result = _run(
+        linked_repo, WIDGET_TEST, baseline, "--json", str(record_path)
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert INTERNAL_ERROR_SENTENCE in _why(result)
+    observed = json.loads(record_path.read_text(encoding="utf-8"))["observed"]
+    assert observed["counts"] == {"passed": 1}
+
+
+def _not_collected_errors(repo: Path, baseline: str) -> list[dict]:
+    """Run the widget test at ``baseline`` and return the collection errors its record holds.
+
+    The run's refusal as not collected, its exit code and its verdict line, is asserted with the
+    tool's output in the message before the record is read.
+    """
+    record_path = repo.parent / "record.json"
+    result = _run(repo, WIDGET_TEST, baseline, "--json", str(record_path))
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"{NOT_COLLECTED_SENTENCE} src/widget.test.ts" in _why(result)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    return record["observed"]["collect_errors"]
+
+
+def test_a_vitest_module_throwing_at_its_top_level_is_refused_as_not_collected(
+    linked_repo: Path,
+) -> None:
+    """A test module that throws before declaring a test is a collection error of its own."""
+    baseline = _widget_repo(
+        linked_repo, NO_OP_DOUBLE, DOUBLE, 'throw new Error("not ready");\n'
+    )
+
+    errors = _not_collected_errors(linked_repo, baseline)
+
+    assert [error["detail"] for error in errors] == ["not ready"]
+
+
+GADGET_TEST_IMPORTING_AT_THE_TOP = (
+    'import { expect, test } from "vitest";\n'
+    "\n"
+    'import { gadget } from "./gadget";\n'
+    "\n"
+    'test("gadget is one", () => {\n'
+    "  expect(gadget).toBe(1);\n"
+    "});\n"
+)
+GADGET_TEST_IMPORTING_IN_ITS_BODY = (
+    'import { expect, test } from "vitest";\n'
+    "\n"
+    'test("gadget is one", async () => {\n'
+    '  const { gadget } = await import("./gadget");\n'
+    "  expect(gadget).toBe(1);\n"
+    "});\n"
+)
+
+
+def _gadget_repo(repo: Path, test_source: str) -> str:
+    """Commit a widget, then a head adding ``src/gadget.ts`` beside ``test_source``.
+
+    Returns the baseline revision, which holds no gadget.
+    """
+    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, test_source)
+    write(
+        repo / FRONTEND_PATH / "src" / "gadget.ts",
+        "export const gadget = 1;\n",
+    )
+    commit_all(repo, "the head's gadget")
+    return baseline
+
+
+def test_a_vitest_module_importing_what_the_baseline_lacks_is_refused_as_not_collected(
+    linked_repo: Path,
+) -> None:
+    """A test module whose top-level import the baseline cannot resolve reports no test.
+
+    vitest records the missing module as the module's own error, so the run is refused as a
+    collection error, not as a test that failed on a missing import.
+    """
+    baseline = _gadget_repo(linked_repo, GADGET_TEST_IMPORTING_AT_THE_TOP)
+
+    errors = _not_collected_errors(linked_repo, baseline)
+
+    assert len(errors) == 1
+    assert errors[0]["detail"].startswith("Cannot find module './gadget'")
+
+
+def test_a_vitest_test_importing_what_the_baseline_lacks_is_refused_as_unreached(
+    linked_repo: Path,
+) -> None:
+    """A test whose body imports a module the baseline lacks fails as unreached, and is refused."""
+    baseline = _gadget_repo(linked_repo, GADGET_TEST_IMPORTING_IN_ITS_BODY)
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert f"all 1 failing tests failed on {UNREACHED_SENTENCE}" in why
+    assert "(Error: Cannot find module " in why
+    assert "[unreached]" in result.stdout
+
+
+def test_a_vitest_name_pattern_matching_no_test_is_refused_as_nothing_selected(
+    linked_repo: Path,
+) -> None:
+    baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+
+    result = _run(linked_repo, WIDGET_TEST, baseline, "-k", "no such test")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert NOTHING_SELECTED_SENTENCE in _why(result)
+
+
+def _two_vitest_tests(declaration: str, skip: str) -> str:
+    """Return a vitest file of two failing tests, each declared by ``declaration``.
+
+    Each body runs ``skip`` before its assertion.
+    """
+    return 'import { expect, test } from "vitest";\n' + "".join(
+        f'\n{declaration}("{name}", (context) => {{\n{skip}  expect(1).toBe(2);\n}});\n'
+        for name in ("first", "second")
+    )
+
+
+def test_a_vitest_file_whose_tests_are_all_declared_skipped_is_refused_as_nothing_selected(
+    linked_repo: Path,
+) -> None:
+    """Tests declared skipped are neither counted nor recorded, so nothing is selected."""
+    baseline = _widget_repo(
+        linked_repo, NO_OP_DOUBLE, DOUBLE, _two_vitest_tests("test.skip", "")
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert NOTHING_SELECTED_SENTENCE in why
+    assert ALL_SKIPPED_SENTENCE not in why
+
+
+def test_a_vitest_file_whose_tests_all_skip_themselves_is_refused_as_all_skipped(
+    linked_repo: Path,
+) -> None:
+    """Tests that skip themselves while running are counted as selected and recorded skipped."""
+    baseline = _widget_repo(
+        linked_repo,
+        NO_OP_DOUBLE,
+        DOUBLE,
+        _two_vitest_tests("test", "  context.skip();\n"),
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"all 2 {ALL_SKIPPED_SENTENCE}" in _why(result)
+
+
+# Runs each test in vitest's own process, so ending or killing that process ends every test.
+THREADS_CONFIG = 'export default { test: { pool: "threads" } };\n'
+
+
+def _threads_widget_repo(repo: Path, test_source: str) -> str:
+    """Commit the threads configuration and a widget, then ``test_source``; return the baseline."""
+    write(repo / VITEST_CONFIG, THREADS_CONFIG)
+    return _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, test_source)
+
+
+def test_a_vitest_run_past_the_runs_timeout_is_refused_naming_the_runner_and_seconds(
+    linked_repo: Path,
+) -> None:
+    """A test that never settles within its own far longer timeout ends the run at ``--timeout``."""
+    baseline = _threads_widget_repo(
+        linked_repo,
+        'import { test } from "vitest";\n'
+        "\n"
+        'test("never settles", () => new Promise(() => {}), 600_000);\n',
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline, "--timeout", "5")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"vitest {RUN_TIMEOUT_SENTENCE} 5s" in _why(result)
+
+
+def test_a_vitest_test_killing_the_run_is_refused_as_reporting_no_outcome(
+    linked_repo: Path,
+) -> None:
+    """A test killing vitest's own process leaves no outcome record, and the run is refused."""
+    baseline = _threads_widget_repo(
+        linked_repo,
+        'import { test } from "vitest";\n'
+        "\n"
+        'test("ends the process", () => {\n'
+        '  process.kill(process.pid, "SIGKILL");\n'
+        "});\n",
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"vitest {NO_OUTCOME_SENTENCE}" in _why(result)
+
+
+def test_a_vitest_module_run_from_outside_the_baseline_tree_is_refused(
+    linked_repo: Path,
+) -> None:
+    """A baseline configuration pointing vitest at the working tree's frontend is refused.
+
+    vitest runs the working tree's copy of the test file, outside the baseline tree, and the
+    record names it.
+    """
+    working_frontend = (linked_repo / FRONTEND_PATH).as_posix()
+    write(
+        linked_repo / VITEST_CONFIG,
+        f"export default {{ test: {{ dir: {json.dumps(working_frontend)} }} }};\n",
+    )
+    baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    record_path = linked_repo.parent / "record.json"
+
+    result = _run(
+        linked_repo, WIDGET_TEST, baseline, "--json", str(record_path)
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "a test module vitest ran lies outside the baseline tree" in _why(
+        result
+    )
+    proof = json.loads(record_path.read_text(encoding="utf-8"))[
+        "harness_proof"
+    ]
+    assert proof["test_modules_in_baseline_tree"] is False
+    assert [Path(module).resolve() for module in proof["test_modules"]] == [
+        (linked_repo / WIDGET_TEST).resolve()
+    ]
+
+
 # Starts the holder over a file beside the test, in a folder a bottom-up removal reaches before the
 # frontend folder holding the link, and returns once the holder has the file open.
 VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS = (
@@ -2246,3 +2611,113 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
             if link.is_symlink():
                 link.unlink()
             shutil.rmtree(leftover)
+
+
+# ── node and the frontend's test file rule ───────────────────────────────────
+
+NO_NODE_SENTENCE = "no node on the path"
+
+
+def _leave_only_git_on_the_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set this process's search path, which the tool inherits, to the folder holding ``git``.
+
+    Fails the test, naming both folders, where that folder also holds ``node``.
+    """
+    git_folder = Path(shutil.which("git")).parent
+    node = shutil.which("node", path=str(git_folder))
+    if node is not None:
+        pytest.fail(
+            f"node ({node}) sits in the folder holding git ({git_folder}), so no search path "
+            "here keeps git and drops node"
+        )
+    monkeypatch.setenv("PATH", str(git_folder))
+
+
+def test_a_vitest_file_with_no_node_on_the_path_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A frontend test file is judged by the frontend's rule under ``node``, which is absent."""
+    repo = scratch_repo(tmp_path)
+    _scratch_frontend(repo)
+    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    _leave_only_git_on_the_path(monkeypatch)
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert _why(result).startswith(f"REFUSED: {NO_NODE_SENTENCE}")
+
+
+def test_a_pytest_file_in_a_repository_holding_frontend_files_with_no_node_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every working-tree file is judged for the overlay, the frontend's among them, under ``node``.
+
+    The change touches no frontend file, so the refusal comes from judging the working tree.
+    """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo = scratch_repo(tmp_path)
+    src = _scratch_frontend(repo) / "src"
+    write(src / "widget.ts", DOUBLE)
+    write(src / "widget.test.ts", DOUBLE_TEST)
+    baseline = _double_repo(repo)
+    _leave_only_git_on_the_path(monkeypatch)
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert _why(result).startswith(f"REFUSED: {NO_NODE_SENTENCE}")
+
+
+def test_a_pytest_file_in_a_repository_holding_no_frontend_runs_without_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No path judged lies under the frontend, so ``node`` is never asked for and the run guards."""
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo, baseline = _fixed_double(tmp_path)
+    _leave_only_git_on_the_path(monkeypatch)
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "tests/test_widgets.py::test_double_doubles" in _why(result)
+
+
+def _frontend_with_rule(tmp_path: Path, rule: str) -> tuple[Path, str]:
+    """Build a scratch repository holding the widget test, its frontend's rule replaced by ``rule``.
+
+    The replacement is left uncommitted, where the tool runs it. Returns the repository and the
+    baseline revision.
+    """
+    repo = scratch_repo(tmp_path)
+    _scratch_frontend(repo)
+    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    write(repo / TEST_FILE_RULE, rule)
+    return repo, baseline
+
+
+def test_a_test_file_rule_that_fails_is_refused_naming_the_rule_and_its_error(
+    tmp_path: Path,
+) -> None:
+    repo, baseline = _frontend_with_rule(
+        tmp_path,
+        'process.stderr.write("the rule broke\\n");\nprocess.exit(1);\n',
+    )
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"{TEST_FILE_RULE} failed: the rule broke" in _why(result)
+
+
+def test_a_test_file_rule_answering_with_no_json_is_refused(
+    tmp_path: Path,
+) -> None:
+    repo, baseline = _frontend_with_rule(
+        tmp_path, 'process.stdout.write("not json");\n'
+    )
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"{TEST_FILE_RULE} answered with no JSON" in _why(result)
