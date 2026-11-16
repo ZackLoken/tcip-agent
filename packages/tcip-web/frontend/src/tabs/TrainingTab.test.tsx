@@ -15,7 +15,9 @@ import {
 } from "@/api/types.generated";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
+import { trainingKey } from "@/lib/trainingKeys";
 import { useStore } from "@/store";
+import { selectStanding } from "@/store/slices/notifications";
 import { numericMetricKeys, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab } from "@/tabs/TrainingTab";
 import { entriesSaying } from "@/test/notifications";
@@ -664,15 +666,32 @@ describe("TrainingTab run end and stream error", () => {
     fireEvent.click(await screen.findByText(id));
 
     await waitFor(() => expect(entriesSaying(ended)).toHaveLength(1));
-    expect(entriesSaying(ended)).toEqual([
+    expect(selectStanding(trainingKey("end", TEST_PROJECT.id, id))(useStore.getState())).toEqual(
       expect.objectContaining({
         kind: "job",
         level: "info",
         count: 1,
+        sentence: ended,
         context: { project: TEST_PROJECT.id, target: id },
       }),
-    ]);
+    );
     expect(useStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("keeps a run's failed Cancel in its row when that run's end arrives", async () => {
+    listing(LISTING_BEFORE_FAILURE);
+    streamFrames(STATUS_FRAME);
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(trainingApi, "cancel").mockRejectedValue(new TypeError("Failed to fetch"));
+    const failed = "Cancel failed: Failed to fetch";
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByRole("button", { name: `Cancel ${id}` }));
+    expect(await within(rowFor(id)).findByTestId("entry-in-place")).toHaveTextContent(failed);
+    fireEvent.click(screen.getByText(id));
+
+    await waitFor(() => expect(entriesSaying(ended)).toHaveLength(1));
+    expect(within(rowFor(id)).getByTestId("entry-in-place")).toHaveTextContent(failed);
   });
 
   it("raises a stream error as one failure naming the run, then still shows a metric the reconnect delivers", async () => {
@@ -687,14 +706,19 @@ describe("TrainingTab run end and stream error", () => {
     expect(
       within(await screen.findByRole("table")).getByText(String(first.row.loss)),
     ).toBeInTheDocument();
-    expect(entriesSaying(sentence)).toEqual([
+    const run = UNKNOWN_RUN_FRAME.experiment_id;
+    expect(entriesSaying(sentence)).toHaveLength(1);
+    expect(
+      selectStanding(trainingKey("stream", TEST_PROJECT.id, run))(useStore.getState()),
+    ).toEqual(
       expect.objectContaining({
         kind: "failure",
         level: "error",
         count: 2,
-        context: { project: TEST_PROJECT.id, target: UNKNOWN_RUN_FRAME.experiment_id },
+        sentence,
+        context: { project: TEST_PROJECT.id, target: run },
       }),
-    ]);
+    );
   });
 });
 
