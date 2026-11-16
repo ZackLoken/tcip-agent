@@ -7,7 +7,6 @@ import {
   NotificationsLiveRegion,
 } from "@/components/Notifications";
 import { ProjectPicker } from "@/components/ProjectPicker";
-import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
 import { defaultDockModel, notificationsOpen, toggleNotifications } from "@/lib/dock";
@@ -75,7 +74,6 @@ function App() {
     <div ref={rootRef} className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
       <TopBar notifications={<NotificationsButton ref={button} open={open} onToggle={toggle} />} />
       <Dock model={model} work={<Work />} />
-      <Toasts />
       <NotificationsLiveRegion />
     </div>
   );

@@ -12,14 +12,12 @@ import { createPendingTerminalMessageSlice } from "@/store/slices/pendingTermina
 import { createProjectOpenSlice } from "@/store/slices/projectOpen";
 import { createRegistryStatusSlice } from "@/store/slices/registryStatus";
 import { createTerminalOpenSlice } from "@/store/slices/terminalOpen";
-import { createToastSlice } from "@/store/slices/toasts";
 import { createUserSlice } from "@/store/slices/user";
 
 export type { AppState } from "@/store/appState";
 export type { AgentActivity } from "@/store/slices/agentActivity";
 export type { Banner } from "@/store/slices/banners";
 export type { CanvasState } from "@/store/slices/canvas";
-export type { Toast } from "@/store/slices/toasts";
 
 /** One slice file per labeled group of store state; each slice's own file is the full read of
  *  that group's state and actions, and this create() call is the only place they compose.
@@ -31,7 +29,6 @@ export const useStore = create<AppState>()((...a) => ({
   ...createBandSelectionSlice(...a),
   ...createRegistryStatusSlice(...a),
   ...createAgentActivitySlice(...a),
-  ...createToastSlice(...a),
   ...createNotificationsSlice(...a),
   ...createBannerSlice(...a),
   ...createTerminalOpenSlice(...a),
