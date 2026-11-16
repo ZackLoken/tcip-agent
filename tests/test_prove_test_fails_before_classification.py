@@ -32,10 +32,8 @@ from pathlib import Path
 import pytest
 
 from tests import FRONTEND, REPO_ROOT
+from tests._scratch_repo_fixtures import commit_all, git, scratch_repo, write
 from tools.prove_test_fails_before import _failure_kind
-
-SCRIPT = REPO_ROOT / "tools" / "prove_test_fails_before.py"
-SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
 
 EXIT = {
     "GUARDS": 0,
@@ -44,36 +42,6 @@ EXIT = {
     "REFUSED": 3,
     "TOOL_FAILURE": 4,
 }
-
-
-def _git(repo: Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True
-    )
-    assert proc.returncode == 0, proc.stderr
-    return proc.stdout
-
-
-def _write(path: Path, text: str) -> None:
-    path.write_text(text, encoding="utf-8", newline="\n")
-
-
-def _scratch_repo(tmp_path: Path) -> Path:
-    """Make a git repository holding nothing but the script under test; return its root."""
-    repo = tmp_path / "scratch"
-    (repo / "tools").mkdir(parents=True)
-    (repo / "tests").mkdir()
-    _write(repo / "tools" / "prove_test_fails_before.py", SCRIPT_SOURCE)
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
-    return repo
-
-
-def _commit_all(repo: Path, message: str) -> str:
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", message)
-    return _git(repo, "rev-parse", "HEAD").strip()
 
 
 def _tool(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -132,18 +100,18 @@ def test_an_assertion_failure_guards(tmp_path: Path) -> None:
     The test's own assert failing on the value the baseline produced is reported GUARDS,
     behavioral.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
 
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_double_doubles():\n"
         "    from widgets import double\n"
         "    assert double(3) == 6\n",
     )
-    _commit_all(repo, "double actually doubles")
+    commit_all(repo, "double actually doubles")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -161,22 +129,22 @@ def test_a_test_file_taken_from_test_rev_guards_by_either_spelling(
     The scratch repository's head no longer holds the test file, so the verdict can only come
     from the file at the fix commit; the repo-relative and the absolute spelling report it alike.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
 
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
     test_path = repo / "tests" / "test_widgets.py"
-    _write(
+    write(
         test_path,
         "def test_double_doubles():\n"
         "    from widgets import double\n"
         "    assert double(3) == 6\n",
     )
-    fix = _commit_all(repo, "double actually doubles")
+    fix = commit_all(repo, "double actually doubles")
 
     test_path.unlink()
-    _commit_all(repo, "remove the test")
+    commit_all(repo, "remove the test")
 
     named = (
         "tests/test_widgets.py" if spelling == "relative" else str(test_path)
@@ -195,30 +163,30 @@ def test_a_value_error_raised_from_code_under_test_guards(
     An uncaught ValueError the code under test raises is reported GUARDS, behavioral, naming
     ValueError.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(
+    repo = scratch_repo(tmp_path)
+    write(
         repo / "widgets.py",
         "def normalize(value):\n"
         "    if value <= 0:\n"
         "        raise ValueError('must be positive')\n"
         "    return value\n",
     )
-    baseline = _commit_all(repo, "normalize wrongly rejects zero")
+    baseline = commit_all(repo, "normalize wrongly rejects zero")
 
-    _write(
+    write(
         repo / "widgets.py",
         "def normalize(value):\n"
         "    if value < 0:\n"
         "        raise ValueError('must be positive')\n"
         "    return value\n",
     )
-    _write(
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_normalize_permits_zero():\n"
         "    from widgets import normalize\n"
         "    assert normalize(0) == 0\n",
     )
-    _commit_all(repo, "normalize permits zero")
+    commit_all(repo, "normalize permits zero")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -236,15 +204,15 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(
     A fixture whose call into package code raises before the fixture returns is reported REFUSED,
     kind ``fixture``, though the crash frame sits in the package's own file, outside tests/.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(
+    repo = scratch_repo(tmp_path)
+    write(
         repo / "widgets.py",
         "def make_widget():\n"
         "    raise ValueError('widgets are not ready yet')\n",
     )
-    baseline = _commit_all(repo, "widgets are not buildable")
+    baseline = commit_all(repo, "widgets are not buildable")
 
-    _write(
+    write(
         repo / "widgets.py",
         "class Widget:\n"
         "    pass\n"
@@ -253,7 +221,7 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(
         "def make_widget():\n"
         "    return Widget()\n",
     )
-    _write(
+    write(
         repo / "tests" / "test_widgets.py",
         "import pytest\n"
         "\n"
@@ -267,7 +235,7 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(
         "def test_widget_builds(widget):\n"
         "    assert widget is not None\n",
     )
-    _commit_all(repo, "widgets are buildable")
+    commit_all(repo, "widgets are buildable")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -348,17 +316,17 @@ def _one_call_repo(
 
     Returns the repository at its head and the baseline revision.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", baseline_source)
-    baseline = _commit_all(repo, "the baseline's widgets")
-    _write(repo / "widgets.py", head_source)
-    _write(
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", baseline_source)
+    baseline = commit_all(repo, "the baseline's widgets")
+    write(repo / "widgets.py", head_source)
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_the_call_fits_the_head():\n"
         "    from widgets import f\n"
         f"    assert {expression}\n",
     )
-    _commit_all(repo, "the head's widgets")
+    commit_all(repo, "the head's widgets")
     return repo, baseline
 
 
@@ -499,8 +467,8 @@ def _head_adds_color_double_and_gadgets(
     ``gadgets`` module; the head fixes the first two and adds the third. Returns the repository at
     its head and the baseline revision.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(
+    repo = scratch_repo(tmp_path)
+    write(
         repo / "widgets.py",
         "def double(x):\n"
         "    return x\n"
@@ -510,8 +478,8 @@ def _head_adds_color_double_and_gadgets(
         "    def __init__(self, size):\n"
         "        self.size = size\n",
     )
-    baseline = _commit_all(repo, "double is a no-op, widget has no color")
-    _write(
+    baseline = commit_all(repo, "double is a no-op, widget has no color")
+    write(
         repo / "widgets.py",
         "def double(x):\n"
         "    return x * 2\n"
@@ -522,9 +490,9 @@ def _head_adds_color_double_and_gadgets(
         "        self.size = size\n"
         "        self.color = color\n",
     )
-    _write(repo / "gadgets.py", "GADGET = 1\n")
-    _write(repo / "tests" / "test_widgets.py", test_source)
-    _commit_all(repo, "double doubles, widget carries a color, gadgets exists")
+    write(repo / "gadgets.py", "GADGET = 1\n")
+    write(repo / "tests" / "test_widgets.py", test_source)
+    commit_all(repo, "double doubles, widget carries a color, gadgets exists")
     return repo, baseline
 
 
@@ -766,13 +734,13 @@ def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untou
     A tracked modification and an untracked file both land in the printed snapshot's tree, and the
     working tree, the index, and the stash list are all unchanged afterward.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    commit_all(repo, "double is a no-op")
 
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(repo / "untracked.py", "NEW = True\n")
-    status_before = _git(repo, "status", "--porcelain")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "untracked.py", "NEW = True\n")
+    status_before = git(repo, "status", "--porcelain")
 
     proc = _snapshot(repo, "tests/test_widgets.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -780,35 +748,35 @@ def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untou
     assert match, proc.stdout
     snapshot = match.group(1)
 
-    assert "x * 2" in _git(repo, "show", f"{snapshot}:widgets.py")
-    assert "NEW = True" in _git(repo, "show", f"{snapshot}:untracked.py")
-    assert _git(repo, "status", "--porcelain") == status_before
-    assert _git(repo, "stash", "list").strip() == ""
+    assert "x * 2" in git(repo, "show", f"{snapshot}:widgets.py")
+    assert "NEW = True" in git(repo, "show", f"{snapshot}:untracked.py")
+    assert git(repo, "status", "--porcelain") == status_before
+    assert git(repo, "stash", "list").strip() == ""
 
 
 def test_baseline_from_working_tree_excludes_ignored_files(
     tmp_path: Path,
 ) -> None:
-    repo = _scratch_repo(tmp_path)
-    _write(repo / ".gitignore", "ignored.txt\n")
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    _commit_all(repo, "double is a no-op")
-    _write(repo / "ignored.txt", "should not appear\n")
+    repo = scratch_repo(tmp_path)
+    write(repo / ".gitignore", "ignored.txt\n")
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    commit_all(repo, "double is a no-op")
+    write(repo / "ignored.txt", "should not appear\n")
 
     proc = _snapshot(repo, "tests/test_widgets.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     snapshot = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout).group(1)
 
-    listing = _git(repo, "ls-tree", "-r", "--name-only", snapshot)
+    listing = git(repo, "ls-tree", "-r", "--name-only", snapshot)
     assert "ignored.txt" not in listing
 
 
 def test_baseline_from_working_tree_together_with_baseline_is_refused(
     tmp_path: Path,
 ) -> None:
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
 
     proc = _tool(
         repo,
@@ -826,7 +794,7 @@ def test_a_snapshot_in_a_repository_with_no_commit_is_refused(
     tmp_path: Path,
 ) -> None:
     """A snapshot that cannot be made is refused: the scratch repository has no commit."""
-    repo = _scratch_repo(tmp_path)
+    repo = scratch_repo(tmp_path)
 
     proc = _snapshot(repo, "tests/test_widgets.py")
 
@@ -842,11 +810,11 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
     The snapshot is taken before the fix, the fix applied, then the tool runs normally with
     --baseline <the printed hash>.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    commit_all(repo, "double is a no-op")
 
-    _write(
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_double_doubles():\n"
         "    from widgets import double\n"
@@ -857,7 +825,7 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
     assert proc.returncode == 0, proc.stdout + proc.stderr
     snapshot = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout).group(1)
 
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
 
     result = _run(repo, "tests/test_widgets.py", snapshot)
     assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
@@ -872,20 +840,20 @@ def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards
     A helper module outside tests/ opens a data file the baseline commit does not carry, and the
     crash frame sits in that helper, outside tests/; the tool reports REFUSED, unreached.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    _write(
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    write(
         repo / "loader.py",
         "def load_expected():\n"
         "    with open('data/expected.txt') as f:\n"
         "        return int(f.read())\n",
     )
-    baseline = _commit_all(repo, "double is a no-op, no recorded value yet")
+    baseline = commit_all(repo, "double is a no-op, no recorded value yet")
 
     (repo / "data").mkdir()
-    _write(repo / "data" / "expected.txt", "6\n")
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(
+    write(repo / "data" / "expected.txt", "6\n")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_double_matches_the_recorded_value():\n"
         "    from widgets import double\n"
@@ -893,7 +861,7 @@ def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards
         "    expected = load_expected()\n"
         "    assert double(3) == expected\n",
     )
-    _commit_all(
+    commit_all(
         repo, "double actually doubles, checked against a recorded value"
     )
 
@@ -912,17 +880,17 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
     The fix writes a file and the guard test's own assertion line reads it back, so at the
     baseline that read raises FileNotFoundError with its crash frame inside the guard test's body.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def write_summary(path):\n    pass\n")
-    baseline = _commit_all(repo, "write_summary is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def write_summary(path):\n    pass\n")
+    baseline = commit_all(repo, "write_summary is a no-op")
 
-    _write(
+    write(
         repo / "widgets.py",
         "def write_summary(path):\n"
         "    with open(path, 'w') as f:\n"
         "        f.write('6')\n",
     )
-    _write(
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_write_summary_writes_the_expected_content(tmp_path):\n"
         "    from widgets import write_summary\n"
@@ -931,7 +899,7 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
         "    with open(out) as f:\n"
         "        assert f.read() == '6'\n",
     )
-    _commit_all(
+    commit_all(
         repo, "write_summary actually writes, checked by reading it back"
     )
 
@@ -945,7 +913,7 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
 
 
 def test_a_command_line_with_no_test_file_is_refused(tmp_path: Path) -> None:
-    repo = _scratch_repo(tmp_path)
+    repo = scratch_repo(tmp_path)
 
     result = _tool(repo)
 
@@ -957,9 +925,9 @@ def test_a_test_rev_that_does_not_resolve_is_refused_naming_it(
     tmp_path: Path,
 ) -> None:
     """A ``--test-rev`` naming no revision is refused by flag and name, with no traceback."""
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
 
     result = _run(
         repo,
@@ -985,17 +953,17 @@ def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
     ``--json`` names a directory, so writing the record of a run that reached its verdict raises,
     and no verdict line is printed.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_double_doubles():\n"
         "    from widgets import double\n"
         "    assert double(3) == 6\n",
     )
-    _commit_all(repo, "double actually doubles")
+    commit_all(repo, "double actually doubles")
     record = tmp_path / "record"
     record.mkdir()
 
@@ -1039,12 +1007,12 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
 
     The tool's output names INDETERMINATE and the hung test.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(
+    repo = scratch_repo(tmp_path)
+    write(
         repo / "tests" / "test_widgets.py",
         "import time\n\n\ndef test_hangs_forever():\n    time.sleep(30)\n",
     )
-    _commit_all(repo, "a test that hangs")
+    commit_all(repo, "a test that hangs")
 
     proc = _run(
         repo, "tests/test_widgets.py", "HEAD", "--per-test-timeout", "1"
@@ -1061,21 +1029,21 @@ def test_a_key_error_on_a_package_result_guards(tmp_path: Path) -> None:
     KeyError at the assert line inside the test file, and the tool reports GUARDS, behavioral,
     naming KeyError.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def describe():\n    return {'size': 3}\n")
-    baseline = _commit_all(repo, "describe carries no color")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def describe():\n    return {'size': 3}\n")
+    baseline = commit_all(repo, "describe carries no color")
 
-    _write(
+    write(
         repo / "widgets.py",
         "def describe():\n    return {'size': 3, 'color': 'red'}\n",
     )
-    _write(
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_describe_carries_a_color():\n"
         "    from widgets import describe\n"
         "    assert describe()['color'] == 'red'\n",
     )
-    _commit_all(repo, "describe carries a color")
+    commit_all(repo, "describe carries a color")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -1189,13 +1157,13 @@ def _run_baseline_leaving(
     scratch_root.mkdir()
     for name in ("TMPDIR", "TEMP", "TMP"):
         monkeypatch.setenv(name, str(scratch_root))
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
 
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(repo / "tests" / "test_widgets.py", test_source)
-    _commit_all(repo, "double actually doubles")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "tests" / "test_widgets.py", test_source)
+    commit_all(repo, "double actually doubles")
 
     return _run(repo, "tests/test_widgets.py", baseline), scratch_root
 
@@ -1208,14 +1176,14 @@ def test_the_baseline_runs_temporary_root_lies_outside_the_materialized_tree(
     A subject that finds its repository from its own file location and refuses a root under it
     accepts the test's ``tmp_path``, so the test passes at the baseline and the verdict is VACUOUS.
     """
-    repo = _scratch_repo(tmp_path)
-    _write(repo / "tools" / "subject.py", SUBJECT_REFUSING_ITS_OWN_REPOSITORY)
-    _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = _commit_all(repo, "double is a no-op")
+    repo = scratch_repo(tmp_path)
+    write(repo / "tools" / "subject.py", SUBJECT_REFUSING_ITS_OWN_REPOSITORY)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
 
-    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(repo / "tests" / "test_subject.py", TEST_OF_THE_SUBJECT)
-    _commit_all(repo, "double actually doubles")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "tests" / "test_subject.py", TEST_OF_THE_SUBJECT)
+    commit_all(repo, "double actually doubles")
 
     result = _run(repo, "tests/test_subject.py", baseline)
 
@@ -1256,7 +1224,7 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
     """
     hold = tmp_path / "hold"
     hold.mkdir()
-    _write(hold / "holder.py", FILE_HOLDER)
+    write(hold / "holder.py", FILE_HOLDER)
     monkeypatch.setenv("FILE_HOLD_DIR", str(hold))
 
     try:
@@ -1275,7 +1243,7 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
         assert str(left[0]) in result.stderr
         assert "held.txt" in result.stderr
     finally:
-        _write(hold / "release", "")
+        write(hold / "release", "")
         # The holder closes its file within one 0.05 s poll of the release; 60 s only bounds a hang.
         deadline = time.monotonic() + 60
         while not (hold / "done").exists() and time.monotonic() < deadline:
@@ -1300,11 +1268,11 @@ def _scratch_frontend(repo: Path) -> Path:
     """
     frontend = repo / FRONTEND_PATH
     shutil.copytree(FRONTEND / "scripts", frontend / "scripts")
-    _write(frontend / "tsconfig.json", '{"include": ["src"]}\n')
-    _write(frontend / "package.json", '{"type": "module"}\n')
-    _write(frontend / "vitest.config.mjs", "export default {};\n")
+    write(frontend / "tsconfig.json", '{"include": ["src"]}\n')
+    write(frontend / "package.json", '{"type": "module"}\n')
+    write(frontend / "vitest.config.mjs", "export default {};\n")
     (frontend / "src").mkdir()
-    _write(repo / ".git" / "info" / "exclude", "node_modules\n")
+    write(repo / ".git" / "info" / "exclude", "node_modules\n")
     return frontend
 
 
@@ -1324,7 +1292,7 @@ def linked_repo(
     scratch_root.mkdir()
     for name in ("TMPDIR", "TEMP", "TMP"):
         monkeypatch.setenv(name, str(scratch_root))
-    repo = _scratch_repo(tmp_path)
+    repo = scratch_repo(tmp_path)
     install = _scratch_frontend(repo) / "node_modules"
     install.mkdir()
     packages = sorted(INSTALL.iterdir()) if INSTALL.is_dir() else []
@@ -1355,12 +1323,12 @@ def _widget_repo(
     Returns the baseline revision; the head commit leaves the working tree clean.
     """
     src = repo / FRONTEND_PATH / "src"
-    _write(src / "widget.ts", baseline_source)
-    baseline = _commit_all(repo, "the baseline's widget")
-    _write(src / "widget.ts", head_source)
-    _write(src / "widget.test.ts", test_source)
-    _commit_all(repo, "the head's widget and its test")
-    assert _git(repo, "status", "--porcelain") == ""
+    write(src / "widget.ts", baseline_source)
+    baseline = commit_all(repo, "the baseline's widget")
+    write(src / "widget.ts", head_source)
+    write(src / "widget.test.ts", test_source)
+    commit_all(repo, "the head's widget and its test")
+    assert git(repo, "status", "--porcelain") == ""
     return baseline
 
 
@@ -1497,7 +1465,7 @@ def test_a_vitest_file_with_no_install_is_refused_naming_the_install_command(
     tmp_path: Path,
 ) -> None:
     """A frontend with no installed packages is refused, naming the command that installs them."""
-    repo = _scratch_repo(tmp_path)
+    repo = scratch_repo(tmp_path)
     _scratch_frontend(repo)
     baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
 
@@ -1515,19 +1483,17 @@ def test_a_changed_frontend_test_alone_leaves_a_pytest_pass_indeterminate(
     The only difference between the baseline and the head is a frontend test file, so no source
     file differs and the baseline is not shown to precede a change.
     """
-    repo = _scratch_repo(tmp_path)
+    repo = scratch_repo(tmp_path)
     src = _scratch_frontend(repo) / "src"
-    _write(src / "widget.ts", DOUBLE)
-    _write(src / "widget.test.ts", DOUBLE_TEST)
-    _write(
+    write(src / "widget.ts", DOUBLE)
+    write(src / "widget.test.ts", DOUBLE_TEST)
+    write(
         repo / "tests" / "test_widgets.py",
         "def test_passes():\n    assert True\n",
     )
-    baseline = _commit_all(repo, "a passing pytest test and a frontend test")
-    _write(
-        src / "widget.test.ts", DOUBLE_TEST.replace("toBe(6)", "toEqual(6)")
-    )
-    _commit_all(repo, "the frontend test alone changes")
+    baseline = commit_all(repo, "a passing pytest test and a frontend test")
+    write(src / "widget.test.ts", DOUBLE_TEST.replace("toBe(6)", "toEqual(6)"))
+    commit_all(repo, "the frontend test alone changes")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -1580,7 +1546,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
     """
     hold = linked_repo.parent / "hold"
     hold.mkdir()
-    _write(hold / "holder.py", FILE_HOLDER)
+    write(hold / "holder.py", FILE_HOLDER)
     monkeypatch.setenv("FILE_HOLD_DIR", str(hold))
     monkeypatch.setenv("HOLDER_PYTHON", sys.executable)
     baseline = _widget_repo(
@@ -1607,7 +1573,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
             left[0] / "tree" / FRONTEND_PATH / "node_modules"
         )
     finally:
-        _write(hold / "release", "")
+        write(hold / "release", "")
         # The holder closes its file within one 0.05 s poll of the release; 60 s only bounds a hang.
         deadline = time.monotonic() + 60
         while not (hold / "done").exists() and time.monotonic() < deadline:
