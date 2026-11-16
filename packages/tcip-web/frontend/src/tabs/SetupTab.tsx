@@ -121,9 +121,9 @@ function PlantMappingPanel({
       refreshMappingNames();
     } catch (e) {
       // A build whose receipt could not be written committed, so its message is no failure.
-      if (refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN)?.committed) {
-        tell("notice", "warning", messageOf(e), mappingName, buildKey);
-      } else {
+      const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
+      if (gap) tell("notice", "warning", gap.message, mappingName, buildKey);
+      else
         tell(
           "failure",
           "error",
@@ -131,7 +131,6 @@ function PlantMappingPanel({
           mappingName,
           buildKey,
         );
-      }
     } finally {
       setBuilding(false);
     }
