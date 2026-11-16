@@ -4087,6 +4087,394 @@ describe("AnnotateTab engine prompt", () => {
   });
 });
 
+describe("AnnotateTab refusals on the canvas, each kind on its own line", () => {
+  const GESTURE = "Box too small to keep. Drag out a bigger area.";
+  const RESIZED = "Box too small to keep; the resize was undone.";
+  const PROMPT = "Could not propose: network down";
+  const FIND = "Could not find: network down";
+  const PROPOSALS = "Could not load proposals: network down";
+  const stage = () => screen.getByTestId("canvas-stage");
+  const propose = () => fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
+  const find = () => fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
+  const toggleProposalsView = () =>
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-view-proposals" }));
+
+  /** The sentence of each entry the canvas shows in place, in the order it shows them. */
+  const standing = () =>
+    onCanvas().map((entry) => entry.querySelector("p")?.firstChild?.textContent);
+
+  /** Mount over the first image, its document holding `placed`. */
+  async function mount(placed: ReturnType<typeof servedAnnotation>[] = []) {
+    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
+    if (placed.length) {
+      loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, placed)));
+    }
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+  }
+
+  /** Drag a box out from (`x`, `y`) by `side` on each axis, in the tool in use. */
+  async function dragBox(x: number, y: number, side: number) {
+    fireEvent.mouseDown(stage(), { clientX: x, clientY: y, button: 0 });
+    fireEvent.mouseMove(stage(), { clientX: x + side, clientY: y + side });
+    await nextFrame();
+    fireEvent.mouseUp(stage(), { clientX: x + side, clientY: y + side });
+    await flush();
+  }
+
+  /** Refuse a box drawn below the minimum side, returning to the tool in use. */
+  async function refuseGesture() {
+    const tool = useStore.getState().gui.mode;
+    act(() => useStore.getState().setMode("box"));
+    await dragBox(100, 100, 2);
+    act(() => useStore.getState().setMode(tool));
+  }
+
+  /** Add a box, select it, and drag its bottom-right corner to (`to`, `to`), not released. */
+  async function dragAddedCorner(to: number) {
+    act(addBox); // {x1:10, y1:10, x2:50, y2:50}
+    fireEvent.mouseDown(stage(), { clientX: 30, clientY: 30, button: 0 });
+    fireEvent.mouseUp(stage(), { clientX: 30, clientY: 30 });
+    await flush();
+    fireEvent.mouseDown(stage(), { clientX: 50, clientY: 50, button: 0 });
+    fireEvent.mouseMove(stage(), { clientX: to, clientY: to });
+    await nextFrame();
+  }
+
+  /** Step to the image at `index`, once its load has been asked for `loads` times. */
+  async function stepTo(index: number, loads: number) {
+    act(() => changeSelection({ current_image_index: index }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(loads));
+    await flush();
+  }
+
+  it("a failed proposals read leaves the canvas once a later read lands, and stays listed", async () => {
+    const stagings = vi
+      .spyOn(api.annotate, "stagings")
+      .mockRejectedValue(new Error("network down"));
+    await mount();
+    expect(standing()).toEqual([PROPOSALS]);
+
+    stagings.mockResolvedValue({ buckets: [] });
+    toggleProposalsView();
+    toggleProposalsView();
+    await flush();
+
+    expect(standing()).toEqual([]);
+    expect(listed()).toEqual([expect.objectContaining({ sentence: PROPOSALS, key: undefined })]);
+  });
+
+  it("a resize undone by a save stays on the canvas once that save is adopted", async () => {
+    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
+    await mount();
+    await dragAddedCorner(11);
+    pressSave();
+    // The adopted save reads the proposals again, and that read lands.
+    await waitFor(() => expect(stagings).toHaveBeenCalledTimes(2));
+    await flush();
+
+    expect(standing()).toEqual([RESIZED]);
+  });
+
+  it("a failed proposals read stays on the canvas when a box is kept", async () => {
+    vi.spyOn(api.annotate, "stagings").mockRejectedValue(new Error("network down"));
+    await mount();
+    await dragBox(100, 100, 60);
+
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    expect(standing()).toEqual([PROPOSALS]);
+  });
+
+  describe("a refused gesture leaves the canvas, and stays listed, when a gesture is kept", () => {
+    const expectGestureEnded = () => {
+      expect(standing()).toEqual([]);
+      expect(listed()).toEqual([expect.objectContaining({ sentence: GESTURE, key: undefined })]);
+    };
+
+    it("by a committed polygon", async () => {
+      await renderPolygonCanvas();
+      await refuseGesture();
+      expect(standing()).toEqual([GESTURE]);
+
+      fireEvent.click(stage(), { clientX: 600, clientY: 600 });
+      fireEvent.click(stage(), { clientX: 700, clientY: 600 });
+      fireEvent.click(stage(), { clientX: 700, clientY: 700 });
+      fireEvent.doubleClick(stage(), { clientX: 700, clientY: 700 });
+      await flush();
+      expect(useStore.getState().canvas.polygons).toHaveLength(3);
+      expectGestureEnded();
+    });
+
+    it("by a kept resize", async () => {
+      await mount();
+      await refuseGesture();
+      expect(standing()).toEqual([GESTURE]);
+
+      await dragAddedCorner(30);
+      fireEvent.mouseUp(stage(), { clientX: 30, clientY: 30 });
+      await flush();
+      expect(useStore.getState().canvas.boxes[0]).toMatchObject({ x2: 30, y2: 30 });
+      expectGestureEnded();
+    });
+
+    it("by a held prompt box", async () => {
+      await mount();
+      await refuseGesture();
+      expect(standing()).toEqual([GESTURE]);
+
+      act(() => useStore.getState().setPrompt(true));
+      await dragBox(10, 20, 70);
+      expect(useStore.getState().annotateUi.pendingPrompts.boxes).toEqual([[10, 20, 80, 90]]);
+      expectGestureEnded();
+    });
+
+    it("by a held prompt point", async () => {
+      await mount();
+      await refuseGesture();
+      expect(standing()).toEqual([GESTURE]);
+
+      act(() => {
+        useStore.getState().setMode("point");
+        useStore.getState().setPrompt(true);
+      });
+      fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+      await flush();
+      expect(useStore.getState().annotateUi.pendingPrompts.points).toEqual([[120, 340]]);
+      expectGestureEnded();
+    });
+
+    it("by a point drag ended on release", async () => {
+      await mount([servedAnnotation({ subject: SUBJECT, point: [400, 400], index: 0 })]);
+      await refuseGesture();
+      expect(standing()).toEqual([GESTURE]);
+
+      act(() => useStore.getState().setMode("point"));
+      fireEvent.mouseDown(stage(), { clientX: 400, clientY: 400, button: 0 });
+      fireEvent.mouseMove(stage(), { clientX: 450, clientY: 450 });
+      await nextFrame();
+      fireEvent.mouseUp(stage(), { clientX: 450, clientY: 450 });
+      await flush();
+      expect(useStore.getState().canvas.points[0]).toMatchObject({ x: 450, y: 450 });
+      expectGestureEnded();
+    });
+
+    it("by a vertex drag ended on release", async () => {
+      await renderPolygonCanvas();
+      await refuseGesture();
+      expect(standing()).toEqual([GESTURE]);
+
+      act(() => useStore.getState().setFocus({ kind: "polygon", index: 0 }));
+      fireEvent.mouseDown(stage(), { clientX: 10, clientY: 10, button: 0 });
+      fireEvent.mouseMove(stage(), { clientX: 20, clientY: 20 });
+      await nextFrame();
+      fireEvent.mouseUp(stage(), { clientX: 20, clientY: 20 });
+      await flush();
+      expect(useStore.getState().canvas.polygons[0].rings[0][0]).toEqual([20, 20]);
+      expectGestureEnded();
+    });
+  });
+
+  it("a refused prompt leaves the canvas once a prompt is answered, and stays listed", async () => {
+    const proposeSpy = vi
+      .spyOn(api.annotate, "propose")
+      .mockRejectedValueOnce(new Error("network down"));
+    await mount();
+    act(() => useStore.getState().addPromptPoint([120, 340]));
+    propose();
+    await flush();
+    expect(standing()).toEqual([PROMPT]);
+
+    proposeSpy.mockResolvedValueOnce(ANNOTATE_ANSWERS.nothing_proposed);
+    propose();
+    await flush();
+
+    expect(standing()).toEqual([]);
+    expect(listed()).toContainEqual(expect.objectContaining({ sentence: PROMPT, key: undefined }));
+  });
+
+  it("a refused find leaves the canvas once a find is answered, and stays listed", async () => {
+    const findSpy = vi.spyOn(api.annotate, "find").mockRejectedValueOnce(new Error("network down"));
+    await mount();
+    find();
+    await flush();
+    expect(standing()).toEqual([FIND]);
+
+    findSpy.mockResolvedValueOnce(ANNOTATE_ANSWERS.found_none);
+    find();
+    await flush();
+
+    expect(standing()).toEqual([]);
+    expect(listed()).toContainEqual(expect.objectContaining({ sentence: FIND, key: undefined }));
+  });
+
+  describe("with a refused gesture, prompt, find and proposals read standing at once", () => {
+    let proposeSpy: MockInstance<typeof api.annotate.propose>;
+    let findSpy: MockInstance<typeof api.annotate.find>;
+    let stagings: MockInstance<typeof api.annotate.stagings>;
+
+    beforeEach(async () => {
+      stagings = vi.spyOn(api.annotate, "stagings").mockRejectedValue(new Error("network down"));
+      proposeSpy = vi.spyOn(api.annotate, "propose").mockRejectedValue(new Error("network down"));
+      findSpy = vi.spyOn(api.annotate, "find").mockRejectedValue(new Error("network down"));
+      await mount();
+      act(() => useStore.getState().addPromptPoint([120, 340]));
+      propose();
+      await flush();
+      find();
+      await flush();
+      await refuseGesture();
+      expect(standing()).toEqual([GESTURE, PROMPT, FIND, PROPOSALS]);
+    });
+
+    it("another refused gesture and a kept one touch no other kind's", async () => {
+      act(() => useStore.getState().setActiveSubject(null));
+      fireEvent.mouseDown(stage(), { clientX: 300, clientY: 300, button: 0 });
+      fireEvent.mouseUp(stage(), { clientX: 300, clientY: 300 });
+      await flush();
+      expect(standing()).toEqual(["Choose a subject first.", PROMPT, FIND, PROPOSALS]);
+
+      act(() => useStore.getState().setActiveSubject(SUBJECT));
+      await dragBox(100, 100, 60);
+      expect(standing()).toEqual([PROMPT, FIND, PROPOSALS]);
+    });
+
+    it("another refused prompt and an answered one touch no other kind's", async () => {
+      proposeSpy.mockRejectedValueOnce(new Error("engine down"));
+      propose();
+      await flush();
+      expect(standing()).toEqual([GESTURE, "Could not propose: engine down", FIND, PROPOSALS]);
+
+      proposeSpy.mockResolvedValueOnce(ANNOTATE_ANSWERS.nothing_proposed);
+      propose();
+      await flush();
+      expect(standing()).toEqual([GESTURE, FIND, PROPOSALS]);
+    });
+
+    it("another refused find and an answered one touch no other kind's", async () => {
+      findSpy.mockRejectedValueOnce(new Error("detector down"));
+      find();
+      await flush();
+      expect(standing()).toEqual([GESTURE, PROMPT, "Could not find: detector down", PROPOSALS]);
+
+      findSpy.mockResolvedValueOnce(ANNOTATE_ANSWERS.found_none);
+      find();
+      await flush();
+      expect(standing()).toEqual([GESTURE, PROMPT, PROPOSALS]);
+    });
+
+    it("a landed proposals read and another failed one touch no other kind's", async () => {
+      toggleProposalsView();
+      await flush();
+      expect(standing()).toEqual([GESTURE, PROMPT, FIND]);
+
+      stagings.mockRejectedValue(new Error("disk busy"));
+      toggleProposalsView();
+      await flush();
+      expect(standing()).toEqual([GESTURE, PROMPT, FIND, "Could not load proposals: disk busy"]);
+    });
+  });
+
+  it("a refused gesture, prompt and find leave the canvas with their image, and stay listed on return", async () => {
+    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
+    vi.spyOn(api.annotate, "propose").mockRejectedValue(new Error("network down"));
+    vi.spyOn(api.annotate, "find").mockRejectedValue(new Error("network down"));
+    await mount();
+    act(() => useStore.getState().addPromptPoint([120, 340]));
+    propose();
+    await flush();
+    find();
+    await flush();
+    await refuseGesture();
+    expect(standing()).toEqual([GESTURE, PROMPT, FIND]);
+
+    await stepTo(1, 2);
+    expect(standing()).toEqual([]);
+    await stepTo(0, 3);
+    // The returned-to image's proposals read lands, which ends nothing but its own kind.
+    await waitFor(() => expect(stagings).toHaveBeenLastCalledWith(IMG1));
+    await flush();
+
+    expect(standing()).toEqual([]);
+    for (const sentence of [GESTURE, PROMPT, FIND]) {
+      expect(listed()).toContainEqual(expect.objectContaining({ sentence, key: undefined }));
+    }
+  });
+
+  it("a prompt refused after its image was left is listed naming that image, on neither canvas", async () => {
+    const answer = Promise.withResolvers<Awaited<ReturnType<typeof api.annotate.propose>>>();
+    vi.spyOn(api.annotate, "propose").mockReturnValue(answer.promise);
+    await mount();
+    act(() => useStore.getState().addPromptPoint([120, 340]));
+    propose();
+    await flush();
+    await stepTo(1, 2);
+    act(() => answer.reject(new Error("network down")));
+    await flush();
+
+    expect(standing()).toEqual([]);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        sentence: PROMPT,
+        key: undefined,
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
+    await stepTo(0, 3);
+    expect(standing()).toEqual([]);
+  });
+
+  it("a resize undone by leaving its image is listed naming that image, not on the next one's canvas", async () => {
+    await mount();
+    await dragAddedCorner(11);
+    await stepTo(1, 2);
+
+    expect(standing()).toEqual([]);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        sentence: RESIZED,
+        key: undefined,
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
+  });
+
+  it("a refused save leaves the canvas once a later save is adopted", async () => {
+    await mount();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(new Error("network down"));
+    pressSave();
+    await flush();
+    expect(standing()).toEqual([
+      "Could not save annotations (network down). Your edits are kept in the editor; press Save to retry.",
+    ]);
+
+    pressSave();
+    await flush();
+
+    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(standing()).toEqual([]);
+  });
+
+  it("the Reload a conflict offers leaves the canvas when its image's next load fails", async () => {
+    await mount();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(await versionConflict());
+    pressSave();
+    await flush();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+
+    await stepTo(1, 2);
+    loadSpy.mockRejectedValueOnce(new Error("network down"));
+    await stepTo(0, 3);
+
+    expect(standing()).toEqual([
+      "Could not load this image's labels: network down. Saving is off.",
+    ]);
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+  });
+});
+
 describe("AnnotateTab heading", () => {
   it("renders exactly one top-level heading naming the tab", async () => {
     render(<AnnotateTab />);

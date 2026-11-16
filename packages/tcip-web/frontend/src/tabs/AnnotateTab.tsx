@@ -113,26 +113,33 @@ const SNAP_RADIUS_CANVAS = 15;
 const EDGE_INSERT_THRESHOLD = 6;
 const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
 
-/** What an image's entries in place over the canvas stand for: a save or load that failed, what
- *  Reload answers, and a refused gesture, prompt, find or proposals read. */
-const CANVAS_SLOTS = ["document", "reload", "act"] as const;
+/** What an image's entries in place over the canvas stand for, in the order they show: a save or
+ *  load that failed, what Reload answers, and a refused act of each kind (anything drawn, moved,
+ *  resized or cut on the canvas, a prompt, a find, and a read of the proposals). */
+const CANVAS_SLOTS = ["document", "reload", "gesture", "prompt", "find", "proposals"] as const;
+
+type CanvasSlot = (typeof CANVAS_SLOTS)[number];
+
+/** A kind of act whose refusal stands until an act of the same kind succeeds. */
+type ActKind = Exclude<CanvasSlot, "document" | "reload">;
 
 /** The key the image at `imagePath` holds its `slot`'s entry on. */
-const canvasKey = (slot: (typeof CANVAS_SLOTS)[number], imagePath: string): string =>
-  `annotate-${slot}:${imagePath}`;
+const canvasKey = (slot: CanvasSlot, imagePath: string): string => `annotate-${slot}:${imagePath}`;
 
 /** The image in view as the store holds it now, which a callback outliving its render reads. */
 const liveImage = (): CaptureImage | null => currentImage(useStore.getState().gui.dataset);
 
-/** Refuse an act on `image`, by default the one in view: a failure standing on its act key. */
-function refuseAct(sentence: string, image = liveImage()): void {
-  if (image) tell("failure", "error", sentence, image.name, canvasKey("act", image.path));
+/** Refuse a `kind` act on `image`: a failure naming it, standing on its `kind` key while it is the
+ *  image in view, and only listed when it is not. */
+function refuseAct(kind: ActKind, sentence: string, image: CaptureImage | null): void {
+  if (!image) return;
+  const inView = liveImage()?.path === image.path;
+  tell("failure", "error", sentence, image.name, inView ? canvasKey(kind, image.path) : undefined);
 }
 
-/** End the refusal standing on `image`'s act key, by default the image in view's, once an act on
- *  it succeeds. */
-function actSucceeded(image = liveImage()): void {
-  if (image) useStore.getState().releaseNotification(canvasKey("act", image.path));
+/** End the refusal standing on `image`'s `kind` key, once a `kind` act on it succeeds. */
+function actSucceeded(kind: ActKind, image: CaptureImage | null): void {
+  if (image) useStore.getState().releaseNotification(canvasKey(kind, image.path));
 }
 
 /** End what stands on the document and reload keys of the image at `imagePath`, once a load or
@@ -294,13 +301,13 @@ export function AnnotateTab() {
           buckets.map((b) => api.annotate.proposals(image.path, b)),
         );
         if (canceled) return;
-        actSucceeded(image);
+        actSucceeded("proposals", image);
         setServed({
           key: proposalKey,
           answers: answers.map((answer, i) => ({ bucket: buckets[i], answer })),
         });
       } catch (e) {
-        if (!canceled) refuseAct(`Could not load proposals: ${messageOf(e)}`, image);
+        if (!canceled) refuseAct("proposals", `Could not load proposals: ${messageOf(e)}`, image);
       }
     })();
     return () => {
@@ -335,7 +342,7 @@ export function AnnotateTab() {
   async function sendPrompt(prompt: ProposePayload["prompt"]) {
     const sent = imageInView;
     if (proposing || !sent || !dataset) return;
-    const authoring = requireSubject();
+    const authoring = requireSubject("prompt");
     if (!authoring) return;
     const subject = dataset.subject;
     setProposing(true);
@@ -347,7 +354,7 @@ export function AnnotateTab() {
         prompt,
       });
       useStore.getState().clearPrompts();
-      actSucceeded(sent);
+      actSucceeded("prompt", sent);
       const told = (sentence: string) => tell("notice", "info", sentence, sent.name);
       if (answer.kind === "nothing_proposed") {
         told(`No proposal for ${sent.name}.`);
@@ -365,7 +372,7 @@ export function AnnotateTab() {
         told(`${answer.proposal_count} ${noun} for ${sent.name}, staged under ${answer.bucket}.`);
       }
     } catch (e) {
-      refuseAct(`Could not propose: ${messageOf(e)}`, sent);
+      refuseAct("prompt", `Could not propose: ${messageOf(e)}`, sent);
     } finally {
       if (mountedRef.current) setProposing(false);
     }
@@ -381,7 +388,7 @@ export function AnnotateTab() {
    *  keep, drop or add to before Propose. */
   async function findByPhrase(phrase: string) {
     const sent = imageInView;
-    if (proposing || !sent || !requireSubject()) return;
+    if (proposing || !sent || !requireSubject("find")) return;
     setProposing(true);
     try {
       const answer = await api.annotate.find({
@@ -389,7 +396,7 @@ export function AnnotateTab() {
         phrase,
         user: useStore.getState().user,
       });
-      actSucceeded(sent);
+      actSucceeded("find", sent);
       const told = (sentence: string) => tell("notice", "info", sentence, sent.name);
       if (!mountedRef.current || liveImage()?.path !== sent.path) {
         told(`${answer.boxes.length} found on ${sent.name}, not held.`);
@@ -398,7 +405,7 @@ export function AnnotateTab() {
       useStore.getState().setFoundBoxes(answer.boxes);
       if (answer.boxes.length === 0) told(`Nothing found for "${phrase}".`);
     } catch (e) {
-      refuseAct(`Could not find: ${messageOf(e)}`, sent);
+      refuseAct("find", `Could not find: ${messageOf(e)}`, sent);
     } finally {
       if (mountedRef.current) setProposing(false);
     }
@@ -612,10 +619,17 @@ export function AnnotateTab() {
     }
   }
 
-  // Leaving an image drops any drag (and ends a live freehand stream so it can't bleed vertices
-  // onto the next image).
+  // The image the canvas showed before the one in view, whose gestures a change of image settles.
+  const imageLeftRef = useRef<CaptureImage | null>(null);
+  // A failed proposals read of the image left stands until its read on returning there lands.
   useEffect(() => {
-    settleGestures();
+    const left = imageLeftRef.current;
+    imageLeftRef.current = imageInView;
+    if (left) {
+      for (const kind of ["gesture", "prompt", "find"] as const) actSucceeded(kind, left);
+    }
+    // Drops any drag, and ends a live freehand stream so it can't bleed vertices onto this image.
+    settleGestures(left);
     setCutStart(null);
     useStore.getState().setCut(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -748,9 +762,9 @@ export function AnnotateTab() {
 
   // ── Label load + save ───────────────────────────────────────────────
 
-  /** End a box resize in progress as its release would: one below the minimum side is undone.
-   *  Returns whether the resize was kept. */
-  function settleBoxResize(): boolean {
+  /** End a box resize in progress on the canvas of `image` as its release would: one below the
+   *  minimum side is undone and refused as a gesture on `image`. Returns whether it was kept. */
+  function settleBoxResize(image: CaptureImage | null): boolean {
     const drag = boxDragRef.current;
     if (!drag) return true;
     boxDragRef.current = null;
@@ -758,16 +772,17 @@ export function AnnotateTab() {
     const resized = useStore.getState().canvas.boxes[drag.idx];
     if (resized && belowMinSide(resized.x1, resized.y1, resized.x2, resized.y2)) {
       rollbackLast();
-      refuseAct("Box too small to keep; the resize was undone.");
+      refuseAct("gesture", "Box too small to keep; the resize was undone.", image);
       return false;
     }
     return true;
   }
 
-  /** End the pointer gesture in progress before a save holds the canvas: a resize is settled by
-   *  its release rule and a draft or other drag is dropped, so none is released into the hold. */
-  function settleGestures() {
-    settleBoxResize();
+  /** End the pointer gesture in progress on the canvas of `image` before a save holds the canvas
+   *  or the image is left: a resize is settled by its release rule and a draft or other drag is
+   *  dropped, so none is released into the hold. */
+  function settleGestures(image: CaptureImage | null) {
+    settleBoxResize(image);
     setDrawing(null);
     pointDragRef.current = null;
     didDragRef.current = false;
@@ -794,7 +809,7 @@ export function AnnotateTab() {
     const stillLoaded = () => useStore.getState().canvas.loaded === loaded;
     if (useStore.getState().canvas.saving) return null;
     if (!useStore.getState().canvas.dirty && !gestures) return null;
-    settleGestures();
+    settleGestures({ path: loaded.image_path, name: loaded.name });
     const c = useStore.getState().canvas;
     if (!c.dirty && !gestures) return null;
 
@@ -1015,7 +1030,7 @@ export function AnnotateTab() {
     add();
     if (total() > before) {
       incrementAnnotationsAdded(1);
-      actSucceeded();
+      actSucceeded("gesture", liveImage());
     }
   }
 
@@ -1025,7 +1040,7 @@ export function AnnotateTab() {
     streamingRef.current = false;
     if (commitCurrentPolygon()) {
       incrementAnnotationsAdded(1);
-      actSucceeded();
+      actSucceeded("gesture", liveImage());
     }
   }
 
@@ -1050,12 +1065,13 @@ export function AnnotateTab() {
   // No subject selected → an authored shape has nowhere to attach and the backend save rejects
   // it. Refuse to start a drawing and say so, once (not per click).
   const noSubjectNoticeRef = useRef<string | null>(null);
-  /** The active subject an authored shape attaches to, or null, said once per image, with none. */
-  function requireSubject(): string | null {
+  /** The active subject an authored shape attaches to, or null, said once per image, with none, as
+   *  a refused `kind` act. */
+  function requireSubject(kind: ActKind): string | null {
     if (activeSubject) return activeSubject;
     if (noSubjectNoticeRef.current !== currentImageName) {
       noSubjectNoticeRef.current = currentImageName;
-      refuseAct("Choose a subject first.");
+      refuseAct(kind, "Choose a subject first.", liveImage());
     }
     return null;
   }
@@ -1130,7 +1146,7 @@ export function AnnotateTab() {
       keys: K.cancel.keys,
       action: () => {
         setCurrentPolygon([]);
-        settleGestures();
+        settleGestures(liveImage());
         setFocus(null);
         setCutStart(null);
         useStore.getState().setCut(false);
@@ -1252,7 +1268,7 @@ export function AnnotateTab() {
         }
       }
       setFocus(null);
-      const subject = requireSubject();
+      const subject = requireSubject("gesture");
       if (!subject) return;
       const cx = Math.max(0, Math.min(imgW || ix, ix));
       const cy = Math.max(0, Math.min(imgH || iy, iy));
@@ -1432,12 +1448,13 @@ export function AnnotateTab() {
       // didDragRef stays set: the trailing click of this release must not place a second point
       // on top of the one just moved (onClick consumes and clears the flag).
       useStore.getState().recomputeDirty(); // the drag flagged dirty per tick without comparing
+      actSucceeded("gesture", liveImage());
       canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), true);
       return;
     }
     if (boxDragRef.current) {
-      if (settleBoxResize()) {
-        actSucceeded();
+      if (settleBoxResize(liveImage())) {
+        actSucceeded("gesture", liveImage());
         useStore.getState().recomputeDirty();
         // The drag suppressed full pushes; the settled geometry ships now.
         canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), true);
@@ -1447,6 +1464,7 @@ export function AnnotateTab() {
     if (annotateUi.draggingVertex) {
       useStore.getState().setDraggingVertex(null);
       useStore.getState().recomputeDirty();
+      actSucceeded("gesture", liveImage());
       return;
     }
     if (mode === "box" && drawing) {
@@ -1455,12 +1473,12 @@ export function AnnotateTab() {
       const [x1, y1, x2, y2] = boxBounds({ ...drawing, x2: cx, y2: cy });
       const box = { x1, y1, x2, y2, subject: drawing.subject, attributes: {} };
       if (belowMinSide(x1, y1, x2, y2)) {
-        refuseAct("Box too small to keep. Drag out a bigger area.");
+        refuseAct("gesture", "Box too small to keep. Drag out a bigger area.", liveImage());
       } else if (annotateUi.prompt) {
         // Armed, the drawn box is held as a prompt and never becomes a box of the labels.
-        if (requireSubject()) {
+        if (requireSubject("gesture")) {
           useStore.getState().addPromptBox([x1, y1, x2, y2]);
-          actSucceeded();
+          actSucceeded("gesture", liveImage());
         }
       } else {
         counted(() => add("boxes", box));
@@ -1487,13 +1505,13 @@ export function AnnotateTab() {
       const y = Math.max(0, Math.min(imgH || iy, iy));
       // Armed, the click is held as a prompt and never becomes a point of the labels.
       if (annotateUi.prompt) {
-        if (requireSubject()) {
+        if (requireSubject("gesture")) {
           useStore.getState().addPromptPoint([x, y]);
-          actSucceeded();
+          actSucceeded("gesture", liveImage());
         }
         return;
       }
-      const subject = requireSubject();
+      const subject = requireSubject("gesture");
       if (!subject) return;
       // One click commits it: a point has nothing to drag out and no second vertex to wait for.
       counted(() => add("points", { x, y, subject, attributes: {} }));
@@ -1518,7 +1536,11 @@ export function AnnotateTab() {
           return;
         }
         if (focusedIdx === null) {
-          refuseAct("Select a polygon to cut, then click two points on either side of it.");
+          refuseAct(
+            "gesture",
+            "Select a polygon to cut, then click two points on either side of it.",
+            liveImage(),
+          );
           return;
         }
         const { rings, subject } = canvas.polygons[focusedIdx];
@@ -1532,20 +1554,22 @@ export function AnnotateTab() {
       if (idx === null || !current || current.rings !== cutStart.rings) {
         setCutStart(null);
         refuseAct(
+          "gesture",
           "The polygon changed since the first click; the cut was canceled. Select it and " +
             "place both points again.",
+          liveImage(),
         );
         return;
       }
       if (current.rings.length > 1) {
         setCutStart(null);
-        refuseAct(multiRingCutRefusal(current.rings.length));
+        refuseAct("gesture", multiRingCutRefusal(current.rings.length), liveImage());
         return;
       }
       const result = cutRing(current.rings[0], cutStart.point, [ix, iy]);
       if ("reason" in result) {
         setCutStart(null);
-        refuseAct(result.reason);
+        refuseAct("gesture", result.reason, liveImage());
         return;
       }
       counted(() => splitPolygon(idx, result.rings));
@@ -1574,7 +1598,7 @@ export function AnnotateTab() {
           return;
         }
       }
-      if (canvas.currentPolygon.length === 0 && !requireSubject()) return;
+      if (canvas.currentPolygon.length === 0 && !requireSubject("gesture")) return;
       const [sx, sy] = snapImagePoint(ix, iy);
       setCurrentPolygon([...canvas.currentPolygon, [sx, sy]]); // a new polygon or a resumed one
       streamingRef.current = true;
@@ -1596,7 +1620,7 @@ export function AnnotateTab() {
     }
     // Clicked empty space with nothing selected: start a new polygon
     if (focusedIdx === null) {
-      if (!requireSubject()) return;
+      if (!requireSubject("gesture")) return;
       const [sx, sy] = snapImagePoint(ix, iy);
       setCurrentPolygon([[sx, sy]]);
     } else {
