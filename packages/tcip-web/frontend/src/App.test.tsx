@@ -6,11 +6,12 @@ import { inferenceApi } from "@/api/inference";
 import { sessionsApi } from "@/api/sessions";
 import { subjectsApi } from "@/api/subjects";
 import { trainingApi } from "@/api/training";
-import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
+import type { OpenAnswer, Panel, PanelEnvelope, TrainingListing } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
+import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { loadOf } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
 import { measureWindow, PANE_FOCUS } from "@/test/dock";
@@ -18,10 +19,10 @@ import { INFERENCE_ANSWERS } from "@/test/inference";
 import { LABEL_ANSWERS } from "@/test/labels";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
+import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import { changeSelection, stateEnvelope, SUBJECT_SELECT_ANSWER } from "@/test/store";
-import { thrown } from "@/test/refusals";
-import { RUNS, TRAINING_LISTING, TRAINING_REFUSALS } from "@/test/training";
+import { CANCEL, RUNS, TRAINING_LISTING, TRAINING_REFUSALS } from "@/test/training";
 
 // The state socket and the active-tab sync stand in for App's network effects.
 const stateSocket = vi.hoisted(() => ({
@@ -699,6 +700,37 @@ describe("App job listings", () => {
       expect(screen.getByText(message)).toBeInTheDocument();
     },
   );
+
+  it("reads the runs once more as soon as the read in flight when a Cancel lands answers", async () => {
+    const held = Promise.withResolvers<TrainingListing>();
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(TRAINING_LISTING)
+      .mockReturnValueOnce(held.promise)
+      .mockResolvedValue({ runs: [], sweeps: [] });
+    vi.spyOn(trainingApi, "cancel").mockResolvedValue(CANCEL);
+    const id = RUNS.unlaunched.experiment_id;
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    vi.useFakeTimers();
+    render(<App />);
+    await vi.waitFor(() => expect(screen.getByText(id)).toBeInTheDocument());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
+    });
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: `Cancel ${id}` }));
+      await Promise.resolve();
+    });
+    expect(trainingApi.cancel).toHaveBeenCalledTimes(1);
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
+
+    await act(() => Promise.resolve(held.resolve(TRAINING_LISTING)));
+
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("No runs.")).toBeInTheDocument();
+  });
 
   it("shows the listing a read answers after a failed one, without a Retry", async () => {
     vi.mocked(trainingApi.listRuns)
