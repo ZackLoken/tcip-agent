@@ -15,9 +15,7 @@ import {
 } from "@/api/types.generated";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
-import { trainingKey } from "@/lib/trainingKeys";
 import { useStore } from "@/store";
-import { selectStanding } from "@/store/slices/notifications";
 import { numericMetricKeys, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab } from "@/tabs/TrainingTab";
 import { renderBesideListings } from "@/test/jobListings";
@@ -722,11 +720,14 @@ describe("TrainingTab run end and stream error", () => {
     expect(within(rowFor(id)).getByTestId("entry-in-place")).toHaveTextContent(failed);
   });
 
-  it("raises a stream error as one failure naming the run, then still shows a metric the reconnect delivers", async () => {
+  const streamError = `Training stream error: ${UNKNOWN_RUN_FRAME.error}`;
+  /** Whether the stream error's entry stands on a key, so a later raise there counts on it. */
+  const errorStands = () => entriesSaying(streamError)[0].key !== undefined;
+
+  it("raises a stream error as one failure naming the run, counted at each reconnect, standing until the reconnect delivers a metric, which shows", async () => {
     const [first] = METRIC_FRAMES;
     listing(LISTING_BEFORE_FAILURE);
     streamFrames(UNKNOWN_RUN_FRAME, UNKNOWN_RUN_FRAME, first);
-    const sentence = `Training stream error: ${UNKNOWN_RUN_FRAME.error}`;
 
     renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
@@ -734,19 +735,29 @@ describe("TrainingTab run end and stream error", () => {
     expect(
       within(await screen.findByRole("table")).getByText(String(first.row.loss)),
     ).toBeInTheDocument();
-    const run = UNKNOWN_RUN_FRAME.experiment_id;
-    expect(entriesSaying(sentence)).toHaveLength(1);
-    expect(
-      selectStanding(trainingKey("stream", TEST_PROJECT.id, run))(useStore.getState()),
-    ).toEqual(
+    expect(entriesSaying(streamError)).toEqual([
       expect.objectContaining({
         kind: "failure",
         level: "error",
         count: 2,
-        sentence,
-        context: { project: TEST_PROJECT.id, target: run },
+        context: { project: TEST_PROJECT.id, target: UNKNOWN_RUN_FRAME.experiment_id },
       }),
-    );
+    ]);
+    expect(errorStands()).toBe(false);
+  });
+
+  it("ends a stream error's standing once the stream that raised it closes, the entry staying listed", async () => {
+    listing(LISTING_BEFORE_FAILURE);
+    streamFrames(UNKNOWN_RUN_FRAME);
+
+    const view = renderBesideListings(<TrainingTab />);
+    fireEvent.click(await screen.findByText(id));
+    expect(errorStands()).toBe(true);
+
+    view.unmount();
+
+    expect(entriesSaying(streamError)).toHaveLength(1);
+    expect(errorStands()).toBe(false);
   });
 });
 

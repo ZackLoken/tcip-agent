@@ -427,27 +427,36 @@ export function TrainingTab() {
     setMetrics([]);
     setLatestBatch(null);
     streamRef.current?.();
-    streamRef.current = openTrainingStream(selectedRun, (msg) => {
-      if (msg.type === "metric") {
-        setMetrics((prev) => mergeMetric(prev, msg.row));
-      } else if (msg.type === "batch") {
-        setLatestBatch(msg.row);
-      } else if (msg.type === "error") {
+    // The stream's error stands on its key until the stream delivers anything else or closes.
+    const errorKey = trainingKey("stream", projectId, selectedRun);
+    const release = () => useStore.getState().releaseNotification(errorKey);
+    const stop = openTrainingStream(selectedRun, (msg) => {
+      if (msg.type === "error") {
         // A run selected at its launch can be unknown to the backend for a few reconnects, each
         // sending this frame again, which counts on the one entry.
-        const run = msg.experiment_id;
         tell(
           "failure",
           "error",
           `Training stream error: ${msg.error}`,
-          run,
-          trainingKey("stream", projectId, run),
+          msg.experiment_id,
+          errorKey,
         );
+        return;
+      }
+      release();
+      if (msg.type === "metric") {
+        setMetrics((prev) => mergeMetric(prev, msg.row));
+      } else if (msg.type === "batch") {
+        setLatestBatch(msg.row);
       } else {
         // The run's end is told from the listing this read answers.
         listRunsNow();
       }
     });
+    streamRef.current = () => {
+      stop();
+      release();
+    };
     return () => streamRef.current?.();
   }, [selectedRun, streaming, projectRoot, projectId, comparing]);
 
