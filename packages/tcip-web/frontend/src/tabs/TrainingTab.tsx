@@ -461,8 +461,8 @@ export function TrainingTab() {
     return () => streamRef.current?.();
   }, [selectedRun, streaming, projectRoot, projectId, comparing]);
 
-  // Adopt the TensorBoard already serving this run, trial or sweep, or start one, retrying on a
-  // timer while it is live.
+  // Adopt the TensorBoard already serving this run, trial or sweep, or start one; a live one with
+  // no logs yet is retried on a timer, a launch answered as failed waits for Try again.
   const tbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
     if (!selectedRun) return { outcome: PENDING, done: true };
     const experimentId = selectedRun;
@@ -486,7 +486,7 @@ export function TrainingTab() {
     } catch (e) {
       outcome = refusalOf<NoLogsRefusal>(e, NO_LOGS) ?? unreached(e);
     }
-    if (outcome.kind === "serving") return { outcome, done: true };
+    if (outcome.kind === "serving" || outcome.kind === "failed") return { outcome, done: true };
     const status = detail.kind === "run" ? detail.run : detail.sweep;
     if (!TERMINAL_STATES.has(status.state)) return { outcome: PENDING, done: false };
     return { outcome, done: true };

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import { openTrainingStream, trainingApi } from "@/api/training";
 import {
@@ -13,6 +13,7 @@ import {
   type TrainingFrame,
   type TrainingListing,
 } from "@/api/types.generated";
+import { EMBEDDED_TOOL_RETRY_MS } from "@/hooks/useEmbeddedToolRetry";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
 import { useStore } from "@/store";
@@ -22,7 +23,7 @@ import { renderBesideListings } from "@/test/jobListings";
 import { entriesSaying } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { openTestProject, TEST_PROJECT } from "@/test/store";
-import { servingOf } from "@/test/tensorboard";
+import { servingOf, TENSORBOARD_FAILURES } from "@/test/tensorboard";
 import {
   AGENT_CLIENT,
   BATCH_FRAMES,
@@ -444,6 +445,65 @@ describe("TrainingTab heading", () => {
 });
 
 describe("TrainingTab tensorboard panel", () => {
+  // A running run: the refusals and failures below meet it while it still lives.
+  const live = RUNS.unlaunched.experiment_id;
+
+  /** Select the live run and wait until its first TensorBoard launch has been asked. */
+  async function selectLive(launchSpy: MockInstance) {
+    renderBesideListings(<TrainingTab />);
+    await vi.waitFor(() => expect(screen.getByText(live)).toBeInTheDocument());
+    fireEvent.click(screen.getByText(live));
+    await vi.waitFor(() => expect(launchSpy).toHaveBeenCalledTimes(1));
+  }
+
+  it("shows a live run's failed TensorBoard launch with Try again, never as starting, and does not launch again on the timer", async () => {
+    const [failure] = TENSORBOARD_FAILURES;
+    listing();
+    details();
+    const launchSpy = vi.spyOn(trainingApi, "launchTensorboard").mockResolvedValue(failure);
+
+    vi.useFakeTimers();
+    try {
+      await selectLive(launchSpy);
+      await vi.waitFor(() => expect(screen.getByText(failure.error)).toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Try again: TensorBoard" })).toBeInTheDocument();
+      expect(screen.queryByText("Starting…")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(EMBEDDED_TOOL_RETRY_MS * 2);
+      });
+
+      expect(launchSpy).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("Starting…")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a live run's no-logs refusal as starting, and asks again after the interval", async () => {
+    listing();
+    details();
+    const launchSpy = vi
+      .spyOn(trainingApi, "launchTensorboard")
+      .mockRejectedValue(await thrown(TRAINING_REFUSALS.no_logs_refusal));
+
+    vi.useFakeTimers();
+    try {
+      await selectLive(launchSpy);
+      expect(screen.getByText("Starting…")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(EMBEDDED_TOOL_RETRY_MS);
+      });
+
+      expect(launchSpy).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Starting…")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Try again: TensorBoard" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says a run produced no logs and offers no Try again, rather than a raw refusal", async () => {
     const id = RUNS.empty.experiment_id;
     listing();

@@ -18,8 +18,9 @@ export const PENDING: EmbeddedToolOutcome = { kind: "pending" };
 
 export interface EmbeddedToolStepResult {
   outcome: EmbeddedToolOutcome;
-  /** True once a further attempt would change nothing: a board is serving, or the run/sweep
-   * behind it reached a state a retry can't recover from. False keeps the timer running. */
+  /** True once a timed attempt would change nothing: a board is serving, its launch failed (the
+   * person asks again), or the run/sweep behind it reached a state a retry can't recover from.
+   * False keeps the timer running. */
   done: boolean;
 }
 
