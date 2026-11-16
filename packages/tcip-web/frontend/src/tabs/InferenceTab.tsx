@@ -178,7 +178,8 @@ export function InferenceTab() {
   const activeJobId = watched?.record.job_id ?? null;
   // What each watched job's stream said once the backend held no record of it, by its id.
   const [gone, setGone] = useState<Record<string, string>>({});
-  // Whether a listing was read since the watched job's record came: the newer of the two shows.
+  // Whether a listing answered after the tab held the watched job's record: whichever of the two
+  // the tab held later shows, however long before its answer the listing was asked for.
   const relisted = watched !== null && listed !== watched.listedAt;
   // The watched job that listing does not list: it shows its last error alone rather than a status
   // line frozen on a job that is gone; null while it is listed.
