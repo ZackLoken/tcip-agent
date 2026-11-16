@@ -47,8 +47,6 @@ from tests._terminal_fixtures import (
 from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from starlette.testclient import WebSocketTestSession, httpx
 
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
@@ -1150,27 +1148,6 @@ def test_the_codex_overrides_carry_any_project_path_as_toml_reads_it_back() -> (
     assert parsed["args"] == list(pty_host.mcp_server(project).args)
 
 
-def _wait_until(
-    session: terminal_routes.TerminalSession,
-    holds: Callable[[str], bool],
-    what: str,
-    timeout: float = 30,
-) -> str:
-    """Return the session's scrollback once ``holds`` accepts it, polling up to ``timeout`` s.
-
-    Raises AssertionError naming ``what`` when the timeout passes without it.
-    """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        text = session.scrollback_snapshot()
-        if holds(text):
-            return text
-        time.sleep(0.1)
-    raise AssertionError(
-        f"never saw {what}; got: {session.scrollback_snapshot()[-500:]!r}"
-    )
-
-
 def _wait_for(
     session: terminal_routes.TerminalSession, needle: str, timeout: float = 30
 ) -> str:
@@ -1178,8 +1155,14 @@ def _wait_for(
 
     Raises AssertionError naming the needle when the timeout passes without it.
     """
-    return _wait_until(
-        session, lambda text: needle in text, repr(needle), timeout
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        text = session.scrollback_snapshot()
+        if needle in text:
+            return text
+        time.sleep(0.1)
+    raise AssertionError(
+        f"never saw {needle!r}; got: {session.scrollback_snapshot()[-500:]!r}"
     )
 
 
