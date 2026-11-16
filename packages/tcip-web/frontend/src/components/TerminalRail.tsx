@@ -231,6 +231,13 @@ export function TerminalRail() {
     }
   });
 
+  // The window narrowing bounds the held width again; the stored width stays the person's own.
+  useEffect(() => {
+    const onResize = () => setWidth(clampWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const [dragging, setDragging] = useState(false);
 
   // A drag's listeners are installed again in the commit of each width it sets, so its release
