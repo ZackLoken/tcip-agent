@@ -740,7 +740,7 @@ describe("TrainingTab run end and stream error", () => {
         kind: "failure",
         level: "error",
         count: 2,
-        context: { project: TEST_PROJECT.id, target: UNKNOWN_RUN_FRAME.experiment_id },
+        context: { project: TEST_PROJECT.id, target: id },
       }),
     ]);
     expect(errorStands()).toBe(false);

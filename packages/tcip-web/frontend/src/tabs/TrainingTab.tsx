@@ -427,20 +427,15 @@ export function TrainingTab() {
     setMetrics([]);
     setLatestBatch(null);
     streamRef.current?.();
-    // The stream's error stands on its key until the stream delivers anything else or closes.
+    // The stream's error stands on its key until the stream delivers anything else or closes; the
+    // backend's frames name the stream's own run.
     const errorKey = trainingKey("stream", projectId, selectedRun);
     const release = () => useStore.getState().releaseNotification(errorKey);
     const stop = openTrainingStream(selectedRun, (msg) => {
       if (msg.type === "error") {
         // A run selected at its launch can be unknown to the backend for a few reconnects, each
         // sending this frame again, which counts on the one entry.
-        tell(
-          "failure",
-          "error",
-          `Training stream error: ${msg.error}`,
-          msg.experiment_id,
-          errorKey,
-        );
+        tell("failure", "error", `Training stream error: ${msg.error}`, selectedRun, errorKey);
         return;
       }
       release();
