@@ -227,14 +227,18 @@ def test_a_repaired_capture_selects_and_reopens_with_no_refused_choice(
     assert _reopened(client, scene).status_code == 200
     (scene.written.images_dir / "Plain_002.png").unlink()
 
-    chosen = _selected(client, scene.written.root, CAPTURE)
-
-    assert chosen.status_code == 200, chosen.text
-    for answer in (None, _reopened(client, scene)):
-        assert answer is None or answer.status_code == 200, answer
+    def assert_holds_the_capture() -> None:
         state = client.get("/api/state").json()
         assert state["dataset"]["date"] == CAPTURE
         assert state["refused_choice"] is None
+
+    chosen = _selected(client, scene.written.root, CAPTURE)
+
+    assert chosen.status_code == 200, chosen.text
+    assert_holds_the_capture()
+    reopened = _reopened(client, scene)
+    assert reopened.status_code == 200, reopened.text
+    assert_holds_the_capture()
 
 
 def test_a_sound_saved_capture_reopens_at_its_saved_index(
