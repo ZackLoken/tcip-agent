@@ -49,6 +49,7 @@ import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import {
   changeSelection,
+  LATER_SELECTION,
   openTestProject,
   RAW_SELECTION,
   SELECTED_SUBJECT as SUBJECT,
@@ -4399,6 +4400,50 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
     for (const sentence of [GESTURE, PROMPT, FIND]) {
       expect(listed()).toContainEqual(expect.objectContaining({ sentence, key: undefined }));
     }
+  });
+
+  it("a refused gesture stays off its image's canvas when that image left the view while the tab was away", async () => {
+    await mount();
+    await refuseGesture();
+    expect(standing()).toEqual([GESTURE]);
+    cleanup();
+    act(() => changeSelection({ current_image_index: 1 }));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    await stepTo(0, 3);
+
+    expect(standing()).toEqual([]);
+    expect(listed()).toEqual([expect.objectContaining({ sentence: GESTURE, key: undefined })]);
+  });
+
+  it("a refused gesture stays on the canvas when the tab is left and its image is in view on return", async () => {
+    await mount();
+    await refuseGesture();
+    cleanup();
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+
+    expect(standing()).toEqual([GESTURE]);
+  });
+
+  it("a refused gesture leaves the canvas when another capture's image of the same name is stepped to", async () => {
+    const [twin] = LATER_SELECTION.images;
+    expect(twin.name).toBe(IMG1_NAME);
+    expect(twin.path).not.toBe(IMG1);
+    await mount();
+    await refuseGesture();
+    const raw = useStore.getState().gui.dataset!;
+    act(() => useStore.setState((s) => ({ gui: { ...s.gui, dataset: LATER_SELECTION } })));
+    await waitFor(() => expect(loadSpy).toHaveBeenLastCalledWith(twin.path));
+    await flush();
+    act(() => useStore.setState((s) => ({ gui: { ...s.gui, dataset: raw } })));
+    await waitFor(() => expect(loadSpy).toHaveBeenLastCalledWith(IMG1));
+    await flush();
+
+    expect(standing()).toEqual([]);
+    expect(listed()).toEqual([expect.objectContaining({ sentence: GESTURE, key: undefined })]);
   });
 
   it("a prompt refused after its image was left is listed naming that image, on neither canvas", async () => {

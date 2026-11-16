@@ -619,21 +619,22 @@ export function AnnotateTab() {
     }
   }
 
-  // The image the canvas showed before the one in view, whose gestures a change of image settles.
-  const imageLeftRef = useRef<CaptureImage | null>(null);
-  // A failed proposals read of the image left stands until its read on returning there lands.
+  // The image last shown outlives this mount, so an image left while the tab was away is seen at
+  // mount. A failed proposals read of it stands until its read on returning there lands.
   useEffect(() => {
-    const left = imageLeftRef.current;
-    imageLeftRef.current = imageInView;
-    if (left) {
-      for (const kind of ["gesture", "prompt", "find"] as const) actSucceeded(kind, left);
+    const { canvasShownImage: left, setCanvasShownImage } = useStore.getState();
+    if ((left?.path ?? null) !== imgPath) {
+      if (left) {
+        for (const kind of ["gesture", "prompt", "find"] as const) actSucceeded(kind, left);
+      }
+      setCanvasShownImage(imageInView);
     }
     // Drops any drag, and ends a live freehand stream so it can't bleed vertices onto this image.
     settleGestures(left);
     setCutStart(null);
     useStore.getState().setCut(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentImageName]);
+  }, [imgPath]);
 
   // Leaving polygon mode clears a pending cut and its flag: the gesture and the flag are only
   // meaningful there, and a lingering armed cut would surprise the next mode's own clicks.
