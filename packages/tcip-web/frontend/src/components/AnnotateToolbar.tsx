@@ -1,5 +1,6 @@
 /**
- * Annotate-tab toolbar, one row in three groups: the tool mode (Point, Box, Polygon) with the
+ * Annotate-tab toolbar, three groups that break onto further lines as the work area narrows: the
+ * tool mode (Point, Box, Polygon) with the
  * engine prompt; the subject picker, the Edit menu (Snap, Stream, Cut, Undo, Redo), the View menu
  * (Labels, Proposals, Predictions), Save and the band picker for a multispectral image; then the
  * image stepper with its filter by annotation status or a review queue's rank order, whose select
