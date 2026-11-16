@@ -1,8 +1,8 @@
 """Corrupting a stored record or log entry, or a root's whole database.
 
 Bytes that will not decode, or that decode and are refused, are put behind a key in the database,
-or over the database file. The module also opens a root's database directly, which is what a
-test that damages or reads the file by hand does through :func:`connected`.
+or over the database file. The module also opens a root's database directly in autocommit
+through :func:`connected`.
 """
 
 from __future__ import annotations
