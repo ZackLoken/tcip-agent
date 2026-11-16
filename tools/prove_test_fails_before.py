@@ -74,8 +74,7 @@ inside package code (the second rightly, since the package's own behavior was re
 assertion that fails before the call under test.
 
 An exception the tool does not name above is its own failure: its traceback goes to standard error
-and the exit code is 4, which no verdict uses. The run then has no verdict, whatever line was
-printed before the exception.
+and the exit code is 4, which no verdict uses.
 
 The baseline is ``--baseline`` when given, else ``HEAD`` for uncommitted work, else the
 merge-base against the integration branch; the baseline used, how it was chosen and the source
@@ -1442,6 +1441,10 @@ def _remove_scratch_directory(
 def _report(record: dict, json_out: str | None) -> int:
     verdict = record["verdict"]
     baseline = record.get("baseline", {})
+    if json_out:
+        Path(json_out).write_text(
+            json.dumps(record, indent=2), encoding="utf-8"
+        )
     print()
     print(f"{verdict}: {record['why']}")
     if baseline.get("revision"):
@@ -1470,9 +1473,6 @@ def _report(record: dict, json_out: str | None) -> int:
                 f"                {failure['crash_path']}:{failure.get('crash_lineno')}"
             )
     if json_out:
-        Path(json_out).write_text(
-            json.dumps(record, indent=2), encoding="utf-8"
-        )
         print(f"  record        {json_out}")
     return EXIT[verdict]
 

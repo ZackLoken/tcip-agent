@@ -982,7 +982,8 @@ def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
 ) -> None:
     """An exception the tool does not name exits with the tool's own code, traceback shown.
 
-    ``--json`` names a directory, so writing the record of a run that reached its verdict raises.
+    ``--json`` names a directory, so writing the record of a run that reached its verdict raises,
+    and no verdict line is printed.
     """
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
@@ -1006,6 +1007,7 @@ def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
         result.stdout + result.stderr
     )
     assert "Traceback" in result.stderr
+    assert _why(result) == "", result.stdout
 
 
 # ── --per-test-timeout ───────────────────────────────────────────────────────
