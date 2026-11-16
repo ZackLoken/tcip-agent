@@ -357,6 +357,8 @@ INTERNAL_ERROR_SENTENCE = "the runner hit an internal or unhandled error"
 NOT_COLLECTED_SENTENCE = "the baseline could not collect"
 NOTHING_SELECTED_SENTENCE = "nothing was selected"
 ALL_SKIPPED_SENTENCE = "selected tests were skipped"
+RUN_TIMEOUT_SENTENCE = "did not finish within"
+NO_OUTCOME_SENTENCE = "reported no outcome record"
 
 
 def _one_call_repo(
@@ -1472,7 +1474,7 @@ def test_a_run_past_the_runs_timeout_is_refused_naming_the_runner_and_seconds(
     result = _run(repo, "tests/test_widgets.py", baseline, "--timeout", "3")
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "pytest did not finish within 3s" in _why(result)
+    assert f"pytest {RUN_TIMEOUT_SENTENCE} 3s" in _why(result)
 
 
 def test_a_run_that_ends_before_its_session_finishes_is_refused(
@@ -1487,7 +1489,7 @@ def test_a_run_that_ends_before_its_session_finishes_is_refused(
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "pytest reported no outcome record" in _why(result)
+    assert f"pytest {NO_OUTCOME_SENTENCE}" in _why(result)
 
 
 def test_an_outcome_record_that_is_not_json_is_refused(tmp_path: Path) -> None:
@@ -2474,7 +2476,7 @@ def test_a_vitest_run_past_the_runs_timeout_is_refused_naming_the_runner_and_sec
     result = _run(linked_repo, WIDGET_TEST, baseline, "--timeout", "5")
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "vitest did not finish within 5s" in _why(result)
+    assert f"vitest {RUN_TIMEOUT_SENTENCE} 5s" in _why(result)
 
 
 def test_a_vitest_test_killing_the_run_is_refused_as_reporting_no_outcome(
@@ -2493,7 +2495,7 @@ def test_a_vitest_test_killing_the_run_is_refused_as_reporting_no_outcome(
     result = _run(linked_repo, WIDGET_TEST, baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "vitest reported no outcome record" in _why(result)
+    assert f"vitest {NO_OUTCOME_SENTENCE}" in _why(result)
 
 
 def test_a_vitest_module_run_from_outside_the_baseline_tree_is_refused(
