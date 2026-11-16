@@ -2,7 +2,6 @@
 
 import { ended } from "@/hooks/jobPoll";
 import { TERMINAL_STATES } from "@/lib/runStatus";
-import { tell } from "@/lib/tell";
 import { jobKey } from "@/lib/trainingKeys";
 import { useStore } from "@/store";
 import type { JobListings, JobsTold, ListingName } from "@/store/slices/jobListings";
@@ -95,7 +94,7 @@ export function tellJobs<N extends ListingName>(
   project: string,
   answer: JobListings[N]["answer"],
 ): void {
-  const { jobsTold, keepJobsTold, releaseNotification } = useStore.getState();
+  const { jobsTold, keepJobsTold, raiseNotification, releaseNotification } = useStore.getState();
   const before: JobsTold | undefined = jobsTold[project]?.[listing];
   const key = (id: string) => jobKey(listing, project, id);
   const listed = LISTED[listing](answer);
@@ -127,8 +126,17 @@ export function tellJobs<N extends ListingName>(
   keepJobsTold(project, listing, { listed: listedIds, watched });
   // The live region announces the last raise alone, so an assertive one goes after every polite.
   const assertive = (r: JobRaise) => Number(LEVELS[r.level].live === "assertive");
-  for (const r of raises.sort((a, b) => assertive(a) - assertive(b))) {
-    tell("job", r.level, r.sentence, r.id, key(r.id), r.retell);
-    if (r.release) releaseNotification(key(r.id));
+  for (const { id, level, sentence, retell, release } of raises.sort(
+    (a, b) => assertive(a) - assertive(b),
+  )) {
+    raiseNotification({
+      kind: "job",
+      level,
+      text: { sentence },
+      context: { project, target: id },
+      key: key(id),
+      retell,
+    });
+    if (release) releaseNotification(key(id));
   }
 }
