@@ -635,7 +635,7 @@ describe("ProjectPicker", () => {
     });
   });
 
-  it("renames a project's display name by its id", async () => {
+  it("renames a project's display name by its id, closing the dialog and raising no entry", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(LISTING);
     const { renamed } = PROJECT_FIXTURES;
     vi.mocked(api.projects.rename).mockResolvedValue(renamed);
@@ -655,15 +655,7 @@ describe("ProjectPicker", () => {
       display_name: renamed.record.display_name,
       user: "grower",
     });
-    await waitFor(() =>
-      expect(useStore.getState().notifications).toEqual([
-        expect.objectContaining({
-          kind: "notice",
-          level: "info",
-          sentence: `Renamed ${VALLEY.record.display_name} to ${renamed.record.display_name}.`,
-          context: { project: VALLEY.record.id, target: VALLEY.record.display_name },
-        }),
-      ]),
-    );
+    await waitFor(() => expect(screen.queryByLabelText("New name")).not.toBeInTheDocument());
+    expect(useStore.getState().notifications).toEqual([]);
   });
 });

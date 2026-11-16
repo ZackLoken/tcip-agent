@@ -144,13 +144,7 @@ function RenameDialog({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await api.projects.rename({ id, display_name: newName, user });
-      useStore.getState().raiseNotification({
-        kind: "notice",
-        level: "info",
-        text: { sentence: `Renamed ${name} to ${res.record.display_name}.` },
-        context: { project: id, target: name },
-      });
+      await api.projects.rename({ id, display_name: newName, user });
       onRenamed();
     } catch (e) {
       setSubmitError(messageOf(e));
