@@ -8,8 +8,10 @@ import { subjectColor } from "@/api/subjects";
 import { CONF_REFUSED, type ImageBands, PLAIN } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { HelpOverlay } from "@/components/HelpOverlay";
+import { NotificationsPane } from "@/components/Notifications";
 import type { BandChoice } from "@/lib/bandSelection";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
+import { dismissLabel } from "@/lib/dismissLabel";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
 import type { ReviewItem } from "@/lib/reviewItems";
@@ -250,6 +252,12 @@ const flush = () => act(async () => {});
 
 // Save now lives in the (mocked-out) toolbar's Editor shelf; drive it via its Ctrl+S shortcut.
 const pressSave = () => fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+/** The entries the canvas shows in place, for the image in view. */
+const onCanvas = () => screen.queryAllByTestId("entry-in-place");
+
+/** The entries the notifications area lists. */
+const listed = () => useStore.getState().notifications;
 
 let loadSpy: MockInstance<typeof api.annotate.load>;
 let saveSpy: MockInstance<typeof api.annotate.save>;
@@ -623,7 +631,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
   });
 
-  it("a stale conflict for a since-left image does not show the Reload banner over the new image", async () => {
+  it("guard: a stale conflict for a since-left image is listed naming it, with nothing on the new image's canvas", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -646,9 +654,18 @@ describe("AnnotateTab save/load race", () => {
     });
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
     expect(screen.queryByText(CONFLICT_SENTENCE, { exact: false })).not.toBeInTheDocument();
+    expect(onCanvas()).toHaveLength(0);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        sentence: `Save failed for ${IMG1_NAME}: ${CONFLICT_SENTENCE}`,
+        key: undefined,
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
   });
 
-  it("a save failing after its own image was reloaded raises no banner over the reloaded labels", async () => {
+  it("guard: a save failing after its own image was reloaded is listed naming that image, with nothing on the canvas", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -657,7 +674,7 @@ describe("AnnotateTab save/load race", () => {
     pressSave();
     await flush();
 
-    // A second save goes out under the conflict's banner, then its Reload re-reads the same image.
+    // A second save goes out under the conflict's entry, then its Reload re-reads the same image.
     const pending = heldSaves();
     pressSave();
     await flush();
@@ -669,9 +686,14 @@ describe("AnnotateTab save/load race", () => {
 
     await act(() => Promise.resolve(pending[0].reject(new Error("network down"))));
     expect(screen.queryByText(/Could not save annotations/)).not.toBeInTheDocument();
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `Save failed: ${IMG1_NAME}'s edits were not written.`,
-    );
+    expect(onCanvas()).toHaveLength(0);
+    expect(listed().at(-1)).toMatchObject({
+      kind: "failure",
+      level: "error",
+      sentence: `Save failed: ${IMG1_NAME}'s edits were not written.`,
+      key: undefined,
+      context: { target: IMG1_NAME },
+    });
   });
 
   it("names the person the app is set to on the save, and sends no provenance of its own", async () => {
@@ -907,14 +929,19 @@ describe("AnnotateTab point tool", () => {
     expect(useStore.getState().canvas.dirty).toBe(true);
   });
 
-  it("refuses to place a point with no subject selected, and says so once", async () => {
+  it("guard: refuses to place a point with no subject selected, and says so once on the canvas", async () => {
     await mountPointMode();
     act(() => useStore.getState().setActiveSubject(null));
     fireEvent.click(stage(), { clientX: 10, clientY: 10 });
+    fireEvent.click(stage(), { clientX: 30, clientY: 30 });
     await flush();
 
     expect(useStore.getState().canvas.points).toHaveLength(0);
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/Choose a subject first/);
+    const [entry] = onCanvas();
+    expect(entry).toHaveTextContent("Choose a subject first.");
+    expect(listed()).toEqual([
+      expect.objectContaining({ kind: "failure", sentence: "Choose a subject first.", count: 1 }),
+    ]);
   });
 
   it("a press-drag repositions a placed point, with one undo snapshot for the whole drag", async () => {
@@ -1202,19 +1229,75 @@ describe("AnnotateTab legend keyboard access", () => {
   });
 });
 
-describe("AnnotateTab ioError banner", () => {
+describe("AnnotateTab entries on the canvas", () => {
   const unreadable = ANNOTATE_ANSWERS.unreadable;
+
+  /** Draw the box mounted in the first image, and answer its save with `refusal`. */
+  async function refusedSave(refusal: unknown) {
+    render(
+      <>
+        <AnnotateTab />
+        <NotificationsPane />
+      </>,
+    );
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(refusal);
+    pressSave();
+    await flush();
+  }
+
+  /** The one entry the notifications area lists. */
+  const inArea = () =>
+    within(screen.getByRole("region", { name: "Notifications" })).getByRole("listitem");
 
   it("names why the labels failed to load", async () => {
     loadSpy.mockRejectedValueOnce(await thrown(unreadable));
 
     render(<AnnotateTab />);
 
-    expect(
-      await screen.findByText(
-        `Could not load this image's labels: ${unreadable.body.detail}. Saving is off.`,
-      ),
-    ).toBeInTheDocument();
+    const entry = await screen.findByTestId("entry-in-place");
+    expect(entry).toHaveTextContent(
+      `Could not load this image's labels: ${unreadable.body.detail}. Saving is off.`,
+    );
+  });
+
+  it("guard: a version conflict offers Reload on the canvas, which reloads the image, and none in the area", async () => {
+    await refusedSave(await versionConflict());
+
+    const [entry] = onCanvas();
+    expect(entry).toHaveTextContent(CONFLICT_SENTENCE);
+    const area = inArea();
+    expect(area).toHaveTextContent(CONFLICT_SENTENCE);
+    expect(within(area).queryByRole("button", { name: "Reload" })).toBeNull();
+
+    fireEvent.click(within(entry).getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(loadSpy.mock.calls[1][0]).toBe(IMG1);
+    expect(onCanvas()).toHaveLength(0);
+    expect(inArea()).toHaveTextContent(CONFLICT_SENTENCE);
+  });
+
+  it("guard: another save failure stands on the canvas offering no Reload", async () => {
+    await refusedSave(new Error("network down"));
+
+    const [entry] = onCanvas();
+    expect(entry).toHaveTextContent("Could not save annotations (network down)");
+    expect(within(entry).queryByRole("button", { name: "Reload" })).toBeNull();
+  });
+
+  it("guard: a failure standing for one image is gone from the canvas as the next is stepped to, before its load lands", async () => {
+    await refusedSave(new Error("network down"));
+    expect(onCanvas()).toHaveLength(1);
+
+    loadSpy.mockImplementation(() => new Promise(() => {}));
+    act(() => changeSelection({ current_image_index: 1 }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+
+    expect(onCanvas()).toHaveLength(0);
+    expect(inArea()).toHaveTextContent("Could not save annotations");
   });
 
   it("reads a failed image once, stepping back to it before the next image lands", async () => {
@@ -1232,35 +1315,31 @@ describe("AnnotateTab ioError banner", () => {
     expect(useStore.getState().canvas.failedLoad).toBe(IMG1);
   });
 
-  it("can be dismissed manually, independent of the conditional Reload button", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
+  it("is dismissed by a control named from its text, taking Reload with it", async () => {
+    await refusedSave(await versionConflict());
 
-    act(addBox);
-    saveSpy.mockRejectedValueOnce(await versionConflict());
-    pressSave();
-    await flush();
-
-    expect(screen.getByText(CONFLICT_SENTENCE, { exact: false })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(CONFLICT_SENTENCE, { exact: false })).not.toBeInTheDocument();
+    const [entry] = onCanvas();
+    fireEvent.click(
+      within(entry).getByRole("button", {
+        name: (name) =>
+          name.startsWith(
+            dismissLabel(
+              `${CONFLICT_SENTENCE} Reload to load the latest (discards your unsaved edits), or keep editing.`,
+            ),
+          ),
+      }),
+    );
+    expect(onCanvas()).toHaveLength(0);
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
+    expect(listed()).toEqual([]);
   });
 
   it("sits in the row below the Fit pill, never on top of it", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
+    await refusedSave(await versionConflict());
 
-    act(addBox);
-    saveSpy.mockRejectedValueOnce(await versionConflict());
-    pressSave();
-    await flush();
-
-    const banner = screen.getByText(CONFLICT_SENTENCE, { exact: false }).closest("div");
+    const line = screen.getByTestId("entry-in-place").parentElement;
     const fit = screen.getByRole("button", { name: "Fit" });
-    expect(banner).toHaveClass("top-12");
+    expect(line).toHaveClass("top-12");
     expect(fit).toHaveClass("top-3");
   });
 });
@@ -1379,11 +1458,12 @@ describe("AnnotateTab labels-written conflict sentence", () => {
       useStore.getState().pushAgentActivity("annotate", written, AGENT_CLIENT);
     });
 
-    expect(
-      screen.getByText(
-        `${AGENT_CLIENT} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
-      ),
-    ).toBeInTheDocument();
+    const [entry] = onCanvas();
+    expect(entry).toHaveTextContent(
+      `${AGENT_CLIENT} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
+    );
+    expect(within(entry).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+    expect(listed()).toEqual([expect.objectContaining({ kind: "notice", level: "warning" })]);
   });
 
   it("names a process when the write declared no actor", async () => {
@@ -1860,11 +1940,14 @@ describe("Cut gesture", () => {
     expect(useStore.getState().canvas.polygons).toHaveLength(3);
   });
 
-  it("with none selected, the first click toasts", async () => {
+  /** The refusal the canvas shows in place for the image in view. */
+  const refusalOnCanvas = () => screen.getByTestId("entry-in-place");
+
+  it("guard: with none selected, the first click is refused on the canvas", async () => {
     const stage = await renderPolygonCanvas();
     act(() => useStore.getState().setCut(true));
     fireEvent.click(stage, { clientX: 500, clientY: 500, button: 0 });
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+    expect(refusalOnCanvas()).toHaveTextContent(
       "Select a polygon to cut, then click two points on either side of it.",
     );
   });
@@ -1915,7 +1998,7 @@ describe("Cut gesture", () => {
     act(() => useStore.getState().setFocus({ kind: "polygon", index: 1 }));
     fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
     expect(useStore.getState().canvas.polygons).toHaveLength(2);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(POLYGON_CHANGED_SENTENCE);
+    expect(refusalOnCanvas()).toHaveTextContent(POLYGON_CHANGED_SENTENCE);
   });
 
   it("an attribute edit between the clicks does not cancel the cut", async () => {
@@ -1937,7 +2020,7 @@ describe("Cut gesture", () => {
     act(() => useStore.getState().dragVertex(0, 0, 0, [11, 11]));
     fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
     expect(useStore.getState().canvas.polygons).toHaveLength(2); // unchanged: the cut was canceled
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(POLYGON_CHANGED_SENTENCE);
+    expect(refusalOnCanvas()).toHaveTextContent(POLYGON_CHANGED_SENTENCE);
   });
 
   it("a refused cut leaves the polygons unchanged and the flag set", async () => {
@@ -1948,7 +2031,7 @@ describe("Cut gesture", () => {
     expect(useStore.getState().canvas.polygons).toHaveLength(2);
     expect(useStore.getState().canvas.polygons[0].rings[0]).toHaveLength(4);
     expect(useStore.getState().annotateUi.cut).toBe(true);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(CUT_MISSES_REFUSAL);
+    expect(refusalOnCanvas()).toHaveTextContent(CUT_MISSES_REFUSAL);
   });
 
   it("after cutting one polygon, a click inside another selects it with no start placed", async () => {
@@ -2147,27 +2230,76 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     expect(useStore.getState().canvas.boxes).toEqual([
       { x1: 100, y1: 100, x2: 103, y2: 103, subject: SUBJECT, attributes: {}, iscrowd: false },
     ]);
-    expect(useStore.getState().toasts).toHaveLength(0);
+    expect(listed()).toHaveLength(0);
   });
 
-  it("refuses a freshly drawn box smaller than the minimum, with a toast", async () => {
-    useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    const stage = screen.getByTestId("canvas-stage");
+  describe("guard: a freshly drawn box smaller than the minimum", () => {
+    const TOO_SMALL = "Box too small to keep. Drag out a bigger area.";
 
-    fireEvent.mouseDown(stage, { clientX: 100, clientY: 100, button: 0 });
-    fireEvent.mouseMove(stage, { clientX: 102, clientY: 102 });
-    await nextFrame();
-    fireEvent.mouseUp(stage, { clientX: 102, clientY: 102 });
-    await flush();
+    /** Mount over the first image and drag a box from (100, 100) by `side` on each axis. */
+    async function mountAndDraw(side: number) {
+      useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
+      render(<AnnotateTab />);
+      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+      await flush();
+      await drawBox(side);
+    }
 
-    expect(useStore.getState().canvas.boxes).toHaveLength(0);
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/too small/i);
+    async function drawBox(side: number) {
+      const stage = screen.getByTestId("canvas-stage");
+      fireEvent.mouseDown(stage, { clientX: 100, clientY: 100, button: 0 });
+      fireEvent.mouseMove(stage, { clientX: 100 + side, clientY: 100 + side });
+      await nextFrame();
+      fireEvent.mouseUp(stage, { clientX: 100 + side, clientY: 100 + side });
+      await flush();
+    }
+
+    it("is refused by one failure shown on the canvas and listed", async () => {
+      await mountAndDraw(2);
+
+      expect(useStore.getState().canvas.boxes).toHaveLength(0);
+      const [entry] = onCanvas();
+      expect(entry).toHaveTextContent(TOO_SMALL);
+      expect(listed()).toEqual([
+        expect.objectContaining({
+          kind: "failure",
+          level: "error",
+          sentence: TOO_SMALL,
+          context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+        }),
+      ]);
+    });
+
+    it("goes from the canvas and from the list when dismissed", async () => {
+      await mountAndDraw(2);
+      const [entry] = onCanvas();
+      fireEvent.click(within(entry).getByRole("button", { name: /^Dismiss: Box too small/ }));
+
+      expect(onCanvas()).toHaveLength(0);
+      expect(listed()).toEqual([]);
+    });
+
+    it("goes from the canvas when the next box is kept, and stays listed", async () => {
+      await mountAndDraw(2);
+      await drawBox(60);
+
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      expect(onCanvas()).toHaveLength(0);
+      expect(listed()).toEqual([expect.objectContaining({ sentence: TOO_SMALL, key: undefined })]);
+    });
+
+    it("goes from the canvas when the image changes, and stays listed", async () => {
+      await mountAndDraw(2);
+      act(() => changeSelection({ current_image_index: 1 }));
+      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+      await flush();
+
+      expect(onCanvas()).toHaveLength(0);
+      expect(listed()).toEqual([expect.objectContaining({ sentence: TOO_SMALL })]);
+    });
   });
 
-  it("undoes a resize that shrinks a box below the minimum, with a toast", async () => {
+  it("undoes a resize that shrinks a box below the minimum, refused on the canvas", async () => {
     useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -2188,7 +2320,9 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     expect(useStore.getState().canvas.boxes).toEqual([
       { x1: 10, y1: 10, x2: 50, y2: 50, subject: SUBJECT, attributes: {}, iscrowd: false },
     ]);
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/too small/i);
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(
+      "Box too small to keep; the resize was undone.",
+    );
   });
 
   describe("a save pressed while a box resize is still being dragged", () => {
@@ -2212,7 +2346,9 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       pressSave();
       await flush();
       expect(saveSpy.mock.calls[0][0].annotations[0]).toMatchObject({ bbox: [10, 10, 50, 50] });
-      expect(useStore.getState().toasts.at(-1)?.message).toMatch(/too small/i);
+      expect(listed()).toEqual([
+        expect.objectContaining({ sentence: "Box too small to keep; the resize was undone." }),
+      ]);
     });
 
     it("reverts the resize, not a vertex of a polygon being drawn, and leaves the draft whole", async () => {
@@ -3570,7 +3706,7 @@ describe("AnnotateTab engine prompt", () => {
 
     expect(propose).not.toHaveBeenCalled();
     expect(useStore.getState().annotateUi.pendingPrompts.points).toEqual([]);
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/Choose a subject first/);
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent("Choose a subject first.");
   });
 
   it("held prompts are dropped when the image changes", async () => {
@@ -3598,9 +3734,8 @@ describe("AnnotateTab engine prompt", () => {
     expect(propose).not.toHaveBeenCalled();
     const [dropped, kept] = ANNOTATE_ANSWERS.found.boxes;
     expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([dropped, kept]);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `${ANNOTATE_ANSWERS.found.boxes.length} found for "open bud". Add or drop boxes, then propose.`,
-    );
+    // The held boxes are drawn on the canvas, so the find raises no entry.
+    expect(listed()).toEqual([]);
 
     fireEvent.contextMenu(stage(), { clientX: dropped[0] + 10, clientY: dropped[1] + 10 });
     await flush();
@@ -3646,10 +3781,17 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
 
     expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([]);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe('Nothing found for "open bud".');
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "info",
+        sentence: 'Nothing found for "open bud".',
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
   });
 
-  it("shows the answered proposals under their shape's tool and focuses the first, the bucket unselected", async () => {
+  it("shows the answered proposals under their shape's tool and focuses the first, the bucket unselected, raising no entry", async () => {
     const { stagings, proposals } = await mountArmed("point");
     stagings.mockResolvedValue(ANNOTATE_ANSWERS.stagings);
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
@@ -3660,9 +3802,7 @@ describe("AnnotateTab engine prompt", () => {
     await waitFor(() => expect(proposals).toHaveBeenCalledWith(IMG1, BUCKET));
     expect(useStore.getState().gui.dataset?.bucket).toBeNull();
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-view-proposals", "true");
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `${STAGED.proposal_count} proposals for ${IMG1_NAME}`,
-    );
+    expect(listed()).toEqual([]);
     await waitFor(() =>
       expect(useStore.getState().canvas.focus).toEqual({
         kind: "proposal",
@@ -3733,12 +3873,17 @@ describe("AnnotateTab engine prompt", () => {
 
     expect(useStore.getState().gui.dataset?.current_image_index).toBe(1);
     expect(proposals).not.toHaveBeenCalledWith(expect.any(String), BUCKET);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `${STAGED.proposal_count} proposals for ${IMG1_NAME}, staged under ${BUCKET}.`,
-    );
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "info",
+        sentence: `${STAGED.proposal_count} proposals for ${IMG1_NAME}, staged under ${BUCKET}.`,
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
   });
 
-  it("a refused prompt reaches the person as a toast carrying the route's text", async () => {
+  it("guard: a refused prompt is refused on the canvas, carrying the route's text", async () => {
     const { propose } = await mountArmed("point");
     const refusal = ANNOTATE_ANSWERS.engine_refusal;
     propose.mockRejectedValue(await thrown(refusal));
@@ -3746,7 +3891,8 @@ describe("AnnotateTab engine prompt", () => {
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
 
-    expect(useStore.getState().toasts.at(-1)?.message).toContain(refusal.body.detail);
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(refusal.body.detail);
+    expect(listed()).toEqual([expect.objectContaining({ kind: "failure", level: "error" })]);
   });
 
   it("a prompt the engine answers with nothing serves nothing and says so", async () => {
@@ -3757,7 +3903,14 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
 
     expect(proposals).not.toHaveBeenCalled();
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(`No proposal for ${IMG1_NAME}.`);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "info",
+        sentence: `No proposal for ${IMG1_NAME}.`,
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
   });
 
   it("disarmed, a click in point mode places a point and sends no prompt", async () => {

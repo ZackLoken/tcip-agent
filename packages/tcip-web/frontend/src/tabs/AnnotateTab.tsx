@@ -6,6 +6,7 @@ import { api, type LoadedLabels, type LoadedSave } from "@/api/client";
 import { messageOf, refusalOf } from "@/api/http";
 import { subjectColor } from "@/api/subjects";
 import {
+  type CaptureImage,
   type Gestures,
   NO_GESTURES,
   PANEL_EVENT_LABELS_WRITTEN,
@@ -27,6 +28,7 @@ import { ReviewStrip } from "@/components/annotate/ReviewStrip";
 import { SnapIndicator } from "@/components/annotate/SnapIndicator";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { NotificationItem } from "@/components/Notifications";
 import { TabHeading } from "@/components/TabHeading";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { useDisplayPixels } from "@/hooks/useDisplayPixels";
@@ -95,6 +97,7 @@ import { nextMode } from "@/lib/toolMode";
 import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import { canvasImage, holdsCanvas, imageSize } from "@/store/slices/canvas";
+import type { MessageLevel } from "@/store/slices/notifications";
 import {
   isFinished,
   TOOL_ARRAY,
@@ -108,6 +111,55 @@ import {
 const SNAP_RADIUS_CANVAS = 15;
 const EDGE_INSERT_THRESHOLD = 6;
 const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
+
+/** What an image's entries in place over the canvas stand for: a save or load that failed, what
+ *  Reload answers, and a refused gesture, prompt, find or proposals read. */
+const CANVAS_SLOTS = ["document", "reload", "act"] as const;
+
+/** The key the image at `imagePath` holds its `slot`'s entry on. */
+const canvasKey = (slot: (typeof CANVAS_SLOTS)[number], imagePath: string): string =>
+  `annotate-${slot}:${imagePath}`;
+
+/** Raise `sentence` as a `kind` of the open project about `target`, an image or a capture by
+ *  name, standing on `key` when one is given. */
+function tell(
+  kind: "failure" | "notice",
+  level: MessageLevel,
+  sentence: string,
+  target: string,
+  key?: string,
+): void {
+  const { raiseNotification, openProject } = useStore.getState();
+  raiseNotification({
+    kind,
+    level,
+    text: { sentence },
+    context: { project: openProject?.id, target },
+    key,
+  });
+}
+
+/** The image in view as the store holds it now, which a callback outliving its render reads. */
+const liveImage = (): CaptureImage | null => currentImage(useStore.getState().gui.dataset);
+
+/** Refuse an act on `image`, by default the one in view: a failure standing on its act key. */
+function refuseAct(sentence: string, image = liveImage()): void {
+  if (image) tell("failure", "error", sentence, image.name, canvasKey("act", image.path));
+}
+
+/** End the refusal standing on `image`'s act key, by default the image in view's, once an act on
+ *  it succeeds. */
+function actSucceeded(image = liveImage()): void {
+  if (image) useStore.getState().releaseNotification(canvasKey("act", image.path));
+}
+
+/** End what stands on the document and reload keys of the image at `imagePath`, once a load or
+ *  save of it lands. */
+function documentLanded(imagePath: string): void {
+  const { releaseNotification } = useStore.getState();
+  releaseNotification(canvasKey("document", imagePath));
+  releaseNotification(canvasKey("reload", imagePath));
+}
 
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
@@ -175,10 +227,7 @@ export function AnnotateTab() {
   const landedRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
   const loadedTickRef = useRef(0);
-  const [ioError, setIoError] = useState<string | null>(null);
-  // True when a save/reload conflict is showing (file changed underneath us);
-  // the banner then offers a Reload button.
-  const [conflict, setConflict] = useState(false);
+  const canvasColumnRef = useRef<HTMLDivElement>(null);
   const agentActivity = useStore((s) => s.agentActivity);
 
   const imageInView = currentImage(dataset);
@@ -249,23 +298,27 @@ export function AnnotateTab() {
   };
   const proposalKey = `${imgPath ?? ""}\0${predictionsShown ? bucket : ""}\0${shown.proposals}`;
   useEffect(() => {
-    if (!imgPath || !currentImageName) return;
+    const image = imageInView;
+    if (!image) return;
     let canceled = false;
     void (async () => {
       try {
-        const staged = shown.proposals ? (await api.annotate.stagings(imgPath)).buckets : [];
+        const staged = shown.proposals ? (await api.annotate.stagings(image.path)).buckets : [];
         const buckets = [
           ...(predictionsShown ? [bucket] : []),
           ...staged.filter((b) => b !== bucket),
         ];
-        const answers = await Promise.all(buckets.map((b) => api.annotate.proposals(imgPath, b)));
+        const answers = await Promise.all(
+          buckets.map((b) => api.annotate.proposals(image.path, b)),
+        );
         if (canceled) return;
+        actSucceeded(image);
         setServed({
           key: proposalKey,
           answers: answers.map((answer, i) => ({ bucket: buckets[i], answer })),
         });
       } catch (e) {
-        if (!canceled) useStore.getState().pushToast(`Could not load proposals: ${messageOf(e)}`);
+        if (!canceled) refuseAct(`Could not load proposals: ${messageOf(e)}`, image);
       }
     })();
     return () => {
@@ -295,41 +348,42 @@ export function AnnotateTab() {
   }, [imgPath]);
   /** Send one prompt about the image in view, its proposals staged under the active subject; one
    *  in flight refuses another. While the tab still shows the selection and image the prompt was
-   *  sent from, the staged proposals are served with the first focused; otherwise a toast names
+   *  sent from, the staged proposals are served with the first focused; otherwise a notice names
    *  the bucket and the view stays. */
   async function sendPrompt(prompt: ProposePayload["prompt"]) {
-    if (proposing || !imgPath || !dataset) return;
+    const sent = imageInView;
+    if (proposing || !sent || !dataset) return;
     const authoring = requireSubject();
     if (!authoring) return;
     const subject = dataset.subject;
-    const [sentFrom, sentName] = [imgPath, currentImageName];
     setProposing(true);
     try {
       const answer = await api.annotate.propose({
-        image_path: sentFrom,
+        image_path: sent.path,
         subject: authoring,
         user: useStore.getState().user,
         prompt,
       });
       useStore.getState().clearPrompts();
+      actSucceeded(sent);
+      const told = (sentence: string) => tell("notice", "info", sentence, sent.name);
       if (answer.kind === "nothing_proposed") {
-        useStore.getState().pushToast(`No proposal for ${sentName}.`);
+        told(`No proposal for ${sent.name}.`);
         return;
       }
-      const count = `${answer.proposal_count} ${answer.proposal_count === 1 ? "proposal" : "proposals"} for ${sentName}`;
       const now = useStore.getState().gui.dataset;
       const inView =
-        mountedRef.current && now?.subject === subject && currentImage(now)?.path === sentFrom;
+        mountedRef.current && now?.subject === subject && currentImage(now)?.path === sent.path;
       if (inView) {
         focusOnServeRef.current = answer.bucket;
         setShown((v) => ({ ...v, proposals: true }));
         refreshProposals();
-        useStore.getState().pushToast(count, "success");
       } else {
-        useStore.getState().pushToast(`${count}, staged under ${answer.bucket}.`);
+        const noun = answer.proposal_count === 1 ? "proposal" : "proposals";
+        told(`${answer.proposal_count} ${noun} for ${sent.name}, staged under ${answer.bucket}.`);
       }
     } catch (e) {
-      useStore.getState().pushToast(`Could not propose: ${messageOf(e)}`);
+      refuseAct(`Could not propose: ${messageOf(e)}`, sent);
     } finally {
       if (mountedRef.current) setProposing(false);
     }
@@ -344,30 +398,25 @@ export function AnnotateTab() {
    *  prompts beside the placed ones, replacing what the previous Find found, for the person to
    *  keep, drop or add to before Propose. */
   async function findByPhrase(phrase: string) {
-    if (proposing || !imgPath || !requireSubject()) return;
-    const [sentFrom, sentName] = [imgPath, currentImageName];
+    const sent = imageInView;
+    if (proposing || !sent || !requireSubject()) return;
     setProposing(true);
     try {
       const answer = await api.annotate.find({
-        image_path: sentFrom,
+        image_path: sent.path,
         phrase,
         user: useStore.getState().user,
       });
-      if (!mountedRef.current || currentImage(useStore.getState().gui.dataset)?.path !== sentFrom) {
-        useStore.getState().pushToast(`${answer.boxes.length} found on ${sentName}, not held.`);
+      actSucceeded(sent);
+      const told = (sentence: string) => tell("notice", "info", sentence, sent.name);
+      if (!mountedRef.current || liveImage()?.path !== sent.path) {
+        told(`${answer.boxes.length} found on ${sent.name}, not held.`);
         return;
       }
       useStore.getState().setFoundBoxes(answer.boxes);
-      useStore
-        .getState()
-        .pushToast(
-          answer.boxes.length === 0
-            ? `Nothing found for "${phrase}".`
-            : `${answer.boxes.length} found for "${phrase}". Add or drop boxes, then propose.`,
-          "success",
-        );
+      if (answer.boxes.length === 0) told(`Nothing found for "${phrase}".`);
     } catch (e) {
-      useStore.getState().pushToast(`Could not find: ${messageOf(e)}`);
+      refuseAct(`Could not find: ${messageOf(e)}`, sent);
     } finally {
       if (mountedRef.current) setProposing(false);
     }
@@ -727,7 +776,7 @@ export function AnnotateTab() {
     const resized = useStore.getState().canvas.boxes[drag.idx];
     if (resized && belowMinSide(resized.x1, resized.y1, resized.x2, resized.y2)) {
       rollbackLast();
-      useStore.getState().pushToast("Box too small to keep; the resize was undone.");
+      refuseAct("Box too small to keep; the resize was undone.");
       return false;
     }
     return true;
@@ -789,10 +838,19 @@ export function AnnotateTab() {
         hold.controller.signal,
       );
     } catch (e) {
+      // Only a failure of the document still loaded stands in place over the canvas; one for an
+      // image since left or reloaded is listed in the notifications area alone, naming it.
+      const inPlace = interactive && stillLoaded();
+      const failed = (sentence: string, slot?: "document" | "reload") =>
+        tell("failure", "error", sentence, loaded.name, slot && canvasKey(slot, loaded.image_path));
       if (hold.controller.signal.aborted) {
-        if (interactive && stillLoaded()) {
-          setIoError(
+        if (inPlace) {
+          tell(
+            "notice",
+            "warning",
             "Save canceled. If the server had already written it, saving again reports a conflict, and Reload shows what it wrote.",
+            loaded.name,
+            canvasKey("document", loaded.image_path),
           );
         }
         return null;
@@ -800,26 +858,24 @@ export function AnnotateTab() {
       const conflict = refusalOf<VersionConflictRefusal>(e, VERSION_CONFLICT);
       if (conflict) {
         // Someone else wrote this file since it loaded: never clobber their work, keep the canvas
-        // dirty; the banner belongs to the image on screen, a toast reports it after leaving.
-        if (interactive && stillLoaded()) {
-          setConflict(true);
-          setIoError(
+        // dirty.
+        if (inPlace) {
+          failed(
             `${conflict.message} Reload to load the latest (discards your unsaved edits), or keep editing.`,
+            "reload",
           );
         } else {
-          useStore.getState().pushToast(`Save failed for ${loaded.name}: ${conflict.message}`);
+          failed(`Save failed for ${loaded.name}: ${conflict.message}`);
         }
         return null;
       }
-      const detail = messageOf(e);
-      // Identity check: a stale failure for a since-left image must not raise a
-      // banner over the image now on screen.
-      if (interactive && stillLoaded()) {
-        setIoError(
-          `Could not save annotations (${detail}). Your edits are kept in the editor; press Save to retry.`,
+      if (inPlace) {
+        failed(
+          `Could not save annotations (${messageOf(e)}). Your edits are kept in the editor; press Save to retry.`,
+          "document",
         );
       } else {
-        useStore.getState().pushToast(`Save failed: ${loaded.name}'s edits were not written.`);
+        failed(`Save failed: ${loaded.name}'s edits were not written.`);
       }
       return null;
     } finally {
@@ -834,8 +890,7 @@ export function AnnotateTab() {
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
-    setIoError(null);
-    setConflict(false);
+    documentLanded(loaded.image_path);
     refreshProposals();
     adoptLabels(result.document);
     if (opts?.focusAccepted !== undefined) focusAccepted(result, opts.focusAccepted);
@@ -866,10 +921,13 @@ export function AnnotateTab() {
     const norm = (p: string) => p.replace(/\\/g, "/");
     if (norm(event.image_path) !== norm(loaded.image_path)) return;
     if (useStore.getState().canvas.dirty) {
-      setConflict(true);
       const client = agentActivity.client ?? "A process";
-      setIoError(
+      tell(
+        "notice",
+        "warning",
         `${client} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
+        loaded.name,
+        canvasKey("reload", loaded.image_path),
       );
     } else {
       requestReload();
@@ -900,8 +958,13 @@ export function AnnotateTab() {
         if (!canceled) setImageStates(r.states);
       },
       (e: unknown) => {
-        if (!canceled)
-          useStore.getState().pushToast(`Could not read the images' states: ${messageOf(e)}`);
+        if (!canceled && dataset)
+          tell(
+            "failure",
+            "error",
+            `Could not read the images' states: ${messageOf(e)}`,
+            dataset.date,
+          );
       },
     );
     return () => {
@@ -932,22 +995,23 @@ export function AnnotateTab() {
         if (canceled) return;
         adoptLabels(labels);
         landedRef.current = true;
-        setIoError(null);
-        setConflict(false);
+        documentLanded(imgPath);
         if (reload) refreshProposals();
         else startImageSessionTracking(currentImageName);
       } catch (e) {
         if (canceled) return;
-        const detail = messageOf(e);
+        const failed = (sentence: string) =>
+          tell("failure", "error", sentence, currentImageName, canvasKey("document", imgPath));
         if (reload) {
-          setIoError(`Reload failed: ${detail}`);
+          failed(`Reload failed: ${messageOf(e)}`);
           return;
         }
         // A blank canvas holding no document: a transient load failure never overwrites the labels.
         useStore.getState().clearCanvas(imgPath);
         landedRef.current = true;
-        setConflict(false);
-        setIoError(`Could not load this image's labels: ${detail}. Saving is off.`);
+        // Reload rereads a loaded document, and the canvas now holds none.
+        useStore.getState().releaseNotification(canvasKey("reload", imgPath));
+        failed(`Could not load this image's labels: ${messageOf(e)}. Saving is off.`);
         startImageSessionTracking(currentImageName);
       }
     })();
@@ -958,7 +1022,8 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imgPath, currentImageName, reloadTick]);
 
-  /** Run a canvas action that adds a shape and count it as added only if the store took it. */
+  /** Run a canvas action that adds a shape and count it as added, a kept act, only if the store
+   *  took it. */
   function counted(add: () => void) {
     const total = () => {
       const c = useStore.getState().canvas;
@@ -966,7 +1031,10 @@ export function AnnotateTab() {
     };
     const before = total();
     add();
-    if (total() > before) incrementAnnotationsAdded(1);
+    if (total() > before) {
+      incrementAnnotationsAdded(1);
+      actSucceeded();
+    }
   }
 
   function commitPolygonAndTrack() {
@@ -975,6 +1043,7 @@ export function AnnotateTab() {
     streamingRef.current = false;
     if (commitCurrentPolygon()) {
       incrementAnnotationsAdded(1);
+      actSucceeded();
     }
   }
 
@@ -1004,20 +1073,9 @@ export function AnnotateTab() {
     if (activeSubject) return activeSubject;
     if (noSubjectNoticeRef.current !== currentImageName) {
       noSubjectNoticeRef.current = currentImageName;
-      useStore.getState().pushToast("Choose a subject first.");
+      refuseAct("Choose a subject first.");
     }
     return null;
-  }
-
-  // Channeled "cut", so a repeat replaces the standing toast with a count.
-  function requireCutSelection(): void {
-    useStore
-      .getState()
-      .pushToast(
-        "Select a polygon to cut, then click two points on either side of it.",
-        "error",
-        "cut",
-      );
   }
 
   function multiRingCutRefusal(ringCount: number): string {
@@ -1397,6 +1455,7 @@ export function AnnotateTab() {
     }
     if (boxDragRef.current) {
       if (settleBoxResize()) {
+        actSucceeded();
         useStore.getState().recomputeDirty();
         // The drag suppressed full pushes; the settled geometry ships now.
         canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), true);
@@ -1414,10 +1473,13 @@ export function AnnotateTab() {
       const [x1, y1, x2, y2] = boxBounds({ ...drawing, x2: cx, y2: cy });
       const box = { x1, y1, x2, y2, subject: drawing.subject, attributes: {} };
       if (belowMinSide(x1, y1, x2, y2)) {
-        useStore.getState().pushToast("Box too small to keep. Drag out a bigger area.");
+        refuseAct("Box too small to keep. Drag out a bigger area.");
       } else if (annotateUi.prompt) {
         // Armed, the drawn box is held as a prompt and never becomes a box of the labels.
-        if (requireSubject()) useStore.getState().addPromptBox([x1, y1, x2, y2]);
+        if (requireSubject()) {
+          useStore.getState().addPromptBox([x1, y1, x2, y2]);
+          actSucceeded();
+        }
       } else {
         counted(() => add("boxes", box));
       }
@@ -1443,7 +1505,10 @@ export function AnnotateTab() {
       const y = Math.max(0, Math.min(imgH || iy, iy));
       // Armed, the click is held as a prompt and never becomes a point of the labels.
       if (annotateUi.prompt) {
-        if (requireSubject()) useStore.getState().addPromptPoint([x, y]);
+        if (requireSubject()) {
+          useStore.getState().addPromptPoint([x, y]);
+          actSucceeded();
+        }
         return;
       }
       const subject = requireSubject();
@@ -1471,7 +1536,7 @@ export function AnnotateTab() {
           return;
         }
         if (focusedIdx === null) {
-          requireCutSelection();
+          refuseAct("Select a polygon to cut, then click two points on either side of it.");
           return;
         }
         const { rings, subject } = canvas.polygons[focusedIdx];
@@ -1484,25 +1549,21 @@ export function AnnotateTab() {
       const current = idx !== null ? canvas.polygons[idx] : null;
       if (idx === null || !current || current.rings !== cutStart.rings) {
         setCutStart(null);
-        useStore
-          .getState()
-          .pushToast(
-            "The polygon changed since the first click; the cut was canceled. Select it and " +
-              "place both points again.",
-            "error",
-            "cut",
-          );
+        refuseAct(
+          "The polygon changed since the first click; the cut was canceled. Select it and " +
+            "place both points again.",
+        );
         return;
       }
       if (current.rings.length > 1) {
         setCutStart(null);
-        useStore.getState().pushToast(multiRingCutRefusal(current.rings.length), "error", "cut");
+        refuseAct(multiRingCutRefusal(current.rings.length));
         return;
       }
       const result = cutRing(current.rings[0], cutStart.point, [ix, iy]);
       if ("reason" in result) {
         setCutStart(null);
-        useStore.getState().pushToast(result.reason, "error", "cut");
+        refuseAct(result.reason);
         return;
       }
       counted(() => splitPolygon(idx, result.rings));
@@ -1759,7 +1820,11 @@ export function AnnotateTab() {
         onReject={() => void decide("reject")}
       />
       <div className="flex-1 flex min-h-0">
-        <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
+        <div
+          ref={canvasColumnRef}
+          tabIndex={-1}
+          className="relative flex-1 flex flex-col min-h-0 min-w-0 outline-none"
+        >
           <CanvasStage
             imageUrl={imageUrl}
             imagePath={imgPath}
@@ -1853,28 +1918,18 @@ export function AnnotateTab() {
             <FlagMarks places={flagMarks} size={widths.labelSize} />
           </CanvasStage>
 
-          {ioError && (
-            <div className="absolute top-12 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[13px] tcip-problem">
-              <span className="flex-1">{ioError}</span>
-              {conflict && (
-                <button className="tcip-btn text-[13px]" onClick={requestReload}>
-                  Reload
-                </button>
-              )}
-              <button
-                type="button"
-                className="tcip-problem/70 hover:tcip-problem"
-                aria-label="Dismiss"
-                title="Dismiss"
-                onClick={() => {
-                  setIoError(null);
-                  setConflict(false);
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          )}
+          {/* Below the toolbar's menus, which drop over the canvas. */}
+          <div className="absolute top-12 left-3 right-3 z-10 flex flex-col gap-1 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-1.5 empty:hidden">
+            {CANVAS_SLOTS.map((slot) => (
+              <NotificationItem
+                key={slot}
+                placement="in place"
+                entryKey={canvasKey(slot, imgPath)}
+                afterDismiss={() => canvasColumnRef.current?.focus()}
+                action={slot === "reload" ? { label: "Reload", run: requestReload } : undefined}
+              />
+            ))}
+          </div>
 
           {/* Floating canvas chrome, DOM order following the reading order (top-left, top-right,
             bottom-left, bottom-right) so tab order matches what a sighted user reads first. */}

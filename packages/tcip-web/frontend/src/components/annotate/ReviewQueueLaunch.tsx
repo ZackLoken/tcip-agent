@@ -29,11 +29,15 @@ export function ReviewQueueLaunch({ onLaunched }: { onLaunched: () => void }) {
   const [refusal, setRefusal] = useState<string | null>(null);
 
   useEffect(() => {
-    api.annotate
-      .scorers()
-      .then(setCatalog, (e: unknown) =>
-        useStore.getState().pushToast(`Could not read the scorers: ${messageOf(e)}`),
-      );
+    api.annotate.scorers().then(setCatalog, (e: unknown) => {
+      const { raiseNotification, openProject } = useStore.getState();
+      raiseNotification({
+        kind: "failure",
+        level: "error",
+        text: { sentence: `Could not read the scorers: ${messageOf(e)}` },
+        context: { project: openProject?.id },
+      });
+    });
   }, []);
 
   const scorer = catalog?.scorers.find((s) => s.name === scorerName);
