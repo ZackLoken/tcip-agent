@@ -46,7 +46,6 @@ that does not include them. A refusal is kept with its status.
 
 from __future__ import annotations
 
-import os
 import shutil
 import time
 from pathlib import Path
@@ -199,12 +198,10 @@ def produce() -> dict[str, JsonValue]:
     from tcip_mcp import agent_identity
     from tcip_mcp.audit import now
     from tcip_mcp.experiments import (
-        HEARTBEAT_FILE,
         HEARTBEAT_STALE_SECONDS,
         TrainingListing,
         last_alive,
         observe_run,
-        touch_heartbeat,
         write_final_status,
     )
     from tcip_mcp.pipelines.data.selection import selection_key
@@ -231,7 +228,7 @@ def produce() -> dict[str, JsonValue]:
         FRAME_STATISTICS,
         training_config,
     )
-    from tests._producer_fixtures import fake_popen
+    from tests._producer_fixtures import beat, fake_popen
     from tests._record_damage_fixtures import damage_record
     from tests._training_values import drawn_split
     from tests._verified_checkpoint_fixtures import (
@@ -465,11 +462,9 @@ def produce() -> dict[str, JsonValue]:
 
         streamed = run_dirs[other]
         alive = last_alive(streamed)
-        touch_heartbeat(streamed)
-        stale = time.time() - HEARTBEAT_STALE_SECONDS - 1
-        os.utime(streamed / HEARTBEAT_FILE, (stale, stale))
+        beat(streamed, HEARTBEAT_STALE_SECONDS + 1)
         served["listing_stalled"] = answered(client, "list_runs_route", 200)
-        os.utime(streamed / HEARTBEAT_FILE, (alive, alive))
+        beat(streamed, time.time() - alive)
         context = TrainContext(
             run=observed_run(observe_run(streamed)), train_loader=None
         )

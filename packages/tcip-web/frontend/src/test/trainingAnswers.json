@@ -106,7 +106,7 @@
         "run": {
           "experiment_id": "train-done",
           "state": "completed",
-          "created": "2000-01-01T00:00:10+00:00",
+          "created": "2000-01-01T00:00:11+00:00",
           "relaunched_from": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
@@ -115,14 +115,14 @@
           "best": { "metric": "objective", "value": 0.413004 },
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:11+00:00",
+          "heartbeat": "2000-01-01T00:00:12+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
           "epoch": 1,
-          "timestamp": "2000-01-01T00:00:12+00:00",
+          "timestamp": "2000-01-01T00:00:13+00:00",
           "step": null,
           "loss": 0.5,
           "selection": 0.413004
@@ -134,7 +134,7 @@
               "name": "train-done",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-done/model_final.pt",
               "sha256": "<sha256 n1>",
-              "registered_at": "2000-01-01T00:00:13+00:00",
+              "registered_at": "2000-01-01T00:00:14+00:00",
               "metrics": {},
               "tags": [],
               "origin": "run"
@@ -306,7 +306,7 @@
         "run": {
           "experiment_id": "train-loose",
           "state": "canceled",
-          "created": "2000-01-01T00:00:28+00:00",
+          "created": "2000-01-01T00:00:29+00:00",
           "relaunched_from": null,
           "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
           "task": "classification",
@@ -315,7 +315,7 @@
           "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:29+00:00",
+          "heartbeat": "2000-01-01T00:00:30+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
@@ -363,7 +363,7 @@
         "run": {
           "experiment_id": "train-rich",
           "state": "completed",
-          "created": "2000-01-01T00:00:14+00:00",
+          "created": "2000-01-01T00:00:15+00:00",
           "relaunched_from": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
@@ -372,14 +372,14 @@
           "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:15+00:00",
+          "heartbeat": "2000-01-01T00:00:16+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
           "epoch": 1,
-          "timestamp": "2000-01-01T00:00:16+00:00",
+          "timestamp": "2000-01-01T00:00:17+00:00",
           "step": null,
           "loss": 0.5
         },
@@ -390,7 +390,7 @@
               "name": "train-rich",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-rich/model_final.pt",
               "sha256": "<sha256 n3>",
-              "registered_at": "2000-01-01T00:00:17+00:00",
+              "registered_at": "2000-01-01T00:00:18+00:00",
               "metrics": {},
               "tags": [],
               "origin": "run"
@@ -415,7 +415,7 @@
         "run": {
           "experiment_id": "train-unstamped",
           "state": "completed",
-          "created": "2000-01-01T00:00:22+00:00",
+          "created": "2000-01-01T00:00:23+00:00",
           "relaunched_from": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
@@ -424,14 +424,14 @@
           "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:23+00:00",
+          "heartbeat": "2000-01-01T00:00:24+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
           "epoch": 1,
-          "timestamp": "2000-01-01T00:00:24+00:00",
+          "timestamp": "2000-01-01T00:00:25+00:00",
           "step": null,
           "loss": 0.5,
           "val_map50": 0.712345
@@ -443,7 +443,7 @@
               "name": "train-unstamped",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-unstamped/model_final.pt",
               "sha256": "<sha256 n5>",
-              "registered_at": "2000-01-01T00:00:25+00:00",
+              "registered_at": "2000-01-01T00:00:26+00:00",
               "metrics": {},
               "tags": [],
               "origin": "run"
@@ -491,7 +491,7 @@
         "run": {
           "experiment_id": "train-undeclared",
           "state": "completed",
-          "created": "2000-01-01T00:00:18+00:00",
+          "created": "2000-01-01T00:00:19+00:00",
           "relaunched_from": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
@@ -500,14 +500,14 @@
           "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:19+00:00",
+          "heartbeat": "2000-01-01T00:00:20+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
           "epoch": 1,
-          "timestamp": "2000-01-01T00:00:20+00:00",
+          "timestamp": "2000-01-01T00:00:21+00:00",
           "step": null,
           "loss": 0.5
         },
@@ -518,7 +518,7 @@
               "name": "train-undeclared",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-undeclared/model_final.pt",
               "sha256": "<sha256 n7>",
-              "registered_at": "2000-01-01T00:00:21+00:00",
+              "registered_at": "2000-01-01T00:00:22+00:00",
               "metrics": {},
               "tags": [],
               "origin": "run"
@@ -535,7 +535,7 @@
         "run": {
           "experiment_id": "train-done",
           "state": "completed",
-          "created": "2000-01-01T00:00:10+00:00",
+          "created": "2000-01-01T00:00:11+00:00",
           "relaunched_from": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
@@ -544,14 +544,14 @@
           "best": { "metric": "objective", "value": 0.413004 },
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:11+00:00",
+          "heartbeat": "2000-01-01T00:00:12+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
           "epoch": 1,
-          "timestamp": "2000-01-01T00:00:12+00:00",
+          "timestamp": "2000-01-01T00:00:13+00:00",
           "step": null,
           "loss": 0.5,
           "selection": 0.413004
@@ -563,7 +563,7 @@
               "name": "train-done",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-done/model_final.pt",
               "sha256": "<sha256 n1>",
-              "registered_at": "2000-01-01T00:00:13+00:00",
+              "registered_at": "2000-01-01T00:00:14+00:00",
               "metrics": {},
               "tags": [],
               "origin": "run"
@@ -583,7 +583,7 @@
       "name": "train-done",
       "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-done/model_final.pt",
       "sha256": "<sha256 n1>",
-      "registered_at": "2000-01-01T00:00:13+00:00",
+      "registered_at": "2000-01-01T00:00:14+00:00",
       "metrics": {},
       "tags": [],
       "origin": "run"
@@ -601,7 +601,7 @@
       "name": "train-rich",
       "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-rich/model_final.pt",
       "sha256": "<sha256 n3>",
-      "registered_at": "2000-01-01T00:00:17+00:00",
+      "registered_at": "2000-01-01T00:00:18+00:00",
       "metrics": {},
       "tags": [],
       "origin": "run"
@@ -622,7 +622,7 @@
       "name": "train-done",
       "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-done/model_final.pt",
       "sha256": "<sha256 n1>",
-      "registered_at": "2000-01-01T00:00:13+00:00",
+      "registered_at": "2000-01-01T00:00:14+00:00",
       "metrics": {},
       "tags": [],
       "origin": "run"
@@ -715,7 +715,7 @@
       {
         "experiment_id": "train-done",
         "state": "completed",
-        "created": "2000-01-01T00:00:10+00:00",
+        "created": "2000-01-01T00:00:11+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -724,14 +724,14 @@
         "best": { "metric": "objective", "value": 0.413004 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:11+00:00",
+        "heartbeat": "2000-01-01T00:00:12+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-rich",
         "state": "completed",
-        "created": "2000-01-01T00:00:14+00:00",
+        "created": "2000-01-01T00:00:15+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -740,14 +740,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:15+00:00",
+        "heartbeat": "2000-01-01T00:00:16+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-undeclared",
         "state": "completed",
-        "created": "2000-01-01T00:00:18+00:00",
+        "created": "2000-01-01T00:00:19+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -756,14 +756,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:19+00:00",
+        "heartbeat": "2000-01-01T00:00:20+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-unstamped",
         "state": "completed",
-        "created": "2000-01-01T00:00:22+00:00",
+        "created": "2000-01-01T00:00:23+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -772,14 +772,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:23+00:00",
+        "heartbeat": "2000-01-01T00:00:24+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-empty",
         "state": "completed",
-        "created": "2000-01-01T00:00:26+00:00",
+        "created": "2000-01-01T00:00:27+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -788,14 +788,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-empty",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:27+00:00",
+        "heartbeat": "2000-01-01T00:00:28+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-loose",
         "state": "canceled",
-        "created": "2000-01-01T00:00:28+00:00",
+        "created": "2000-01-01T00:00:29+00:00",
         "relaunched_from": null,
         "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
         "task": "classification",
@@ -804,14 +804,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:29+00:00",
+        "heartbeat": "2000-01-01T00:00:30+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-refused",
         "state": "failed",
-        "created": "2000-01-01T00:00:30+00:00",
+        "created": "2000-01-01T00:00:31+00:00",
         "relaunched_from": null,
         "builder": "not.a:module",
         "task": "detection",
@@ -820,14 +820,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-refused",
         "status_error": "a sample failure the scene records for this run",
-        "heartbeat": "2000-01-01T00:00:31+00:00",
+        "heartbeat": "2000-01-01T00:00:32+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "<relaunched run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:32+00:00",
+        "created": "2000-01-01T00:00:33+00:00",
         "relaunched_from": "train-x",
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -836,14 +836,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:33+00:00",
+        "heartbeat": "2000-01-01T00:00:34+00:00",
         "launch": { "kind": "no_agent" },
         "kind": "standalone"
       },
       {
         "experiment_id": "<agent run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:35+00:00",
+        "created": "2000-01-01T00:00:36+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -852,7 +852,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<agent run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:36+00:00",
+        "heartbeat": "2000-01-01T00:00:37+00:00",
         "launch": {
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
@@ -962,12 +962,12 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:05+00:00",
+        "heartbeat": "2000-01-01T00:00:06+00:00",
         "trials": [
           {
             "experiment_id": "<sweep id>_t0",
             "state": "completed",
-            "created": "2000-01-01T00:00:06+00:00",
+            "created": "2000-01-01T00:00:07+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -976,7 +976,7 @@
             "best": { "metric": "objective", "value": 0.7 },
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:07+00:00",
+            "heartbeat": "2000-01-01T00:00:08+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -985,7 +985,7 @@
           {
             "experiment_id": "<sweep id>_t1",
             "state": "running",
-            "created": "2000-01-01T00:00:08+00:00",
+            "created": "2000-01-01T00:00:09+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -994,7 +994,7 @@
             "best": null,
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:09+00:00",
+            "heartbeat": "2000-01-01T00:00:10+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -1109,7 +1109,7 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:34+00:00",
+        "heartbeat": "2000-01-01T00:00:35+00:00",
         "trials": [],
         "outcome": { "kind": "no_best", "split_sensitivity": null },
         "selection_metric": "objective"
@@ -1146,14 +1146,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:04+00:00",
+        "heartbeat": "2000-01-01T00:00:05+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-done",
         "state": "completed",
-        "created": "2000-01-01T00:00:10+00:00",
+        "created": "2000-01-01T00:00:11+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1162,14 +1162,14 @@
         "best": { "metric": "objective", "value": 0.413004 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:11+00:00",
+        "heartbeat": "2000-01-01T00:00:12+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-rich",
         "state": "completed",
-        "created": "2000-01-01T00:00:14+00:00",
+        "created": "2000-01-01T00:00:15+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1178,14 +1178,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:15+00:00",
+        "heartbeat": "2000-01-01T00:00:16+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-undeclared",
         "state": "completed",
-        "created": "2000-01-01T00:00:18+00:00",
+        "created": "2000-01-01T00:00:19+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1194,14 +1194,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:19+00:00",
+        "heartbeat": "2000-01-01T00:00:20+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-unstamped",
         "state": "completed",
-        "created": "2000-01-01T00:00:22+00:00",
+        "created": "2000-01-01T00:00:23+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1210,14 +1210,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:23+00:00",
+        "heartbeat": "2000-01-01T00:00:24+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-empty",
         "state": "completed",
-        "created": "2000-01-01T00:00:26+00:00",
+        "created": "2000-01-01T00:00:27+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1226,14 +1226,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-empty",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:27+00:00",
+        "heartbeat": "2000-01-01T00:00:28+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-loose",
         "state": "canceled",
-        "created": "2000-01-01T00:00:28+00:00",
+        "created": "2000-01-01T00:00:29+00:00",
         "relaunched_from": null,
         "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
         "task": "classification",
@@ -1242,14 +1242,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:29+00:00",
+        "heartbeat": "2000-01-01T00:00:30+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-refused",
         "state": "failed",
-        "created": "2000-01-01T00:00:30+00:00",
+        "created": "2000-01-01T00:00:31+00:00",
         "relaunched_from": null,
         "builder": "not.a:module",
         "task": "detection",
@@ -1258,14 +1258,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-refused",
         "status_error": "a sample failure the scene records for this run",
-        "heartbeat": "2000-01-01T00:00:31+00:00",
+        "heartbeat": "2000-01-01T00:00:32+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "<relaunched run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:32+00:00",
+        "created": "2000-01-01T00:00:33+00:00",
         "relaunched_from": "train-x",
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1274,14 +1274,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:33+00:00",
+        "heartbeat": "2000-01-01T00:00:34+00:00",
         "launch": { "kind": "no_agent" },
         "kind": "standalone"
       },
       {
         "experiment_id": "<agent run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:35+00:00",
+        "created": "2000-01-01T00:00:36+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1290,7 +1290,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<agent run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:36+00:00",
+        "heartbeat": "2000-01-01T00:00:37+00:00",
         "launch": {
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
@@ -1400,12 +1400,12 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:05+00:00",
+        "heartbeat": "2000-01-01T00:00:06+00:00",
         "trials": [
           {
             "experiment_id": "<sweep id>_t0",
             "state": "completed",
-            "created": "2000-01-01T00:00:06+00:00",
+            "created": "2000-01-01T00:00:07+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -1414,7 +1414,7 @@
             "best": { "metric": "objective", "value": 0.7 },
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:07+00:00",
+            "heartbeat": "2000-01-01T00:00:08+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -1423,7 +1423,7 @@
           {
             "experiment_id": "<sweep id>_t1",
             "state": "running",
-            "created": "2000-01-01T00:00:08+00:00",
+            "created": "2000-01-01T00:00:09+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -1432,7 +1432,7 @@
             "best": null,
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:09+00:00",
+            "heartbeat": "2000-01-01T00:00:10+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -1547,7 +1547,7 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:34+00:00",
+        "heartbeat": "2000-01-01T00:00:35+00:00",
         "trials": [],
         "outcome": { "kind": "no_best", "split_sensitivity": null },
         "selection_metric": "objective"
@@ -1584,14 +1584,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": "a sample failure the scene records for this run",
-        "heartbeat": "2000-01-01T00:00:04+00:00",
+        "heartbeat": "2000-01-01T00:00:05+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-done",
         "state": "completed",
-        "created": "2000-01-01T00:00:10+00:00",
+        "created": "2000-01-01T00:00:11+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1600,14 +1600,14 @@
         "best": { "metric": "objective", "value": 0.413004 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:11+00:00",
+        "heartbeat": "2000-01-01T00:00:12+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-rich",
         "state": "completed",
-        "created": "2000-01-01T00:00:14+00:00",
+        "created": "2000-01-01T00:00:15+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1616,14 +1616,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:15+00:00",
+        "heartbeat": "2000-01-01T00:00:16+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-undeclared",
         "state": "completed",
-        "created": "2000-01-01T00:00:18+00:00",
+        "created": "2000-01-01T00:00:19+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1632,14 +1632,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:19+00:00",
+        "heartbeat": "2000-01-01T00:00:20+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-unstamped",
         "state": "completed",
-        "created": "2000-01-01T00:00:22+00:00",
+        "created": "2000-01-01T00:00:23+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1648,14 +1648,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:23+00:00",
+        "heartbeat": "2000-01-01T00:00:24+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-empty",
         "state": "completed",
-        "created": "2000-01-01T00:00:26+00:00",
+        "created": "2000-01-01T00:00:27+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1664,14 +1664,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-empty",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:27+00:00",
+        "heartbeat": "2000-01-01T00:00:28+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-loose",
         "state": "canceled",
-        "created": "2000-01-01T00:00:28+00:00",
+        "created": "2000-01-01T00:00:29+00:00",
         "relaunched_from": null,
         "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
         "task": "classification",
@@ -1680,14 +1680,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:29+00:00",
+        "heartbeat": "2000-01-01T00:00:30+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "train-refused",
         "state": "failed",
-        "created": "2000-01-01T00:00:30+00:00",
+        "created": "2000-01-01T00:00:31+00:00",
         "relaunched_from": null,
         "builder": "not.a:module",
         "task": "detection",
@@ -1696,14 +1696,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-refused",
         "status_error": "a sample failure the scene records for this run",
-        "heartbeat": "2000-01-01T00:00:31+00:00",
+        "heartbeat": "2000-01-01T00:00:32+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
       {
         "experiment_id": "<relaunched run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:32+00:00",
+        "created": "2000-01-01T00:00:33+00:00",
         "relaunched_from": "train-x",
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1712,14 +1712,14 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:33+00:00",
+        "heartbeat": "2000-01-01T00:00:34+00:00",
         "launch": { "kind": "no_agent" },
         "kind": "standalone"
       },
       {
         "experiment_id": "<agent run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:35+00:00",
+        "created": "2000-01-01T00:00:36+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -1728,7 +1728,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<agent run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:36+00:00",
+        "heartbeat": "2000-01-01T00:00:37+00:00",
         "launch": {
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
@@ -1838,12 +1838,12 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:05+00:00",
+        "heartbeat": "2000-01-01T00:00:06+00:00",
         "trials": [
           {
             "experiment_id": "<sweep id>_t0",
             "state": "completed",
-            "created": "2000-01-01T00:00:06+00:00",
+            "created": "2000-01-01T00:00:07+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -1852,7 +1852,7 @@
             "best": { "metric": "objective", "value": 0.7 },
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:07+00:00",
+            "heartbeat": "2000-01-01T00:00:08+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -1861,7 +1861,7 @@
           {
             "experiment_id": "<sweep id>_t1",
             "state": "running",
-            "created": "2000-01-01T00:00:08+00:00",
+            "created": "2000-01-01T00:00:09+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -1870,7 +1870,7 @@
             "best": null,
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:09+00:00",
+            "heartbeat": "2000-01-01T00:00:10+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -1985,7 +1985,7 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:34+00:00",
+        "heartbeat": "2000-01-01T00:00:35+00:00",
         "trials": [],
         "outcome": { "kind": "no_best", "split_sensitivity": null },
         "selection_metric": "objective"
@@ -2027,7 +2027,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": "a sample failure the scene records for this run",
-        "heartbeat": "2000-01-01T00:00:04+00:00",
+        "heartbeat": "2000-01-01T00:00:05+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2038,7 +2038,7 @@
       "run": {
         "experiment_id": "train-done",
         "state": "completed",
-        "created": "2000-01-01T00:00:10+00:00",
+        "created": "2000-01-01T00:00:11+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2047,7 +2047,7 @@
         "best": { "metric": "objective", "value": 0.413004 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-done",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:11+00:00",
+        "heartbeat": "2000-01-01T00:00:12+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2058,7 +2058,7 @@
       "run": {
         "experiment_id": "train-rich",
         "state": "completed",
-        "created": "2000-01-01T00:00:14+00:00",
+        "created": "2000-01-01T00:00:15+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2067,7 +2067,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-rich",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:15+00:00",
+        "heartbeat": "2000-01-01T00:00:16+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2078,7 +2078,7 @@
       "run": {
         "experiment_id": "train-undeclared",
         "state": "completed",
-        "created": "2000-01-01T00:00:18+00:00",
+        "created": "2000-01-01T00:00:19+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2087,7 +2087,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-undeclared",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:19+00:00",
+        "heartbeat": "2000-01-01T00:00:20+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2098,7 +2098,7 @@
       "run": {
         "experiment_id": "train-unstamped",
         "state": "completed",
-        "created": "2000-01-01T00:00:22+00:00",
+        "created": "2000-01-01T00:00:23+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2107,7 +2107,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:23+00:00",
+        "heartbeat": "2000-01-01T00:00:24+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2118,7 +2118,7 @@
       "run": {
         "experiment_id": "train-empty",
         "state": "completed",
-        "created": "2000-01-01T00:00:26+00:00",
+        "created": "2000-01-01T00:00:27+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2127,7 +2127,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-empty",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:27+00:00",
+        "heartbeat": "2000-01-01T00:00:28+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2138,7 +2138,7 @@
       "run": {
         "experiment_id": "train-loose",
         "state": "canceled",
-        "created": "2000-01-01T00:00:28+00:00",
+        "created": "2000-01-01T00:00:29+00:00",
         "relaunched_from": null,
         "builder": "tiny_trainer_fixtures:build_mean_intensity_classifier",
         "task": "classification",
@@ -2147,7 +2147,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-loose",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:29+00:00",
+        "heartbeat": "2000-01-01T00:00:30+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2158,7 +2158,7 @@
       "run": {
         "experiment_id": "train-refused",
         "state": "failed",
-        "created": "2000-01-01T00:00:30+00:00",
+        "created": "2000-01-01T00:00:31+00:00",
         "relaunched_from": null,
         "builder": "not.a:module",
         "task": "detection",
@@ -2167,7 +2167,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-refused",
         "status_error": "a sample failure the scene records for this run",
-        "heartbeat": "2000-01-01T00:00:31+00:00",
+        "heartbeat": "2000-01-01T00:00:32+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       },
@@ -2178,7 +2178,7 @@
       "run": {
         "experiment_id": "<relaunched run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:32+00:00",
+        "created": "2000-01-01T00:00:33+00:00",
         "relaunched_from": "train-x",
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2187,7 +2187,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:33+00:00",
+        "heartbeat": "2000-01-01T00:00:34+00:00",
         "launch": { "kind": "no_agent" },
         "kind": "standalone"
       },
@@ -2198,7 +2198,7 @@
       "run": {
         "experiment_id": "<agent run id>",
         "state": "running",
-        "created": "2000-01-01T00:00:35+00:00",
+        "created": "2000-01-01T00:00:36+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2207,7 +2207,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<agent run id>",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:36+00:00",
+        "heartbeat": "2000-01-01T00:00:37+00:00",
         "launch": {
           "agent_client_name": "claude-code",
           "agent_client_version": "2.1.238",
@@ -2319,12 +2319,12 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:05+00:00",
+        "heartbeat": "2000-01-01T00:00:06+00:00",
         "trials": [
           {
             "experiment_id": "<sweep id>_t0",
             "state": "completed",
-            "created": "2000-01-01T00:00:06+00:00",
+            "created": "2000-01-01T00:00:07+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -2333,7 +2333,7 @@
             "best": { "metric": "objective", "value": 0.7 },
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:07+00:00",
+            "heartbeat": "2000-01-01T00:00:08+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -2342,7 +2342,7 @@
           {
             "experiment_id": "<sweep id>_t1",
             "state": "running",
-            "created": "2000-01-01T00:00:08+00:00",
+            "created": "2000-01-01T00:00:09+00:00",
             "relaunched_from": null,
             "builder": "bespoke_models:build_bespoke_detection",
             "task": "detection",
@@ -2351,7 +2351,7 @@
             "best": null,
             "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
             "status_error": null,
-            "heartbeat": "2000-01-01T00:00:09+00:00",
+            "heartbeat": "2000-01-01T00:00:10+00:00",
             "launch": { "kind": "no_launch_line" },
             "kind": "trial",
             "sweep_id": "<sweep id>",
@@ -2470,7 +2470,7 @@
           "trial_budget": null
         },
         "cancel_requested": false,
-        "heartbeat": "2000-01-01T00:00:34+00:00",
+        "heartbeat": "2000-01-01T00:00:35+00:00",
         "trials": [],
         "outcome": { "kind": "no_best", "split_sensitivity": null },
         "selection_metric": "objective"
@@ -2482,7 +2482,7 @@
       "run": {
         "experiment_id": "<sweep id>_t0",
         "state": "completed",
-        "created": "2000-01-01T00:00:06+00:00",
+        "created": "2000-01-01T00:00:07+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2491,7 +2491,7 @@
         "best": { "metric": "objective", "value": 0.7 },
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:07+00:00",
+        "heartbeat": "2000-01-01T00:00:08+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "trial",
         "sweep_id": "<sweep id>",
@@ -2504,7 +2504,7 @@
       "run": {
         "experiment_id": "<sweep id>_t1",
         "state": "running",
-        "created": "2000-01-01T00:00:08+00:00",
+        "created": "2000-01-01T00:00:09+00:00",
         "relaunched_from": null,
         "builder": "bespoke_models:build_bespoke_detection",
         "task": "detection",
@@ -2513,7 +2513,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t1",
         "status_error": null,
-        "heartbeat": "2000-01-01T00:00:09+00:00",
+        "heartbeat": "2000-01-01T00:00:10+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "trial",
         "sweep_id": "<sweep id>",
@@ -2529,7 +2529,7 @@
         "run": {
           "experiment_id": "<relaunched run id>",
           "state": "running",
-          "created": "2000-01-01T00:00:32+00:00",
+          "created": "2000-01-01T00:00:33+00:00",
           "relaunched_from": "train-x",
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
@@ -2538,7 +2538,7 @@
           "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:33+00:00",
+          "heartbeat": "2000-01-01T00:00:34+00:00",
           "launch": { "kind": "no_agent" },
           "kind": "standalone"
         },
@@ -2611,14 +2611,14 @@
     {
       "type": "batch",
       "experiment_id": "train-y",
-      "row": { "epoch": 1, "timestamp": "2000-01-01T00:00:37+00:00", "step": 3, "batch_loss": 0.25 }
+      "row": { "epoch": 1, "timestamp": "2000-01-01T00:00:38+00:00", "step": 3, "batch_loss": 0.25 }
     },
     {
       "type": "metric",
       "experiment_id": "train-y",
       "row": {
         "epoch": 1,
-        "timestamp": "2000-01-01T00:00:38+00:00",
+        "timestamp": "2000-01-01T00:00:39+00:00",
         "step": null,
         "loss": 0.5,
         "val_map50": 0.4
@@ -2629,7 +2629,7 @@
       "experiment_id": "train-y",
       "row": {
         "epoch": 2,
-        "timestamp": "2000-01-01T00:00:39+00:00",
+        "timestamp": "2000-01-01T00:00:40+00:00",
         "step": null,
         "loss": null,
         "loss_state": "nan"
@@ -2638,12 +2638,12 @@
     {
       "type": "metric",
       "experiment_id": "train-y",
-      "row": { "epoch": 3, "timestamp": "2000-01-01T00:00:40+00:00", "step": null, "loss": 0.2 }
+      "row": { "epoch": 3, "timestamp": "2000-01-01T00:00:41+00:00", "step": null, "loss": 0.2 }
     },
     {
       "type": "batch",
       "experiment_id": "train-y",
-      "row": { "epoch": 4, "timestamp": "2000-01-01T00:00:41+00:00", "step": 7, "batch_loss": 0.25 }
+      "row": { "epoch": 4, "timestamp": "2000-01-01T00:00:42+00:00", "step": 7, "batch_loss": 0.25 }
     },
     {
       "type": "status",
@@ -2660,7 +2660,7 @@
         "best": null,
         "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
         "status_error": "a sample failure the scene records for this run",
-        "heartbeat": "2000-01-01T00:00:04+00:00",
+        "heartbeat": "2000-01-01T00:00:05+00:00",
         "launch": { "kind": "no_launch_line" },
         "kind": "standalone"
       }
@@ -2719,7 +2719,7 @@
         "run": {
           "experiment_id": "train-verified",
           "state": "completed",
-          "created": "2000-01-01T00:00:42+00:00",
+          "created": "2000-01-01T00:00:43+00:00",
           "relaunched_from": null,
           "builder": "tiny_trainer_fixtures:build_mean_intensity_regressor",
           "task": "regression",
@@ -2728,14 +2728,14 @@
           "best": { "metric": "loss", "value": 0.036369 },
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-verified",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:43+00:00",
+          "heartbeat": "2000-01-01T00:00:44+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
           "epoch": 1,
-          "timestamp": "2000-01-01T00:00:44+00:00",
+          "timestamp": "2000-01-01T00:00:45+00:00",
           "step": null,
           "stage": 0,
           "train_loss": 0.91117,
@@ -2758,7 +2758,7 @@
               "name": "train-verified",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-verified/model_best.pt",
               "sha256": "<sha256 n10>",
-              "registered_at": "2000-01-01T00:00:45+00:00",
+              "registered_at": "2000-01-01T00:00:46+00:00",
               "metrics": {},
               "tags": [],
               "origin": "run"
@@ -2792,7 +2792,7 @@
         "run": {
           "experiment_id": "train-unstamped",
           "state": "completed",
-          "created": "2000-01-01T00:00:22+00:00",
+          "created": "2000-01-01T00:00:23+00:00",
           "relaunched_from": null,
           "builder": "bespoke_models:build_bespoke_detection",
           "task": "detection",
@@ -2801,14 +2801,14 @@
           "best": null,
           "output_dir": "/scratch/workspace/training/.tcip/experiments/train-unstamped",
           "status_error": null,
-          "heartbeat": "2000-01-01T00:00:23+00:00",
+          "heartbeat": "2000-01-01T00:00:24+00:00",
           "launch": { "kind": "no_launch_line" },
           "kind": "standalone"
         },
         "n_epochs": 1,
         "last_logged_metrics": {
           "epoch": 1,
-          "timestamp": "2000-01-01T00:00:24+00:00",
+          "timestamp": "2000-01-01T00:00:25+00:00",
           "step": null,
           "loss": 0.5,
           "val_map50": 0.712345
@@ -2820,7 +2820,7 @@
               "name": "train-unstamped",
               "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-unstamped/model_final.pt",
               "sha256": "<sha256 n5>",
-              "registered_at": "2000-01-01T00:00:25+00:00",
+              "registered_at": "2000-01-01T00:00:26+00:00",
               "metrics": {},
               "tags": [],
               "origin": "run"
@@ -2851,7 +2851,7 @@
       "name": "train-verified",
       "checkpoint_path": "/scratch/workspace/training/.tcip/experiments/train-verified/model_best.pt",
       "sha256": "<sha256 n10>",
-      "registered_at": "2000-01-01T00:00:45+00:00",
+      "registered_at": "2000-01-01T00:00:46+00:00",
       "metrics": {},
       "tags": [],
       "origin": "run"
