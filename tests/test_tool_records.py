@@ -245,12 +245,11 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tcip_mcp.tools.proposal_tools import _staging_key_for, stage_proposals
+    from tests._record_damage_fixtures import stripped_of_its_engine
 
     image, _candidate, proposed = _proposed(tmp_path, monkeypatch)
     key = _staging_key_for(str(image), proposed.staging_id)
-    stored = dict(ts.read(key))
-    del stored["engine"]
-    ts.replace(key, stored)
+    refusal = stripped_of_its_engine(key)
 
     result = stage_proposals(
         tmp_path,
@@ -260,8 +259,7 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
     )
 
     assert result == {
-        "error": f"proposal run {proposed.staging_id!r} staged for {image.stem}: "
-        "engine: Field required"
+        "error": f"proposal run {proposed.staging_id!r} staged for {image.stem}: {refusal}"
     }
 
 
@@ -269,13 +267,11 @@ def test_a_staged_proposal_that_will_not_decode_refuses_the_staging_naming_its_p
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tcip_mcp.tools.proposal_tools import _staging_key_for, stage_proposals
-    from tests._record_damage_fixtures import UNDECODABLE, damage_record
+    from tests._record_damage_fixtures import made_undecodable
 
     image, _candidate, proposed = _proposed(tmp_path, monkeypatch)
     key = _staging_key_for(str(image), proposed.staging_id)
-    damage_record(key, UNDECODABLE)
-    with pytest.raises(ts.DecodeError) as stored_sentence:
-        ts.read(key)
+    stored_sentence = made_undecodable(key)
 
     result = stage_proposals(
         tmp_path,
@@ -286,7 +282,7 @@ def test_a_staged_proposal_that_will_not_decode_refuses_the_staging_naming_its_p
 
     assert result == {
         "error": f"proposal run {proposed.staging_id!r} staged for {image.stem}"
-        f": {stored_sentence.value}"
+        f": {stored_sentence}"
     }
 
 
@@ -385,7 +381,7 @@ def test_a_raster_pass_record_that_will_not_decode_refuses_the_resume_naming_its
 ) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.inference_tools import _progress_key
-    from tests._record_damage_fixtures import UNDECODABLE, damage_record
+    from tests._record_damage_fixtures import made_undecodable
     from tests.test_raster_pass_resume import _interrupted, _run, _setup
 
     ckpt, raster_path = _setup(tmp_path)
@@ -393,15 +389,13 @@ def test_a_raster_pass_record_that_will_not_decode_refuses_the_resume_naming_its
     _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
     key = _progress_key(tmp_path, tmp_path / "ds", bucket, segment)
     assert ts.read(key, default=None) is not None
-    damage_record(key, UNDECODABLE)
-    with pytest.raises(ts.DecodeError) as stored_sentence:
-        ts.read(key)
+    stored_sentence = made_undecodable(key)
 
     result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
     assert result["error"] == (
         f"the raster-pass {segment} record toward bucket {bucket!r} under {tmp_path / 'ds'}"
-        f": {stored_sentence.value}"
+        f": {stored_sentence}"
     )
 
 

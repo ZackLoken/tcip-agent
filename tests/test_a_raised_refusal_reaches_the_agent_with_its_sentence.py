@@ -26,8 +26,8 @@ from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import label_image, write_image
 from tests._record_damage_fixtures import (
     REFUSED_DOCUMENT,
-    UNDECODABLE,
     damage_record,
+    made_undecodable,
 )
 from tests._server_calls import results_through_handshake
 
@@ -150,9 +150,7 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
         image, [{"subject": "bud", "bbox": [2, 2, 8, 8]}], project=project
     )
     key = label_key_of(str(image))
-    damage_record(key, UNDECODABLE)
-    with pytest.raises(ts.DecodeError) as refused:
-        ts.read(key)
+    refused = made_undecodable(key)
 
     crop = sorted(registered_crops())[0]
     plants = write_plant_csv(project / "plants.csv", PLANTS)
@@ -165,9 +163,7 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     first = register_plant_registry(project, **registry, actor=None)
     assert "error" not in first, first
     registry_key = plant_registry_key(project, "north-block")
-    damage_record(registry_key, UNDECODABLE)
-    with pytest.raises(ts.DecodeError) as registry_refused:
-        ts.read(registry_key)
+    registry_refused = made_undecodable(registry_key)
 
     exported, registered, reregistered, unread_ingest = (
         results_through_handshake(
@@ -191,13 +187,13 @@ def test_an_audited_door_raising_past_its_handlers_answers_the_sentence_beside_o
     )
 
     for door, error_class, result, sentence in (
-        ("export_labels", "DecodeError", exported, refused.value),
-        ("register_dataset", "DecodeError", registered, refused.value),
+        ("export_labels", "DecodeError", exported, refused),
+        ("register_dataset", "DecodeError", registered, refused),
         (
             "register_plant_registry",
             "DecodeError",
             reregistered,
-            registry_refused.value,
+            registry_refused,
         ),
         (
             "ingest_images",

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests._record_damage_fixtures import UNDECODABLE, damage_record
+from tests._record_damage_fixtures import made_undecodable
 from tests._verified_checkpoint_fixtures import (
     produced_checkpoint,
     read_denied,
@@ -151,23 +151,17 @@ def test_a_registry_index_that_will_not_decode_answers_409_as_an_unreadable_regi
     The index is written by a legitimate registration, then given bytes that are no JSON in its
     root's database: fault injection, since the registry writes only an index that decodes.
     """
-    import tcip_store
-    from tcip_mcp.model_registry import (
-        read_registry_index,
-        registry_index_key,
-    )
+    from tcip_mcp.model_registry import registry_index_key
 
     launch, jobs = _door(door, opened_client, tmp_path)
     checkpoint = _registered(tmp_path)
-    damage_record(registry_index_key(tmp_path), UNDECODABLE)
-    with pytest.raises(tcip_store.DecodeError) as undecoded:
-        read_registry_index(tmp_path)
+    undecoded = made_undecodable(registry_index_key(tmp_path))
     before = jobs()
 
     answer = launch(checkpoint)
 
     assert answer.status_code == 409, answer.text
-    assert answer.json()["detail"] == f"registry unreadable: {undecoded.value}"
+    assert answer.json()["detail"] == f"registry unreadable: {undecoded}"
     assert jobs() == before
 
 

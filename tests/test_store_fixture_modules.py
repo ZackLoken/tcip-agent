@@ -2,8 +2,10 @@
 
 ``unopenable_database``, ``damage_log_entry`` and ``damage_last_log_entry`` of
 ``tests._record_damage_fixtures`` are exercised here, and a scan over the test tree
-finds no test spelling the same steps out again, nor binding a backend with a lock wait of its own
-beside ``tests._busy_store_fixtures``.
+finds no test spelling the same steps out again, nor opening a root's database in autocommit
+beside ``connected``, nor keeping the store's decode sentence from a ``pytest.raises`` block
+beside ``made_undecodable``, nor binding a backend with a lock wait of its own beside
+``tests._busy_store_fixtures``.
 """
 
 from __future__ import annotations
@@ -29,6 +31,10 @@ if TYPE_CHECKING:
 TEST_TREE = Path(__file__).resolve().parent
 DAMAGE_FIXTURES = "_record_damage_fixtures.py"
 DAMAGING_SQL = re.compile(r"\bupdate\s+(records|log_entries)\b", re.IGNORECASE)
+AUTOCOMMIT_OPEN = re.compile(r"\bisolation_level\s*=\s*None\b")
+KEPT_DECODE_ERROR = re.compile(
+    r"pytest\.raises\(\s*(?:\w+\.)?DecodeError\s*\)\s*as\b"
+)
 BACKEND_WITH_WAIT = re.compile(r"SqliteBackend\(\s*lock_timeout_s")
 CHILD_PROCESS_PROGRAM = "test_concurrent_audit_appends.py"
 
@@ -238,6 +244,39 @@ def test_no_test_writes_the_sql_that_damages_a_record_or_a_log_entry() -> None:
     assert not found, (
         "these rewrite a stored entry by hand; use damage_record, damage_log_entry or "
         f"damage_last_log_entry from tests._record_damage_fixtures: {found}"
+    )
+
+
+def test_no_test_opens_a_root_s_database_in_autocommit_by_hand() -> None:
+    """Only the damage fixtures open a connection to a database in autocommit mode."""
+    found = [
+        f"{name}:{number}"
+        for name, source in _test_sources()
+        if name != DAMAGE_FIXTURES
+        for number, line in enumerate(source.splitlines(), start=1)
+        if AUTOCOMMIT_OPEN.search(line)
+    ]
+
+    assert not found, (
+        "these open a database directly; use "
+        f"tests._record_damage_fixtures.connected: {found}"
+    )
+
+
+def test_no_test_keeps_the_store_s_decode_sentence_from_a_raises_block() -> (
+    None
+):
+    """Only the damage fixtures capture the store's ``DecodeError`` to read its sentence."""
+    found = [
+        f"{name}:{source.count(chr(10), 0, match.start()) + 1}"
+        for name, source in _test_sources()
+        if name != DAMAGE_FIXTURES
+        for match in KEPT_DECODE_ERROR.finditer(source)
+    ]
+
+    assert not found, (
+        "these keep the store's decode sentence by hand; use made_undecodable "
+        f"from tests._record_damage_fixtures: {found}"
     )
 
 

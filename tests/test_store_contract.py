@@ -46,8 +46,10 @@ from tests._busy_store_fixtures import (
 )
 from tests._record_damage_fixtures import (
     UNDECODABLE,
+    connected,
     damage_log_entry,
     damage_record,
+    released_into_rollback_journal,
     unopenable_database,
 )
 from tests._store_worker import (
@@ -79,12 +81,6 @@ class Harness:
 
     def key(self, store: str, *parts: str) -> ts.Key:
         return ts.Key(store, str(self.root), tuple(parts))
-
-    def connect(self) -> sqlite3.Connection:
-        """Open a SQLite connection in autocommit mode directly to the root's database file."""
-        return sqlite3.connect(
-            str(database_file(str(self.root))), isolation_level=None
-        )
 
     def spawn(self, *args: object) -> subprocess.Popen:
         proc = subprocess.Popen(
@@ -295,7 +291,7 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
     ts.replace(store.key(LWW, "first"), {"n": 1})
     ts.release_root(store.root)
     db_path = database_file(str(store.root))
-    bystander = sqlite3.connect(str(db_path), isolation_level=None)
+    bystander = connected(store.root)
     try:
         bystander.execute("select count(*) from records").fetchone()
         conn = open_verified(db_path, store.backend.lock_timeout_s)
@@ -1330,7 +1326,7 @@ def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelli
     key = store.key(NESTED, "grüne/reihe", "ü_2")
     ts.replace(key, {"n": 1})
 
-    conn = store.connect()
+    conn = connected(store.root)
     try:
         stored = [
             row[0]
@@ -1807,21 +1803,6 @@ def _waiting(store: Harness, lock_timeout_s: float) -> Iterator[None]:
         ts.bind(store.backend)
 
 
-def _released_into_rollback_journal(store: Harness) -> None:
-    """Release the root and put its database in rollback-journal (``delete``) mode.
-
-    A WAL database refuses another connection's exclusive lock while the store holds a
-    connection on it; a rollback-journal database takes it.
-    """
-    ts.release_root(store.root)
-    conn = store.connect()
-    try:
-        mode = conn.execute("pragma journal_mode = delete").fetchone()[0]
-    finally:
-        conn.close()
-    assert mode == "delete"
-
-
 def _served_as_busy(refused: ts.ReadRefusedError) -> ts.StoreBusyError:
     """Return the busy refusal a reader served as ``Unreadable``, its sentence carried whole."""
     busy = refused.__cause__
@@ -1890,7 +1871,7 @@ def test_a_lock_met_on_a_cached_connection_is_served_by_the_reader(
     """
     key = store.key(LWW, "held-mid-read")
     ts.replace(key, {"n": 1})
-    _released_into_rollback_journal(store)
+    released_into_rollback_journal(store.root)
     root = str(store.root)
 
     with _waiting(store, SHORT_WAIT_S):
@@ -1919,7 +1900,7 @@ def test_a_read_after_a_write_that_waited_nothing_outlasts_a_lock_that_clears_in
     """
     key = store.key(LWW, "after-a-write")
     ts.replace(key, {"n": 1})
-    _released_into_rollback_journal(store)
+    released_into_rollback_journal(store.root)
 
     with _waiting(store, _LONG_WAIT_S):
         with ts.transaction(key, timeout_s=0.0) as txn:
@@ -2017,7 +1998,7 @@ def test_a_fresh_process_reads_while_another_process_holds_the_write_transaction
     """
     ts.replace(store.key(LWW, "seed"), {"who": "writer"})
     if journal_mode == "delete":
-        _released_into_rollback_journal(store)
+        released_into_rollback_journal(store.root)
     else:
         ts.release_root(store.root)
     ready = store.root / "holder.ready"
