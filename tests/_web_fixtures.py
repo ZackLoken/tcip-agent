@@ -1,7 +1,7 @@
 """Web backend fixtures over a scratch workspace.
 
-They start the web backend over a scratch workspace, make a test directory a project, and open it
-in the web backend.
+They start the web backend over a scratch workspace, make a test directory a project, open it
+in the web backend, and post the focus tool's own event through the panel route.
 """
 
 from __future__ import annotations
@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING
 from tcip_mcp.project_record import CaptureInvariances
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import pytest
     from fastapi.testclient import TestClient
     from starlette.testclient import httpx
 
@@ -153,6 +156,46 @@ def bound_to(project: OpenProject) -> BoundProject:
     from tcip_mcp.workspace import BoundProject, workspace_from_environment
 
     return BoundProject(project.root, project.id, workspace_from_environment())
+
+
+def posted_focus(
+    client: TestClient,
+    project: OpenProject,
+    monkeypatch: pytest.MonkeyPatch,
+    focus: Callable[[BoundProject], dict],
+) -> httpx.Response:
+    """Post the event ``focus`` makes ``focus_human_attention`` send, through the panel route.
+
+    ``focus`` calls the tool for the bound ``project``; the tool's own post is replaced, through
+    ``monkeypatch``, by a capture of its target, panel and event. The tool's answer is asserted
+    to carry no error and one ``AnnotateFocus`` to be captured. Returns the route's answer.
+    """
+    from tcip_mcp import web_client
+    from tcip_mcp.web_client import (
+        AnnotateFocus,
+        Panel,
+        PanelEvent,
+        PanelEventAnswer,
+        PanelEventTaken,
+        PanelPost,
+    )
+
+    posted: list[tuple[Panel, PanelPost]] = []
+
+    def captured(
+        target: BoundProject, panel: Panel, event: PanelEvent
+    ) -> PanelEventAnswer:
+        posted.append((panel, PanelPost(event=event, project_id=target.id)))
+        return PanelEventTaken(url="u")
+
+    monkeypatch.setattr(web_client, "post_panel_event", captured)
+    answer = focus(bound_to(project))
+    assert "error" not in answer, answer
+    ((panel, post),) = posted
+    assert isinstance(post.event, AnnotateFocus), post
+    return client.post(
+        f"/api/events/{panel}", json=post.model_dump(mode="json")
+    )
 
 
 def new_project(path: Path) -> OpenProject:

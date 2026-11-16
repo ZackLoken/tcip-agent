@@ -29,8 +29,6 @@ if TYPE_CHECKING:
     import httpx
     from fastapi.testclient import TestClient
 
-    from tcip_mcp.web_client import Panel, PanelEvent, PanelEventAnswer
-    from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
 
 CAPTURE = "2026-04-01"
@@ -86,37 +84,6 @@ def _ambiguous(written: GroupedDataset) -> Path:
     )
 
 
-def _focused(
-    client: TestClient,
-    project: OpenProject,
-    written: GroupedDataset,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Post the event ``focus_human_attention`` makes for the saved capture, in point mode."""
-    from tcip_mcp import web_client
-    from tcip_mcp.tools.gui_tools import focus_human_attention
-    from tcip_mcp.web_client import PanelEventTaken, PanelPost
-    from tests._web_fixtures import bound_to
-
-    posted: list[PanelPost] = []
-
-    def captured(
-        target: BoundProject, panel: Panel, event: PanelEvent
-    ) -> PanelEventAnswer:
-        assert panel == "app"
-        posted.append(PanelPost(event=event, project_id=target.id))
-        return PanelEventTaken(url="u")
-
-    monkeypatch.setattr(web_client, "post_panel_event", captured)
-    focused = focus_human_attention(
-        bound_to(project), str(written.root), "bud", CAPTURE, mode="point"
-    )
-    assert "error" not in focused, focused
-    (post,) = posted
-    answer = client.post("/api/events/app", json=post.model_dump(mode="json"))
-    assert answer.status_code == 200, answer.text
-
-
 @pytest.fixture
 def scene(
     client: TestClient,
@@ -128,7 +95,8 @@ def scene(
     The dataset holds :data:`CAPTURE` and :data:`SOUND`; another project stands beside this one
     in the workspace.
     """
-    from tests._web_fixtures import named_project
+    from tcip_mcp.tools.gui_tools import focus_human_attention
+    from tests._web_fixtures import named_project, posted_focus
 
     written = labeled_grouped_capture(opened.root / "ds", CAPTURE)
     register_dataset_at(opened.root, written.root, crop=CROP)
@@ -136,7 +104,15 @@ def scene(
     other = named_project(opened.root.parent / "other", "other")
     chosen = _selected(client, written.root, CAPTURE)
     assert chosen.status_code == 200, chosen.text
-    _focused(client, opened, written, monkeypatch)
+    focused = posted_focus(
+        client,
+        opened,
+        monkeypatch,
+        lambda bound: focus_human_attention(
+            bound, str(written.root), "bud", CAPTURE, mode="point"
+        ),
+    )
+    assert focused.status_code == 200, focused.text
     tab = client.post("/api/state/tab", json={"active_tab": SAVED_TAB})
     assert tab.status_code == 200, tab.text
     _ambiguous(written)
