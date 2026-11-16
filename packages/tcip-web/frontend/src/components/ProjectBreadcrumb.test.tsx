@@ -188,8 +188,9 @@ describe("footer open state", () => {
 
     render(<ProjectBreadcrumb />);
 
-    expect(screen.getByText(refused.choice.date)).toBeInTheDocument();
-    expect(screen.getByText(refused.sentence)).toBeInTheDocument();
+    const line = screen.getByText(`${refused.choice.date} cannot be listed`);
+    expect(line).toHaveAttribute("title", refused.sentence);
+    expect(screen.queryByText(refused.sentence)).not.toBeInTheDocument();
     expect(screen.queryByText("No dated images")).not.toBeInTheDocument();
   });
 

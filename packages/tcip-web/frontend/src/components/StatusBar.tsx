@@ -55,7 +55,7 @@ export function StatusBar() {
   }, [agentActivity]);
 
   return (
-    <div className="min-h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[12px] text-tcip-muted shrink-0">
+    <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[12px] text-tcip-muted shrink-0">
       {activeTab === "annotate" && (
         <span className="tabular-nums">Zoom: {(view.scale * 100).toFixed(0)}%</span>
       )}
