@@ -31,7 +31,10 @@ def write(path: Path, text: str) -> None:
 
 
 def scratch_repo(tmp_path: Path) -> Path:
-    """Make a git repository holding nothing but the script under test; return its root."""
+    """Make a git repository holding a copy of the fail-before script and an empty ``tests/``.
+
+    The copy sits at ``SCRIPT_RELATIVE_PATH`` and nothing is committed. Returns the root.
+    """
     repo = tmp_path / "scratch"
     copy = repo / SCRIPT_RELATIVE_PATH
     copy.parent.mkdir(parents=True)
