@@ -13,14 +13,15 @@ type Tree = Awaited<ReturnType<typeof api.dataset.tree>>;
 
 /** What `tools/generate_open_fixture.py` received from a backend opening a project: the open
  *  route's answer, the envelope `/ws/state` sent next, the select route's answers for a capture
- *  of five photographs, a capture of one band group and a capture whose label document will not
- *  read, the nav route's answer, three datasets' trees, the select route's answers for the
+ *  of five photographs, a later capture of one photograph named as the first of those, a capture
+ *  of one band group and a capture whose label document will not read, the nav route's answer, three datasets' trees, the select route's answers for the
  *  photographs made for a subject, for the subject an agent's focus names and for that subject
  *  with a bucket, and the photographs' selection under a separator-ended root. */
 const PRODUCED = produced as unknown as {
   opened: OpenAnswer;
   envelope: StateSnapshotMessage;
   raw: SelectAnswer;
+  later: SelectAnswer;
   grouped: SelectAnswer;
   troubled: SelectAnswer;
   navigated: Awaited<ReturnType<typeof api.dataset.nav>>;
@@ -77,6 +78,10 @@ export const FOCUSED_BUCKET_SELECT_ANSWER = PRODUCED.focused_bucket;
 
 /** The selection of the capture of five photographs, `img1.jpg` to `img5.jpg`, the first in view. */
 export const RAW_SELECTION = PRODUCED.raw.selection;
+
+/** The selection of the photographs' dataset's later capture, its one photograph named as the first
+ *  of {@link RAW_SELECTION} at another path. */
+export const LATER_SELECTION = PRODUCED.later.selection;
 
 /** The selection of a capture of another dataset of the project, holding one band group. */
 export const GROUPED_SELECTION = PRODUCED.grouped.selection;

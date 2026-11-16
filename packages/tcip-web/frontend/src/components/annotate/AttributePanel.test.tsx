@@ -274,4 +274,27 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
       expect.objectContaining({ sentence, key: undefined }),
     ]);
   });
+
+  it("takes a refused save from the panel once the next save commits without its audit line", async () => {
+    const stale = LABEL_ANSWERS.registry_stale;
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockRejectedValueOnce(await thrown(stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
+
+    render(<AttributePanel focused={null} />);
+    fillAttributeDraft("opening", ["closed", "open"]);
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+    const sentence = `Could not update the attributes: ${stale.body.detail}`;
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(sentence);
+
+    const gap = LABEL_ANSWERS.registry_audit_gap;
+    saveSpy.mockRejectedValue(await thrown(gap));
+    fireEvent.click(screen.getByRole("button", { name: ADD_A_VALUE }));
+    await act(() => Promise.resolve(enter(`new ${DECLARED} value`, "half")));
+
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ sentence, key: undefined }),
+      expect.objectContaining({ sentence: gap.body.detail.message, key: undefined }),
+    ]);
+  });
 });

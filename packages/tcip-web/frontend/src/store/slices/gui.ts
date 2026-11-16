@@ -1,6 +1,7 @@
 import type { StateCreator } from "zustand";
 
 import {
+  type CaptureImage,
   GUI_STATE_DEFAULTS,
   type SnapshotProject,
   type StateSnapshotMessage,
@@ -49,6 +50,8 @@ export interface GuiSlice {
   /** This backend process's launch identity, from the envelope; a change accepts a lower
    *  wsVersion instead of dropping it as a stale replay (a restarted backend's own snapshot). */
   wsEpoch: string | null;
+  /** The image the Annotate canvas last showed, kept past the tab's unmount. */
+  canvasShownImage: CaptureImage | null;
 
   patchGui: (partial: Partial<GuiState>) => void;
   /** Clear the dataset selection, returning the GUI to the project front door. */
@@ -71,6 +74,7 @@ export interface GuiSlice {
   setView: (view: ViewState) => void;
   setMode: (mode: Mode) => void;
   setActiveSubject: (subject: string | null) => void;
+  setCanvasShownImage: (image: CaptureImage | null) => void;
 }
 
 export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, get) => ({
@@ -78,6 +82,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   openProject: null,
   wsVersion: 0,
   wsEpoch: null,
+  canvasShownImage: null,
 
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
   clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: null } })),
@@ -192,4 +197,5 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       mode === s.gui.mode ? s : { gui: { ...s.gui, mode }, canvas: { ...s.canvas, focus: null } },
     ),
   setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
+  setCanvasShownImage: (canvasShownImage) => set({ canvasShownImage }),
 });

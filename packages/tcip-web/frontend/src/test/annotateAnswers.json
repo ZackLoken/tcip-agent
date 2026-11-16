@@ -49,6 +49,16 @@
       "flags": [],
       "base_mtime": "<base_mtime n4>",
       "name": "img5.jpg"
+    },
+    {
+      "image_path": "/scratch/workspace/valley/ds/images/2026-01-08/img1.jpg",
+      "img_width": 8,
+      "img_height": 8,
+      "annotations": [],
+      "completion": {},
+      "flags": [],
+      "base_mtime": "<base_mtime n5>",
+      "name": "img1.jpg"
     }
   ],
   "states": {
@@ -83,7 +93,7 @@
     ],
     "completion": { "subject_a": "complete" },
     "flags": [],
-    "base_mtime": "<base_mtime n5>",
+    "base_mtime": "<base_mtime n6>",
     "name": "img1.jpg"
   },
   "marked_states": {
@@ -194,7 +204,7 @@
     ],
     "completion": { "subject_a": "partial" },
     "flags": [],
-    "base_mtime": "<base_mtime n6>",
+    "base_mtime": "<base_mtime n7>",
     "name": "img1.jpg"
   },
   "review_proposals": {
@@ -348,7 +358,7 @@
     "completion": { "subject_a": "partial" },
     "flags": [
       {
-        "id": "<id n7>",
+        "id": "<id n8>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:07+00:00",
@@ -356,7 +366,7 @@
         "covered_by": [0]
       }
     ],
-    "base_mtime": "<base_mtime n6>",
+    "base_mtime": "<base_mtime n7>",
     "name": "img1.jpg"
   },
   "shaped_proposals": {
@@ -436,7 +446,7 @@
     "completion": { "subject_a": "partial" },
     "flags": [
       {
-        "id": "<id n7>",
+        "id": "<id n8>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:07+00:00",
@@ -449,7 +459,7 @@
         "covered_by": [0]
       },
       {
-        "id": "<id n8>",
+        "id": "<id n9>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:15+00:00",
@@ -457,7 +467,7 @@
         "covered_by": [0]
       }
     ],
-    "base_mtime": "<base_mtime n9>",
+    "base_mtime": "<base_mtime n10>",
     "name": "img1.jpg"
   },
   "flags_mixed": {
@@ -484,7 +494,7 @@
     "completion": { "subject_a": "partial" },
     "flags": [
       {
-        "id": "<id n7>",
+        "id": "<id n8>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:07+00:00",
@@ -497,7 +507,7 @@
         "covered_by": [0]
       },
       {
-        "id": "<id n8>",
+        "id": "<id n9>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:15+00:00",
@@ -510,7 +520,7 @@
         "covered_by": [0]
       },
       {
-        "id": "<id n10>",
+        "id": "<id n11>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:17+00:00",
@@ -531,7 +541,7 @@
         "covered_by": [0]
       }
     ],
-    "base_mtime": "<base_mtime n11>",
+    "base_mtime": "<base_mtime n12>",
     "name": "img1.jpg"
   },
   "saves": {
@@ -559,7 +569,7 @@
         ],
         "completion": { "subject_a": "partial" },
         "flags": [],
-        "base_mtime": "<base_mtime n12>",
+        "base_mtime": "<base_mtime n13>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -601,7 +611,7 @@
         ],
         "completion": { "tip": "partial" },
         "flags": [],
-        "base_mtime": "<base_mtime n13>",
+        "base_mtime": "<base_mtime n14>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -614,7 +624,7 @@
         "annotations": [],
         "completion": { "subject_a": "negative" },
         "flags": [],
-        "base_mtime": "<base_mtime n14>",
+        "base_mtime": "<base_mtime n15>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -694,7 +704,7 @@
         ],
         "completion": { "subject_a": "partial" },
         "flags": [],
-        "base_mtime": "<base_mtime n6>",
+        "base_mtime": "<base_mtime n7>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -775,7 +785,7 @@
         "completion": { "subject_a": "partial" },
         "flags": [
           {
-            "id": "<id n7>",
+            "id": "<id n8>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -786,7 +796,7 @@
             "covered_by": [0]
           }
         ],
-        "base_mtime": "<base_mtime n15>",
+        "base_mtime": "<base_mtime n16>",
         "name": "img1.jpg"
       },
       "accepted": { "3": 1 }
@@ -882,7 +892,7 @@
         "completion": { "subject_a": "partial" },
         "flags": [
           {
-            "id": "<id n7>",
+            "id": "<id n8>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -893,7 +903,7 @@
             "covered_by": [0]
           }
         ],
-        "base_mtime": "<base_mtime n16>",
+        "base_mtime": "<base_mtime n17>",
         "name": "img1.jpg"
       },
       "accepted": { "1": 4 }
@@ -995,7 +1005,7 @@
         "completion": { "subject_a": "partial" },
         "flags": [
           {
-            "id": "<id n7>",
+            "id": "<id n8>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -1006,7 +1016,7 @@
             "covered_by": [0]
           }
         ],
-        "base_mtime": "<base_mtime n17>",
+        "base_mtime": "<base_mtime n18>",
         "name": "img1.jpg"
       },
       "accepted": { "1": 4 }
@@ -1102,7 +1112,7 @@
         "completion": { "subject_a": "partial" },
         "flags": [
           {
-            "id": "<id n7>",
+            "id": "<id n8>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -1113,7 +1123,7 @@
             "covered_by": [1]
           }
         ],
-        "base_mtime": "<base_mtime n18>",
+        "base_mtime": "<base_mtime n19>",
         "name": "img1.jpg"
       },
       "accepted": { "1": 0 }
@@ -1143,7 +1153,7 @@
         "completion": { "subject_a": "partial" },
         "flags": [
           {
-            "id": "<id n7>",
+            "id": "<id n8>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -1159,7 +1169,7 @@
             "covered_by": [0]
           },
           {
-            "id": "<id n8>",
+            "id": "<id n9>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -1170,7 +1180,7 @@
             "covered_by": [0]
           }
         ],
-        "base_mtime": "<base_mtime n9>",
+        "base_mtime": "<base_mtime n10>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -1184,7 +1194,7 @@
         "completion": {},
         "flags": [
           {
-            "id": "<id n7>",
+            "id": "<id n8>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -1200,7 +1210,7 @@
             "covered_by": []
           },
           {
-            "id": "<id n8>",
+            "id": "<id n9>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -1275,7 +1285,7 @@
         ],
         "completion": { "subject_a": "partial", "subject_b": "unannotated", "tip": "unannotated" },
         "flags": [],
-        "base_mtime": "<base_mtime n19>",
+        "base_mtime": "<base_mtime n20>",
         "name": "tool.jpg"
       },
       "accepted": {}
@@ -1334,7 +1344,7 @@
         ],
         "completion": { "subject_a": "partial", "subject_b": "unannotated", "tip": "unannotated" },
         "flags": [],
-        "base_mtime": "<base_mtime n20>",
+        "base_mtime": "<base_mtime n21>",
         "name": "tool.jpg"
       },
       "accepted": {}
@@ -1487,7 +1497,7 @@
     ],
     "completion": { "subject_a": "partial", "subject_b": "unannotated", "tip": "unannotated" },
     "flags": [],
-    "base_mtime": "<base_mtime n21>",
+    "base_mtime": "<base_mtime n22>",
     "name": "tool.jpg"
   },
   "tool_polygon": {
@@ -1519,7 +1529,7 @@
     ],
     "completion": { "subject_a": "partial", "subject_b": "unannotated", "tip": "unannotated" },
     "flags": [],
-    "base_mtime": "<base_mtime n22>",
+    "base_mtime": "<base_mtime n23>",
     "name": "polygon.jpg"
   },
   "authored": {
@@ -1590,7 +1600,7 @@
     ],
     "completion": { "subject_a": "partial", "subject_b": "unannotated", "tip": "unannotated" },
     "flags": [],
-    "base_mtime": "<base_mtime n23>",
+    "base_mtime": "<base_mtime n24>",
     "name": "authored.jpg"
   },
   "imported": {

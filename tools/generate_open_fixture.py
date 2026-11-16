@@ -4,7 +4,8 @@ In a scratch session (``tools/fixture_session.py``), a project created through
 ``tests._web_fixtures.named_project`` is opened through the picker's route; the route's answer
 (``opened``) and the envelope ``/ws/state`` then sends on connect
 (``tcip_web.app.state_snapshot_message``, ``envelope``) are written, with the select route's
-answers for a capture of photographs (``raw``), a capture of one band group (``grouped``) and a
+answers for a capture of photographs (``raw``), a later capture of one photograph named as the
+first of those (``later``), a capture of one band group (``grouped``) and a
 capture whose one label document will not read (``troubled``) of datasets inside the project,
 the nav route's answer to a step to the first image of the last (``navigated``), the dataset
 trees of the photographs' dataset, the troubled one and one holding no capture, the select
@@ -67,8 +68,9 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
 
     ``ds`` holds a capture of :data:`RAW_IMAGES` (``raw``), each of its own of :data:`FRAMES`, with
     each of :data:`BUCKETS` published over it
-    (``tests._chain_fixtures.published``), and a later capture of one photograph over which
-    nothing is published; ``grouped`` a capture of one two-band group (``grouped``);
+    (``tests._chain_fixtures.published``), and a later capture of one photograph named as the
+    first of them, over which nothing is published (``later``); ``grouped`` a capture of one
+    two-band group (``grouped``);
     ``troubled`` a capture of one image whose label document is stored as a list, which no label
     document reads as (``tests._record_damage_fixtures.damage_record``, ``troubled``); and
     ``empty`` is a dataset root holding no capture.
@@ -111,7 +113,7 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
             ],
             scope={"subject": SUBJECT},
         )
-    write_image(image_dir(raw_root, later) / "img1.jpg", (8, 8))
+    write_image(image_dir(raw_root, later) / RAW_IMAGES[0], (8, 8))
     group_dir = image_dir(grouped_root, grouped)
     group_dir.mkdir(parents=True)
     bands = {band: group_dir / f"cap_{band}.tif" for band in ("Green", "Red")}
@@ -124,6 +126,7 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
     (project / "empty").mkdir()
     return {
         "raw": (raw_root, raw),
+        "later": (raw_root, later),
         "grouped": (grouped_root, grouped),
         "troubled": (troubled_root, troubled),
     }
@@ -132,9 +135,9 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
 def produce() -> dict[str, JsonValue]:
     """Open the fixture project; return its open answer, the envelope, selections and trees.
 
-    The selections are the select route's answers for the three captures :func:`captures`
-    names, made after the envelope; the trees ``GET /api/dataset/tree`` answers for the datasets
-    ``ds``, ``troubled`` and ``empty`` (``ds_tree``, ``troubled_tree``, ``empty_tree``); and
+    The selections are the select route's answers for the captures :func:`captures` names, made
+    after the envelope; the trees ``GET /api/dataset/tree`` answers for the datasets ``ds``,
+    ``troubled`` and ``empty`` (``ds_tree``, ``troubled_tree``, ``empty_tree``); and
     :func:`~tcip_mcp.web_client.selection_for`'s selection of the photographs' capture under its
     root spelled with a trailing separator (``separated``), which keeps that spelling while each
     image's place is the one its scan found. All are normalized by :data:`STAMPED`, the epoch
