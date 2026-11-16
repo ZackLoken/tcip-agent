@@ -34,41 +34,47 @@ Four verdicts, each its own exit code:
                        is printed and recorded, each failure not counted is named beside it. At a
                        baseline not shown to precede the change the verdict says so, as a fact
                        about the baseline rather than proof the change is guarded
-    VACUOUS (1)        every selected test passed at a baseline shown to precede the change
-    INDETERMINATE (2)  every selected test passed, but the baseline is not shown to precede the
-                       change, so passing says nothing about the test; or a selected test did not
-                       finish within its timeout (pytest-timeout's report, vitest's own "Test
-                       timed out in" message, or the test running when the process ended under
-                       ``--per-test-timeout``), named in the verdict, so a hung baseline is told
-                       apart from a merely slow one
-    REFUSED (3)        no verdict is available: the test file is not on the test side or does not
-                       exist, ``--test-rev`` was given without ``--baseline``, the baseline does
-                       not resolve or no tree here precedes the change, nothing was selected,
-                       everything was skipped, the baseline could not collect the file, the
-                       baseline's own source was not what got imported (for vitest, a test module
-                       ran from outside the tree), the runner did not finish within ``--timeout``,
-                       hit an internal or unhandled error or never reported an outcome, ``node``
-                       is not on the path where a frontend path is to be judged, the frontend has
-                       no install or the link to it cannot be made, or no failure is behavioral
-                       (each is ``unreached``, ``fixture`` or ``test_code``), so no behavior was
-                       compared. A setup or teardown failure that is neither a missing import or
-                       file nor a timeout is ``fixture``, whatever raised it; under vitest that is
-                       a failure following a hook that started and did not end, or an error a
-                       suite or a module with tests carries of its own. A call-phase failure is
-                       ``test_code``, raised in the test's own code, when it is a ``TypeError``
-                       whose crash frame is placed on the test side of the materialized tree (a
-                       frame that cannot be placed there, a library's, is behavioral), whatever
-                       its message. This is a
-                       policy: the class and the place of the raise do not establish that a call
-                       failed to fit, so no wording is read, and a
-                       ``TypeError`` from handling what the code under test returned (a ``None``
-                       subscripted) is refused the same way. Such a test becomes a guard by
-                       asserting on what was returned before using it.
+    VACUOUS (1)        no selected test failed and not every one was skipped, at a baseline shown
+                       to precede the change
+    INDETERMINATE (2)  no selected test failed and not every one was skipped, but the baseline is
+                       not shown to precede the change, so passing says nothing about the test; or
+                       a selected test did not finish within its timeout (pytest-timeout's report,
+                       vitest's own "Test timed out in" message, or the test running when the
+                       process ended under ``--per-test-timeout``), named in the verdict, so a
+                       hung baseline is told apart from a merely slow one
+    REFUSED (3)        no verdict is available: the command line is not usable, the test file is
+                       not on the test side or does not exist, ``--test-rev`` was given without
+                       ``--baseline`` or does not resolve, the baseline does not resolve or no tree
+                       here precedes the change, a git command failed, the working-tree snapshot
+                       could not be made, nothing was selected, everything was skipped, the
+                       baseline could not collect the file, the baseline's own source was not what
+                       got imported (for vitest, a test module ran from outside the tree), the
+                       runner did not finish within ``--timeout``, hit an internal or unhandled
+                       error, never reported an outcome or wrote one that is not JSON, ``node`` is
+                       not on the path where a frontend path is to be judged, the frontend's test
+                       file rule failed or answered with something that is not JSON, the frontend
+                       has no install or the link to it cannot be made, or no failure is
+                       behavioral (each is ``unreached``, ``fixture`` or ``test_code``), so no
+                       behavior was compared. A setup or teardown failure that is neither a
+                       missing import or file nor a timeout is ``fixture``, whatever raised it;
+                       under vitest that is a failure following a hook that started and did not
+                       end, or an error a suite or a module with tests carries of its own. A
+                       call-phase failure is ``test_code``, raised in the test's own code, when it
+                       is a ``TypeError`` whose crash frame is placed on the test side of the
+                       materialized tree (a frame that cannot be placed there, a library's, is
+                       behavioral), whatever its message. This is a policy: the class and the
+                       place of the raise do not establish that a call failed to fit, so no
+                       wording is read, and a ``TypeError`` from handling what the code under test
+                       returned (a ``None`` subscripted) is refused the same way. Such a test
+                       becomes a guard by asserting on what was returned before using it.
 
 Not closed, each still counted as behavioral: an exception of another class raised in the test's
 own code before the behavior is reached; a wrong call made in a helper off the test side or
 inside package code (the second rightly, since the package's own behavior was reached); an
 assertion that fails before the call under test.
+
+An exception the tool does not name above is its own failure: its traceback goes to standard error
+and the exit code is 4, which no verdict uses.
 
 The baseline is ``--baseline`` when given, else ``HEAD`` for uncommitted work, else the
 merge-base against the integration branch; the baseline used, how it was chosen and the source
@@ -79,7 +85,8 @@ files the change touches are recorded with the verdict.
 
 ``--baseline-from-working-tree`` snapshots the working tree (tracked modifications and untracked
 files, ignored files excluded) into a commit object and prints its hash, touching neither the
-working tree, the index nor the stash list, and computes no verdict.
+working tree, the index nor the stash list, and computes no verdict. It exits 0 when the snapshot
+is made and REFUSED when it cannot be.
 
 ``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout; a selected test that does
 not finish within it is named and the verdict is INDETERMINATE. A vitest run takes each test's
@@ -99,9 +106,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import traceback
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, NoReturn, NotRequired, TypedDict
 
 REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
@@ -119,6 +127,7 @@ GUARDS, VACUOUS, INDETERMINATE, REFUSED = (
     "REFUSED",
 )
 EXIT = {GUARDS: 0, VACUOUS: 1, INDETERMINATE: 2, REFUSED: 3}
+TOOL_FAILURE = max(EXIT.values()) + 1
 
 FailureKind = Literal[
     "unreached", "timeout", "behavioral", "test_code", "fixture"
@@ -342,41 +351,67 @@ class RefusalError(Exception):
     """No verdict is available; the message says why and what to do."""
 
 
-def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
+class _Parser(argparse.ArgumentParser):
+    """An argument parser whose usage error raises :class:`RefusalError` with argparse's message."""
+
+    def error(self, message: str) -> NoReturn:
+        raise RefusalError(f"{message}; run with --help for the usage.")
+
+
+def _test_file_relative_to_repo(raw: str) -> str:
     """Return ``raw`` normalized to a repo-relative, forward-slash path on the test side.
 
     Accepts a relative path as always, or an absolute one naming a file inside this repository;
     either way the return is a tree-relative path. A relative path is resolved against the
     repository root, never the caller's ``cwd``, and either spelling's ``..`` segments are
     collapsed before the test-side check, so a path that only reads as inside ``tests/`` before
-    normalizing (``tests/../tools/x.py``) is refused rather than admitted. Returns
-    ``(None, reason)`` when ``raw`` resolves off the test side.
+    normalizing (``tests/../tools/x.py``) is refused rather than admitted. :class:`RefusalError`
+    when ``raw`` resolves outside the repository or off the test side.
     """
     path = Path(raw)
     anchored = path if path.is_absolute() else REPO / path
     try:
         rel = anchored.resolve().relative_to(REPO.resolve())
-    except ValueError:
-        return None, f"{raw} is outside this repository ({REPO})."
+    except ValueError as error:
+        raise RefusalError(
+            f"{raw} is outside this repository ({REPO})."
+        ) from error
     rel_str = str(rel).replace("\\", "/")
     if not _is_test_side(rel_str):
-        return None, (
+        raise RefusalError(
             f"{raw} resolves to {rel_str}, outside {TEST_TREE}/ and no test file under "
             f"{FRONTEND}/."
         )
-    return rel_str, ""
+    return rel_str
+
+
+def _git(*args: str) -> bytes:
+    """Return git's standard output for ``args`` run in the repository, as bytes.
+
+    :class:`RefusalError` naming the command and git's own error when git exits non-zero.
+    """
+    proc = subprocess.run(["git", *args], cwd=REPO, capture_output=True)
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode(errors="replace").strip()
+        raise RefusalError(f"git {' '.join(args)} failed: {stderr}")
+    return proc.stdout
 
 
 def git_output(*args: str) -> str:
-    """Return git's stdout for ``args`` run in the repository; ``RuntimeError`` on failure."""
-    proc = subprocess.run(
-        ["git", *args], cwd=REPO, capture_output=True, text=True
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"git {' '.join(args)} failed: {proc.stderr.strip()}"
-        )
-    return proc.stdout
+    """Return git's standard output for ``args`` as text; :class:`RefusalError` as :func:`_git`."""
+    return _git(*args).decode()
+
+
+def _commit(flag: str, named: str) -> str:
+    """Return the commit ``named`` resolves to; :class:`RefusalError` naming ``flag`` when none."""
+    try:
+        return git_output(
+            "rev-parse", "--verify", f"{named}^{{commit}}"
+        ).strip()
+    except RefusalError as refusal:
+        raise RefusalError(
+            f"{flag} {named} does not name a commit here: {refusal}"
+        ) from refusal
 
 
 def _node() -> str:
@@ -396,7 +431,8 @@ def _test_side(paths: Iterable[str]) -> set[str]:
     The test side is every path under ``tests/`` and every path under the frontend that its own
     rule, ``TEST_FILE_RULE`` run under ``node``, calls a test file. The tool overlays the test side
     from the tree the test comes from, so a diff in it is not the change under test. ``node`` is
-    started only when a path lies under the frontend; :class:`RefusalError` when the rule fails.
+    started only when a path lies under the frontend; :class:`RefusalError` when the rule fails or
+    its answer is not JSON.
     """
     wanted = set(paths)
     side = {p for p in wanted if p.startswith(f"{TEST_TREE}/")}
@@ -414,7 +450,13 @@ def _test_side(paths: Iterable[str]) -> set[str]:
         raise RefusalError(
             f"the frontend's test file rule {TEST_FILE_RULE} failed: {proc.stderr.strip()}"
         )
-    judged = zip(frontend, json.loads(proc.stdout), strict=True)
+    try:
+        answer = json.loads(proc.stdout)
+    except json.JSONDecodeError as error:
+        raise RefusalError(
+            f"the frontend's test file rule {TEST_FILE_RULE} answered with no JSON: {error}"
+        ) from error
+    judged = zip(frontend, answer, strict=True)
     return side | {path for path, is_test in judged if is_test}
 
 
@@ -435,43 +477,36 @@ def _uncommitted_paths() -> list[str]:
     return paths
 
 
-def _resolve_baseline(
-    named: str | None, integration: str
-) -> tuple[str | None, str, str]:
-    """Return (revision, how it was chosen, why it is unusable if it is)."""
+def _resolve_baseline(named: str | None, integration: str) -> tuple[str, str]:
+    """Return the baseline revision and how it was chosen.
+
+    :class:`RefusalError` when ``named`` is no commit, when the merge-base against
+    ``integration`` cannot be read, or when that merge-base is HEAD itself.
+    """
     if named:
-        try:
-            sha = git_output(
-                "rev-parse", "--verify", f"{named}^{{commit}}"
-            ).strip()
-        except RuntimeError as exc:
-            return None, f"named by the caller as {named}", str(exc)
-        return sha, f"named by the caller as {named}", ""
+        return _commit("--baseline", named), f"named by the caller as {named}"
 
     uncommitted = _uncommitted_paths()
     if set(uncommitted) - _test_side(uncommitted):
         return (
             git_output("rev-parse", "HEAD").strip(),
             "HEAD, because the change under test is uncommitted",
-            "",
         )
 
     try:
         head = git_output("rev-parse", "HEAD").strip()
         base = git_output("merge-base", "HEAD", integration).strip()
-    except RuntimeError as exc:
-        return None, f"merge-base against {integration}", str(exc)
+    except RefusalError as refusal:
+        raise RefusalError(
+            f"no merge-base of HEAD and --integration {integration} here: {refusal}"
+        ) from refusal
     if base == head:
-        return (
-            None,
-            f"merge-base against {integration}",
-            (
-                "the working tree carries no uncommitted source change and HEAD is already "
-                f"contained in {integration}, so no tree here precedes a change. Name the "
-                "pre-change revision with --baseline."
-            ),
+        raise RefusalError(
+            "the working tree carries no uncommitted source change and HEAD is already "
+            f"contained in {integration}, so no tree here precedes a change. Name the "
+            "pre-change revision with --baseline."
         )
-    return base, f"merge-base of HEAD and {integration}", ""
+    return base, f"merge-base of HEAD and {integration}"
 
 
 def _changed_source_files(
@@ -584,7 +619,7 @@ def snapshot_working_tree() -> tuple[str, str]:
 
     It holds tracked modifications and untracked files, ignored files excluded. Returns
     ``(commit_hash, method)``. Touches neither the working tree, the real index, nor the stash
-    list.
+    list. :class:`RefusalError` when HEAD cannot be read or neither form makes a commit.
     """
     with tempfile.TemporaryDirectory(prefix="failbefore-index-") as scratch:
         head = git_output("rev-parse", "HEAD").strip()
@@ -594,7 +629,7 @@ def snapshot_working_tree() -> tuple[str, str]:
     commit = _snapshot_via_stash_create()
     if commit:
         return commit, "git stash create (tracked changes only)"
-    raise RuntimeError(
+    raise RefusalError(
         "could not snapshot the working tree: the temporary-index form failed here and git "
         "stash create produced nothing, most likely because there are no tracked changes to stash"
     )
@@ -603,9 +638,7 @@ def snapshot_working_tree() -> tuple[str, str]:
 def materialize(rev: str, dest: Path) -> None:
     """Extract a revision's whole tree into `dest`. The working tree is never touched."""
     dest.mkdir(parents=True, exist_ok=True)
-    archive = subprocess.run(
-        ["git", "archive", rev], cwd=REPO, check=True, stdout=subprocess.PIPE
-    ).stdout
+    archive = _git("archive", rev)
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r|") as tar:
         tar.extractall(dest, filter="data")
 
@@ -617,12 +650,7 @@ def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
     the number of files copied.
     """
     if test_rev:
-        archive = subprocess.run(
-            ["git", "archive", test_rev],
-            cwd=REPO,
-            check=True,
-            stdout=subprocess.PIPE,
-        ).stdout
+        archive = _git("archive", test_rev)
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r") as tar:
             files = [m for m in tar.getmembers() if m.isfile()]
             side = _test_side(m.name for m in files)
@@ -766,10 +794,18 @@ def run_capturing_outcome(
 
 
 def _read_outcome(outcome_json: Path) -> dict | None:
-    """Return the outcome record at ``outcome_json`` and remove the file; None if there is none."""
+    """Return the outcome record at ``outcome_json`` and remove the file; None if there is none.
+
+    :class:`RefusalError` when the record is not JSON.
+    """
     if not outcome_json.is_file():
         return None
-    observed = json.loads(outcome_json.read_text(encoding="utf-8"))
+    try:
+        observed = json.loads(outcome_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise RefusalError(
+            f"the runner's outcome record {outcome_json} is not JSON: {error}"
+        ) from error
     outcome_json.unlink()
     return observed
 
@@ -1012,8 +1048,7 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
     outcomes = [t["outcome"] for t in observed["tests"]]
     if outcomes and all(o == "skipped" for o in outcomes):
         return REFUSED, (
-            f"all {len(outcomes)} selected tests were skipped, so nothing was evaluated. A "
-            "module-level importorskip at the baseline will do this."
+            f"all {len(outcomes)} selected tests were skipped, so nothing was evaluated."
         )
     unreached = [t for t in failed if t["kind"] == "unreached"]
     timed_out = [t for t in failed if t["kind"] == "timeout"]
@@ -1080,19 +1115,39 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
         )
     if baseline_precedes:
         return VACUOUS, (
-            "every selected test passed at a baseline shown to precede the change. It guards "
-            "nothing; assert on what only the change produces."
+            "no selected test failed and not every one was skipped, at a baseline shown to "
+            "precede the change. It guards nothing; assert on what only the change produces."
         )
     return INDETERMINATE, (
-        "every selected test passed, but no source file differs between the baseline and the "
-        "working tree, so the baseline is not shown to precede the change and passing there says "
-        "nothing about the test. Name the pre-change revision with --baseline."
+        "no selected test failed and not every one was skipped, but no source file differs "
+        "between the baseline and the tree this test comes from, so the baseline is not shown to "
+        "precede the change and passing there says nothing about the test. Name the pre-change "
+        "revision with --baseline."
     )
 
 
 def main() -> int:
-    """Run the command line's test at its baseline, print the verdict, return its exit code."""
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    """Run the command line, print what it found, and return the exit code.
+
+    A verdict returns its code from ``EXIT``, a snapshot that is made returns 0, and any exception
+    other than a :class:`RefusalError` prints its traceback to standard error and returns
+    ``TOOL_FAILURE``, which no verdict uses.
+    """
+    try:
+        return _run_command_line()
+    except Exception:
+        traceback.print_exc()
+        return TOOL_FAILURE
+
+
+def _run_command_line() -> int:
+    """Run the command line's test at its baseline, or its snapshot; return the exit code.
+
+    A :class:`RefusalError` raised anywhere, by a usage error or by the run, is reported as the
+    verdict REFUSED with its message as the reason; the record is written to ``--json`` unless the
+    refusal is a usage error.
+    """
+    ap = _Parser(description=__doc__.splitlines()[0])
     ap.add_argument(
         "test_file",
         help="path, repo-relative, e.g. tests/test_foo.py or a test file under "
@@ -1154,88 +1209,72 @@ def main() -> int:
         "a test that does not finish within it scores INDETERMINATE by name, "
         "told apart from a hang that says nothing and a real pass or failure",
     )
-    args = ap.parse_args()
-
-    if args.baseline_from_working_tree:
-        if args.baseline:
+    record: dict = {}
+    json_out: str | None = None
+    try:
+        args = ap.parse_args()
+        if args.baseline_from_working_tree and args.baseline:
             ap.error(
                 "--baseline-from-working-tree and --baseline name the baseline two ways at once"
             )
-        commit, method = snapshot_working_tree()
-        expr_flag = f"-k {args.expr!r} " if args.expr else ""
-        print(f"snapshot {commit} ({method})")
-        print(
-            "computes no verdict by itself. This is the working tree as it stands right now: a "
-            "snapshot that already holds the fix is a baseline the change does not precede, and a "
-            "passing run against it is the same INDETERMINATE case as any other baseline already "
-            "containing the change, never evidence the test guards anything. Apply the fix now, "
-            "then run:\n"
-            f"  python tools/prove_test_fails_before.py {args.test_file} {expr_flag}"
-            f"--baseline {commit}"
+        json_out = args.json_out
+        if args.baseline_from_working_tree:
+            commit, method = snapshot_working_tree()
+            expr_flag = f"-k {args.expr!r} " if args.expr else ""
+            print(f"snapshot {commit} ({method})")
+            print(
+                "computes no verdict by itself. This is the working tree as it stands right now: "
+                "a snapshot that already holds the fix is a baseline the change does not precede, "
+                "and a passing run against it is the same INDETERMINATE case as any other "
+                "baseline already containing the change, never evidence the test guards "
+                "anything. Apply the fix now, then run:\n"
+                f"  python tools/prove_test_fails_before.py {args.test_file} {expr_flag}"
+                f"--baseline {commit}"
+            )
+            return 0
+        record.update(
+            test_file=args.test_file,
+            k=args.expr,
+            verdict=None,
+            test_tree_from=args.test_rev or "the working tree",
         )
-        return 0
-
-    record: dict = {
-        "test_file": args.test_file,
-        "k": args.expr,
-        "verdict": None,
-        "test_tree_from": args.test_rev or "the working tree",
-    }
-    try:
-        return _prove(args, record)
+        _prove(args, record)
     except RefusalError as refusal:
         record.update(verdict=REFUSED, why=str(refusal))
-        return _report(record, args.json_out)
+    return _report(record, json_out)
 
 
-def _prove(args: argparse.Namespace, record: dict) -> int:
-    """Run the test ``args`` names at its baseline into ``record``, report it, return the exit code.
+def _prove(args: argparse.Namespace, record: dict) -> None:
+    """Run the test ``args`` names at its baseline; write its findings and verdict to ``record``.
 
-    A :class:`RefusalError` raised on the way propagates once the scratch directory is removed.
+    :class:`RefusalError` when no verdict is available, raised once the scratch directory is
+    removed.
     """
-    test_file, refusal = _test_file_relative_to_repo(args.test_file)
-    if test_file is None:
-        record.update(verdict=REFUSED, why=refusal)
-        return _report(record, args.json_out)
+    test_file = _test_file_relative_to_repo(args.test_file)
     record["test_file"] = test_file
 
     if args.test_rev and not args.baseline:
-        record.update(
-            verdict=REFUSED,
-            why=(
-                "--test-rev needs an explicit --baseline. A change spans one commit per concern, "
-                "so the commit before a test can be inside it, and guessing one would decide the "
-                "verdict."
-            ),
+        raise RefusalError(
+            "--test-rev needs an explicit --baseline. A change spans one commit per concern, so "
+            "the commit before a test can be inside it, and guessing one would decide the verdict."
         )
-        return _report(record, args.json_out)
 
-    if args.test_rev:
+    test_rev = _commit("--test-rev", args.test_rev) if args.test_rev else None
+    if test_rev:
         listed = git_output(
-            "ls-tree", "--name-only", "-r", args.test_rev, "--", test_file
+            "ls-tree", "--name-only", "-r", test_rev, "--", test_file
         ).strip()
         if not listed:
-            record.update(
-                verdict=REFUSED,
-                why=f"{test_file} does not exist at {args.test_rev}.",
+            raise RefusalError(
+                f"{test_file} does not exist at {args.test_rev}."
             )
-            return _report(record, args.json_out)
     elif not (REPO / test_file).is_file():
-        record.update(
-            verdict=REFUSED,
-            why=f"{test_file} does not exist in the working tree.",
-        )
-        return _report(record, args.json_out)
+        raise RefusalError(f"{test_file} does not exist in the working tree.")
 
-    rev, how, unusable = _resolve_baseline(args.baseline, args.integration)
+    rev, how = _resolve_baseline(args.baseline, args.integration)
     record["baseline"] = {"revision": rev, "how_chosen": how}
-    if rev is None:
-        record.update(verdict=REFUSED, why=unusable)
-        return _report(record, args.json_out)
 
-    changed, how_changed = _changed_source_files(
-        rev, args.change, args.test_rev
-    )
+    changed, how_changed = _changed_source_files(rev, args.change, test_rev)
     baseline_precedes = bool(changed)
     record["change_under_test"] = {
         "source_files": changed,
@@ -1257,7 +1296,7 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
             "from": f"the test side at {args.test_rev}"
             if args.test_rev
             else "the test side in the working tree",
-            "files": _overlay_test_tree(tree, args.test_rev),
+            "files": _overlay_test_tree(tree, test_rev),
         }
         if runner == "vitest":
             link = link_install(tree)
@@ -1278,15 +1317,11 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
                 "baseline_source_imported": imports_ok,
             }
             if not imports_ok:
-                record.update(
-                    verdict=REFUSED,
-                    why=(
-                        "the baseline tree's own source is not what got imported, so any verdict "
-                        "would describe the working checkout instead. Resolved module paths are "
-                        "recorded."
-                    ),
+                raise RefusalError(
+                    "the baseline tree's own source is not what got imported, so any verdict "
+                    "would describe the working checkout instead. Resolved module paths are "
+                    "recorded."
                 )
-                return _report(record, args.json_out)
             run = functools.partial(
                 run_capturing_outcome,
                 tree,
@@ -1301,12 +1336,10 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
 
         try:
             proc, observed = run()
-        except subprocess.TimeoutExpired:
-            record.update(
-                verdict=REFUSED,
-                why=f"{runner} did not finish within {args.timeout}s.",
-            )
-            return _report(record, args.json_out)
+        except subprocess.TimeoutExpired as expired:
+            raise RefusalError(
+                f"{runner} did not finish within {args.timeout}s."
+            ) from expired
 
         record[runner] = {
             "exit_code": proc.returncode,
@@ -1331,18 +1364,14 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
                         "real failure."
                     ),
                 )
-                return _report(record, args.json_out)
-            record.update(
-                verdict=REFUSED,
-                why=(
-                    f"{runner} reported no outcome record, which happens on a usage error before "
-                    f"the run starts. Its output is recorded under {runner}.tail."
-                ),
-            )
+                return
             record[runner]["stderr_tail"] = proc.stderr.strip().splitlines()[
                 -15:
             ]
-            return _report(record, args.json_out)
+            raise RefusalError(
+                f"{runner} reported no outcome record, which happens on a usage error before "
+                f"the run starts. Its output is recorded under {runner}.tail."
+            )
 
         if runner == "vitest":
             modules = observed["modules"]
@@ -1386,8 +1415,6 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
     finally:
         _remove_scratch_directory(scratch, link)
 
-    return _report(record, args.json_out)
-
 
 def _remove_scratch_directory(
     scratch: tempfile.TemporaryDirectory[str], link: Path | None
@@ -1414,6 +1441,10 @@ def _remove_scratch_directory(
 def _report(record: dict, json_out: str | None) -> int:
     verdict = record["verdict"]
     baseline = record.get("baseline", {})
+    if json_out:
+        Path(json_out).write_text(
+            json.dumps(record, indent=2), encoding="utf-8"
+        )
     print()
     print(f"{verdict}: {record['why']}")
     if baseline.get("revision"):
@@ -1442,9 +1473,6 @@ def _report(record: dict, json_out: str | None) -> int:
                 f"                {failure['crash_path']}:{failure.get('crash_lineno')}"
             )
     if json_out:
-        Path(json_out).write_text(
-            json.dumps(record, indent=2), encoding="utf-8"
-        )
         print(f"  record        {json_out}")
     return EXIT[verdict]
 

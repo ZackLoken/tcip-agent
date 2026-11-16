@@ -6,7 +6,10 @@ commit with the fix and the guard test) and run the real script against it. They
 - the failure classification, a baseline failure that does not reach the code under test told
   apart from one at the guard's own assertion;
 - ``--test-rev``, over a third revision that removes the test;
-- ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched;
+- ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched,
+  and its refusal beside ``--baseline`` or with no commit to snapshot;
+- a command line naming no test file and a ``--test-rev`` naming no revision, each refused, and an
+  exception the tool does not name, which exits with the tool's own failure code;
 - ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
   the directory cannot be removed;
@@ -34,7 +37,13 @@ from tools.prove_test_fails_before import _failure_kind
 SCRIPT = REPO_ROOT / "tools" / "prove_test_fails_before.py"
 SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
 
-EXIT = {"GUARDS": 0, "VACUOUS": 1, "INDETERMINATE": 2, "REFUSED": 3}
+EXIT = {
+    "GUARDS": 0,
+    "VACUOUS": 1,
+    "INDETERMINATE": 2,
+    "REFUSED": 3,
+    "TOOL_FAILURE": 4,
+}
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -67,23 +76,25 @@ def _commit_all(repo: Path, message: str) -> str:
     return _git(repo, "rev-parse", "HEAD").strip()
 
 
-def _run(
-    repo: Path, test_file: str, baseline: str, *extra: str
-) -> subprocess.CompletedProcess:
+def _tool(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    """Run the script copied into ``repo`` with ``args`` as its command line, from ``repo``."""
     return subprocess.run(
         [
             sys.executable,
             str(repo / "tools" / "prove_test_fails_before.py"),
-            test_file,
-            "--baseline",
-            baseline,
-            *extra,
+            *args,
         ],
         cwd=str(repo),
         capture_output=True,
         text=True,
         timeout=120,
     )
+
+
+def _run(
+    repo: Path, test_file: str, baseline: str, *extra: str
+) -> subprocess.CompletedProcess:
+    return _tool(repo, test_file, "--baseline", baseline, *extra)
 
 
 def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
@@ -468,10 +479,14 @@ def test_a_type_error_raised_inside_a_library_by_package_code_guards(
 
 
 def _why(result: subprocess.CompletedProcess) -> str:
+    """Return the verdict line ``result`` printed, or the empty string when it printed none."""
     return next(
-        line
-        for line in result.stdout.splitlines()
-        if line.startswith(tuple(f"{verdict}:" for verdict in EXIT))
+        (
+            line
+            for line in result.stdout.splitlines()
+            if line.startswith(tuple(f"{verdict}:" for verdict in EXIT))
+        ),
+        "",
     )
 
 
@@ -740,18 +755,7 @@ def test_a_fixture_failing_during_teardown_is_refused_with_the_teardown_sentence
 
 
 def _snapshot(repo: Path, test_file: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [
-            sys.executable,
-            str(repo / "tools" / "prove_test_fails_before.py"),
-            test_file,
-            "--baseline-from-working-tree",
-        ],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    return _tool(repo, test_file, "--baseline-from-working-tree")
 
 
 def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untouched(
@@ -806,21 +810,28 @@ def test_baseline_from_working_tree_together_with_baseline_is_refused(
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     baseline = _commit_all(repo, "double is a no-op")
 
-    proc = subprocess.run(
-        [
-            sys.executable,
-            str(repo / "tools" / "prove_test_fails_before.py"),
-            "tests/test_widgets.py",
-            "--baseline-from-working-tree",
-            "--baseline",
-            baseline,
-        ],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=60,
+    proc = _tool(
+        repo,
+        "tests/test_widgets.py",
+        "--baseline-from-working-tree",
+        "--baseline",
+        baseline,
     )
-    assert proc.returncode != 0
+
+    assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
+    assert _why(proc).startswith("REFUSED: "), proc.stdout + proc.stderr
+
+
+def test_a_snapshot_in_a_repository_with_no_commit_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A snapshot that cannot be made is refused: the scratch repository has no commit."""
+    repo = _scratch_repo(tmp_path)
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+
+    assert _why(proc).startswith("REFUSED: "), proc.stdout + proc.stderr
+    assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
 
 
 def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
@@ -930,6 +941,75 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
     assert "GUARDS" in result.stdout
 
 
+# ── a command line that names no run, and the tool's own failure ─────────────
+
+
+def test_a_command_line_with_no_test_file_is_refused(tmp_path: Path) -> None:
+    repo = _scratch_repo(tmp_path)
+
+    result = _tool(repo)
+
+    assert _why(result).startswith("REFUSED: "), result.stdout + result.stderr
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+
+
+def test_a_test_rev_that_does_not_resolve_is_refused_naming_it(
+    tmp_path: Path,
+) -> None:
+    """A ``--test-rev`` naming no revision is refused by flag and name, with no traceback."""
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+
+    result = _run(
+        repo,
+        "tests/test_widgets.py",
+        baseline,
+        "--test-rev",
+        "no_such_revision",
+    )
+
+    why = _why(result)
+    assert why.startswith("REFUSED: "), result.stdout + result.stderr
+    assert "--test-rev" in why
+    assert "no_such_revision" in why
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
+    tmp_path: Path,
+) -> None:
+    """An exception the tool does not name exits with the tool's own code, traceback shown.
+
+    ``--json`` names a directory, so writing the record of a run that reached its verdict raises,
+    and no verdict line is printed.
+    """
+    repo = _scratch_repo(tmp_path)
+    _write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = _commit_all(repo, "double is a no-op")
+    _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_double_doubles():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n",
+    )
+    _commit_all(repo, "double actually doubles")
+    record = tmp_path / "record"
+    record.mkdir()
+
+    result = _run(
+        repo, "tests/test_widgets.py", baseline, "--json", str(record)
+    )
+
+    assert result.returncode == EXIT["TOOL_FAILURE"], (
+        result.stdout + result.stderr
+    )
+    assert "Traceback" in result.stderr
+    assert _why(result) == "", result.stdout
+
+
 # ── --per-test-timeout ───────────────────────────────────────────────────────
 
 
@@ -966,20 +1046,8 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
     )
     _commit_all(repo, "a test that hangs")
 
-    proc = subprocess.run(
-        [
-            sys.executable,
-            str(repo / "tools" / "prove_test_fails_before.py"),
-            "tests/test_widgets.py",
-            "--baseline",
-            "HEAD",
-            "--per-test-timeout",
-            "1",
-        ],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=60,
+    proc = _run(
+        repo, "tests/test_widgets.py", "HEAD", "--per-test-timeout", "1"
     )
 
     assert "INDETERMINATE" in proc.stdout
