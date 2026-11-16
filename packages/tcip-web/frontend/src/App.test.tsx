@@ -1056,6 +1056,38 @@ describe("App job entries", () => {
     expect(alert()).toHaveTextContent(RUN_FAILED);
   });
 
+  it("tells nothing from an answer read for a project no longer open", async () => {
+    const held = Promise.withResolvers<TrainingListing>();
+    vi.mocked(trainingApi.listRuns).mockReturnValueOnce(held.promise);
+    await watchFromMeta([], []);
+
+    act(() =>
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 1, project: openedAs(RIDGE).project })),
+    );
+    await settle();
+    await act(() => Promise.resolve(held.resolve(LISTING_BEFORE_FAILURE)));
+    await settle();
+
+    expect(useStore.getState().notifications).toEqual([]);
+  });
+
+  it("tells nothing from a failed read, the jobs an answer left watched reading as they did", async () => {
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(LISTING_BEFORE_FAILURE)
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockImplementation(NO_ANSWER);
+    await watchFromMeta([], []);
+    const told = useStore.getState().notifications;
+    expect(told.map((e) => e.sentence)).toContain(RUN_RUNNING);
+
+    await next(RUN_REFRESH_MS);
+
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().notifications).toEqual(told);
+  });
+
   it("counts a job told again as seen while the area is open over it", async () => {
     await watchFromMeta([LISTING_BEFORE_FAILURE, TRAINING_LISTING], []);
     fireEvent.click(notificationsButton());
