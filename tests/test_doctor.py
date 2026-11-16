@@ -276,11 +276,10 @@ def test_diagnosing_a_rollback_journal_database_changes_and_locks_nothing(
     takes no transition lock, leaves the file's bytes and its journal mode as they were, and
     leaves no ``-wal`` or ``-shm`` beside it.
     """
-    import sqlite3
-
     import tcip_store as ts
     from tcip_store import sqlite_backend
     from tcip_store.file_backend import _DATABASE_SIDECARS, database_file
+    from tests._record_damage_fixtures import released_into_rollback_journal
     from tests.test_store_contract import _journal_mode
 
     date = "2026-03-04"
@@ -292,13 +291,8 @@ def test_diagnosing_a_rollback_journal_database_changes_and_locks_nothing(
         32,
     )
     bound = binding_for(root)
-    ts.release_root(root)
+    released_into_rollback_journal(root)
     db = database_file(str(root))
-    conn = sqlite3.connect(str(db), isolation_level=None)
-    try:
-        conn.execute("pragma journal_mode = delete")
-    finally:
-        conn.close()
     held: list[str] = []
     real_lock = sqlite_backend.transition_lock
 

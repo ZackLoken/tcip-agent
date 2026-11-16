@@ -1,7 +1,8 @@
 """Corrupting a stored record or log entry, or a root's whole database.
 
 Bytes that will not decode, or that decode and are refused, are put behind a key in the database,
-or over the database file.
+or over the database file. The module also opens a root's database directly, which is what a
+test that damages or reads the file by hand does through :func:`connected`.
 """
 
 from __future__ import annotations
@@ -52,16 +53,40 @@ def unopenable_database(root: str | Path) -> Iterator[Path]:
         path.unlink()
 
 
-def _connected(key: ts.Key) -> sqlite3.Connection:
-    """Open the database of ``key``'s root directly, in autocommit mode."""
+def connected(
+    root: str | Path, *, check_same_thread: bool = True
+) -> sqlite3.Connection:
+    """Open ``root``'s database directly, in autocommit mode, and return the connection.
+
+    ``check_same_thread`` is :func:`sqlite3.connect`'s own parameter: pass ``False`` for a
+    connection that will be closed from a thread other than the one that opened it.
+    """
     return sqlite3.connect(
-        str(database_file(str(key.root))), isolation_level=None
+        str(database_file(str(root))),
+        isolation_level=None,
+        check_same_thread=check_same_thread,
     )
+
+
+def released_into_rollback_journal(root: str | Path) -> None:
+    """Release ``root``'s store connections and put its database in rollback-journal mode.
+
+    A WAL database refuses another connection's exclusive lock while the store holds a
+    connection on it; a rollback-journal database takes it. Asserts the database answers
+    ``delete`` for the mode.
+    """
+    ts.release_root(root)
+    conn = connected(root)
+    try:
+        mode = conn.execute("pragma journal_mode = delete").fetchone()[0]
+    finally:
+        conn.close()
+    assert mode == "delete"
 
 
 def damage_record(key: ts.Key, data: bytes) -> None:
     """Overwrite the stored value of the record at ``key`` with ``data`` in its root's database."""
-    conn = _connected(key)
+    conn = connected(key.root)
     try:
         conn.execute(
             "update records set value = ? where store = ? and parts = ?",
@@ -77,7 +102,7 @@ def damage_log_entry(key: ts.Key, position: int, data: bytes) -> None:
     Positions count from the log's first entry, and a negative one from its last, as a list's
     do. Asserts the log holds an entry at ``position``.
     """
-    conn = _connected(key)
+    conn = connected(key.root)
     try:
         ids = [
             row[0]

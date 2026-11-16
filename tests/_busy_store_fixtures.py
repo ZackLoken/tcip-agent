@@ -7,15 +7,15 @@ exclusive locking mode with its transaction open.
 from __future__ import annotations
 
 import re
-import sqlite3
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import tcip_store
-from tcip_store.file_backend import database_file
+from tests._record_damage_fixtures import connected
 from tests._store_worker import make_backend
 
 if TYPE_CHECKING:
+    import sqlite3
     from collections.abc import Iterator
     from pathlib import Path
 
@@ -38,11 +38,7 @@ def held_by_another_connection(
     The connection takes its lock with ``begin exclusive`` and gives it up when it closes, on
     leaving the block unless it was closed before.
     """
-    holder = sqlite3.connect(
-        str(database_file(str(root))),
-        isolation_level=None,
-        check_same_thread=False,
-    )
+    holder = connected(root, check_same_thread=False)
     try:
         holder.execute("pragma locking_mode = exclusive")
         holder.execute("begin exclusive")
