@@ -332,6 +332,25 @@ describe("ResultsTab evidence gate", () => {
     ]);
   });
 
+  it("ends what the last CSV export told once the next CSV export starts", async () => {
+    mockDatasetTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
+    vi.spyOn(resultsApi, "downloadCsv")
+      .mockRejectedValueOnce(await thrown(RESULTS_ANSWERS.export_audit_gap))
+      .mockReturnValue(new Promise(() => {}));
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
+    await within(phenologyPanel()).findByTestId("entry-in-place");
+    fireEvent.click(screen.getByRole("button", { name: /milestones csv/i }));
+
+    await waitFor(() =>
+      expect(within(phenologyPanel()).queryByTestId("entry-in-place")).toBeNull(),
+    );
+    expect(resultsApi.downloadCsv).toHaveBeenCalledTimes(2);
+  });
+
   it("shows the row count only after a compute", async () => {
     mockDatasetTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
@@ -784,6 +803,26 @@ describe("ResultsTab count export", () => {
     await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
     const delivery = downloadCountCsv.mock.calls[0][0].delivery;
     expect(delivery).toMatchObject({ position_error_m: null, canopy_subject: "" });
+  });
+
+  it("ends what the last count export told once the next count export starts", async () => {
+    const panel = await renderCountPanel();
+    vi.spyOn(resultsApi, "downloadCountCsv")
+      .mockRejectedValueOnce(await thrown(RESULTS_ANSWERS.count_export_audit_gap))
+      .mockReturnValue(new Promise(() => {}));
+
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
+    fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+    await within(panel).findByTestId("entry-in-place");
+    await waitFor(() =>
+      expect(within(panel).getByRole("button", { name: /^export$/i })).toBeEnabled(),
+    );
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    await waitFor(() => expect(within(panel).queryByTestId("entry-in-place")).toBeNull());
+    expect(resultsApi.downloadCountCsv).toHaveBeenCalledTimes(2);
   });
 
   it("shows the second-delivery sentence naming the saved path as a warning in place when the count export's audit line is lost", async () => {

@@ -417,6 +417,24 @@ describe("SetupTab plant-mapping build: match radius", () => {
     ]);
   });
 
+  it("ends a failed mapping load's line once a load lands", async () => {
+    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(resultsApi, "loadPlantMapping")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(RESULTS_ANSWERS.mapping_loaded);
+    const [first, second] = RESULTS_ANSWERS.mapping_names.names;
+
+    render(<SetupTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: first } });
+    await within(mappingPanel()).findByTestId("entry-in-place");
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: second } });
+
+    await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
+  });
+
   it("renders the mapping-wide unattributed line when the total is nonzero", async () => {
     await buildAnswering(ONE_PLACED);
 
@@ -676,6 +694,24 @@ describe("SetupTab dataset identity", () => {
         context: { project: TEST_PROJECT.id, target: ROOT },
       }),
     ]);
+  });
+
+  it("ends a refused registration's line once the next registration starts", async () => {
+    vi.spyOn(api.dataset, "register")
+      .mockRejectedValueOnce(await thrown(IDENTITY_ANSWERS.unknown_crop))
+      .mockReturnValue(new Promise(() => {}));
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    await within(identityPanel()).findByTestId("entry-in-place");
+    // The reread after the refusal puts the crop back to the stored one, none.
+    await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText("Crop"), { target: { value: SERVED_CROP } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() => expect(within(identityPanel()).queryByTestId("entry-in-place")).toBeNull());
+    expect(api.dataset.register).toHaveBeenCalledTimes(2);
   });
 
   it("shows a committed registration's lost audit line as a warning, not a failure", async () => {
