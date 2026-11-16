@@ -1,6 +1,7 @@
 /** Reading one background job back by its id until it ends. */
 
 import { FINAL_STATES, type JobState_Completed_ } from "@/api/types.generated";
+import { pollLoop } from "@/hooks/pollLoop";
 
 const FINAL: ReadonlySet<string> = new Set(FINAL_STATES);
 
@@ -27,25 +28,17 @@ export function pollJob<J extends { state: JobState_Completed_ }>(
   onRead: (job: J) => void,
   onError: (error: unknown) => void,
 ): () => void {
-  let canceled = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const next = () => {
-    timer = setTimeout(() => {
-      read(jobId).then(
-        (job) => {
-          if (canceled) return;
-          onRead(job);
-          if (unended(job.state) && !canceled) next();
-        },
-        (error: unknown) => {
-          if (!canceled) onError(error);
-        },
-      );
-    }, JOB_POLL_MS);
-  };
-  next();
-  return () => {
-    canceled = true;
-    if (timer !== null) clearTimeout(timer);
-  };
+  return pollLoop({
+    read: () => read(jobId),
+    intervalMs: JOB_POLL_MS,
+    readFirstNow: false,
+    onAnswer: (job) => {
+      onRead(job);
+      return unended(job.state);
+    },
+    onFailure: (error) => {
+      onError(error);
+      return false;
+    },
+  }).stop;
 }
