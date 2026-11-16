@@ -17,9 +17,10 @@ commit with the fix and the guard test) and run the real script against it. They
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
   the directory cannot be removed;
 - a vitest file under a scratch frontend whose installed packages are this checkout's, each verdict
-  and refusal it can reach, ``--test-rev`` among them, except an outcome record that is not JSON
-  and a pass at a baseline no source change follows, which the pytest path alone holds, and a
-  changed frontend test counted as the test side of a pytest run;
+  and refusal it can reach, ``--test-rev`` among them, except an outcome record that is not JSON,
+  a pass at a baseline no source change follows, and a failure there scoring GUARDS with the
+  caveat that no source file differs, which the pytest path alone holds; and a changed frontend
+  test counted as the test side of a pytest run;
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
   rule failing or answering with something that is not JSON.
