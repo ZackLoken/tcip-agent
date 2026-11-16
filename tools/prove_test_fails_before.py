@@ -1116,13 +1116,14 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
         )
     if baseline_precedes:
         return VACUOUS, (
-            "every selected test passed at a baseline shown to precede the change. It guards "
-            "nothing; assert on what only the change produces."
+            "no selected test failed and not every one was skipped, at a baseline shown to "
+            "precede the change. It guards nothing; assert on what only the change produces."
         )
     return INDETERMINATE, (
-        "every selected test passed, but no source file differs between the baseline and the "
-        "working tree, so the baseline is not shown to precede the change and passing there says "
-        "nothing about the test. Name the pre-change revision with --baseline."
+        "no selected test failed and not every one was skipped, but no source file differs "
+        "between the baseline and the tree this test comes from, so the baseline is not shown to "
+        "precede the change and passing there says nothing about the test. Name the pre-change "
+        "revision with --baseline."
     )
 
 
