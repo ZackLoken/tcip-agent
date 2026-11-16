@@ -1,4 +1,8 @@
 {
+  "unopened": {
+    "status": 409,
+    "body": { "detail": "no project is open; open one from the project list first" }
+  },
   "split_choices": {
     "as_recorded": {
       "case": "drawn",

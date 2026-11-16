@@ -17,10 +17,11 @@ images under no dataset root (:data:`LOOSE_RUN`), and a run
 through its route's request model. The routes' answers are written, normalized by
 :data:`NUMBERED` and :data:`STAMPED` (``fixture_session.normalized``), to
 :data:`GENERATED_PATH`,
-keyed by answer: the first run's data choices and cancellation; comparisons of the first run and
-a completed one (``compare``), of the two opened runs (``compare_same``), of the first run alone
-(``compare_one``), of it and an id naming no run (``compare_unread``), of it and the loose run
-(``compare_unset``), and of the finished runs'
+keyed by answer: the listing's refusal asked for before the project opens
+(``unopened``); the first run's data choices and cancellation; comparisons of the
+first run and a completed one (``compare``), of the two opened runs (``compare_same``), of the
+first run alone (``compare_one``), of it and an id naming no run (``compare_unread``), of it
+and the loose run (``compare_unset``), and of the finished runs'
 pairs (``compare_rich``, ``compare_unstamped``, ``compare_unranked``), with the rankings of three
 of them and two refusals of the first; a relaunch of the first run bound to
 its selection and of the sweep, each spawn recorded by ``tests._producer_fixtures.fake_popen`` and
@@ -258,6 +259,7 @@ def produce() -> dict[str, JsonValue]:
                     sent.append(ws.receive_json())
             return sent
 
+        unopened = answered(client, "list_runs_route", 409)
         root = workspace / "training"
         opened(client, named_project(root, "Training"))
         dataset = root / "dataset"
@@ -303,6 +305,7 @@ def produce() -> dict[str, JsonValue]:
         run, other = RUNS
         of_run = {"experiment_id": run}
         served: dict[str, JsonValue] = {
+            "unopened": unopened,
             "split_choices": split_choices(run),
             "cancel": answered(
                 client,

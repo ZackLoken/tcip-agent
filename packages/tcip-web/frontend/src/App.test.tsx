@@ -2,21 +2,27 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
+import { inferenceApi } from "@/api/inference";
 import { sessionsApi } from "@/api/sessions";
 import { subjectsApi } from "@/api/subjects";
-import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
+import { trainingApi } from "@/api/training";
+import type { OpenAnswer, Panel, PanelEnvelope, TrainingListing } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
+import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { loadOf } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
 import { measureWindow, PANE_FOCUS } from "@/test/dock";
+import { INFERENCE_ANSWERS } from "@/test/inference";
 import { LABEL_ANSWERS } from "@/test/labels";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
+import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import { changeSelection, stateEnvelope, SUBJECT_SELECT_ANSWER } from "@/test/store";
+import { CANCEL, RUNS, TRAINING_LISTING, TRAINING_REFUSALS } from "@/test/training";
 
 // The state socket and the active-tab sync stand in for App's network effects.
 const stateSocket = vi.hoisted(() => ({
@@ -42,17 +48,15 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
     <div data-testid="canvas-stage">{props.children}</div>
   ),
 }));
-// The Training tab lists its runs on mount, whether or not a project is open; the listing holds
-// no run.
+// The training runs and the inference jobs are listed whether or not a project is open; each
+// test sets what they answer.
 vi.mock("@/api/training", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/training")>();
-  return {
-    ...actual,
-    trainingApi: {
-      ...actual.trainingApi,
-      listRuns: vi.fn().mockResolvedValue({ runs: [], sweeps: [] }),
-    },
-  };
+  return { ...actual, trainingApi: { ...actual.trainingApi, listRuns: vi.fn() } };
+});
+vi.mock("@/api/inference", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/inference")>();
+  return { ...actual, inferenceApi: { ...actual.inferenceApi, listJobs: vi.fn() } };
 });
 
 vi.mock("@/api/client", async (importOriginal) => {
@@ -82,6 +86,8 @@ beforeEach(() => {
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
   vi.mocked(api.projects.list).mockResolvedValue(PROJECT_FIXTURES.picker);
+  vi.mocked(trainingApi.listRuns).mockReset().mockResolvedValue({ runs: [], sweeps: [] });
+  vi.mocked(inferenceApi.listJobs).mockReset().mockResolvedValue({ jobs: [] });
   stateSocket.connect.mockClear();
   stateSocket.close.mockClear();
   stateSocket.subscribePanel.mockClear();
@@ -604,6 +610,217 @@ describe("App session end", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("App job listings", () => {
+  const NO_ANSWER = () => new Promise<never>(() => {});
+  const listings = [
+    { tab: "training", read: () => vi.mocked(trainingApi.listRuns) },
+    { tab: "inference", read: () => vi.mocked(inferenceApi.listJobs) },
+  ] as const;
+
+  afterEach(() => vi.useRealTimers());
+
+  it("lists the training runs and the inference jobs with another tab active, which each tab then shows", async () => {
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(TRAINING_LISTING)
+      .mockImplementation(NO_ANSWER);
+    vi.mocked(inferenceApi.listJobs)
+      .mockResolvedValueOnce(INFERENCE_ANSWERS.running)
+      .mockImplementation(NO_ANSWER);
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("meta"));
+    render(<App />);
+    await screen.findByRole("tabpanel", { name: /meta/i });
+
+    await waitFor(() => {
+      expect(trainingApi.listRuns).toHaveBeenCalled();
+      expect(inferenceApi.listJobs).toHaveBeenCalled();
+    });
+
+    act(() => useStore.getState().setActiveTab("training"));
+    expect(await screen.findByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument();
+    act(() => useStore.getState().setActiveTab("inference"));
+    expect(await screen.findByText(INFERENCE_ANSWERS.launched.job_id)).toBeInTheDocument();
+  });
+
+  it.each(listings)(
+    "starts no second read of the $tab listing while its first is held open for a minute",
+    async ({ tab, read }) => {
+      read().mockImplementation(NO_ANSWER);
+      useStore.setState({ openProject: VALLEY_OPENED.project });
+      act(() => useStore.getState().setActiveTab(tab));
+      vi.useFakeTimers();
+      render(<App />);
+      await vi.waitFor(() => expect(read()).toHaveBeenCalled());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(read()).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    {
+      tab: "training",
+      read: () => vi.mocked(trainingApi.listRuns),
+      refusal: TRAINING_REFUSALS.unopened,
+      failed: "Could not load training runs",
+    },
+    {
+      tab: "inference",
+      read: () => vi.mocked(inferenceApi.listJobs),
+      refusal: INFERENCE_ANSWERS.unopened,
+      failed: "Could not load inference jobs",
+    },
+  ] as const)(
+    "with no project open reads the $tab listing once across a minute, and once more on its Retry",
+    async ({ tab, read, refusal, failed }) => {
+      const refused = await thrown(refusal);
+      read().mockRejectedValue(refused);
+      const message = `${failed}: ${refusal.body.detail}`;
+      act(() => useStore.getState().setActiveTab(tab));
+      vi.useFakeTimers();
+      render(<App />);
+      await vi.waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(read()).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(within(screen.getByText(message)).getByRole("button", { name: "Retry" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(read()).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(message)).toBeInTheDocument();
+    },
+  );
+
+  it("reads the runs once more as soon as the read in flight when a Cancel lands answers", async () => {
+    const held = Promise.withResolvers<TrainingListing>();
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(TRAINING_LISTING)
+      .mockReturnValueOnce(held.promise)
+      .mockResolvedValue({ runs: [], sweeps: [] });
+    vi.spyOn(trainingApi, "cancel").mockResolvedValue(CANCEL);
+    const id = RUNS.unlaunched.experiment_id;
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    vi.useFakeTimers();
+    render(<App />);
+    await vi.waitFor(() => expect(screen.getByText(id)).toBeInTheDocument());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
+    });
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: `Cancel ${id}` }));
+      await Promise.resolve();
+    });
+    expect(trainingApi.cancel).toHaveBeenCalledTimes(1);
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
+
+    await act(() => Promise.resolve(held.resolve(TRAINING_LISTING)));
+
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("No runs.")).toBeInTheDocument();
+  });
+
+  it("never shows the runs a read answers for the project open before another opened", async () => {
+    const held = Promise.withResolvers<TrainingListing>();
+    vi.mocked(trainingApi.listRuns)
+      .mockReturnValueOnce(held.promise)
+      .mockResolvedValue({ runs: [], sweeps: [] });
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    render(<App />);
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(1));
+
+    act(() =>
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 1, project: openedAs(RIDGE).project })),
+    );
+    act(() => useStore.getState().setActiveTab("training"));
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("No runs.")).toBeInTheDocument();
+    await act(() => Promise.resolve(held.resolve(TRAINING_LISTING)));
+
+    expect(screen.getByText("No runs.")).toBeInTheDocument();
+    expect(screen.queryByText(RUNS.unlaunched.experiment_id)).not.toBeInTheDocument();
+  });
+
+  it("keeps the runs a read answered beside the failure of the read after it", async () => {
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(TRAINING_LISTING)
+      .mockRejectedValue(new TypeError("Failed to fetch"));
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    vi.useFakeTimers();
+    render(<App />);
+    await vi.waitFor(() =>
+      expect(screen.getByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
+    });
+
+    expect(screen.getByText("Could not load training runs: Failed to fetch")).toBeInTheDocument();
+    expect(screen.getByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument();
+  });
+
+  it("shows the listing a read answers after a failed one, without a Retry", async () => {
+    vi.mocked(trainingApi.listRuns)
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(TRAINING_LISTING);
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    vi.useFakeTimers();
+    render(<App />);
+    await vi.waitFor(() =>
+      expect(screen.getByText("Could not load training runs: Failed to fetch")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(screen.getByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument();
+    expect(screen.queryByText(/Could not load training runs/)).not.toBeInTheDocument();
+  });
+
+  it("shows none of one project's runs or jobs once another project opens", async () => {
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(TRAINING_LISTING)
+      .mockImplementation(NO_ANSWER);
+    vi.mocked(inferenceApi.listJobs)
+      .mockResolvedValueOnce(INFERENCE_ANSWERS.running)
+      .mockImplementation(NO_ANSWER);
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    render(<App />);
+    expect(await screen.findByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument();
+    act(() => useStore.getState().setActiveTab("inference"));
+    expect(await screen.findByText(INFERENCE_ANSWERS.launched.job_id)).toBeInTheDocument();
+
+    act(() =>
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 1, project: openedAs(RIDGE).project })),
+    );
+    act(() => useStore.getState().setActiveTab("training"));
+    expect(await screen.findByText("No runs.")).toBeInTheDocument();
+    expect(screen.queryByText(RUNS.unlaunched.experiment_id)).not.toBeInTheDocument();
+    act(() => useStore.getState().setActiveTab("inference"));
+    expect(await screen.findByText("No jobs.")).toBeInTheDocument();
+    expect(screen.queryByText(INFERENCE_ANSWERS.launched.job_id)).not.toBeInTheDocument();
   });
 });
 

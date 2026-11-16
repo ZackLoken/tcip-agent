@@ -17,6 +17,7 @@ import { TabBanner } from "@/components/TabBanner";
 import { TerminalRail } from "@/components/TerminalRail";
 import { tabButtonId, tabPanelId } from "@/components/TopBar";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
+import { useJobListings } from "@/hooks/useJobListings";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { adoptLoad } from "@/lib/registrySave";
@@ -67,8 +68,8 @@ function TabFallback() {
 
 /**
  * Everything that runs on behalf of a project: the state socket and its snapshot adoption, the
- * agent's panel events, the registry hydration, the session end, the agent rail, the status bar
- * and the tabs.
+ * agent's panel events, the job listings, the registry hydration, the session end, the agent
+ * rail, the status bar and the tabs.
  */
 export function ProjectShell() {
   const activeTab = useStore((s) => s.gui.active_tab);
@@ -85,6 +86,8 @@ export function ProjectShell() {
 
   // Every change to the active tab is sent to the backend's GUI state, debounced.
   useActiveTabSync();
+
+  useJobListings();
 
   // Subscribe to agent panel pushes for every tab: a "banner" event becomes that tab's note,
   // and the Annotate panel's pushes also drive the agent-activity indicator.

@@ -23,11 +23,12 @@ import produced from "@/test/trainingAnswers.json";
 
 type Answer<K extends keyof typeof trainingApi> = Awaited<ReturnType<(typeof trainingApi)[K]>>;
 
-/** The refusals the generator received, each with its own detail: a relaunch of a run whose
- *  builder no import resolves, a ranking whose every carrier is unverified, a ranking by a metric
- *  no checkpoint carries (three tool dicts the route lifts), a TensorBoard over a run with no
- *  logs, and one over a failed run with no logs. */
+/** The refusals the generator received, each with its own detail: the listing asked for while no
+ *  project is open, a relaunch of a run whose builder no import resolves, a ranking whose every
+ *  carrier is unverified, a ranking by a metric no checkpoint carries (three tool dicts the route
+ *  lifts), a TensorBoard over a run with no logs, and one over a failed run with no logs. */
 interface Refusals {
+  unopened: Refusal<string>;
   refused_relaunch: Refusal<{ message: string; issues: string[] }>;
   unverified_refusal: Refusal<{ message: string; all_unverified: boolean }>;
   absent_metric_refusal: Refusal<{ message: string }>;

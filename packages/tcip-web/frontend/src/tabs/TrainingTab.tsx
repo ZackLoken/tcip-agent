@@ -11,7 +11,6 @@ import {
   type RunRow,
   type SplitChoices,
   type SweepGroup,
-  type TrainingListing,
   TRIAL,
 } from "@/api/types.generated";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
@@ -40,11 +39,11 @@ import {
   inProgressBatch,
   mergeMetric,
   numericMetricKeys,
-  RUN_REFRESH_MS,
   unionMetricKeys,
 } from "@/tabs/trainingMetrics";
 
-const NO_LISTING: TrainingListing = { runs: [], sweeps: [] };
+/** Ask the shell's reader to list the runs again now. */
+const listRunsNow = () => useStore.getState().askListing("training");
 
 /** What a run's launch event says about who started it. */
 function launcherSentence(launch: RunRow["launch"]): string {
@@ -298,8 +297,9 @@ export function TrainingTab() {
   const [splitChoicesById, setSplitChoicesById] = useState<Record<string, SplitChoices>>({});
   const [splitChoicesLoadingId, setSplitChoicesLoadingId] = useState<string | null>(null);
   const [splitChoiceErrors, setSplitChoiceErrors] = useState<Record<string, string>>({});
-  const [listing, setListing] = useState<TrainingListing>(NO_LISTING);
-  const [runsError, setRunsError] = useState<string | null>(null);
+  const listing = useStore((s) => s.jobListings.training.answer);
+  const listFailure = useStore((s) => s.jobListings.training.failure);
+  const runsError = listFailure && `Could not load training runs: ${listFailure}`;
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [latestBatch, setLatestBatch] = useState<MetricsRow | null>(null);
@@ -362,28 +362,21 @@ export function TrainingTab() {
     if (soleMarkedExperimentId) setSelectedRun(soleMarkedExperimentId);
   }, [soleMarkedExperimentId]);
 
-  const refreshRuns = useCallback(async () => {
-    try {
-      const next = await trainingApi.listRuns();
-      setListing(next);
-      setRunsError(null);
-      // A run that leaves the list must also leave the marked set, or the cap (which counts
-      // markedExperimentIds itself) can read full while the header (runs still present) shows fewer.
-      const stillPresent = new Set([
-        ...next.runs.map((run) => run.experiment_id),
-        ...next.sweeps.flatMap((s) => [s.sweep_id, ...s.trials.map((t) => t.experiment_id)]),
-      ]);
-      setMarkedExperimentIds((prev) => {
-        const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
-        return pruned.size === prev.size ? prev : pruned;
-      });
-      // A selected run that left the list (another project opened, say) must give up its
-      // stream too, or a stale selection keeps reconnecting behind a run this list never shows.
-      setSelectedRun((prev) => (prev !== null && !stillPresent.has(prev) ? null : prev));
-    } catch (e) {
-      setRunsError(`Could not load training runs: ${messageOf(e)}`);
-    }
-  }, []);
+  useEffect(() => {
+    // A run that leaves the list must also leave the marked set, or the cap (which counts
+    // markedExperimentIds itself) can read full while the header (runs still present) shows fewer.
+    const stillPresent = new Set([
+      ...listing.runs.map((run) => run.experiment_id),
+      ...listing.sweeps.flatMap((s) => [s.sweep_id, ...s.trials.map((t) => t.experiment_id)]),
+    ]);
+    setMarkedExperimentIds((prev) => {
+      const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
+      return pruned.size === prev.size ? prev : pruned;
+    });
+    // A selected run that left the list (another project opened, say) must give up its
+    // stream too, or a stale selection keeps reconnecting behind a run this list never shows.
+    setSelectedRun((prev) => (prev !== null && !stillPresent.has(prev) ? null : prev));
+  }, [listing]);
 
   // Fetched only for the row the breeder opens.
   const loadSplitChoices = useCallback(
@@ -410,12 +403,6 @@ export function TrainingTab() {
   );
 
   useEffect(() => {
-    void refreshRuns();
-    const t = setInterval(refreshRuns, RUN_REFRESH_MS);
-    return () => clearInterval(t);
-  }, [refreshRuns]);
-
-  useEffect(() => {
     if (!pickerOpen) return;
     setSplitChoicesById({});
     setSplitChoiceErrors({});
@@ -428,11 +415,11 @@ export function TrainingTab() {
       user: useStore.getState().user,
     });
     setPickerOpen(false);
-    void refreshRuns();
+    listRunsNow();
     setSelectedRun(result.kind === "sweep" ? result.sweep_id : result.experiment_id);
   }
 
-  // The run list's own poll keeps a state per run, which the metrics stream reads without reopening.
+  // The run listing keeps a state per run, which the metrics stream reads without reopening.
   const rowsRef = useRef<RunRow[]>(rows);
   useEffect(() => {
     rowsRef.current = rows;
@@ -476,11 +463,11 @@ export function TrainingTab() {
             run,
             trainingKey("end", projectId, run),
           );
-        void refreshRuns();
+        listRunsNow();
       }
     });
     return () => streamRef.current?.();
-  }, [selectedRun, streaming, projectRoot, projectId, refreshRuns, comparing]);
+  }, [selectedRun, streaming, projectRoot, projectId, comparing]);
 
   // Adopt the TensorBoard already serving this run, trial or sweep, or start one, retrying on a
   // timer while it is live.
@@ -532,7 +519,7 @@ export function TrainingTab() {
     useStore.getState().releaseNotification(key);
     try {
       await trainingApi.cancel(id, { user: useStore.getState().user });
-      void refreshRuns();
+      listRunsNow();
     } catch (e) {
       tell("failure", "error", `Cancel failed: ${messageOf(e)}`, id, key);
     } finally {
@@ -696,7 +683,7 @@ export function TrainingTab() {
                 title: "Runs and sweeps in this project",
                 emptyMessage: "No runs.",
                 error: runsError ?? undefined,
-                onRetry: () => void refreshRuns(),
+                onRetry: listRunsNow,
                 rows: launchRows,
               }}
               onSelect={(key) => void loadSplitChoices(key)}
@@ -705,11 +692,7 @@ export function TrainingTab() {
         )}
 
         {runsError && !pickerOpen && (
-          <ErrorRetry
-            message={runsError}
-            onRetry={() => void refreshRuns()}
-            className="text-[13px] mb-2"
-          />
+          <ErrorRetry message={runsError} onRetry={listRunsNow} className="text-[13px] mb-2" />
         )}
         {empty && !runsError && <RunMonitorEmpty>No runs.</RunMonitorEmpty>}
         <div className="mb-2 empty:hidden">

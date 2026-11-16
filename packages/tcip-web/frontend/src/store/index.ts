@@ -7,6 +7,7 @@ import { createBandSelectionSlice } from "@/store/slices/bandSelection";
 import { createBannerSlice } from "@/store/slices/banners";
 import { createCanvasSlice, focusContext } from "@/store/slices/canvas";
 import { createGuiSlice } from "@/store/slices/gui";
+import { createJobListingsSlice, NO_JOB_LISTINGS } from "@/store/slices/jobListings";
 import { createNotificationsSlice } from "@/store/slices/notifications";
 import { createPendingTerminalMessageSlice } from "@/store/slices/pendingTerminalMessage";
 import { createProjectOpenSlice } from "@/store/slices/projectOpen";
@@ -35,6 +36,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createPendingTerminalMessageSlice(...a),
   ...createUserSlice(...a),
   ...createProjectOpenSlice(...a),
+  ...createJobListingsSlice(...a),
 }));
 
 /** Focus clears when its context (`focusContext`) changes. */
@@ -45,6 +47,12 @@ useStore.subscribe((s) => {
   if (next === context) return;
   context = next;
   if (s.canvas.focus) useStore.setState({ canvas: { ...s.canvas, focus: null } });
+});
+
+/** The job listings empty when the open project changes. */
+useStore.subscribe((s, prev) => {
+  if (s.openProject?.id !== prev.openProject?.id)
+    useStore.setState({ jobListings: NO_JOB_LISTINGS });
 });
 
 // Re-export so callers derive a subject's color from one source (GUI-local, name-hashed).
