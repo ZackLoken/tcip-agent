@@ -1044,20 +1044,8 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
     )
     _commit_all(repo, "a test that hangs")
 
-    proc = subprocess.run(
-        [
-            sys.executable,
-            str(repo / "tools" / "prove_test_fails_before.py"),
-            "tests/test_widgets.py",
-            "--baseline",
-            "HEAD",
-            "--per-test-timeout",
-            "1",
-        ],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=60,
+    proc = _run(
+        repo, "tests/test_widgets.py", "HEAD", "--per-test-timeout", "1"
     )
 
     assert "INDETERMINATE" in proc.stdout
