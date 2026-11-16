@@ -266,9 +266,9 @@ export function AnnotateToolbar({
 
   return (
     <div className="shrink-0 border-b border-tcip-border bg-tcip-panel">
-      <div className="h-topbar flex items-center gap-3 px-3">
+      <div className="min-h-topbar flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-1">
         <div
-          className="inline-flex gap-0.5 rounded border border-tcip-border bg-tcip-bg p-0.5"
+          className="inline-flex flex-wrap gap-0.5 rounded border border-tcip-border bg-tcip-bg p-0.5"
           role="group"
           aria-label="Tool"
         >
@@ -293,22 +293,31 @@ export function AnnotateToolbar({
         <Divider />
 
         {/* Subject picker */}
-        <div className="relative">
+        <div className="relative min-w-0">
           <button
             id={SUBJECT_CONTROL_ID}
             type="button"
             onClick={() => setSubjectMenuOpen((o) => !o)}
             aria-expanded={subjectMenuOpen}
-            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-tcip-fg hover:border-tcip-border-hover"
+            className="flex h-[30px] max-w-full items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-tcip-fg hover:border-tcip-border-hover"
           >
             <span
-              className="h-2.5 w-2.5 rounded-xs"
+              className="h-2.5 w-2.5 shrink-0 rounded-xs"
               style={{ background: activeSubject ? subjectColor(activeSubject) : "#666" }}
               aria-hidden
             />
-            <span className="font-semibold">{activeSubject ?? "select subject"}</span>
-            <span className="font-mono text-tcip-muted">({activeCount})</span>
-            <svg viewBox="0 0 10 10" width="9" height="9" fill="none" aria-hidden="true">
+            <span className="truncate font-semibold" title={activeSubject ?? undefined}>
+              {activeSubject ?? "select subject"}
+            </span>
+            <span className="shrink-0 font-mono text-tcip-muted">({activeCount})</span>
+            <svg
+              viewBox="0 0 10 10"
+              width="9"
+              height="9"
+              fill="none"
+              aria-hidden="true"
+              className="shrink-0"
+            >
               <path
                 d="M2 4l3 3 3-3"
                 stroke="currentColor"
@@ -467,77 +476,78 @@ export function AnnotateToolbar({
           />
         )}
 
-        <div className="flex-1" />
-
-        <Divider />
-
-        <Stepper
-          label="Image"
-          noun="image"
-          name={imageName}
-          position={nav.position}
-          total={nav.total}
-          canPrev={nav.canPrev}
-          canNext={nav.canNext}
-          onStep={nav.stepImage}
-          onJump={nav.jumpToPosition}
-        />
-
-        {dataset && (
-          <div className="relative">
-            <select
-              aria-label="Images"
-              className="tcip-select h-[30px]"
-              value={nav.filter}
-              onChange={(e) =>
-                e.target.value === RANK_QUEUE
-                  ? setLaunching(true)
-                  : setImageFilter(e.target.value as ImageFilter)
-              }
-              title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"} or in a review queue's rank order`}
-            >
-              {IMAGE_FILTERS.filter((f) => f !== "queue" || nav.ranked !== null).map((f) => (
-                <option key={f} value={f}>
-                  {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f, nav.ranked ?? []).length})`}
-                </option>
-              ))}
-              <option value={RANK_QUEUE} disabled={ranking}>
-                {ranking ? "ranking a review queue" : "rank a review queue"}
-              </option>
-            </select>
-            {launching && (
-              <>
-                <div
-                  role="presentation"
-                  className="fixed inset-0 z-10"
-                  onClick={() => setLaunching(false)}
-                />
-                <div className="absolute right-0 top-full z-20 mt-1 rounded-md border border-tcip-border bg-tcip-panel shadow-lg">
-                  <ReviewQueueLaunch onLaunched={() => setLaunching(false)} />
-                </div>
-              </>
-            )}
+        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div className="flex items-center gap-3">
+            <Divider />
+            <Stepper
+              label="Image"
+              noun="image"
+              name={imageName}
+              position={nav.position}
+              total={nav.total}
+              canPrev={nav.canPrev}
+              canNext={nav.canNext}
+              onStep={nav.stepImage}
+              onJump={nav.jumpToPosition}
+            />
           </div>
-        )}
 
-        <label
-          className="flex items-center gap-1.5"
-          title={
-            !dataset?.subject
-              ? "Select a subject first"
-              : subjectState !== null
-                ? `Every ${dataset.subject} on this image is annotated (c)`
-                : "Loading this image's labels"
-          }
-        >
-          <input
-            type="checkbox"
-            checked={finished}
-            onChange={(e) => onComplete(e.target.checked)}
-            disabled={!imageName || subjectState === null || !dataset?.subject}
-          />
-          {subjectState === "negative" ? "Complete (none)" : "Complete"}
-        </label>
+          {dataset && (
+            <div className="relative">
+              <select
+                aria-label="Images"
+                className="tcip-select h-[30px]"
+                value={nav.filter}
+                onChange={(e) =>
+                  e.target.value === RANK_QUEUE
+                    ? setLaunching(true)
+                    : setImageFilter(e.target.value as ImageFilter)
+                }
+                title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"} or in a review queue's rank order`}
+              >
+                {IMAGE_FILTERS.filter((f) => f !== "queue" || nav.ranked !== null).map((f) => (
+                  <option key={f} value={f}>
+                    {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f, nav.ranked ?? []).length})`}
+                  </option>
+                ))}
+                <option value={RANK_QUEUE} disabled={ranking}>
+                  {ranking ? "ranking a review queue" : "rank a review queue"}
+                </option>
+              </select>
+              {launching && (
+                <>
+                  <div
+                    role="presentation"
+                    className="fixed inset-0 z-10"
+                    onClick={() => setLaunching(false)}
+                  />
+                  <div className="absolute right-0 top-full z-20 mt-1 rounded-md border border-tcip-border bg-tcip-panel shadow-lg">
+                    <ReviewQueueLaunch onLaunched={() => setLaunching(false)} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <label
+            className="flex items-center gap-1.5"
+            title={
+              !dataset?.subject
+                ? "Select a subject first"
+                : subjectState !== null
+                  ? `Every ${dataset.subject} on this image is annotated (c)`
+                  : "Loading this image's labels"
+            }
+          >
+            <input
+              type="checkbox"
+              checked={finished}
+              onChange={(e) => onComplete(e.target.checked)}
+              disabled={!imageName || subjectState === null || !dataset?.subject}
+            />
+            {subjectState === "negative" ? "Complete (none)" : "Complete"}
+          </label>
+        </div>
       </div>
     </div>
   );
