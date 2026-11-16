@@ -135,6 +135,12 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
     }
 
 
+def envelope_on_connect(client: TestClient) -> JsonValue:
+    """Return the state envelope ``/ws/state`` sends ``client`` on connect, the socket closed."""
+    with client.websocket_connect(socket_url(client, "state_ws")) as ws:
+        return ws.receive_json()
+
+
 REFUSED_CAPTURE = "2026-01-09"
 """The capture the refused scene saves and then makes ambiguous, a sample capture name."""
 
@@ -159,10 +165,6 @@ def refused_scene(
     from tests._producer_fixtures import write_image
     from tests._web_fixtures import named_project
 
-    def envelope() -> JsonValue:
-        with client.websocket_connect(socket_url(client, "state_ws")) as ws:
-            return ws.receive_json()
-
     root = project.root / "refused"
     photograph = write_image(
         image_dir(root, REFUSED_CAPTURE) / "a.jpg", (8, 8)
@@ -176,7 +178,7 @@ def refused_scene(
     write_image(photograph.with_name("A.png"), (8, 8))
     opened(client, named_project(workspace / "ridge", "ridge"))
     opened(client, project)
-    refused = envelope()
+    refused = envelope_on_connect(client)
     sound_root, sound_date = sound
     answered(
         client,
@@ -184,7 +186,10 @@ def refused_scene(
         200,
         CaptureChoice(dataset_root=str(sound_root), date=sound_date),
     )
-    return {"refused_envelope": refused, "reselected_envelope": envelope()}
+    return {
+        "refused_envelope": refused,
+        "reselected_envelope": envelope_on_connect(client),
+    }
 
 
 def produce() -> dict[str, JsonValue]:
@@ -207,8 +212,7 @@ def produce() -> dict[str, JsonValue]:
     with scratch_session() as (workspace, client):
         valley = named_project(workspace / "valley", "valley")
         answer = opened(client, valley)
-        with client.websocket_connect(socket_url(client, "state_ws")) as ws:
-            envelope = ws.receive_json()
+        envelope = envelope_on_connect(client)
         written = captures(valley.root)
         selected = {
             kind: answered(
