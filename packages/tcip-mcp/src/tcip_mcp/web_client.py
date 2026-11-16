@@ -407,9 +407,10 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     against ``project``; a capture the enumerator refuses (``LogicalImageError``) is returned as
     the state's ``refused_choice``, that choice with the error's sentence, and no selection. A
     snapshot that does not decode as its shape, that will not decode or sits in a database that
-    will not open or answer, or whose choice names a root or a capture that is no path raises
+    will not open or answer, or whose choice's root is empty or traverses raises
     ``tcip_store.ReadRefusedError`` naming the project: the shape's issues, or the sentence of
-    the error that stopped it.
+    the error that stopped it. A choice whose capture is no path segment raises the segment's own
+    ``tcip_store.ReadRefusedError``, naming the segment.
     """
     from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_mcp.registry_paths import resolved_registry_path
