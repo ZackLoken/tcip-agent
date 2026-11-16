@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import { messageOf, refusalOf } from "@/api/http";
@@ -18,10 +18,13 @@ import {
 } from "@/api/types.generated";
 import { ErrorRetry } from "@/components/ErrorRetry";
 import { ModelPicker } from "@/components/ModelPicker";
+import { NotificationItem } from "@/components/Notifications";
 import { TabHeading } from "@/components/TabHeading";
 import { unended } from "@/hooks/jobPoll";
+import { tell } from "@/lib/tell";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
+import { selectStanding } from "@/store/slices/notifications";
 
 type StatedField = "conf" | "cross_tile_nms" | keyof MaskCut;
 
@@ -72,6 +75,45 @@ function RefusedLaunchEntry({
   );
 }
 
+/** The key a failed launch for `date` of the dataset at `datasetRoot` stands on in the project
+ *  `projectId`. */
+const launchKey = (projectId: string | undefined, datasetRoot: string, date: string) =>
+  `inference-launch:${projectId}:${datasetRoot}:${date}`;
+
+/** The key a failed cancel of the job `jobId` stands on in the project `projectId`. */
+const cancelKey = (projectId: string | undefined, jobId: string) =>
+  `inference-cancel:${projectId}:${jobId}`;
+
+/** The id of the Watch control of the job `jobId`, where focus returns once its cancel's failure
+ *  is dismissed. */
+const watchControlId = (jobId: string) => `watch-${jobId}`;
+
+/** The failure standing on the last cancel of the job `jobId`, in place as a row under that job's
+ *  own, spanning the table's `columns`. */
+function CancelFailureRow({
+  entryKey,
+  jobId,
+  columns,
+}: {
+  entryKey: string;
+  jobId: string;
+  columns: number;
+}) {
+  const failed = useStore((s) => selectStanding(entryKey)(s) !== null);
+  if (!failed) return null;
+  return (
+    <tr>
+      <td colSpan={columns} className="pb-1.5">
+        <NotificationItem
+          placement="in place"
+          entryKey={entryKey}
+          afterDismiss={() => document.getElementById(watchControlId(jobId))?.focus()}
+        />
+      </td>
+    </tr>
+  );
+}
+
 function statusBadgeClass(job: InferenceJob): string {
   if (unended(job.state)) return "bg-tcip-fn/20 text-tcip-fn";
   return job.state.status === "completed"
@@ -93,6 +135,7 @@ function assessmentsOf(assessments: AssessmentSummary[], model: Listed | null) {
 export function InferenceTab() {
   const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = useStore(selectDatasetRoot);
+  const projectId = useStore((s) => s.openProject?.id);
 
   const [model, setModel] = useState<Listed | null>(null);
   const [assessed, setAssessed] = useState<Assessments | null>(null);
@@ -283,6 +326,8 @@ export function InferenceTab() {
   // One date's launch: the server publishes the date's own bucket beneath the named one.
   async function launchOne(checkpointPath: string, date: string) {
     if (!datasetRoot) return;
+    const key = launchKey(projectId, datasetRoot, date);
+    useStore.getState().releaseNotification(key);
     try {
       const launched = await inferenceApi.launch({
         checkpoint_path: checkpointPath,
@@ -303,7 +348,7 @@ export function InferenceTab() {
         return;
       }
       dropRefusal(date);
-      useStore.getState().pushToast(`Inference launch failed for ${date}: ${messageOf(e)}`);
+      tell("failure", "error", `Inference launch failed for ${date}: ${messageOf(e)}`, date, key);
     }
   }
 
@@ -336,7 +381,9 @@ export function InferenceTab() {
   const [cancelRequested, setCancelRequested] = useState<ReadonlySet<string>>(new Set());
 
   async function onCancel(jobId: string) {
+    const key = cancelKey(projectId, jobId);
     setCancelRequested((prev) => new Set(prev).add(jobId));
+    useStore.getState().releaseNotification(key);
     try {
       await inferenceApi.cancel(jobId, { user: useStore.getState().user });
     } catch (e) {
@@ -345,7 +392,7 @@ export function InferenceTab() {
         next.delete(jobId);
         return next;
       });
-      useStore.getState().pushToast(`Cancel failed: ${messageOf(e)}`);
+      tell("failure", "error", `Cancel failed: ${messageOf(e)}`, jobId, key);
     }
   }
 
@@ -505,6 +552,18 @@ export function InferenceTab() {
               />
             ))}
           </ul>
+          {datasetRoot && (
+            <div className="mt-1 flex flex-col gap-1 empty:hidden">
+              {dates.map((date) => (
+                <NotificationItem
+                  key={date}
+                  placement="in place"
+                  entryKey={launchKey(projectId, datasetRoot, date)}
+                  afterDismiss={() => launchButtonRef.current?.focus()}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -527,35 +586,46 @@ export function InferenceTab() {
             </thead>
             <tbody>
               {listedJobs.map((j) => (
-                <tr key={j.job_id} className="border-t border-tcip-border">
-                  <td className="py-1.5 pr-3 font-mono">{j.job_id}</td>
-                  <td className="pr-3">
-                    <span className={`tcip-badge ${statusBadgeClass(j)}`}>{shownStatus(j)}</span>
-                  </td>
-                  <td className="pr-3 tabular-nums">
-                    {j.total > 0 ? `${j.done} / ${j.total}` : j.done}
-                    {j.total > 0 && (
-                      <div className="h-1 mt-1 bg-tcip-border rounded overflow-hidden">
-                        <div
-                          className="h-full bg-tcip-accent"
-                          style={{ width: `${(j.done / j.total) * 100}%` }}
-                        />
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    <div className="flex gap-1">
-                      <button className="tcip-btn" onClick={() => setActiveJobId(j.job_id)}>
-                        Watch
-                      </button>
-                      {unended(j.state) && !cancelRequested.has(j.job_id) && (
-                        <button className="tcip-btn" onClick={() => void onCancel(j.job_id)}>
-                          Cancel
-                        </button>
+                <Fragment key={j.job_id}>
+                  <tr className="border-t border-tcip-border">
+                    <td className="py-1.5 pr-3 font-mono">{j.job_id}</td>
+                    <td className="pr-3">
+                      <span className={`tcip-badge ${statusBadgeClass(j)}`}>{shownStatus(j)}</span>
+                    </td>
+                    <td className="pr-3 tabular-nums">
+                      {j.total > 0 ? `${j.done} / ${j.total}` : j.done}
+                      {j.total > 0 && (
+                        <div className="h-1 mt-1 bg-tcip-border rounded overflow-hidden">
+                          <div
+                            className="h-full bg-tcip-accent"
+                            style={{ width: `${(j.done / j.total) * 100}%` }}
+                          />
+                        </div>
                       )}
-                    </div>
-                  </td>
-                </tr>
+                    </td>
+                    <td>
+                      <div className="flex gap-1">
+                        <button
+                          id={watchControlId(j.job_id)}
+                          className="tcip-btn"
+                          onClick={() => setActiveJobId(j.job_id)}
+                        >
+                          Watch
+                        </button>
+                        {unended(j.state) && !cancelRequested.has(j.job_id) && (
+                          <button className="tcip-btn" onClick={() => void onCancel(j.job_id)}>
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  <CancelFailureRow
+                    entryKey={cancelKey(projectId, j.job_id)}
+                    jobId={j.job_id}
+                    columns={4}
+                  />
+                </Fragment>
               ))}
             </tbody>
           </table>
