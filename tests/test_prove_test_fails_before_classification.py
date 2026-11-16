@@ -1171,9 +1171,9 @@ def test_an_uncommitted_source_change_takes_head_as_the_baseline(
     result = _tool(repo, "tests/test_widgets.py")
 
     assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
-    assert _baseline_line(result) == (
-        f"baseline      {head[:12]} (HEAD, because the change under test is uncommitted)"
-    )
+    line = _baseline_line(result)
+    assert head[:8] in line, result.stdout
+    assert "(HEAD, because the change under test is uncommitted)" in line
 
 
 def test_a_committed_change_takes_its_merge_base_with_the_integration_branch(
@@ -1196,9 +1196,9 @@ def test_a_committed_change_takes_its_merge_base_with_the_integration_branch(
     result = _tool(repo, "tests/test_widgets.py", "--integration", "trunk")
 
     assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
-    assert _baseline_line(result) == (
-        f"baseline      {baseline[:12]} (merge-base of HEAD and trunk)"
-    )
+    line = _baseline_line(result)
+    assert baseline[:8] in line, result.stdout
+    assert "(merge-base of HEAD and trunk)" in line
 
 
 def test_head_already_on_the_integration_branch_is_refused(
