@@ -1355,14 +1355,10 @@ def _prove(args: argparse.Namespace, record: dict) -> int:
                 "test_modules_in_baseline_tree": inside,
             }
             if not inside:
-                record.update(
-                    verdict=REFUSED,
-                    why=(
-                        "a test module vitest ran lies outside the baseline tree, so any verdict "
-                        "would describe another checkout. The modules are recorded."
-                    ),
+                raise RefusalError(
+                    "a test module vitest ran lies outside the baseline tree, so any verdict "
+                    "would describe another checkout. The modules are recorded."
                 )
-                return _report(record, args.json_out)
 
         # _failure_kind resolves crash_path against tree, so it runs before the materialized tree
         # is removed below.
