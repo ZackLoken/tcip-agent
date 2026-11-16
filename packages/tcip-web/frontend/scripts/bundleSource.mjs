@@ -20,7 +20,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { isTestFile } from "./routeReads.mjs";
+import { isTestFile } from "./testFiles.mjs";
 
 /** The build record's file name, written into the output directory. */
 export const BUILD_RECORD = "build.json";

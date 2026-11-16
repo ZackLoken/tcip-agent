@@ -19,16 +19,7 @@ import { pathToFileURL } from "node:url";
 
 import ts from "typescript";
 
-/**
- * Return whether `relative`, a path relative to the source directory, is a test file: one whose
- * name carries `.test.`, or one inside the directory's `test` folder.
- *
- * @param {string} relative
- */
-export function isTestFile(relative) {
-  const parts = relative.split(/[\\/]/);
-  return parts.at(-1).includes(".test.") || parts[0] === "test";
-}
+import { isTestFile } from "./testFiles.mjs";
 
 /**
  * Return whether `relative`, a path relative to the source directory, is a non-test source.
