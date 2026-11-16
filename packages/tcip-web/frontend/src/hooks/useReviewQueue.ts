@@ -30,6 +30,7 @@ export function useReviewQueuePoll(): void {
         text: { sentence },
         context: { target: `review queue of ${held.capture}` },
         key: `review-queue:${running}`,
+        retell: false,
       });
     return pollJob(
       running,

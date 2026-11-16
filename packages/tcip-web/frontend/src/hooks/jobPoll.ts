@@ -5,9 +5,15 @@ import { pollLoop } from "@/hooks/pollLoop";
 
 const FINAL: ReadonlySet<string> = new Set(FINAL_STATES);
 
-/** Whether `state` is one a job holds before it ends: none of the backend's `FINAL_STATES`. */
+/** Whether `status` is one a job, a training run or a sweep holds once it has ended: one of the
+ *  backend's `FINAL_STATES`. */
+export function ended(status: string): boolean {
+  return FINAL.has(status);
+}
+
+/** Whether `state` is one a job holds before it ends. */
 export function unended(state: JobState_Completed_): boolean {
-  return !FINAL.has(state.status);
+  return !ended(state.status);
 }
 
 /** How often a job is read back. Long enough that a job running for minutes is not polled

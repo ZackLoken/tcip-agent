@@ -6,13 +6,14 @@ import { messageOf } from "@/api/http";
 import { inferenceApi } from "@/api/inference";
 import { trainingApi } from "@/api/training";
 import { pollLoop } from "@/hooks/pollLoop";
+import { tellJobs } from "@/lib/jobEntries";
 import { useStore } from "@/store";
 import type { JobListings, ListingName } from "@/store/slices/jobListings";
 import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 /** How often the inference job listing is read; 3000 ms is the hand-set interval the Inference tab
  *  polled it at, with no measurement behind it. */
-const INFERENCE_REFRESH_MS = 3000;
+export const INFERENCE_REFRESH_MS = 3000;
 
 /** How each listing is read, as the store holds its answer, and how often. */
 const LISTINGS: {
@@ -28,8 +29,9 @@ const LISTINGS: {
 
 /** Read the listing `name` for the project `project` names until `project` changes or the
  *  caller unmounts, holding each answer and each failure, and reading now whenever
- *  `askListing(name)` is called. A failed read keeps the listing last answered. With no project
- *  open the listing is read once, and again only when asked. */
+ *  `askListing(name)` is called. Each answer held for an open project tells its jobs. A failed
+ *  read keeps the listing last answered. With no project open the listing is read once, and
+ *  again only when asked. */
 function useListing<N extends ListingName>(name: N, project: string | null): void {
   useEffect(() => {
     const { read, intervalMs } = LISTINGS[name];
@@ -40,7 +42,8 @@ function useListing<N extends ListingName>(name: N, project: string | null): voi
       intervalMs,
       readFirstNow: true,
       onAnswer: (answer) => {
-        holdListing(name, project, answer, null);
+        if (holdListing(name, project, answer, null) && project !== null)
+          tellJobs(name, project, answer);
         return again;
       },
       onFailure: (error) => {

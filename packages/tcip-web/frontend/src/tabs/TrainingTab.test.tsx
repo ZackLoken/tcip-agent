@@ -664,7 +664,16 @@ describe("TrainingTab run end and stream error", () => {
   });
 
   const id = RUNS.streamed.experiment_id;
-  const ended = `Training ${id}: ${String(STATUS_FRAME.status?.state)}`;
+  const ended = `Training run ${id}: ${RUNS.streamed.state}. ${RUNS.streamed.status_error}`;
+  /** Every listed entry about the run `id`. */
+  const entriesOfRun = () =>
+    useStore.getState().notifications.filter((e) => e.context.target === id);
+  /** The run list answers the produced listing taken before the run failed, then the one after. */
+  const failing = () =>
+    vi
+      .spyOn(trainingApi, "listRuns")
+      .mockResolvedValueOnce(LISTING_BEFORE_FAILURE)
+      .mockResolvedValue(TRAINING_LISTING);
 
   it("raises no entry on selecting a run already known to be terminal, only rediscovering its state", async () => {
     listing();
@@ -677,28 +686,28 @@ describe("TrainingTab run end and stream error", () => {
     expect(entriesSaying(ended)).toEqual([]);
   });
 
-  it("raises one job entry naming the run when a watched live run ends, and none for the same end again", async () => {
-    listing(LISTING_BEFORE_FAILURE);
+  it("tells a watched live run's end in its one job entry from the listing its end asks for, and nothing for the same end again", async () => {
+    failing();
     streamFrames(STATUS_FRAME, STATUS_FRAME);
 
     renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     await waitFor(() => expect(entriesSaying(ended)).toHaveLength(1));
-    expect(selectStanding(trainingKey("end", TEST_PROJECT.id, id))(useStore.getState())).toEqual(
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(3));
+    expect(entriesOfRun()).toEqual([
       expect.objectContaining({
         kind: "job",
-        level: "info",
+        level: "error",
         count: 1,
         sentence: ended,
         context: { project: TEST_PROJECT.id, target: id },
       }),
-    );
-    expect(useStore.getState().notifications).toHaveLength(1);
+    ]);
   });
 
   it("keeps a run's failed Cancel in its row when that run's end arrives", async () => {
-    listing(LISTING_BEFORE_FAILURE);
+    failing();
     streamFrames(STATUS_FRAME);
     // What fetch rejects with when the backend cannot be reached.
     vi.spyOn(trainingApi, "cancel").mockRejectedValue(new TypeError("Failed to fetch"));

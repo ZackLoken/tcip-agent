@@ -419,12 +419,6 @@ export function TrainingTab() {
     setSelectedRun(result.kind === "sweep" ? result.sweep_id : result.experiment_id);
   }
 
-  // The run listing keeps a state per run, which the metrics stream reads without reopening.
-  const rowsRef = useRef<RunRow[]>(rows);
-  useEffect(() => {
-    rowsRef.current = rows;
-  }, [rows]);
-
   const streaming = selectedRun !== null && !selectedSweep;
   useEffect(() => {
     // Comparing owns the detail region; a sweep has no metrics log of its own.
@@ -433,10 +427,6 @@ export function TrainingTab() {
     setMetrics([]);
     setLatestBatch(null);
     streamRef.current?.();
-    // A run already terminal when this stream opened is a rediscovery, not a transition the
-    // breeder is watching; only a run still live at open time raises its end.
-    const knownAtOpen = rowsRef.current.find((r) => r.experiment_id === selectedRun);
-    const alreadyTerminal = knownAtOpen !== undefined && TERMINAL_STATES.has(knownAtOpen.state);
     streamRef.current = openTrainingStream(selectedRun, (msg) => {
       if (msg.type === "metric") {
         setMetrics((prev) => mergeMetric(prev, msg.row));
@@ -453,16 +443,8 @@ export function TrainingTab() {
           run,
           trainingKey("stream", projectId, run),
         );
-      } else if (msg.type === "status") {
-        const run = msg.experiment_id;
-        if (!alreadyTerminal)
-          tell(
-            "job",
-            "info",
-            `Training ${run}: ${msg.status.state}`,
-            run,
-            trainingKey("end", projectId, run),
-          );
+      } else {
+        // The run's end is told from the listing this read answers.
         listRunsNow();
       }
     });

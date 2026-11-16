@@ -348,6 +348,64 @@ describe("a failure", () => {
   });
 });
 
+describe("a job", () => {
+  const raiseJob = (sentence: string, retell: boolean) =>
+    act(() =>
+      useStore.getState().raiseNotification({
+        kind: "job",
+        level: "info",
+        text: { sentence },
+        context: { project: "valley", target: "run-1" },
+        key: "training-job:valley:run-1",
+        retell,
+      }),
+    );
+  /** The job's one entry standing, and a later failure, both seen; every polite announcement after
+   *  that is returned as it is made. */
+  async function seenBesideAFailure(): Promise<string[]> {
+    renderOpenHost();
+    raiseJob("Training run run-1: running", false);
+    raiseFailure("Could not load the registry.", "valley");
+    act(() => useStore.getState().markNotificationsSeen());
+    await act(flush);
+    return announcements(screen.getByRole("status"));
+  }
+
+  it("told again on its standing entry is one entry with a new id, announced, counted as new and listed first", async () => {
+    const statuses = await seenBesideAFailure();
+    const [standing] = useStore.getState().notifications;
+
+    raiseJob("Training run run-1: completed", true);
+    await act(flush);
+
+    expect(statuses).toEqual(["Training run run-1: completed"]);
+    const jobs = useStore.getState().notifications.filter((e) => e.kind === "job");
+    expect(jobs).toEqual([
+      expect.objectContaining({ key: standing.key, sentence: "Training run run-1: completed" }),
+    ]);
+    expect(jobs[0].id).toBeGreaterThan(standing.id);
+    expect(screen.getByRole("button", { name: "Notifications, 1 new" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("Training run run-1: completed");
+  });
+
+  it("raised on its standing entry without being told again updates that entry in place, unannounced", async () => {
+    const statuses = await seenBesideAFailure();
+    const [standing] = useStore.getState().notifications;
+
+    raiseJob("Training run run-1: running, epoch 2", false);
+    await act(flush);
+
+    expect(statuses).toEqual([]);
+    expect(useStore.getState().notifications[0]).toEqual(
+      expect.objectContaining({
+        id: standing.id,
+        sentence: "Training run run-1: running, epoch 2",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Notifications" })).toBeInTheDocument();
+  });
+});
+
 describe("an entry in place", () => {
   it("offers the action its placing control supplies, which the same entry in the area does not", () => {
     const reload = vi.fn();

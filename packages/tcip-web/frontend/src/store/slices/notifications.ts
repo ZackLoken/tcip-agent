@@ -72,15 +72,15 @@ export type NotificationEntry = EntryText &
     context: EntryContext;
   };
 
-/** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal. */
-export interface Raised {
-  kind: RaisedKind;
+/** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal. A job
+ *  states whether an entry already standing for it is told again (`retell`). */
+export type Raised = {
   level: MessageLevel;
   text: { sentence: string } | { refusal: Refusal };
   context: EntryContext;
   key?: string;
   action?: EntryAction;
-}
+} & ({ kind: Exclude<RaisedKind, "job">; retell?: never } | { kind: "job"; retell: boolean });
 
 export interface NotificationsSlice {
   /** The entries the notifications area lists, oldest first; a dismissed entry leaves it. */
@@ -97,12 +97,13 @@ export interface NotificationsSlice {
    *  once that entry is dismissed. */
   holdCondition: (condition: ConditionName, sentence: string | null) => void;
   /**
-   * Raise `raised`. On a key a listed entry stands on, a job updates that entry in place, a
-   * refusal is added to its refusals, a failure or notice stating the same text raises its count,
-   * and one stating another text is a new entry that takes the key, the earlier one staying
-   * listed. With no key, or none standing on it, a listed entry standing on no key of the same
-   * kind, level, text and context raises its count and takes the key. Anything else is a new
-   * entry, announced once. An entry raised again carries the latest raise's action.
+   * Raise `raised`. On a key a listed entry stands on, a job updates that entry in place, or
+   * with `retell` replaces it by a new entry on the same key, a refusal is added to its
+   * refusals, a failure or notice stating the same text raises its count, and one stating
+   * another text is a new entry that takes the key, the earlier one staying listed. With no key,
+   * or none standing on it, a listed entry standing on no key of the same kind, level, text and
+   * context raises its count and takes the key. Anything else is a new entry, announced once. An
+   * entry raised again carries the latest raise's action.
    */
   raiseNotification: (raised: Raised) => void;
   /** End what stands on `key`: its entry stays listed until dismissed, standing on no key and
@@ -185,7 +186,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
       };
     }),
 
-  raiseNotification: ({ kind, level, text, context, key, action }) =>
+  raiseNotification: ({ kind, level, text, context, key, action, retell }) =>
     set((s) => {
       const said: EntryText =
         "refusal" in text ? { refusals: [text.refusal] } : { sentence: text.sentence };
@@ -204,13 +205,14 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
           e === standing ? ({ ...e, key, action, ...next } as NotificationEntry) : e,
         ),
       });
-      if (standing && kind === "job") {
+      const standingJob = kind === "job" && !!standing;
+      if (standingJob && !retell) {
         return replaced({ level, context, ...said });
       }
-      if (standing?.refusals && "refusal" in text) {
+      if (!standingJob && standing?.refusals && "refusal" in text) {
         return replaced({ refusals: [...standing.refusals, text.refusal] });
       }
-      if (standing && textOf(standing) === textOf(said)) {
+      if (!standingJob && standing && textOf(standing) === textOf(said)) {
         return replaced({ count: standing.count + 1 });
       }
       const entry = {
@@ -224,10 +226,10 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         action,
         ...said,
       } as NotificationEntry;
-      return {
-        notifications: [...s.notifications.map((e) => (e === standing ? unkeyed(e) : e)), entry],
-        announced: entry,
-      };
+      const earlier = s.notifications.flatMap((e) =>
+        e !== standing ? [e] : standingJob ? [] : [unkeyed(e)],
+      );
+      return { notifications: [...earlier, entry], announced: entry };
     }),
 
   releaseNotification: (key) =>
