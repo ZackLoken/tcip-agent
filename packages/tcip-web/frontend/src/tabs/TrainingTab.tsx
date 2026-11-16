@@ -30,6 +30,7 @@ import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
 import { TERMINAL_STATES } from "@/lib/runStatus";
 import { tell } from "@/lib/tell";
+import { trainingKey } from "@/lib/trainingKeys";
 import { useStore } from "@/store";
 import { clientName } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
@@ -146,15 +147,8 @@ function sweepLaunchRow(sweep: SweepGroup, onStart: () => Promise<void>): Launch
   };
 }
 
-/** The key a training message of `kind` stands on in the project `projectId`: a Cancel's failure,
- *  a stream's error or a run's end, each about the run or sweep `id`, or the Compare cap. */
-function trainingKey(
-  kind: "cancel" | "stream" | "end" | "compare-cap",
-  projectId: string | undefined,
-  id = "",
-): string {
-  return `training-${kind}:${projectId}:${id}`;
-}
+/** The key the Compare cap's refusal stands on in the project `projectId`. */
+const compareCapKey = (projectId: string | undefined) => `training-compare-cap:${projectId}`;
 
 /** The id of the control that selects the run or sweep `id`, where focus returns once its Cancel's
  *  failure is dismissed. */
@@ -310,7 +304,7 @@ export function TrainingTab() {
   // label.
   const [pendingCancel, setPendingCancel] = useState<ReadonlySet<string>>(new Set());
   const projectId = useStore((s) => s.openProject?.id);
-  const capKey = trainingKey("compare-cap", projectId);
+  const capKey = compareCapKey(projectId);
   // The run whose Compare toggle the cap last refused, where focus returns once that is dismissed.
   const capRefused = useRef<string | null>(null);
   const streamRef = useRef<(() => void) | null>(null);

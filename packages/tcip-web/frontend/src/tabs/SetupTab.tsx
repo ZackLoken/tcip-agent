@@ -37,15 +37,14 @@ function radiusPhrase(radius: MatchRadius): string {
   return `radius ${radius.value.toFixed(2)} m ${source}`;
 }
 
-/** The key a Setup failure of `kind` stands on in the project `projectId`: a mapping's load or
- *  build, or the identity read or registration of the dataset at `datasetRoot`. */
-function setupKey(
-  kind: "mapping-load" | "mapping-build" | "identity-read" | "register",
-  projectId: string,
-  datasetRoot = "",
-): string {
-  return `setup-${kind}:${projectId}:${datasetRoot}`;
-}
+/** The key a failed mapping `kind`, a load or a build, stands on in the project `projectId`. */
+const mappingKey = (kind: "load" | "build", projectId: string) =>
+  `setup-mapping-${kind}:${projectId}`;
+
+/** The key a failed identity `kind`, a read or a registration, of the dataset at `datasetRoot`
+ *  stands on in the project `projectId`. */
+const identityKey = (kind: "read" | "register", projectId: string, datasetRoot: string) =>
+  `setup-identity-${kind}:${projectId}:${datasetRoot}`;
 
 const MAPPING_INPUT_ID = "plant-mapping-name";
 const CROP_INPUT_ID = "dataset-crop";
@@ -57,8 +56,8 @@ function PlantMappingPanel({
   projectId: string;
   datasetRoot: string | null;
 }) {
-  const loadKey = setupKey("mapping-load", projectId);
-  const buildKey = setupKey("mapping-build", projectId);
+  const loadKey = mappingKey("load", projectId);
+  const buildKey = mappingKey("build", projectId);
   const buildButton = useRef<HTMLButtonElement>(null);
   const [mappingName, setMappingName] = useState("");
   // Every mapping name already persisted under the open project, for the picker below; a name
@@ -272,10 +271,10 @@ function DatasetIdentityPanel({
   datasetRoot,
 }: {
   projectId: string;
-  datasetRoot: string | null;
+  datasetRoot: string;
 }) {
-  const readKey = setupKey("identity-read", projectId, datasetRoot ?? "");
-  const registerKey = setupKey("register", projectId, datasetRoot ?? "");
+  const readKey = identityKey("read", projectId, datasetRoot);
+  const registerKey = identityKey("register", projectId, datasetRoot);
   const user = useStore((s) => s.user);
   const readFailed = useStore((s) => selectStanding(readKey)(s) !== null);
   const [read, setRead] = useState<RootIdentity | null>(null);
@@ -287,7 +286,6 @@ function DatasetIdentityPanel({
 
   const readIdentity = useCallback(
     (adopt: (answer: RootIdentity) => void) => {
-      if (!datasetRoot) return;
       void api.dataset
         .identity(datasetRoot)
         .then((answer) => {
@@ -318,7 +316,7 @@ function DatasetIdentityPanel({
     refresh();
   }, [refresh]);
 
-  if (!datasetRoot || (!read && !readFailed)) return null;
+  if (!read && !readFailed) return null;
   const readFailure = (
     <NotificationItem
       placement="in place"
@@ -339,7 +337,6 @@ function DatasetIdentityPanel({
   const stored = state.kind === REGISTERED ? state.identity.crop : null;
 
   async function register(confirmedCrop: string | null) {
-    if (!datasetRoot) return;
     setSubmitting(true);
     setRepaired(null);
     useStore.getState().releaseNotification(registerKey);
@@ -592,11 +589,13 @@ export function SetupTab() {
         <TabHeading tab="setup" />
         <TraitRevisionPanel key={projectId} />
         <InvariancesPanel key={`invariances-${projectId}`} projectId={projectId} />
-        <DatasetIdentityPanel
-          key={`identity-${projectId}-${datasetRoot}`}
-          projectId={projectId}
-          datasetRoot={datasetRoot}
-        />
+        {datasetRoot && (
+          <DatasetIdentityPanel
+            key={`identity-${projectId}-${datasetRoot}`}
+            projectId={projectId}
+            datasetRoot={datasetRoot}
+          />
+        )}
         <PlantMappingPanel
           key={`mapping-${projectId}`}
           projectId={projectId}
