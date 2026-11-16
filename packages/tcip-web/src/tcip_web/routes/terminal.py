@@ -47,7 +47,7 @@ from tcip_mcp.identity import actor
 from tcip_store import validated
 from tcip_web import terminal as pty_host
 from tcip_web.routes.audit_gap import audit_gap_409
-from tcip_web.state import OpenProject, RefusedOpen, store
+from tcip_web.state import OpenProject, store
 
 logger = logging.getLogger(__name__)
 
@@ -225,29 +225,6 @@ HAND_OFF_REQUEST = (
 )
 """The request a switch of harness delivers to the agent it ends."""
 
-OPENING_REQUEST = (
-    "[TCIP session start] Greet the person, ask whether to create a new project with you or to "
-    "open one they already have, and say how each is done."
-)
-"""The request that ends the session's own text a no-project launch pastes ahead of anything
-submitted, so its agent speaks first (:func:`opening_request` returns that text)."""
-
-
-def opening_request(refused: RefusedOpen | None) -> str:
-    """Return the request a launch with no project open delivers to its agent.
-
-    :data:`OPENING_REQUEST`, led on the same line by the id of the project ``refused`` names and
-    the sentence it was refused with, and by the instruction to tell the person, when ``refused``
-    is given.
-    """
-    if refused is None:
-        return OPENING_REQUEST
-    return (
-        f"The person tried to open the project with id {refused.project_id} and was refused: "
-        f'"{refused.sentence}". Tell them that, and why, in your greeting. {OPENING_REQUEST}'
-    )
-
-
 UNRECORDED_END = (AuditEntryNotWrittenError, ValueError)
 """What leaves an end with no end line: the line failing to append, or the session's log failing
 to read for its hand-off."""
@@ -300,8 +277,7 @@ class TerminalSession:
     """One PTY-attached agent process, its delivery state, its input writer and its subscribers.
 
     The delivery state is the session's own text still to paste ahead of the queued requests
-    (the opening request of a launch with no project, led by the open the backend last refused
-    when it holds one, or a hand-off request once a switch asks for one), whether the agent has
+    (the hand-off request, once a switch of harness asks for one), whether the agent has
     bracketed paste on, whether it has written its row's ``composer_ready``, the requests a
     person submitted that are still queued, whether a paste of them is with the writer, and the
     output tail an escape sequence split across reads continues from. Every input reaches the
@@ -351,13 +327,12 @@ class TerminalSession:
     ) -> pty_host.Prepared | pty_host.NotStarted:
         """Spawn ``provider``'s harness in a PTY for the open project, by ``actor``.
 
-        The launch resumes what :func:`launch_resumes` answers. With no project open the session
-        is to paste :func:`opening_request` of the backend's refused open once its composer is
-        live. Returns what its preparation took, or why it started no agent (a row that cannot
-        launch here, a log that will not read, a session hook its arguments cannot spell, a
-        preparation refused or failing on the filesystem, a failed spawn or start line).
+        The launch resumes what :func:`launch_resumes` answers. Returns what its preparation
+        took, or why it started no agent (a row that cannot launch here, a log that will not
+        read, a session hook its arguments cannot spell, a preparation refused or failing on the
+        filesystem, a failed spawn or start line).
         """
-        project, refused = store.opened, store.refused_open
+        project = store.opened
         command = pty_host.launch_command(provider)
         if command.kind == "unlaunchable":
             return pty_host.NotStarted(why=command.why)
@@ -404,8 +379,6 @@ class TerminalSession:
                 why=f"{_line_unwritten(exc)} {_SURVIVED}"
             )
         self._project = project
-        if project is None:
-            self._ahead = opening_request(refused)
         # Started only once the start line is written, so the process's own end follows it.
         pty_host.start_reader(
             pty,
