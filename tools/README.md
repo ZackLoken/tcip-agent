@@ -11,9 +11,11 @@ section instead.
   it leaves out.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
   current test side (`tests/` and the frontend's test files) so conftest and helpers travel with the
-  test, proves the baseline's own source is what runs, and reads the per-test outcome of pytest,
-  for a file under `tests/`, or of the frontend's installed vitest, for a frontend test file, to say
-  whether a test actually fails without its fix. Four verdicts, `GUARDS`, `VACUOUS`,
+  test, and reads the per-test outcome to say whether a test actually fails without its fix. A
+  file under `tests/` runs under pytest, after a proof that the baseline's own Python source is
+  what gets imported; a frontend test file runs under the frontend's installed vitest, after which
+  the proof is only that every test module vitest ran lies in the baseline tree, never where their
+  imports resolve. Four verdicts, `GUARDS`, `VACUOUS`,
   `INDETERMINATE` and `REFUSED`, each its own exit code; its module docstring states what each
   means and how the baseline is chosen, and only `GUARDS` is evidence. `--test-rev` checks a guard
   claim already in the history.
