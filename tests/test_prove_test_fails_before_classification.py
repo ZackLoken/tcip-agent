@@ -156,20 +156,10 @@ def test_a_test_file_taken_from_test_rev_guards_by_either_spelling(
     The scratch repository's head no longer holds the test file, so the verdict can only come
     from the file at the fix commit; the repo-relative and the absolute spelling report it alike.
     """
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = commit_all(repo, "double is a no-op")
+    repo, baseline = _fixed_double(tmp_path)
+    fix = git(repo, "rev-parse", "HEAD").strip()
 
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
     test_path = repo / "tests" / "test_widgets.py"
-    write(
-        test_path,
-        "def test_double_doubles():\n"
-        "    from widgets import double\n"
-        "    assert double(3) == 6\n",
-    )
-    fix = commit_all(repo, "double actually doubles")
-
     test_path.unlink()
     commit_all(repo, "remove the test")
 
@@ -867,12 +857,7 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
     write(repo / "widgets.py", "def double(x):\n    return x\n")
     commit_all(repo, "double is a no-op")
 
-    write(
-        repo / "tests" / "test_widgets.py",
-        "def test_double_doubles():\n"
-        "    from widgets import double\n"
-        "    assert double(3) == 6\n",
-    )
+    write(repo / "tests" / "test_widgets.py", DOUBLE_GUARD)
 
     proc = _snapshot(repo, "tests/test_widgets.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
