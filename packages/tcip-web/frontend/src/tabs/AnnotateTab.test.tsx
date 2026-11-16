@@ -4446,6 +4446,26 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
     expect(listed()).toEqual([expect.objectContaining({ sentence: GESTURE, key: undefined })]);
   });
 
+  it("says a subject is needed on another capture's image of the same name, once said on the first", async () => {
+    const [twin] = LATER_SELECTION.images;
+    await mount();
+    act(() => useStore.getState().setActiveSubject(null));
+    fireEvent.mouseDown(stage(), { clientX: 300, clientY: 300, button: 0 });
+    fireEvent.mouseUp(stage(), { clientX: 300, clientY: 300 });
+    await flush();
+    expect(standing()).toEqual(["Choose a subject first."]);
+
+    act(() => useStore.setState((s) => ({ gui: { ...s.gui, dataset: LATER_SELECTION } })));
+    await waitFor(() => expect(loadSpy).toHaveBeenLastCalledWith(twin.path));
+    await flush();
+    expect(standing()).toEqual([]);
+    fireEvent.mouseDown(stage(), { clientX: 4, clientY: 4, button: 0 });
+    fireEvent.mouseUp(stage(), { clientX: 4, clientY: 4 });
+    await flush();
+
+    expect(standing()).toEqual(["Choose a subject first."]);
+  });
+
   it("a prompt refused after its image was left is listed naming that image, on neither canvas", async () => {
     const answer = Promise.withResolvers<Awaited<ReturnType<typeof api.annotate.propose>>>();
     vi.spyOn(api.annotate, "propose").mockReturnValue(answer.promise);

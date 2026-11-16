@@ -1070,8 +1070,8 @@ export function AnnotateTab() {
    *  a refused `kind` act. */
   function requireSubject(kind: ActKind): string | null {
     if (activeSubject) return activeSubject;
-    if (noSubjectNoticeRef.current !== currentImageName) {
-      noSubjectNoticeRef.current = currentImageName;
+    if (noSubjectNoticeRef.current !== imgPath) {
+      noSubjectNoticeRef.current = imgPath;
       refuseAct(kind, "Choose a subject first.", liveImage());
     }
     return null;
