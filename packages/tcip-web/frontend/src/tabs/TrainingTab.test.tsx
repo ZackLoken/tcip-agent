@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { openTrainingStream, trainingApi } from "@/api/training";
@@ -17,8 +18,9 @@ import { formatNumber } from "@/lib/numberFormat";
 import { useStore } from "@/store";
 import { numericMetricKeys, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab } from "@/tabs/TrainingTab";
+import { entriesSaying } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
-import { openTestProject } from "@/test/store";
+import { openTestProject, TEST_PROJECT } from "@/test/store";
 import { servingOf } from "@/test/tensorboard";
 import {
   AGENT_CLIENT,
@@ -232,14 +234,36 @@ describe("TrainingTab run list", () => {
     );
   });
 
-  it("shows a failed Cancel in the row, not only as a toast", async () => {
+  it("holds a failed Cancel as one entry its row shows in place, describing the button, until the next Cancel", async () => {
+    openTestProject();
     listing();
-    vi.spyOn(trainingApi, "cancel").mockRejectedValue(new Error("network error"));
+    const id = unlaunched.experiment_id;
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(trainingApi, "cancel")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockReturnValue(new Promise(() => {}));
+    const sentence = "Cancel failed: Failed to fetch";
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByRole("button", cancelOf(unlaunched.experiment_id)));
+    fireEvent.click(await screen.findByRole("button", cancelOf(id)));
 
-    expect(await screen.findByText("Cancel failed: network error")).toBeInTheDocument();
+    const line = await within(rowFor(id)).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(sentence);
+    expect(screen.getAllByText(sentence)).toHaveLength(1);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        count: 1,
+        context: { project: TEST_PROJECT.id, target: id },
+      }),
+    ]);
+    expect(screen.getByRole("button", cancelOf(id))).toHaveAccessibleDescription(sentence);
+
+    fireEvent.click(screen.getByRole("button", cancelOf(id)));
+
+    await waitFor(() => expect(within(rowFor(id)).queryByTestId("entry-in-place")).toBeNull());
+    expect(entriesSaying(sentence)).toHaveLength(1);
   });
 });
 
@@ -612,7 +636,7 @@ describe("TrainingTab epoch table", () => {
   });
 });
 
-describe("TrainingTab status toast", () => {
+describe("TrainingTab run end and stream error", () => {
   beforeEach(() => {
     openTestProject();
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
@@ -621,34 +645,41 @@ describe("TrainingTab status toast", () => {
   const id = RUNS.streamed.experiment_id;
   const ended = `Training ${id}: ${String(STATUS_FRAME.status?.state)}`;
 
-  it("does not toast on selecting a run already known to be terminal, only rediscovering its state", async () => {
+  it("raises no entry on selecting a run already known to be terminal, only rediscovering its state", async () => {
     listing();
     streamFrames(STATUS_FRAME);
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
-    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalled());
-    expect(pushToast).not.toHaveBeenCalledWith(ended, "info");
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(2));
+    expect(entriesSaying(ended)).toEqual([]);
   });
 
-  it("toasts a transition to terminal observed while watching a live run", async () => {
+  it("raises one job entry naming the run when a watched live run ends, and none for the same end again", async () => {
     listing(LISTING_BEFORE_FAILURE);
-    streamFrames(STATUS_FRAME);
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+    streamFrames(STATUS_FRAME, STATUS_FRAME);
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
-    await waitFor(() => expect(pushToast).toHaveBeenCalledWith(ended, "info"));
+    await waitFor(() => expect(entriesSaying(ended)).toHaveLength(1));
+    expect(entriesSaying(ended)).toEqual([
+      expect.objectContaining({
+        kind: "job",
+        level: "info",
+        count: 1,
+        context: { project: TEST_PROJECT.id, target: id },
+      }),
+    ]);
+    expect(useStore.getState().notifications).toHaveLength(1);
   });
 
-  it("toasts a stream error once, then still shows a metric the reconnect delivers", async () => {
+  it("raises a stream error as one failure naming the run, then still shows a metric the reconnect delivers", async () => {
     const [first] = METRIC_FRAMES;
     listing(LISTING_BEFORE_FAILURE);
     streamFrames(UNKNOWN_RUN_FRAME, UNKNOWN_RUN_FRAME, first);
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+    const sentence = `Training stream error: ${UNKNOWN_RUN_FRAME.error}`;
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
@@ -656,8 +687,14 @@ describe("TrainingTab status toast", () => {
     expect(
       within(await screen.findByRole("table")).getByText(String(first.row.loss)),
     ).toBeInTheDocument();
-    expect(pushToast).toHaveBeenCalledWith(`Training stream error: ${UNKNOWN_RUN_FRAME.error}`);
-    expect(pushToast).toHaveBeenCalledTimes(1);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        count: 2,
+        context: { project: TEST_PROJECT.id, target: UNKNOWN_RUN_FRAME.experiment_id },
+      }),
+    ]);
   });
 });
 
@@ -918,23 +955,36 @@ describe("TrainingTab compare", () => {
     expect(toggle(first)).not.toBeDisabled();
   });
 
-  it("caps the marked set and names the reason on a fifth toggle", async () => {
+  it("caps the marked set and names the reason once per refused toggle, in place until a run is unmarked", async () => {
     openTestProject();
     const ids = TRAINING_LISTING.runs.slice(0, 5).map((r) => r.experiment_id);
     expect(ids).toHaveLength(5);
     listing();
     vi.spyOn(trainingApi, "compare").mockResolvedValue(compared);
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+    const sentence = "Compare fits at most 4 runs at once; unmark one first.";
 
-    render(<TrainingTab />);
+    // As main.tsx renders the app, so an updater React runs twice would raise twice.
+    render(
+      <StrictMode>
+        <TrainingTab />
+      </StrictMode>,
+    );
     await screen.findByText(ids[0]);
     for (const id of ids.slice(0, 4)) fireEvent.click(toggle(id));
     fireEvent.click(toggle(ids[4]));
 
-    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({ kind: "failure", level: "error", count: 1 }),
+    ]);
+    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(sentence);
     // The fifth toggle stayed off: the fourth (last accepted) row is still the marked one.
     expect(toggle(ids[3])).toHaveAttribute("aria-pressed", "true");
     expect(toggle(ids[4])).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(toggle(ids[3]));
+
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(entriesSaying(sentence)).toHaveLength(1);
   });
 
   it("groups Compare and Cancel as one action group", async () => {

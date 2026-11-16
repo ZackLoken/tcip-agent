@@ -17,6 +17,7 @@ import {
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { ErrorRetry } from "@/components/ErrorRetry";
 import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
+import { NotificationItem } from "@/components/Notifications";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
 import {
@@ -28,9 +29,11 @@ import {
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
 import { TERMINAL_STATES } from "@/lib/runStatus";
+import { tell } from "@/lib/tell";
 import { useStore } from "@/store";
 import { clientName } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
+import { selectStanding } from "@/store/slices/notifications";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
 import {
   inProgressBatch,
@@ -143,12 +146,29 @@ function sweepLaunchRow(sweep: SweepGroup, onStart: () => Promise<void>): Launch
   };
 }
 
+/** The key a training message of `kind` stands on in the project `projectId`: a Cancel's failure,
+ *  a stream's error or a run's end, each about the run or sweep `id`, or the Compare cap. */
+function trainingKey(
+  kind: "cancel" | "stream" | "end" | "compare-cap",
+  projectId: string | undefined,
+  id = "",
+): string {
+  return `training-${kind}:${projectId}:${id}`;
+}
+
+/** The id of the control that selects the run or sweep `id`, where focus returns once its Cancel's
+ *  failure is dismissed. */
+const selectControlId = (id: string) => `select-${id}`;
+
+/** The id of the Compare toggle of the run `id`. */
+const compareToggleId = (id: string) => `compare-${id}`;
+
 function RunItem({
   run,
   selected,
   marked,
   canceling,
-  cancelError,
+  cancelKey,
   onSelect,
   onToggleMarked,
   onCancel,
@@ -157,7 +177,7 @@ function RunItem({
   selected: boolean;
   marked: boolean;
   canceling: boolean;
-  cancelError: string | undefined;
+  cancelKey: string;
   onSelect: () => void;
   onToggleMarked: () => void;
   onCancel: () => void;
@@ -165,43 +185,45 @@ function RunItem({
   const id = run.experiment_id;
   return (
     <div
-      className={`flex items-start gap-1 p-2 rounded border transition-colors ${
+      className={`p-2 rounded border transition-colors ${
         selected && !marked
           ? "border-tcip-accent bg-tcip-accent/10"
           : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
       }`}
     >
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={runRowLabel(run)}
-        aria-describedby={`origin-mark-${id}`}
-        className="flex-1 min-w-0 text-left"
-        onClick={onSelect}
-      >
-        <div className="font-mono text-[13px]">{id}</div>
-        <div className="text-[12px] text-tcip-muted flex justify-between">
-          <span>
-            {stateLine(run.state, run.heartbeat)}
-            <span title={launcherDescription(run.launch)}>
-              {` · ${launcherSentence(run.launch)}`}
+      <div className="flex items-start gap-1">
+        <button
+          type="button"
+          id={selectControlId(id)}
+          aria-pressed={selected}
+          aria-label={runRowLabel(run)}
+          aria-describedby={`origin-mark-${id}`}
+          className="flex-1 min-w-0 text-left"
+          onClick={onSelect}
+        >
+          <div className="font-mono text-[13px]">{id}</div>
+          <div className="text-[12px] text-tcip-muted flex justify-between">
+            <span>
+              {stateLine(run.state, run.heartbeat)}
+              <span title={launcherDescription(run.launch)}>
+                {` · ${launcherSentence(run.launch)}`}
+              </span>
+              <span id={`origin-mark-${id}`} className="sr-only">
+                {launcherDescription(run.launch)}
+              </span>
             </span>
-            <span id={`origin-mark-${id}`} className="sr-only">
-              {launcherDescription(run.launch)}
-            </span>
-          </span>
-          {run.best && <span className="tabular-nums">{bestLine(run)}</span>}
-        </div>
-        {run.status_error && <div className="text-[12px] tcip-problem">{run.status_error}</div>}
-      </button>
-      <div className="flex flex-col items-end gap-1 shrink-0">
+            {run.best && <span className="tabular-nums">{bestLine(run)}</span>}
+          </div>
+          {run.status_error && <div className="text-[12px] tcip-problem">{run.status_error}</div>}
+        </button>
         <div
           role="group"
           aria-label="Run actions"
-          className="inline-flex rounded border border-tcip-border overflow-hidden"
+          className="inline-flex shrink-0 rounded border border-tcip-border overflow-hidden"
         >
           <button
             type="button"
+            id={compareToggleId(id)}
             aria-pressed={marked}
             aria-label={`Compare ${id}`}
             className={`px-2 py-1 text-[12px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
@@ -215,12 +237,12 @@ function RunItem({
             id={id}
             state={run.state}
             canceling={canceling}
-            cancelError={cancelError}
+            cancelKey={cancelKey}
             onCancel={onCancel}
           />
         </div>
-        <CancelError id={id} cancelError={cancelError} />
       </div>
+      <CancelFailure id={id} cancelKey={cancelKey} />
     </div>
   );
 }
@@ -229,22 +251,23 @@ function CancelButton({
   id,
   state,
   canceling,
-  cancelError,
+  cancelKey,
   onCancel,
 }: {
   id: string;
   state: string;
   canceling: boolean;
-  cancelError: string | undefined;
+  cancelKey: string;
   onCancel: () => void;
 }) {
+  const failed = useStore((s) => selectStanding(cancelKey)(s) !== null);
   if (TERMINAL_STATES.has(state)) return null;
   return (
     <button
       type="button"
       title="Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
       aria-label={`Cancel ${id}`}
-      aria-describedby={cancelError ? `cancel-error-${id}` : undefined}
+      aria-describedby={failed ? `cancel-error-${id}` : undefined}
       disabled={canceling}
       className="px-2 py-1 text-[12px] border-l border-tcip-border first:border-l-0 hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
       onClick={onCancel}
@@ -254,12 +277,17 @@ function CancelButton({
   );
 }
 
-function CancelError({ id, cancelError }: { id: string; cancelError: string | undefined }) {
-  if (!cancelError) return null;
+/** The failure standing on the Cancel of the run or sweep `id`, in place under its row. */
+function CancelFailure({ id, cancelKey }: { id: string; cancelKey: string }) {
   return (
-    <span id={`cancel-error-${id}`} className="text-[12px] tcip-problem text-right max-w-[150px]">
-      {cancelError}
-    </span>
+    <div className="mt-1 empty:hidden">
+      <NotificationItem
+        placement="in place"
+        entryKey={cancelKey}
+        textId={`cancel-error-${id}`}
+        afterDismiss={() => document.getElementById(selectControlId(id))?.focus()}
+      />
+    </div>
   );
 }
 
@@ -279,9 +307,12 @@ export function TrainingTab() {
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedExperimentIds, setMarkedExperimentIds] = useState<Set<string>>(new Set());
   // Cancel in flight, by run or sweep id: disables that row's own Cancel button with a pending
-  // label, and a failure lands in cancelErrors.
+  // label.
   const [pendingCancel, setPendingCancel] = useState<ReadonlySet<string>>(new Set());
-  const [cancelErrors, setCancelErrors] = useState<Record<string, string>>({});
+  const projectId = useStore((s) => s.openProject?.id);
+  const capKey = trainingKey("compare-cap", projectId);
+  // The run whose Compare toggle the cap last refused, where focus returns once that is dismissed.
+  const capRefused = useRef<string | null>(null);
   const streamRef = useRef<(() => void) | null>(null);
 
   const rows = useMemo(
@@ -296,22 +327,34 @@ export function TrainingTab() {
   const comparing = marked.length >= 2;
 
   function toggleMarked(run: RunRow) {
+    const id = run.experiment_id;
+    if (!markedExperimentIds.has(id) && markedExperimentIds.size >= MAX_MARKED_RUNS) {
+      capRefused.current = id;
+      tell(
+        "failure",
+        "error",
+        `Compare fits at most ${MAX_MARKED_RUNS} runs at once; unmark one first.`,
+        "Compare",
+        capKey,
+      );
+      return;
+    }
     setMarkedExperimentIds((prev) => {
       const next = new Set(prev);
-      if (next.has(run.experiment_id)) {
-        next.delete(run.experiment_id);
-        return next;
-      }
-      if (next.size >= MAX_MARKED_RUNS) {
-        useStore
-          .getState()
-          .pushToast(`Compare fits at most ${MAX_MARKED_RUNS} runs at once; unmark one first.`);
-        return prev;
-      }
-      next.add(run.experiment_id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
+
+  // The cap's refusal stands while the marked set is full, and ends once it is not or the tab
+  // leaves, which empties the set.
+  const markedCount = markedExperimentIds.size;
+  useEffect(() => {
+    const release = () => useStore.getState().releaseNotification(capKey);
+    if (markedCount < MAX_MARKED_RUNS) release();
+    return release;
+  }, [markedCount, capKey]);
 
   // Once the marked set settles at exactly one run, that run becomes the one the detail region
   // shows.
@@ -405,31 +448,40 @@ export function TrainingTab() {
     setLatestBatch(null);
     streamRef.current?.();
     // A run already terminal when this stream opened is a rediscovery, not a transition the
-    // breeder is watching; only a run still live at open time toasts on its own terminal frame.
+    // breeder is watching; only a run still live at open time raises its end.
     const knownAtOpen = rowsRef.current.find((r) => r.experiment_id === selectedRun);
     const alreadyTerminal = knownAtOpen !== undefined && TERMINAL_STATES.has(knownAtOpen.state);
-    // A run selected at its launch moment can be unknown to the backend for a few reconnects;
-    // the toast names that once per selection.
-    let errorToasted = false;
     streamRef.current = openTrainingStream(selectedRun, (msg) => {
       if (msg.type === "metric") {
         setMetrics((prev) => mergeMetric(prev, msg.row));
       } else if (msg.type === "batch") {
         setLatestBatch(msg.row);
       } else if (msg.type === "error") {
-        // An unknown run is not terminal, and the socket keeps reconnecting behind it.
-        if (!errorToasted) {
-          errorToasted = true;
-          useStore.getState().pushToast(`Training stream error: ${msg.error}`);
-        }
+        // A run selected at its launch can be unknown to the backend for a few reconnects, each
+        // sending this frame again, which counts on the one entry.
+        const run = msg.experiment_id;
+        tell(
+          "failure",
+          "error",
+          `Training stream error: ${msg.error}`,
+          run,
+          trainingKey("stream", projectId, run),
+        );
       } else if (msg.type === "status") {
+        const run = msg.experiment_id;
         if (!alreadyTerminal)
-          useStore.getState().pushToast(`Training ${selectedRun}: ${msg.status.state}`, "info");
+          tell(
+            "job",
+            "info",
+            `Training ${run}: ${msg.status.state}`,
+            run,
+            trainingKey("end", projectId, run),
+          );
         void refreshRuns();
       }
     });
     return () => streamRef.current?.();
-  }, [selectedRun, streaming, projectRoot, refreshRuns, comparing]);
+  }, [selectedRun, streaming, projectRoot, projectId, refreshRuns, comparing]);
 
   // Adopt the TensorBoard already serving this run, trial or sweep, or start one, retrying on a
   // timer while it is live.
@@ -476,18 +528,14 @@ export function TrainingTab() {
   }, [epochRows]);
 
   async function onCancel(id: string) {
+    const key = trainingKey("cancel", projectId, id);
     setPendingCancel((prev) => new Set(prev).add(id));
-    setCancelErrors((prev) => {
-      const { [id]: _drop, ...rest } = prev;
-      return rest;
-    });
+    useStore.getState().releaseNotification(key);
     try {
       await trainingApi.cancel(id, { user: useStore.getState().user });
       void refreshRuns();
     } catch (e) {
-      const message = `Cancel failed: ${messageOf(e)}`;
-      useStore.getState().pushToast(message);
-      setCancelErrors((prev) => ({ ...prev, [id]: message }));
+      tell("failure", "error", `Cancel failed: ${messageOf(e)}`, id, key);
     } finally {
       setPendingCancel((prev) => {
         const next = new Set(prev);
@@ -512,7 +560,7 @@ export function TrainingTab() {
           selected={selectedRun === id}
           marked={markedExperimentIds.has(id)}
           canceling={pendingCancel.has(id)}
-          cancelError={cancelErrors[id]}
+          cancelKey={trainingKey("cancel", projectId, id)}
           onSelect={() => setSelectedRun(id)}
           onToggleMarked={() => toggleMarked(run)}
           onCancel={() => void onCancel(id)}
@@ -665,6 +713,15 @@ export function TrainingTab() {
           />
         )}
         {empty && !runsError && <RunMonitorEmpty>No runs.</RunMonitorEmpty>}
+        <div className="mb-2 empty:hidden">
+          <NotificationItem
+            placement="in place"
+            entryKey={capKey}
+            afterDismiss={() =>
+              document.getElementById(compareToggleId(capRefused.current ?? ""))?.focus()
+            }
+          />
+        </div>
         <ul className="space-y-1">
           {listing.runs.map(runItem)}
           {listing.sweeps.map((sweep) => (
@@ -677,6 +734,7 @@ export function TrainingTab() {
                 <div className="flex items-start gap-1">
                   <button
                     type="button"
+                    id={selectControlId(sweep.sweep_id)}
                     aria-pressed={selectedRun === sweep.sweep_id}
                     className="flex-1 min-w-0 text-left"
                     onClick={() => setSelectedRun(sweep.sweep_id)}
@@ -686,19 +744,20 @@ export function TrainingTab() {
                       sweep · {stateLine(sweep.state, sweep.heartbeat)} · {sweepOutcomeLine(sweep)}
                     </div>
                   </button>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <div className="inline-flex rounded border border-tcip-border overflow-hidden empty:hidden">
-                      <CancelButton
-                        id={sweep.sweep_id}
-                        state={sweep.state}
-                        canceling={pendingCancel.has(sweep.sweep_id)}
-                        cancelError={cancelErrors[sweep.sweep_id]}
-                        onCancel={() => void onCancel(sweep.sweep_id)}
-                      />
-                    </div>
-                    <CancelError id={sweep.sweep_id} cancelError={cancelErrors[sweep.sweep_id]} />
+                  <div className="inline-flex shrink-0 rounded border border-tcip-border overflow-hidden empty:hidden">
+                    <CancelButton
+                      id={sweep.sweep_id}
+                      state={sweep.state}
+                      canceling={pendingCancel.has(sweep.sweep_id)}
+                      cancelKey={trainingKey("cancel", projectId, sweep.sweep_id)}
+                      onCancel={() => void onCancel(sweep.sweep_id)}
+                    />
                   </div>
                 </div>
+                <CancelFailure
+                  id={sweep.sweep_id}
+                  cancelKey={trainingKey("cancel", projectId, sweep.sweep_id)}
+                />
                 {sweep.status_error && (
                   <div className="text-[12px] tcip-problem">{sweep.status_error}</div>
                 )}
