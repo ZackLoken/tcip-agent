@@ -2,6 +2,7 @@ import { Terminal } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 
 import { TAB_NAMES } from "@/api/types.generated";
+import { AGENT_NAME } from "@/lib/agentName";
 import { TAB_LABELS } from "@/lib/tabLabels";
 import { useStore } from "@/store";
 import { selectAnnotatorNamed } from "@/store/slices/user";
@@ -106,7 +107,7 @@ export function TopBar({ notifications }: { notifications: ReactNode }) {
             title={
               handingOff
                 ? "The agent is writing its hand-off; open the rail to start the chosen harness once it is recorded"
-                : "TCIP Agent"
+                : AGENT_NAME
             }
             className={`flex items-center gap-1.5 px-2.5 h-7 rounded text-[13px] font-medium transition-colors ${
               terminalOpen

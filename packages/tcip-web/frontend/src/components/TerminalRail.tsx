@@ -29,6 +29,7 @@ import {
   type TerminalServedFrame,
   type TerminalStatus,
 } from "@/api/types.generated";
+import { AGENT_NAME } from "@/lib/agentName";
 import {
   createReconnectingSocket,
   jsonFrameHandlers,
@@ -570,7 +571,7 @@ export function TerminalRail() {
       </div>
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-medium text-tcip-muted">TCIP Agent</span>
+          <span className="text-[12px] font-medium text-tcip-muted">{AGENT_NAME}</span>
           {asked.kind === "answered" && (
             <select
               aria-label="Agent harness"

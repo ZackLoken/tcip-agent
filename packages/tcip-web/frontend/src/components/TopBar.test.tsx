@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { NotificationsButton } from "@/components/Notifications";
 import { TopBar } from "@/components/TopBar";
+import { AGENT_NAME } from "@/lib/agentName";
 import { useStore } from "@/store";
 
 const initialStoreState = useStore.getState();
@@ -50,7 +51,7 @@ describe("TopBar agent button", () => {
 
     expect(button.textContent).not.toMatch(/[A-Za-z]/);
     expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
-    expect(button).toHaveAttribute("title", "TCIP Agent");
+    expect(button).toHaveAttribute("title", AGENT_NAME);
     expect(screen.queryByTestId("handoff-mark")).not.toBeInTheDocument();
   });
 
@@ -70,7 +71,7 @@ describe("TopBar agent button", () => {
     expect(screen.getByTestId("handoff-mark")).toBeInTheDocument();
 
     act(() => useStore.getState().setTerminalOpen(true));
-    expect(agentButton()).toHaveAttribute("title", "TCIP Agent");
+    expect(agentButton()).toHaveAttribute("title", AGENT_NAME);
     expect(screen.queryByTestId("handoff-mark")).not.toBeInTheDocument();
   });
 });
