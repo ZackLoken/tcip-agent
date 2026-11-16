@@ -1467,3 +1467,85 @@ def test_a_changed_frontend_test_alone_leaves_a_pytest_pass_indeterminate(
         result.stdout + result.stderr
     )
     assert "no source file differs" in _why(result)
+
+
+# Starts the holder over a file beside the test, in a folder a bottom-up removal reaches before the
+# frontend folder holding the link, and returns once the holder has the file open.
+VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS = (
+    'import { spawn } from "node:child_process";\n'
+    'import { join } from "node:path";\n'
+    'import { fileURLToPath } from "node:url";\n'
+    "\n"
+    'import { expect, test } from "vitest";\n'
+    "\n"
+    'test("leaves a file a process still holds", async () => {\n'
+    "  const hold = process.env.FILE_HOLD_DIR as string;\n"
+    '  const held = fileURLToPath(new URL("held.txt", import.meta.url));\n'
+    "  const holder = spawn(\n"
+    "    process.env.HOLDER_PYTHON as string,\n"
+    '    [join(hold, "holder.py"), held, join(hold, "release"), join(hold, "done")],\n'
+    '    { cwd: hold, detached: true, stdio: ["ignore", "pipe", "ignore"] },\n'
+    "  );\n"
+    "  const line: string = await new Promise((resolve) =>\n"
+    '    holder.stdout.once("data", (data) => resolve(String(data))),\n'
+    "  );\n"
+    "  holder.stdout.destroy();\n"
+    "  holder.unref();\n"
+    '  expect(line.trim()).toBe("ready");\n'
+    "});\n"
+)
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only Windows refuses to delete a file another process holds open",
+)
+def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
+    linked_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A vitest run's scratch directory the tool cannot remove is left holding no link.
+
+    The vitest test starts a process that holds a file beside it open past the tool's removal, so
+    the removal stops before it reaches the frontend folder holding the link; the link into the
+    install is gone all the same, since the tool removes it first. This test releases the process
+    and removes the directory left behind.
+    """
+    hold = linked_repo.parent / "hold"
+    hold.mkdir()
+    _write(hold / "holder.py", FILE_HOLDER)
+    monkeypatch.setenv("FILE_HOLD_DIR", str(hold))
+    monkeypatch.setenv("HOLDER_PYTHON", sys.executable)
+    baseline = _widget_repo(
+        linked_repo,
+        DOUBLE,
+        DOUBLE + "\nexport const TRIPLE = 3;\n",
+        VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS,
+    )
+    scratch_root = linked_repo.parent / "t"
+
+    try:
+        result = _run(linked_repo, WIDGET_TEST, baseline)
+        left = sorted(scratch_root.glob("failbefore-*"))
+
+        assert result.returncode == EXIT["VACUOUS"], (
+            result.stdout + result.stderr
+        )
+        assert len(left) == 1, result.stdout + result.stderr
+        assert SCRATCH_REMOVAL_LINE in result.stderr, (
+            result.stdout + result.stderr
+        )
+        assert "held.txt" in result.stderr
+        assert not os.path.lexists(
+            left[0] / "tree" / FRONTEND_PATH / "node_modules"
+        )
+    finally:
+        _write(hold / "release", "")
+        # The holder closes its file within one 0.05 s poll of the release; 60 s only bounds a hang.
+        deadline = time.monotonic() + 60
+        while not (hold / "done").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        for leftover in scratch_root.glob("failbefore-*"):
+            link = leftover / "tree" / FRONTEND_PATH / "node_modules"
+            if link.is_symlink():
+                link.unlink()
+            shutil.rmtree(leftover)
