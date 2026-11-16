@@ -17,7 +17,7 @@ import type { ImageBands, ScorerEntry } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { NO_BAND_CHOICE, type BandChoice } from "@/lib/bandSelection";
-import { adoptLoad } from "@/lib/registrySave";
+import { adoptLoad, refusedRegistryKey, SUBJECT_CONTROL_ID } from "@/lib/registrySave";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
@@ -438,7 +438,7 @@ describe("AnnotateToolbar subject authoring", () => {
     expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
   });
 
-  it("shows a refused new subject beside the subject control until the next add lands", async () => {
+  it("stands a refused new subject on the dataset's new-subject key, shown by the canvas and not the toolbar, until the next add lands", async () => {
     seedDataset();
     act(() => adoptLoad(REGISTRY_LOADED));
     const stale = LABEL_ANSWERS.registry_stale;
@@ -450,16 +450,32 @@ describe("AnnotateToolbar subject authoring", () => {
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
-    const sentence = `Could not add the subject: ${stale.body.detail}`;
-    expect(screen.getByTestId("entry-in-place")).toHaveTextContent(sentence);
+    const key = refusedRegistryKey("new subject", useStore.getState().gui.dataset!.dataset_root);
     expect(useStore.getState().notifications).toEqual([
-      expect.objectContaining({ kind: "failure", level: "error", sentence }),
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        sentence: `Could not add the subject: ${stale.body.detail}`,
+        key,
+      }),
     ]);
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
 
     saveSpy.mockResolvedValue(REGISTRY_SAVED);
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
-    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ key: undefined }),
+    ]);
+  });
+
+  it("gives the subject control the id focus returns to once a refused new subject is dismissed", () => {
+    seedDataset();
+    renderToolbar();
+    expect(screen.getByRole("button", { name: /select subject/ })).toHaveAttribute(
+      "id",
+      SUBJECT_CONTROL_ID,
+    );
   });
 
   it("reverts the optimistically set active subject when the save is refused", async () => {

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 
 import { api, loadedLabels, type LoadedLabels, type LoadedSave } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
-import { subjectColor } from "@/api/subjects";
+import { subjectColor, subjectsApi } from "@/api/subjects";
 import { CONF_REFUSED, type ImageBands, PLAIN } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { HelpOverlay } from "@/components/HelpOverlay";
@@ -14,6 +14,7 @@ import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { dismissLabel } from "@/lib/dismissLabel";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
+import { refusedRegistryKey, saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import {
   CASING,
@@ -167,48 +168,55 @@ vi.mock("@/components/Canvas/CanvasStage", async () => {
     },
   };
 });
-vi.mock("@/components/AnnotateToolbar", () => ({
-  AnnotateToolbar: (props: {
-    bandChoice: BandChoice;
-    subjectState: string | null;
-    onComplete: (next: boolean) => void;
-    onCancelSave: () => void;
-    proposing: boolean;
-    onPhrase: (phrase: string) => void;
-    onPropose: () => void;
-    view: AnnotateView;
-    onView: (next: AnnotateView) => void;
-    predictionsAvailable: boolean;
-    focused: ReviewItem | null;
-  }) => (
-    <div
-      data-testid="toolbar"
-      data-band-choice={props.bandChoice.kind}
-      data-band-count={props.bandChoice.kind === "banded" ? props.bandChoice.info.band_count : ""}
-      data-subject-state={props.subjectState ?? ""}
-      data-proposing={props.proposing}
-      data-view-proposals={props.view.proposals}
-      data-view-predictions={props.view.predictions}
-      data-predictions-available={props.predictionsAvailable}
-      data-focused={
-        props.focused?.kind === "annotation"
-          ? `annotation ${props.focused.shape} ${props.focused.ref}`
-          : (props.focused?.kind ?? "")
-      }
-    >
-      <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
-      <button onClick={props.onCancelSave}>toolbar-cancel-save</button>
-      <button onClick={() => props.onPhrase("open bud")}>toolbar-phrase</button>
-      <button onClick={props.onPropose}>toolbar-propose</button>
-      <button onClick={() => props.onView({ ...props.view, proposals: !props.view.proposals })}>
-        toolbar-view-proposals
-      </button>
-      <button onClick={() => props.onView({ ...props.view, predictions: !props.view.predictions })}>
-        toolbar-view-predictions
-      </button>
-    </div>
-  ),
-}));
+vi.mock("@/components/AnnotateToolbar", async () => {
+  const { SUBJECT_CONTROL_ID } =
+    await vi.importActual<typeof import("@/lib/registrySave")>("@/lib/registrySave");
+  return {
+    AnnotateToolbar: (props: {
+      bandChoice: BandChoice;
+      subjectState: string | null;
+      onComplete: (next: boolean) => void;
+      onCancelSave: () => void;
+      proposing: boolean;
+      onPhrase: (phrase: string) => void;
+      onPropose: () => void;
+      view: AnnotateView;
+      onView: (next: AnnotateView) => void;
+      predictionsAvailable: boolean;
+      focused: ReviewItem | null;
+    }) => (
+      <div
+        data-testid="toolbar"
+        data-band-choice={props.bandChoice.kind}
+        data-band-count={props.bandChoice.kind === "banded" ? props.bandChoice.info.band_count : ""}
+        data-subject-state={props.subjectState ?? ""}
+        data-proposing={props.proposing}
+        data-view-proposals={props.view.proposals}
+        data-view-predictions={props.view.predictions}
+        data-predictions-available={props.predictionsAvailable}
+        data-focused={
+          props.focused?.kind === "annotation"
+            ? `annotation ${props.focused.shape} ${props.focused.ref}`
+            : (props.focused?.kind ?? "")
+        }
+      >
+        <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
+        <button onClick={props.onCancelSave}>toolbar-cancel-save</button>
+        <button onClick={() => props.onPhrase("open bud")}>toolbar-phrase</button>
+        <button onClick={props.onPropose}>toolbar-propose</button>
+        <button onClick={() => props.onView({ ...props.view, proposals: !props.view.proposals })}>
+          toolbar-view-proposals
+        </button>
+        <button
+          onClick={() => props.onView({ ...props.view, predictions: !props.view.predictions })}
+        >
+          toolbar-view-predictions
+        </button>
+        <button id={SUBJECT_CONTROL_ID}>toolbar-subject</button>
+      </div>
+    ),
+  };
+});
 
 // The key that hides or shows every proposal and prediction at once.
 const toggleProposals = () => fireEvent.keyDown(window, { key: "h" });
@@ -1313,6 +1321,30 @@ describe("AnnotateTab entries on the canvas", () => {
 
     expect(loadSpy).toHaveBeenCalledTimes(2);
     expect(useStore.getState().canvas.failedLoad).toBe(IMG1);
+  });
+
+  it("shows a refused new subject first in the strip, and dismissed puts focus on the subject control", async () => {
+    await refusedSave(new Error("network down"));
+    const stale = LABEL_ANSWERS.registry_stale;
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
+    const root = useStore.getState().gui.dataset!.dataset_root;
+    await act(() =>
+      saveRegistry(
+        { husk: { description: "one husk" } },
+        "Could not add the subject",
+        refusedRegistryKey("new subject", root),
+      ),
+    );
+
+    const [subjectEntry, saveEntry] = onCanvas();
+    expect(subjectEntry).toHaveTextContent(`Could not add the subject: ${stale.body.detail}`);
+    expect(saveEntry).toHaveTextContent("Could not save annotations (network down)");
+    fireEvent.click(
+      within(subjectEntry).getByRole("button", { name: /^Dismiss: Could not add the subject/ }),
+    );
+    expect(onCanvas()).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "toolbar-subject" })).toHaveFocus();
   });
 
   it("is dismissed by a control named from its text, taking Reload with it", async () => {

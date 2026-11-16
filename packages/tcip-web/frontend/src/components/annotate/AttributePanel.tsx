@@ -5,7 +5,7 @@ import { ATTR_TYPES, type RegistrySubjects } from "@/api/types.generated";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { AddValue, ValueChips } from "@/components/annotate/ValueChips";
 import { NotificationItem } from "@/components/Notifications";
-import { saveRegistry } from "@/lib/registrySave";
+import { refusedRegistryKey, saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import { TOOL_ARRAY } from "@/store/types";
@@ -53,7 +53,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
     });
   };
 
-  const refusedKey = `registry:attributes:${datasetRoot ?? ""}`;
+  const refusedKey = refusedRegistryKey("attributes", datasetRoot ?? "");
   function saveGrownRegistry(next: RegistrySubjects) {
     void saveRegistry(next, "Could not update the attributes", refusedKey);
   }

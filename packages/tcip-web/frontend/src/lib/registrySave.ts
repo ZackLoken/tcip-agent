@@ -9,6 +9,17 @@ import {
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
 
+/** The key a refused registry save made from `control` over the dataset at `datasetRoot` stands
+ *  on, so one dataset's refusal never shows against another's. */
+export const refusedRegistryKey = (
+  control: "attributes" | "new subject",
+  datasetRoot: string,
+): string => `registry:${control}:${datasetRoot}`;
+
+/** The id of the Annotate toolbar's subject control, where focus returns once a refused new
+ *  subject is dismissed. */
+export const SUBJECT_CONTROL_ID = "annotate-subject-control";
+
 /** Hold the subject registry the load answer `loaded` found: a stored one's subjects at its
  *  version, or none declared over no registry. */
 export function adoptLoad(loaded: SubjectsLoad): void {

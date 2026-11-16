@@ -62,6 +62,7 @@ import {
   polygonAt,
   withRing,
 } from "@/lib/polygonGeometry";
+import { refusedRegistryKey, SUBJECT_CONTROL_ID } from "@/lib/registrySave";
 import {
   decisionTarget,
   flagPlaces,
@@ -1920,6 +1921,11 @@ export function AnnotateTab() {
 
           {/* Below the toolbar's menus, which drop over the canvas. */}
           <div className="absolute top-12 left-3 right-3 z-10 flex flex-col gap-1 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-1.5 empty:hidden">
+            <NotificationItem
+              placement="in place"
+              entryKey={refusedRegistryKey("new subject", dataset?.dataset_root ?? "")}
+              afterDismiss={() => document.getElementById(SUBJECT_CONTROL_ID)?.focus()}
+            />
             {CANVAS_SLOTS.map((slot) => (
               <NotificationItem
                 key={slot}
