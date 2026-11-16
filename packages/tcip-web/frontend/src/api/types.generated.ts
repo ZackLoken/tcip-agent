@@ -728,6 +728,7 @@ export interface GuiState {
   mode: "box" | "polygon" | "point";
   active_subject: string | null;
   dataset: DatasetSelection | null;
+  refused_choice: RefusedChoice | null;
 }
 
 export interface ActiveTabPayload {
@@ -1161,6 +1162,14 @@ export interface CurveRow {
   n_unclassified: number;
   n_missing: number;
   ratio: number | null;
+}
+
+export interface DatasetChoice {
+  dataset_root: string;
+  subject: string | null;
+  date: string;
+  bucket: string | null;
+  current_image_index: number;
 }
 
 export interface DatasetIdentity {
@@ -1752,6 +1761,11 @@ export type Reference = SelectionReference | RasterReference;
 export interface ReferenceSample {
   sample: Sample;
   source_digest: string;
+}
+
+export interface RefusedChoice {
+  choice: DatasetChoice;
+  sentence: string;
 }
 
 export interface RefusedIdentity {
@@ -2461,6 +2475,7 @@ export const GUI_STATE_DEFAULTS: GuiState = {
   mode: "box",
   active_subject: null,
   dataset: null,
+  refused_choice: null,
 };
 export const NO_GESTURES: Gestures = {
   decide: null,

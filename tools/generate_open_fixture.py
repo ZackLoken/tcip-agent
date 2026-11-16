@@ -11,9 +11,10 @@ the nav route's answer to a step to the first image of the last (``navigated``),
 trees of the photographs' dataset, the troubled one and one holding no capture, the select
 route's answers for the photographs made for :data:`SUBJECT` (``raw_subject``), for
 :data:`FOCUSED_SUBJECT` (``focused``) and for it with the first bucket the photographs' tree
-names over that capture (``focused_bucket``), and a selection of the photographs under a
-separator-ended root (``separated``), normalized (``fixture_session.normalized``), to
-:data:`GENERATED_PATH`.
+names over that capture (``focused_bucket``), a selection of the photographs under a
+separator-ended root (``separated``), and the envelopes of a reopen onto a saved capture the
+enumerator refuses and of a select of the later capture after it (:func:`refused_scene`),
+normalized (``fixture_session.normalized``), to :data:`GENERATED_PATH`.
 
     python -m tools.generate_open_fixture
 """
@@ -34,8 +35,10 @@ from tools.fixture_session import (
 )
 
 if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
     from pydantic import JsonValue
 
+    from tcip_web.state import OpenProject
     from tools.fixture_session import Stamp
 
 GENERATED_PATH = FRONTEND_SRC / "test" / "openFixtures.json"
@@ -132,6 +135,58 @@ def captures(project: Path) -> dict[str, tuple[Path, str]]:
     }
 
 
+REFUSED_CAPTURE = "2026-01-09"
+"""The capture the refused scene saves and then makes ambiguous, a sample capture name."""
+
+
+def refused_scene(
+    client: TestClient,
+    workspace: Path,
+    project: OpenProject,
+    sound: tuple[Path, str],
+) -> dict[str, JsonValue]:
+    """Reopen ``project`` onto a saved capture the enumerator refuses, then select ``sound``.
+
+    The capture :data:`REFUSED_CAPTURE` of the dataset ``refused`` inside ``project`` holds one
+    photograph when the select route saves it; a second photograph of its case-folded stem is
+    written beside it, another project of ``workspace`` is opened and ``project`` reopened, each
+    through the open route. Returns the envelope ``/ws/state`` sends on connect after the reopen
+    (``refused_envelope``) and after the select of ``sound``, a dataset root and a capture
+    (``reselected_envelope``).
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.web_client import CaptureChoice
+    from tests._producer_fixtures import write_image
+    from tests._web_fixtures import named_project
+
+    def envelope() -> JsonValue:
+        with client.websocket_connect(socket_url(client, "state_ws")) as ws:
+            return ws.receive_json()
+
+    root = project.root / "refused"
+    photograph = write_image(
+        image_dir(root, REFUSED_CAPTURE) / "a.jpg", (8, 8)
+    )
+    answered(
+        client,
+        "select_dataset",
+        200,
+        CaptureChoice(dataset_root=str(root), date=REFUSED_CAPTURE),
+    )
+    write_image(photograph.with_name("A.png"), (8, 8))
+    opened(client, named_project(workspace / "ridge", "ridge"))
+    opened(client, project)
+    refused = envelope()
+    sound_root, sound_date = sound
+    answered(
+        client,
+        "select_dataset",
+        200,
+        CaptureChoice(dataset_root=str(sound_root), date=sound_date),
+    )
+    return {"refused_envelope": refused, "reselected_envelope": envelope()}
+
+
 def produce() -> dict[str, JsonValue]:
     """Open the fixture project; return its open answer, the envelope, selections and trees.
 
@@ -205,6 +260,7 @@ def produce() -> dict[str, JsonValue]:
                 current_image_index=0,
             )
         )
+        refused = refused_scene(client, workspace, valley, written["later"])
         return normalized(
             {
                 "opened": answer,
@@ -214,6 +270,7 @@ def produce() -> dict[str, JsonValue]:
                 **trees,
                 **made_for,
                 "separated": separated.model_dump(mode="json"),
+                **refused,
             },
             workspace,
             stamped=STAMPED,

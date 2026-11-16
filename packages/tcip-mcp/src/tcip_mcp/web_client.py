@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Literal, Self, get_args
 
 from pydantic import (
     AwareDatetime,
@@ -21,6 +21,7 @@ from pydantic import (
     PositiveFloat,
     TypeAdapter,
     computed_field,
+    model_validator,
 )
 
 import tcip_store
@@ -289,14 +290,47 @@ class _GuiFields(BaseModel):
     active_subject: str | None
 
 
+class RefusedChoice(BaseModel):
+    """A chosen capture the enumerator refused to list, and the sentence it refused it with."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    choice: DatasetChoice
+    sentence: str
+
+
 class GuiState(_GuiFields):
     """The GUI state the backend holds for its open project.
 
-    Only ``dataset`` is the backend's own, the rest advisory; it is ``None`` while no capture is
-    chosen.
+    Only ``dataset`` and ``refused_choice`` are the backend's own, the rest advisory.
+    ``dataset`` is ``None`` while no capture is chosen or the chosen one would not list;
+    ``refused_choice`` holds the chosen one in that second case and is ``None`` otherwise. A
+    state holding both is refused.
     """
 
     dataset: DatasetSelection | None
+    refused_choice: RefusedChoice | None
+
+    @model_validator(mode="after")
+    def _one_choice(self) -> Self:
+        if self.dataset is not None and self.refused_choice is not None:
+            raise ValueError(
+                "a GUI state holds a selection or a refused choice, never both"
+            )
+        return self
+
+    def choice(self) -> DatasetChoice | None:
+        """Return the capture chosen: the selection's choice, the refused one, or ``None``."""
+        if self.dataset is not None:
+            return DatasetChoice(
+                **{
+                    name: getattr(self.dataset, name)
+                    for name in DatasetChoice.model_fields
+                }
+            )
+        return (
+            None if self.refused_choice is None else self.refused_choice.choice
+        )
 
 
 GUI_STATE_DEFAULTS = GuiState(
@@ -305,9 +339,10 @@ GUI_STATE_DEFAULTS = GuiState(
     mode="box",
     active_subject=None,
     dataset=None,
+    refused_choice=None,
 )
 """The GUI state a project holds before it has any of its own: the Annotate tab in box mode at
-unit zoom, no subject active and no dataset chosen."""
+unit zoom, no subject active and no capture chosen."""
 
 
 class _PersistedGuiState(_GuiFields):
@@ -345,20 +380,19 @@ def selection_for(choice: DatasetChoice) -> DatasetSelection:
 
 
 def write_gui_snapshot(project: Path, state: GuiState) -> None:
-    """Persist ``state`` as ``project``'s GUI snapshot, its dataset held as the choice."""
+    """Persist ``state`` as ``project``'s GUI snapshot, its dataset held as the choice.
+
+    The choice is :meth:`GuiState.choice`, the refused one while no selection is held.
+    """
     from tcip_mcp.registry_paths import stored_path
 
-    selection = state.dataset
+    choice = state.choice()
     document = _PersistedGuiState(
         **{name: getattr(state, name) for name in _GuiFields.model_fields},
         dataset=None
-        if selection is None
-        else DatasetChoice(
-            **{
-                name: getattr(selection, name)
-                for name in DatasetChoice.model_fields
-            }
-            | {"dataset_root": stored_path(selection.dataset_root, project)}
+        if choice is None
+        else choice.model_copy(
+            update={"dataset_root": stored_path(choice.dataset_root, project)}
         ),
     )
     tcip_store.replace(
@@ -369,10 +403,13 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
 def read_gui_snapshot(project: Path) -> GuiState | None:
     """Return ``project``'s persisted GUI state, or ``None`` when it has none.
 
-    Its selection is rebuilt through :func:`selection_for`. A snapshot that does not decode as its
-    shape, that will not decode or sits in a database that will not open or answer, or whose
-    selection will not build raises ``tcip_store.ReadRefusedError`` naming the project: the
-    shape's issues, or the sentence of the error that stopped it.
+    Its selection is rebuilt through :func:`selection_for` over the choice, its root resolved
+    against ``project``; a capture the enumerator refuses (``LogicalImageError``) is returned as
+    the state's ``refused_choice``, that choice with the error's sentence, and no selection. A
+    snapshot that does not decode as its shape, that will not decode or sits in a database that
+    will not open or answer, or whose choice names a root or a capture that is no path raises
+    ``tcip_store.ReadRefusedError`` naming the project: the shape's issues, or the sentence of
+    the error that stopped it.
     """
     from tcip_mcp.pipelines.image_utils import LogicalImageError
     from tcip_mcp.registry_paths import resolved_registry_path
@@ -387,26 +424,25 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     )
     if persisted is None:
         return None
-    choice = persisted.dataset
-    with tcip_store.unreadable(place, LogicalImageError, ValueError):
-        dataset = (
-            None
-            if choice is None
-            else selection_for(
-                choice.model_copy(
-                    update={
-                        "dataset_root": str(
-                            resolved_registry_path(
-                                project, choice.dataset_root
-                            )
-                        )
-                    }
-                )
+    stored = persisted.dataset
+    dataset = refused = None
+    if stored is not None:
+        with tcip_store.unreadable(place, ValueError):
+            choice = stored.model_copy(
+                update={
+                    "dataset_root": str(
+                        resolved_registry_path(project, stored.dataset_root)
+                    )
+                }
             )
-        )
+            try:
+                dataset = selection_for(choice)
+            except LogicalImageError as exc:
+                refused = RefusedChoice(choice=choice, sentence=str(exc))
     return GuiState(
         **{name: getattr(persisted, name) for name in _GuiFields.model_fields},
         dataset=dataset,
+        refused_choice=refused,
     )
 
 

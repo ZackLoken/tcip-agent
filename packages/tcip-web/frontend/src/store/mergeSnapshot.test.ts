@@ -36,6 +36,7 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
     view: { scale: 1, offset_x: 0, offset_y: 0 },
     mode: "box",
     active_subject: SUBJECT,
+    refused_choice: null,
     ...over,
   };
 }

@@ -343,16 +343,15 @@ def test_the_web_mapping_build_answers_an_ambiguous_capture_400(
     )
 
 
-def test_selecting_an_ambiguous_capture_answers_400_and_a_snapshot_over_it_refuses(
+def test_selecting_an_ambiguous_capture_answers_400_and_a_snapshot_over_it_states_it(
     client: TestClient, opened: OpenProject
 ) -> None:
-    """A capture holding two images of one stem refuses its selection and the snapshot naming it.
+    """A capture holding two images of one stem refuses its selection and states it in the snapshot.
 
     The capture selects while it holds one image per stem. With a second image of one stem the
     select route answers the enumerator's sentence 400, and the persisted GUI snapshot that
-    selected it refuses its read naming the project, with that sentence.
+    selected it reads with no selection and that capture refused with that sentence.
     """
-    import tcip_store as ts
     from tcip_mcp.web_client import read_gui_snapshot
 
     written = _written(opened.root / "ds", opened.root)
@@ -370,10 +369,11 @@ def test_selecting_an_ambiguous_capture_answers_400_and_a_snapshot_over_it_refus
     refused = selected()
     assert refused.status_code == 400, refused.text
     assert refused.json()["detail"] == sentence
-    with pytest.raises(ts.ReadRefusedError) as unread:
-        read_gui_snapshot(opened.root)
-    assert str(opened.root) in str(unread.value)
-    assert sentence in str(unread.value)
+    read = read_gui_snapshot(opened.root)
+    assert read is not None and read.dataset is None
+    assert read.refused_choice is not None
+    assert read.refused_choice.choice.date == CAPTURE
+    assert read.refused_choice.sentence == sentence
 
 
 def test_the_image_door_answers_an_ambiguous_stem_400(
@@ -598,13 +598,14 @@ def test_the_project_listing_and_the_overview_serve_one_image_count(
         )
 
 
-def test_reopening_a_project_whose_saved_selection_lies_in_an_unread_capture_answers_409(
+def test_reopening_a_project_whose_saved_selection_lies_in_an_unread_capture_states_it(
     client: TestClient, opened: OpenProject
 ) -> None:
-    """A selection saved in a capture whose manifest then will not read refuses the reopen.
+    """A selection saved in a capture whose manifest then will not read reopens, stating it.
 
     The capture is selected through the select route, the manifest made unreadable, and the
-    project closed; its open answers 409 carrying the refusal, and nothing is open.
+    project closed; its open answers 200, the project is open, and the held state carries no
+    selection and the capture refused with the manifest's sentence.
     """
     from tcip_web.state import store
 
@@ -621,8 +622,11 @@ def test_reopening_a_project_whose_saved_selection_lies_in_an_unread_capture_ans
         "/api/projects/open", json={"id": opened.id, "user": "grower"}
     )
 
-    assert reopened.status_code == 409, reopened.text
+    assert reopened.status_code == 200, reopened.text
+    assert client.get("/api/projects").json()["open_id"] == opened.id
+    state = client.get("/api/state").json()
+    assert state["dataset"] is None
+    assert state["refused_choice"]["choice"]["date"] == CAPTURE
     _assert_names_the_unread_manifest(
-        reopened.json()["detail"]["refusal"]["message"], written.manifest
+        state["refused_choice"]["sentence"], written.manifest
     )
-    assert client.get("/api/projects").json()["open_id"] is None
