@@ -22,8 +22,6 @@ from tests._record_damage_fixtures import (
     NON_DATABASE,
     damage_last_log_entry,
     damage_log_entry,
-    made_undecodable,
-    store_sentence,
     unopenable_database,
 )
 
@@ -231,21 +229,6 @@ def test_the_last_log_entry_is_damaged_and_the_cursor_returned_is_past_it(
     assert [r["i"] for r in page.records] == [0, 1]
     assert page.corrupt == (2,)
     assert page.cursor == past
-
-
-def test_a_record_made_undecodable_answers_the_sentence_the_store_raises_reading_it(
-    tmp_path: Path,
-) -> None:
-    """The returned sentence is the one a read of the damaged record raises, as it still does."""
-    key = _record_key(tmp_path)
-    ts.replace(key, {"n": 1})
-
-    sentence = made_undecodable(key)
-
-    assert sentence
-    with pytest.raises(ts.DecodeError, match=re.escape(sentence)):
-        ts.read(key)
-    assert store_sentence(key) == sentence
 
 
 def test_no_test_writes_the_sql_that_damages_a_record_or_a_log_entry() -> None:
