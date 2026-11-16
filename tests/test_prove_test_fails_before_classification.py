@@ -48,7 +48,11 @@ from tests._scratch_repo_fixtures import (
     scratch_repo,
     write,
 )
-from tools.prove_test_fails_before import OUTCOME_ENV, _failure_kind
+from tools.prove_test_fails_before import (
+    OUTCOME_ENV,
+    TEST_FILE_RULE,
+    _failure_kind,
+)
 
 EXIT = {
     "GUARDS": 0,
@@ -345,6 +349,13 @@ CAUSE_CLAUSE = "A call that does not fit the baseline's code is one cause"
 FIXTURE_SENTENCE = "a fixture failed during setup"
 TEARDOWN_SENTENCE = "a fixture failed during teardown"
 UNREACHED_SENTENCE = "a missing import or file"
+IMPORT_PROOF_SENTENCE = (
+    "the baseline tree's own source is not what got imported"
+)
+INTERNAL_ERROR_SENTENCE = "the runner hit an internal or unhandled error"
+NOT_COLLECTED_SENTENCE = "the baseline could not collect"
+NOTHING_SELECTED_SENTENCE = "nothing was selected"
+ALL_SKIPPED_SENTENCE = "selected tests were skipped"
 
 
 def _one_call_repo(
@@ -1403,9 +1414,7 @@ def test_a_baseline_package_that_raises_at_import_is_refused(
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the baseline tree's own source is not what got imported" in _why(
-        result
-    )
+    assert IMPORT_PROOF_SENTENCE in _why(result)
     proof = json.loads(record_path.read_text(encoding="utf-8"))[
         "harness_proof"
     ]
@@ -1434,9 +1443,7 @@ def test_a_baseline_package_reporting_a_file_outside_the_tree_is_refused(
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the baseline tree's own source is not what got imported" in _why(
-        result
-    )
+    assert IMPORT_PROOF_SENTENCE in _why(result)
     proof = json.loads(record_path.read_text(encoding="utf-8"))[
         "harness_proof"
     ]
@@ -1514,7 +1521,7 @@ def test_an_internal_error_of_the_runner_is_refused(tmp_path: Path) -> None:
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the runner hit an internal or unhandled error" in _why(result)
+    assert INTERNAL_ERROR_SENTENCE in _why(result)
 
 
 def test_a_module_that_raises_at_import_at_the_baseline_is_refused(
@@ -1540,9 +1547,7 @@ def test_a_module_that_raises_at_import_at_the_baseline_is_refused(
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the baseline could not collect tests/test_widgets.py" in _why(
-        result
-    )
+    assert f"{NOT_COLLECTED_SENTENCE} tests/test_widgets.py" in _why(result)
 
 
 def test_a_k_expression_matching_no_test_is_refused_as_nothing_selected(
@@ -1555,7 +1560,7 @@ def test_a_k_expression_matching_no_test_is_refused_as_nothing_selected(
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "nothing was selected" in _why(result)
+    assert NOTHING_SELECTED_SENTENCE in _why(result)
 
 
 def test_a_module_skipped_at_import_is_refused_as_nothing_selected(
@@ -1580,8 +1585,8 @@ def test_a_module_skipped_at_import_is_refused_as_nothing_selected(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert "nothing was selected" in why
-    assert "were skipped" not in why
+    assert NOTHING_SELECTED_SENTENCE in why
+    assert ALL_SKIPPED_SENTENCE not in why
 
 
 SKIPPED_TEST = "\n\n@pytest.mark.skip(reason='not yet')\ndef test_{name}():\n    assert False\n"
@@ -1598,7 +1603,7 @@ def test_every_test_skipped_at_setup_is_refused(tmp_path: Path) -> None:
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "all 2 selected tests were skipped" in _why(result)
+    assert f"all 2 {ALL_SKIPPED_SENTENCE}" in _why(result)
 
 
 def test_a_pass_beside_a_skip_at_a_baseline_before_the_change_is_vacuous(
@@ -1634,7 +1639,7 @@ def test_a_missing_import_failing_every_test_is_refused_quoting_it(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert "all 1 failing tests failed on a missing import or file" in why
+    assert f"all 1 failing tests failed on {UNREACHED_SENTENCE}" in why
     assert "No module named 'gadgets'" in why
 
 
@@ -1992,6 +1997,7 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
 FRONTEND_PATH = FRONTEND.relative_to(REPO_ROOT).as_posix()
 INSTALL = FRONTEND / "node_modules"
 WIDGET_TEST = f"{FRONTEND_PATH}/src/widget.test.ts"
+VITEST_CONFIG = f"{FRONTEND_PATH}/vitest.config.mjs"
 
 
 def _scratch_frontend(repo: Path) -> Path:
@@ -2005,7 +2011,7 @@ def _scratch_frontend(repo: Path) -> Path:
     shutil.copytree(FRONTEND / "scripts", frontend / "scripts")
     write(frontend / "tsconfig.json", '{"include": ["src"]}\n')
     write(frontend / "package.json", '{"type": "module"}\n')
-    write(frontend / "vitest.config.mjs", "export default {};\n")
+    write(repo / VITEST_CONFIG, "export default {};\n")
     (frontend / "src").mkdir()
     write(repo / ".git" / "info" / "exclude", "node_modules\n")
     return frontend
@@ -2292,7 +2298,7 @@ def test_a_rejection_a_vitest_test_leaves_unhandled_is_refused_as_an_unhandled_e
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the runner hit an internal or unhandled error" in _why(result)
+    assert INTERNAL_ERROR_SENTENCE in _why(result)
     observed = json.loads(record_path.read_text(encoding="utf-8"))["observed"]
     assert observed["counts"] == {"passed": 1}
 
@@ -2319,7 +2325,7 @@ def test_a_vitest_module_throwing_at_its_top_level_is_refused_as_not_collected(
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the baseline could not collect src/widget.test.ts" in _why(result)
+    assert f"{NOT_COLLECTED_SENTENCE} src/widget.test.ts" in _why(result)
     assert [error["detail"] for error in errors] == ["not ready"]
 
 
@@ -2371,7 +2377,7 @@ def test_a_vitest_module_importing_what_the_baseline_lacks_is_refused_as_not_col
     )
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "the baseline could not collect src/widget.test.ts" in _why(result)
+    assert f"{NOT_COLLECTED_SENTENCE} src/widget.test.ts" in _why(result)
     assert len(errors) == 1
     assert errors[0]["detail"].startswith("Cannot find module './gadget'")
 
@@ -2386,7 +2392,7 @@ def test_a_vitest_test_importing_what_the_baseline_lacks_is_refused_as_unreached
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert "all 1 failing tests failed on a missing import or file" in why
+    assert f"all 1 failing tests failed on {UNREACHED_SENTENCE}" in why
     assert "(Error: Cannot find module " in why
     assert "[unreached]" in result.stdout
 
@@ -2399,7 +2405,7 @@ def test_a_vitest_name_pattern_matching_no_test_is_refused_as_nothing_selected(
     result = _run(linked_repo, WIDGET_TEST, baseline, "-k", "no such test")
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "nothing was selected" in _why(result)
+    assert NOTHING_SELECTED_SENTENCE in _why(result)
 
 
 def _two_vitest_tests(declaration: str, skip: str) -> str:
@@ -2425,8 +2431,8 @@ def test_a_vitest_file_whose_tests_are_all_declared_skipped_is_refused_as_nothin
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert "nothing was selected" in why
-    assert "were skipped" not in why
+    assert NOTHING_SELECTED_SENTENCE in why
+    assert ALL_SKIPPED_SENTENCE not in why
 
 
 def test_a_vitest_file_whose_tests_all_skip_themselves_is_refused_as_all_skipped(
@@ -2443,7 +2449,7 @@ def test_a_vitest_file_whose_tests_all_skip_themselves_is_refused_as_all_skipped
     result = _run(linked_repo, WIDGET_TEST, baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "all 2 selected tests were skipped" in _why(result)
+    assert f"all 2 {ALL_SKIPPED_SENTENCE}" in _why(result)
 
 
 # Runs each test in vitest's own process, so ending or killing that process ends every test.
@@ -2452,7 +2458,7 @@ THREADS_CONFIG = 'export default { test: { pool: "threads" } };\n'
 
 def _threads_widget_repo(repo: Path, test_source: str) -> str:
     """Commit the threads configuration and a widget, then ``test_source``; return the baseline."""
-    write(repo / FRONTEND_PATH / "vitest.config.mjs", THREADS_CONFIG)
+    write(repo / VITEST_CONFIG, THREADS_CONFIG)
     return _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, test_source)
 
 
@@ -2502,7 +2508,7 @@ def test_a_vitest_module_run_from_outside_the_baseline_tree_is_refused(
     """
     working_frontend = (linked_repo / FRONTEND_PATH).as_posix()
     write(
-        linked_repo / FRONTEND_PATH / "vitest.config.mjs",
+        linked_repo / VITEST_CONFIG,
         f"export default {{ test: {{ dir: {json.dumps(working_frontend)} }} }};\n",
     )
     baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
@@ -2684,9 +2690,9 @@ def _frontend_with_rule(tmp_path: Path, rule: str) -> tuple[Path, str]:
     baseline revision.
     """
     repo = scratch_repo(tmp_path)
-    frontend = _scratch_frontend(repo)
+    _scratch_frontend(repo)
     baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
-    write(frontend / "scripts" / "testFiles.mjs", rule)
+    write(repo / TEST_FILE_RULE, rule)
     return repo, baseline
 
 
@@ -2701,7 +2707,7 @@ def test_a_test_file_rule_that_fails_is_refused_naming_the_rule_and_its_error(
     result = _run(repo, WIDGET_TEST, baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "testFiles.mjs failed: the rule broke" in _why(result)
+    assert f"{TEST_FILE_RULE} failed: the rule broke" in _why(result)
 
 
 def test_a_test_file_rule_answering_with_no_json_is_refused(
@@ -2714,4 +2720,4 @@ def test_a_test_file_rule_answering_with_no_json_is_refused(
     result = _run(repo, WIDGET_TEST, baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "testFiles.mjs answered with no JSON" in _why(result)
+    assert f"{TEST_FILE_RULE} answered with no JSON" in _why(result)
