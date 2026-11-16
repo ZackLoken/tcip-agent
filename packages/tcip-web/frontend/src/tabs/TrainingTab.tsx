@@ -157,6 +157,10 @@ const selectControlId = (id: string) => `select-${id}`;
 /** The id of the Compare toggle of the run `id`. */
 const compareToggleId = (id: string) => `compare-${id}`;
 
+/** The id of the text of the failure standing on the Cancel of the run or sweep `id`, which
+ *  describes that Cancel button. */
+const cancelFailureId = (id: string) => `cancel-error-${id}`;
+
 function RunItem({
   run,
   selected,
@@ -261,7 +265,7 @@ function CancelButton({
       type="button"
       title="Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
       aria-label={`Cancel ${id}`}
-      aria-describedby={failed ? `cancel-error-${id}` : undefined}
+      aria-describedby={failed ? cancelFailureId(id) : undefined}
       disabled={canceling}
       className="px-2 py-1 text-[12px] border-l border-tcip-border first:border-l-0 hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
       onClick={onCancel}
@@ -278,7 +282,7 @@ function CancelFailure({ id, cancelKey }: { id: string; cancelKey: string }) {
       <NotificationItem
         placement="in place"
         entryKey={cancelKey}
-        textId={`cancel-error-${id}`}
+        textId={cancelFailureId(id)}
         afterDismiss={() => document.getElementById(selectControlId(id))?.focus()}
       />
     </div>
