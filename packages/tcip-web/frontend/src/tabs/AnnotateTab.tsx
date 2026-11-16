@@ -94,11 +94,11 @@ import {
   PROMPT_POINT_STYLE,
   strokeWidths,
 } from "@/lib/symbology";
+import { tell } from "@/lib/tell";
 import { nextMode } from "@/lib/toolMode";
 import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import { canvasImage, holdsCanvas, imageSize } from "@/store/slices/canvas";
-import type { MessageLevel } from "@/store/slices/notifications";
 import {
   isFinished,
   TOOL_ARRAY,
@@ -120,25 +120,6 @@ const CANVAS_SLOTS = ["document", "reload", "act"] as const;
 /** The key the image at `imagePath` holds its `slot`'s entry on. */
 const canvasKey = (slot: (typeof CANVAS_SLOTS)[number], imagePath: string): string =>
   `annotate-${slot}:${imagePath}`;
-
-/** Raise `sentence` as a `kind` of the open project about `target`, an image or a capture by
- *  name, standing on `key` when one is given. */
-function tell(
-  kind: "failure" | "notice",
-  level: MessageLevel,
-  sentence: string,
-  target: string,
-  key?: string,
-): void {
-  const { raiseNotification, openProject } = useStore.getState();
-  raiseNotification({
-    kind,
-    level,
-    text: { sentence },
-    context: { project: openProject?.id, target },
-    key,
-  });
-}
 
 /** The image in view as the store holds it now, which a callback outliving its render reads. */
 const liveImage = (): CaptureImage | null => currentImage(useStore.getState().gui.dataset);
