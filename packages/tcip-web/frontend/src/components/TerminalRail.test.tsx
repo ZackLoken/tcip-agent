@@ -136,6 +136,7 @@ type Globals = { IS_REACT_ACT_ENVIRONMENT?: boolean };
 
 // Read before any test overrides them.
 const JSDOM_PLATFORM = navigator.platform;
+const JSDOM_INNER_WIDTH = window.innerWidth;
 const ACT_ENVIRONMENT = (globalThis as Globals).IS_REACT_ACT_ENVIRONMENT;
 
 afterEach(cleanup);
@@ -481,10 +482,83 @@ describe("TerminalRail", () => {
     expect(localStorage.getItem("tcip.terminal_width")).toBe("600");
   });
 
+  describe("when the window's width changes", () => {
+    /** Make the window `px` wide for the running test and tell the page it was resized. */
+    function resizeWindowTo(px: number) {
+      vi.stubGlobal("innerWidth", px);
+      fireEvent(window, new Event("resize"));
+    }
+
+    /** Render the rail in a window `px` wide, ready for arrow-key resizes. */
+    async function renderedAt(px: number) {
+      painted.columnPx = 8;
+      vi.stubGlobal("innerWidth", px);
+      render(<TerminalRail />);
+      await screen.findByTestId("terminal-host");
+      await waitFor(() => expect(termInstances[0].open).toHaveBeenCalled());
+      return {
+        handle: screen.getByLabelText("Resize agent terminal"),
+        rail: screen.getByLabelText("Agent terminal"),
+      };
+    }
+
+    /** Press ArrowLeft on `handle` until `rail` stops widening; the width it stopped at. */
+    function widenUntilBound(handle: HTMLElement, rail: HTMLElement): string {
+      let previous = "";
+      while (rail.style.width !== previous) {
+        previous = rail.style.width;
+        fireEvent.keyDown(handle, { key: "ArrowLeft" });
+      }
+      return rail.style.width;
+    }
+
+    it("narrowing it bounds the width the rail holds again, and not the stored one", async () => {
+      const { handle, rail } = await renderedAt(1280);
+      expect(widenUntilBound(handle, rail)).toBe("896px");
+      expect(localStorage.getItem("tcip.terminal_width")).toBe("896");
+
+      resizeWindowTo(900);
+      expect(rail.style.width).toBe("630px");
+      expect(handle.getAttribute("aria-valuenow")).toBe("630");
+      expect(localStorage.getItem("tcip.terminal_width")).toBe("896");
+
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+      expect(rail.style.width).toBe("622px");
+
+      resizeWindowTo(600);
+      expect(rail.style.width).toBe("420px");
+    });
+
+    it("narrowing it while the rail is minimized bounds the width it reopens at", async () => {
+      const { handle, rail } = await renderedAt(1280);
+      expect(widenUntilBound(handle, rail)).toBe("896px");
+
+      fireEvent.click(screen.getByLabelText("Minimize agent terminal"));
+      expect(screen.queryByLabelText("Agent terminal")).toBeNull();
+      resizeWindowTo(900);
+      act(() => useStore.getState().setTerminalOpen(true));
+
+      expect(screen.getByLabelText("Agent terminal").style.width).toBe("630px");
+      expect(localStorage.getItem("tcip.terminal_width")).toBe("896");
+    });
+
+    it("widening it again leaves the rail at the width it was bounded to", async () => {
+      const { handle, rail } = await renderedAt(1280);
+      widenUntilBound(handle, rail);
+      resizeWindowTo(900);
+      expect(rail.style.width).toBe("630px");
+
+      resizeWindowTo(1280);
+      expect(rail.style.width).toBe("630px");
+      expect(localStorage.getItem("tcip.terminal_width")).toBe("896");
+    });
+  });
+
   // Runs after the tests above in file order and observes what they overrode: a stubbed global
   // (unstubGlobals), a spied platform (restoreMocks) and the test-scoped clipboard.
   it("finds every global the tests before it overrode back at its value from before them", () => {
     expect((globalThis as Globals).IS_REACT_ACT_ENVIRONMENT).toBe(ACT_ENVIRONMENT);
+    expect(window.innerWidth).toBe(JSDOM_INNER_WIDTH);
     expect(navigator.platform).toBe(JSDOM_PLATFORM);
     expect("clipboard" in navigator).toBe(false);
   });
