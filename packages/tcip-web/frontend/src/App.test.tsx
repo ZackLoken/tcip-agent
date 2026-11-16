@@ -1015,6 +1015,15 @@ describe("App job entries", () => {
     expect(alert()).toHaveTextContent(RUN_FAILED);
   });
 
+  it("tells a run first seen interrupted nothing, and tells it once a later answer lists it running", async () => {
+    await watchFromMeta([STALLED_LISTING, LISTING_BEFORE_FAILURE], []);
+    expect(useStore.getState().notifications.map((e) => e.context.target)).not.toContain(streamed);
+
+    await next(RUN_REFRESH_MS);
+
+    expect(listedSentences()).toContain(RUN_RUNNING);
+  });
+
   it("tells nothing when another project's opening empties the listings, and what changed once the first opens again", async () => {
     const valley = [LISTING_BEFORE_FAILURE, TRAINING_LISTING];
     const inValley = () => useStore.getState().openProject?.id === VALLEY.record.id;

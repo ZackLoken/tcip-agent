@@ -82,8 +82,9 @@ function levelOf(state: string): MessageLevel {
  * Tell the jobs `answer`, the listing `listing` answered for the open project `project`, lists,
  * against what the last answer for that project and listing told.
  *
- * The first answer tells each unended job; a later one tells a job not seen unended before
- * that is unended now, or ended and not listed before. A job told unended is watched: a
+ * The first answer tells each running or pending job; a later one tells a job not watched that
+ * is running or pending now, or ended and not listed before. A job not watched that reads stalled
+ * is neither told nor watched. A job told running or pending is watched: a
  * sentence changed since the last told updates its standing entry in place, and none is raised
  * once its entry is dismissed. Its end, its state becoming or leaving stalled, and its absence
  * from an answer are told again, announced as new; an end or an absence also ends the watch and
@@ -103,6 +104,7 @@ export function tellJobs<N extends ListingName>(
   for (const job of listed) {
     const { id, name, state, sentence } = job;
     const seen = before?.watched[id];
+    if (seen === undefined && stalled(state)) continue;
     const over = ended(state);
     const raise = { id, level: levelOf(state), sentence, release: over };
     if (seen === undefined) {
