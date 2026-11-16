@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
-import { messageOf, refusalOf, StructuredRefusalError } from "@/api/http";
+import { messageOf, refusalOf } from "@/api/http";
 import { resultsApi } from "@/api/inference";
 import {
   AUDIT_ENTRY_NOT_WRITTEN,
@@ -18,10 +18,12 @@ import {
   UNREGISTERED,
 } from "@/api/types.generated";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { NotificationItem } from "@/components/Notifications";
 import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
 import { useMappingNames } from "@/hooks/useMappingNames";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
+import { tell } from "@/lib/tell";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
 
@@ -34,7 +36,28 @@ function radiusPhrase(radius: MatchRadius): string {
   return `radius ${radius.value.toFixed(2)} m ${source}`;
 }
 
-function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
+/** The key a failed mapping `kind`, a load or a build, stands on in the project `projectId`. */
+const mappingKey = (kind: "load" | "build", projectId: string) =>
+  `setup-mapping-${kind}:${projectId}`;
+
+/** The key a failed identity `kind`, a read or a registration, of the dataset at `datasetRoot`
+ *  stands on in the project `projectId`. */
+const identityKey = (kind: "read" | "register", projectId: string, datasetRoot: string) =>
+  `setup-identity-${kind}:${projectId}:${datasetRoot}`;
+
+const MAPPING_INPUT_ID = "plant-mapping-name";
+const CROP_INPUT_ID = "dataset-crop";
+
+function PlantMappingPanel({
+  projectId,
+  datasetRoot,
+}: {
+  projectId: string;
+  datasetRoot: string | null;
+}) {
+  const loadKey = mappingKey("load", projectId);
+  const buildKey = mappingKey("build", projectId);
+  const buildButton = useRef<HTMLButtonElement>(null);
   const [mappingName, setMappingName] = useState("");
   // Every mapping name already persisted under the open project, for the picker below; a name
   // typed here that isn't in the list is a new mapping this build will create.
@@ -59,8 +82,9 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   async function loadMapping(name: string) {
     try {
       setMapping(await resultsApi.loadPlantMapping({ name }));
+      useStore.getState().releaseNotification(loadKey);
     } catch (e) {
-      useStore.getState().pushToast(`Could not load the mapping: ${messageOf(e)}`);
+      tell("failure", "error", `Could not load the mapping: ${messageOf(e)}`, name, loadKey);
     }
   }
 
@@ -77,6 +101,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
     setBuilding(true);
     setBuildMsg(null);
     setMapping(null);
+    useStore.getState().releaseNotification(buildKey);
     try {
       const built = await resultsApi.buildPlantMapping({
         name: mappingName,
@@ -94,13 +119,17 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       setBuildMsg(`Built ${mappingName}.`);
       refreshMappingNames();
     } catch (e) {
-      if (e instanceof StructuredRefusalError && e.status === 409) {
-        // A rebuild cited by a delivery event, or a receipt that could not be written.
-        setBuildMsg(e.message);
-      } else {
-        useStore.getState().pushToast(`Could not build the mapping: ${messageOf(e)}`);
-        setBuildMsg(null);
-      }
+      // A build whose receipt could not be written committed, so its message is no failure.
+      const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
+      if (gap) tell("notice", "warning", gap.message, mappingName, buildKey);
+      else
+        tell(
+          "failure",
+          "error",
+          `Could not build the mapping: ${messageOf(e)}`,
+          mappingName,
+          buildKey,
+        );
     } finally {
       setBuilding(false);
     }
@@ -111,11 +140,11 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       <div className="tcip-heading mb-3">Plant mapping</div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-3">
         <div className="flex flex-col gap-1">
-          <label className="tcip-label" htmlFor="plant-mapping-name">
+          <label className="tcip-label" htmlFor={MAPPING_INPUT_ID}>
             Mapping
           </label>
           <input
-            id="plant-mapping-name"
+            id={MAPPING_INPUT_ID}
             className="tcip-input"
             value={mappingName}
             onChange={(e) => {
@@ -135,6 +164,11 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
               ))}
             </datalist>
           )}
+          <NotificationItem
+            placement="in place"
+            entryKey={loadKey}
+            afterDismiss={() => document.getElementById(MAPPING_INPUT_ID)?.focus()}
+          />
         </div>
         <div className="flex flex-col gap-1">
           <label className="tcip-label" htmlFor="plant-registry-name">
@@ -187,6 +221,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       </label>
       <div className="mt-4 flex items-center gap-3">
         <button
+          ref={buildButton}
           className="tcip-btn-primary"
           onClick={() => void buildMapping()}
           disabled={building || !datasetRoot}
@@ -194,6 +229,13 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
           {building ? "Building…" : "Build"}
         </button>
         {buildMsg && <span className="text-tcip-muted">{buildMsg}</span>}
+        <div className="min-w-0 flex-1 empty:hidden">
+          <NotificationItem
+            placement="in place"
+            entryKey={buildKey}
+            afterDismiss={() => buildButton.current?.focus()}
+          />
+        </div>
       </div>
       {mapping && (
         <div className="mt-3 text-tcip-muted tabular-nums">
@@ -222,9 +264,20 @@ const CROP_CHANGE_CONSEQUENCE =
 /** The selected dataset root's identity as its document reads, registered from here at a crop of
  *  the served vocabulary; a registered crop changes only after a confirmation listing the open
  *  project's mappings built over the dataset with each one's plant registry crop. */
-function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
+function DatasetIdentityPanel({
+  projectId,
+  datasetRoot,
+}: {
+  projectId: string;
+  datasetRoot: string;
+}) {
+  const readKey = identityKey("read", projectId, datasetRoot);
+  const registerKey = identityKey("register", projectId, datasetRoot);
   const user = useStore((s) => s.user);
+  const retryButton = useRef<HTMLButtonElement>(null);
   const [read, setRead] = useState<RootIdentity | null>(null);
+  // Whether a read failed with none landing since, which keeps the panel and its Retry shown.
+  const [readRefused, setReadRefused] = useState(false);
   const [crop, setCrop] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -233,18 +286,26 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
 
   const readIdentity = useCallback(
     (adopt: (answer: RootIdentity) => void) => {
-      if (!datasetRoot) return;
       void api.dataset
         .identity(datasetRoot)
         .then((answer) => {
+          useStore.getState().releaseNotification(readKey);
+          setReadRefused(false);
           setRead(answer);
           adopt(answer);
         })
-        .catch((e: unknown) =>
-          useStore.getState().pushToast(`Could not read the dataset identity: ${messageOf(e)}`),
-        );
+        .catch((e: unknown) => {
+          setReadRefused(true);
+          tell(
+            "failure",
+            "error",
+            `Could not read the dataset identity: ${messageOf(e)}`,
+            datasetRoot,
+            readKey,
+          );
+        });
     },
-    [datasetRoot],
+    [datasetRoot, readKey],
   );
 
   const refresh = useCallback(() => {
@@ -257,14 +318,46 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
     refresh();
   }, [refresh]);
 
-  if (!datasetRoot || !read) return null;
+  if (!read) {
+    if (!readRefused) return null;
+    return (
+      <div className="tcip-panel p-5">
+        <div className="tcip-heading mb-3">Dataset identity</div>
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1 empty:hidden">
+            <NotificationItem
+              placement="in place"
+              entryKey={readKey}
+              afterDismiss={() => retryButton.current?.focus()}
+            />
+          </div>
+          <button
+            ref={retryButton}
+            type="button"
+            className="tcip-btn h-6 shrink-0 px-2 text-[12px]"
+            onClick={refresh}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+  const readFailure = (
+    <NotificationItem
+      placement="in place"
+      entryKey={readKey}
+      action={{ label: "Retry", run: refresh }}
+      afterDismiss={() => document.getElementById(CROP_INPUT_ID)?.focus()}
+    />
+  );
   const state = read.identity;
   const stored = state.kind === REGISTERED ? state.identity.crop : null;
 
   async function register(confirmedCrop: string | null) {
-    if (!datasetRoot) return;
     setSubmitting(true);
     setRepaired(null);
+    useStore.getState().releaseNotification(registerKey);
     try {
       const answer = await api.dataset.register({
         dataset_root: datasetRoot,
@@ -273,13 +366,18 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
         confirmed_crop: confirmedCrop,
       });
       setRepaired(answer.repaired);
-      useStore.getState().pushToast(`Registered at crop ${answer.crop}.`, "success");
     } catch (e) {
       // A registration whose audit line was lost still committed, so its message is no failure.
       const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
-      useStore
-        .getState()
-        .pushToast(gap ? gap.message : `Could not register the dataset: ${messageOf(e)}`);
+      if (gap) tell("notice", "warning", gap.message, datasetRoot);
+      else
+        tell(
+          "failure",
+          "error",
+          `Could not register the dataset: ${messageOf(e)}`,
+          datasetRoot,
+          registerKey,
+        );
     } finally {
       setSubmitting(false);
       setConfirming(false);
@@ -299,11 +397,11 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
       {state.kind === REFUSED && <p className="tcip-problem">{state.reason}</p>}
       <div className="mt-3 flex items-end gap-3">
         <div className="flex flex-col gap-1">
-          <label className="tcip-label" htmlFor="dataset-crop">
+          <label className="tcip-label" htmlFor={CROP_INPUT_ID}>
             Crop
           </label>
           <select
-            id="dataset-crop"
+            id={CROP_INPUT_ID}
             className="tcip-input"
             value={crop}
             onChange={(e) => setCrop(e.target.value)}
@@ -332,6 +430,14 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
             Change crop
           </button>
         )}
+      </div>
+      <div className="mt-2 flex flex-col gap-1 empty:hidden">
+        <NotificationItem
+          placement="in place"
+          entryKey={registerKey}
+          afterDismiss={() => document.getElementById(CROP_INPUT_ID)?.focus()}
+        />
+        {readFailure}
       </div>
       {repaired && <p className="mt-2 text-tcip-muted">{repaired}</p>}
       {confirming && state.kind === REGISTERED && (
@@ -379,6 +485,8 @@ function DatasetIdentityPanel({ datasetRoot }: { datasetRoot: string | null }) {
 
 type Answer = [keyof CaptureInvariances, boolean | number];
 
+const INVARIANCES_HEADING = "Variation across photos";
+
 /** The capture invariances the open project's record carries, read from the project listing and
  *  corrected as one block through the record's correction door. */
 function InvariancesPanel({ projectId }: { projectId: string }) {
@@ -424,7 +532,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
         );
       setRecorded(record.invariances);
       setDraft(record.invariances);
-      useStore.getState().pushToast(`Saved: ${changed.join(", ")}.`, "success");
+      tell("notice", "info", `Saved: ${changed.join(", ")}.`, INVARIANCES_HEADING);
     } catch (e) {
       setProblem(messageOf(e));
     } finally {
@@ -434,7 +542,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
 
   return (
     <div className="tcip-panel p-5">
-      <div className="tcip-heading mb-3">Variation across photos</div>
+      <div className="tcip-heading mb-3">{INVARIANCES_HEADING}</div>
       <div className="grid grid-cols-3 gap-4">
         {answers.map(([name, value]) => {
           const id = `invariance-${name}`;
@@ -499,11 +607,18 @@ export function SetupTab() {
         <TabHeading tab="setup" />
         <TraitRevisionPanel key={projectId} />
         <InvariancesPanel key={`invariances-${projectId}`} projectId={projectId} />
-        <DatasetIdentityPanel
-          key={`identity-${projectId}-${datasetRoot}`}
+        {datasetRoot && (
+          <DatasetIdentityPanel
+            key={`identity-${projectId}-${datasetRoot}`}
+            projectId={projectId}
+            datasetRoot={datasetRoot}
+          />
+        )}
+        <PlantMappingPanel
+          key={`mapping-${projectId}`}
+          projectId={projectId}
           datasetRoot={datasetRoot}
         />
-        <PlantMappingPanel key={`mapping-${projectId}`} datasetRoot={datasetRoot} />
       </div>
     </div>
   );

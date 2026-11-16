@@ -19,9 +19,10 @@ import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { IDENTITY_ANSWERS } from "@/test/datasetIdentity";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
+import { entriesSaying } from "@/test/notifications";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
-import { GROUPED_SELECTION, openTestProject, RAW_SELECTION } from "@/test/store";
+import { GROUPED_SELECTION, openTestProject, RAW_SELECTION, TEST_PROJECT } from "@/test/store";
 import { CONFIRM_ANSWERS, TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
@@ -104,11 +105,11 @@ describe("SetupTab capture invariances", () => {
         return `${invarianceName(field)} ${answerPhrase(before[field])} to ${answerPhrase(value)}`;
       });
     expect(changed).not.toHaveLength(0);
-    await waitFor(() =>
-      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
-        `Saved: ${changed.join(", ")}.`,
-      ),
-    );
+    const summary = `Saved: ${changed.join(", ")}.`;
+    await waitFor(() => expect(entriesSaying(summary)).toHaveLength(1));
+    expect(entriesSaying(summary)).toEqual([
+      expect.objectContaining({ kind: "notice", level: "info", key: undefined }),
+    ]);
   });
 
   it("shows the door's refusal text in the panel", async () => {
@@ -256,6 +257,14 @@ describe("SetupTab trait revisions", () => {
   });
 });
 
+/** The panel whose heading reads `heading`. */
+function panelHeaded(heading: string): HTMLElement {
+  return screen.getByText(heading).closest(".tcip-panel") as HTMLElement;
+}
+
+const mappingPanel = () => panelHeaded("Plant mapping");
+const identityPanel = () => panelHeaded("Dataset identity");
+
 function fillAndBuild() {
   fireEvent.change(screen.getByLabelText("Mapping"), {
     target: { value: "valley-2026" },
@@ -344,18 +353,34 @@ describe("SetupTab plant-mapping build: match radius", () => {
     );
   });
 
-  it("shows a citing-events 409 beside the supersede checkbox rather than only a toast", async () => {
+  it("shows a refused build as one failure in place beside Build, until the next build starts", async () => {
     const cited = RESULTS_ANSWERS.mapping_cited;
-    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(await thrown(cited));
+    vi.spyOn(resultsApi, "buildPlantMapping")
+      .mockRejectedValueOnce(await thrown(cited))
+      .mockReturnValue(new Promise(() => {}));
 
     render(<SetupTab />);
     await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
     fillAndBuild();
 
-    expect(await screen.findByText(cited.body.detail)).toBeInTheDocument();
+    const sentence = `Could not build the mapping: ${cited.body.detail}`;
+    const line = await within(mappingPanel()).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(sentence);
+    expect(screen.getAllByText(sentence)).toHaveLength(1);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: "valley-2026" },
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+
+    await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
   });
 
-  it("adopts nothing and shows the panel message when the receipt could not be written", async () => {
+  it("adopts nothing and shows a build committed without its receipt as a warning in place", async () => {
     const gap = RESULTS_ANSWERS.mapping_audit_gap;
     vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(await thrown(gap));
 
@@ -363,9 +388,51 @@ describe("SetupTab plant-mapping build: match radius", () => {
     await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
     fillAndBuild();
 
-    expect(
-      await screen.findByText(new RegExp(gap.body.detail.message.slice(0, 40))),
-    ).toBeInTheDocument();
+    const line = await within(mappingPanel()).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(gap.body.detail.message);
+    expect(entriesSaying(gap.body.detail.message)).toEqual([
+      expect.objectContaining({ kind: "notice", level: "warning" }),
+    ]);
+  });
+
+  it("shows a failed load of a stored mapping in place under the Mapping input", async () => {
+    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(resultsApi, "loadPlantMapping").mockRejectedValue(new TypeError("Failed to fetch"));
+    const [name] = RESULTS_ANSWERS.mapping_names.names;
+    const sentence = "Could not load the mapping: Failed to fetch";
+
+    render(<SetupTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: name } });
+
+    const line = await within(mappingPanel()).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(sentence);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: name },
+      }),
+    ]);
+  });
+
+  it("ends a failed mapping load's line once a load lands", async () => {
+    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(resultsApi, "loadPlantMapping")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(RESULTS_ANSWERS.mapping_loaded);
+    const [first, second] = RESULTS_ANSWERS.mapping_names.names;
+
+    render(<SetupTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: first } });
+    await within(mappingPanel()).findByTestId("entry-in-place");
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: second } });
+
+    await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
   });
 
   it("renders the mapping-wide unattributed line when the total is nonzero", async () => {
@@ -592,22 +659,62 @@ describe("SetupTab dataset identity", () => {
     expect(screen.getByText(repaired.repaired!)).toBeInTheDocument();
   });
 
-  it("shows the route's refusal as it answered it", async () => {
-    const refusal = IDENTITY_ANSWERS.unknown_crop;
-    vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(refusal));
+  it("raises no entry for a registration that lands, the panel showing it from the reread", async () => {
+    vi.spyOn(api.dataset, "identity")
+      .mockResolvedValueOnce(IDENTITY_ANSWERS.unregistered)
+      .mockResolvedValue(MAPPED);
+    vi.spyOn(api.dataset, "register").mockResolvedValue(IDENTITY_ANSWERS.registered);
+    const { identity } = registeredOf(MAPPED);
 
     render(<SetupTab />);
     fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
-    await waitFor(() =>
-      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
-        `Could not register the dataset: ${refusal.body.detail}`,
-      ),
-    );
+    expect(
+      await screen.findByText(`Registered at crop ${identity.crop}, id ${identity.id}.`),
+    ).toBeInTheDocument();
+    expect(useStore.getState().notifications).toEqual([]);
   });
 
-  it("shows a committed registration's lost audit line as its message, not a failure", async () => {
+  it("shows the route's refusal as it answered it, in place in the identity panel", async () => {
+    const refusal = IDENTITY_ANSWERS.unknown_crop;
+    vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(refusal));
+    const sentence = `Could not register the dataset: ${refusal.body.detail}`;
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    const line = await within(identityPanel()).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(sentence);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: ROOT },
+      }),
+    ]);
+  });
+
+  it("ends a refused registration's line once the next registration starts", async () => {
+    vi.spyOn(api.dataset, "register")
+      .mockRejectedValueOnce(await thrown(IDENTITY_ANSWERS.unknown_crop))
+      .mockReturnValue(new Promise(() => {}));
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    await within(identityPanel()).findByTestId("entry-in-place");
+    // The reread after the refusal puts the crop back to the stored one, none.
+    await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText("Crop"), { target: { value: SERVED_CROP } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() => expect(within(identityPanel()).queryByTestId("entry-in-place")).toBeNull());
+    expect(api.dataset.register).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a committed registration's lost audit line as a warning, not a failure", async () => {
     const gap = IDENTITY_ANSWERS.unrecorded;
     vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(gap));
 
@@ -615,10 +722,62 @@ describe("SetupTab dataset identity", () => {
     fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
-    const toasted = () => useStore.getState().toasts.map((t) => t.message);
-    await waitFor(() => expect(toasted()).toContain(gap.body.detail.message));
-    expect(toasted().join()).not.toMatch(/Could not/);
+    await waitFor(() => expect(entriesSaying(gap.body.detail.message)).toHaveLength(1));
+    expect(entriesSaying(gap.body.detail.message)).toEqual([
+      expect.objectContaining({ kind: "notice", level: "warning", key: undefined }),
+    ]);
+    expect(useStore.getState().notifications).toHaveLength(1);
     await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a failed identity read in place in the identity panel, whose Retry reads it again", async () => {
+    // What fetch rejects with when the backend cannot be reached.
+    const identity = vi
+      .spyOn(api.dataset, "identity")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(IDENTITY_ANSWERS.unregistered);
+    const sentence = "Could not read the dataset identity: Failed to fetch";
+
+    render(<SetupTab />);
+    await screen.findByText("Dataset identity");
+
+    const line = within(identityPanel()).getByTestId("entry-in-place");
+    expect(line).toHaveTextContent(sentence);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: ROOT },
+      }),
+    ]);
+
+    fireEvent.click(within(identityPanel()).getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
+    expect(identity).toHaveBeenCalledTimes(2);
+    expect(within(identityPanel()).queryByTestId("entry-in-place")).toBeNull();
+  });
+
+  it("keeps the identity panel and its Retry once a failed first read is dismissed, focus on Retry", async () => {
+    // What fetch rejects with when the backend cannot be reached.
+    const identity = vi
+      .spyOn(api.dataset, "identity")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(IDENTITY_ANSWERS.unregistered);
+
+    render(<SetupTab />);
+    await screen.findByText("Dataset identity");
+    const line = within(identityPanel()).getByTestId("entry-in-place");
+    fireEvent.click(within(line).getByRole("button", { name: /^Dismiss: Could not read/ }));
+
+    const retry = within(identityPanel()).getByRole("button", { name: "Retry" });
+    expect(within(identityPanel()).queryByTestId("entry-in-place")).toBeNull();
+    expect(retry).toHaveFocus();
+
+    fireEvent.click(retry);
+
+    expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
+    expect(identity).toHaveBeenCalledTimes(2);
   });
 
   it("rereads the identity when the confirmation opens, listing a mapping built since", async () => {
@@ -660,7 +819,7 @@ describe("SetupTab dataset identity", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the server's refusal of a crop change and rereads the identity", async () => {
+  it("shows the server's refusal of a crop change in the identity panel once the confirmation closes, and rereads the identity", async () => {
     const refusal = IDENTITY_ANSWERS.crop_unconfirmed;
     vi.spyOn(api.dataset, "identity").mockResolvedValue(MAPPED);
     vi.spyOn(api.dataset, "register").mockRejectedValue(await thrown(refusal));
@@ -669,11 +828,9 @@ describe("SetupTab dataset identity", () => {
     const dialog = await openConfirmation(MAPPED);
     fireEvent.click(within(dialog).getByRole("button", { name: "Change crop" }));
 
-    await waitFor(() =>
-      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
-        `Could not register the dataset: ${refusal.body.detail}`,
-      ),
-    );
+    const line = await within(identityPanel()).findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(`Could not register the dataset: ${refusal.body.detail}`);
+    expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(3));
   });
 

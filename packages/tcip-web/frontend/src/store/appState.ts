@@ -8,7 +8,6 @@ import type { PendingTerminalMessageSlice } from "@/store/slices/pendingTerminal
 import type { ProjectOpenSlice } from "@/store/slices/projectOpen";
 import type { RegistryStatusSlice } from "@/store/slices/registryStatus";
 import type { TerminalOpenSlice } from "@/store/slices/terminalOpen";
-import type { ToastSlice } from "@/store/slices/toasts";
 import type { UserSlice } from "@/store/slices/user";
 
 /**
@@ -23,7 +22,6 @@ export interface AppState
     BandSelectionSlice,
     RegistryStatusSlice,
     AgentActivitySlice,
-    ToastSlice,
     NotificationsSlice,
     BannerSlice,
     TerminalOpenSlice,

@@ -3,7 +3,7 @@ import type { StateCreator } from "zustand";
 import type { AppState } from "@/store/appState";
 
 /** How loud a message to the person is. */
-export type MessageLevel = "error" | "warning" | "info" | "success";
+export type MessageLevel = "error" | "warning" | "info";
 
 /** How each level is shown and told, read by every message component: its word, its text tone,
  *  the color of its mark, and the politeness its live region announces it with. */
@@ -14,7 +14,6 @@ export const LEVELS: Record<
   error: { word: "Error", tone: "tcip-problem", mark: "bg-tcip-fp", live: "assertive" },
   warning: { word: "Warning", tone: "text-tcip-warn", mark: "bg-tcip-warn", live: "polite" },
   info: { word: "Information", tone: "text-tcip-fg", mark: "bg-tcip-fn", live: "polite" },
-  success: { word: "Done", tone: "text-tcip-fg", mark: "bg-tcip-tp", live: "polite" },
 };
 
 /** A state of the application that holds over time: the state socket's lost connection, a

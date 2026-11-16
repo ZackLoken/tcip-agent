@@ -3897,7 +3897,6 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([dropped, kept]);
     // The held boxes are drawn on the canvas, so the find raises no message.
     expect(listed()).toEqual([]);
-    expect(useStore.getState().toasts).toEqual([]);
 
     fireEvent.contextMenu(stage(), { clientX: dropped[0] + 10, clientY: dropped[1] + 10 });
     await flush();
@@ -3965,7 +3964,6 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().gui.dataset?.bucket).toBeNull();
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-view-proposals", "true");
     expect(listed()).toEqual([]);
-    expect(useStore.getState().toasts).toEqual([]);
     await waitFor(() =>
       expect(useStore.getState().canvas.focus).toEqual({
         kind: "proposal",

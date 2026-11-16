@@ -13,6 +13,7 @@ import {
   REGISTERED_MODELS,
 } from "@/test/deliveryRecords";
 import { INFERENCE_ANSWERS } from "@/test/inference";
+import { entriesSaying } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import {
   DATASET_TREES,
@@ -21,6 +22,7 @@ import {
   GROUPED_SELECTION,
   openTestProject,
   RAW_SELECTION,
+  TEST_PROJECT,
 } from "@/test/store";
 
 // The live job stream owns a real WebSocket; only its frame-to-state mapping is under test here,
@@ -300,6 +302,34 @@ describe("InferenceTab job table", () => {
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(HELD, { user: "jordan" }));
   });
 
+  it("shows a failed job cancel in place in that job's row, until its next cancel", async () => {
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue(RUNNING);
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(inferenceApi, "cancel")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockReturnValue(new Promise(() => {}));
+    const sentence = "Cancel failed: Failed to fetch";
+
+    render(<InferenceTab />);
+    expect(await screen.findByText(HELD)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const line = await screen.findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(sentence);
+    expect(line.closest("tr")?.previousElementSibling).toBe(screen.getByText(HELD).closest("tr"));
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: HELD },
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByTestId("entry-in-place")).toBeNull());
+  });
+
   it("shows canceling until the poll reports the job ended", async () => {
     vi.useFakeTimers();
     try {
@@ -410,13 +440,13 @@ describe("InferenceTab bucket refusals", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
   }
 
-  it("renders the refusal's own sentence under its date, with no toast", async () => {
+  it("renders the refusal's own sentence under its date, raising no entry", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
 
     const sentence = `${DS_DATE}: ${REFUSED.message}`;
     expect(await screen.findByText(paragraphHolding(sentence))).toBeInTheDocument();
-    expect(useStore.getState().toasts).toHaveLength(0);
+    expect(useStore.getState().notifications).toEqual([]);
   });
 
   it("names the job still writing the bucket and watches it", async () => {
@@ -496,14 +526,30 @@ describe("InferenceTab bucket refusals", () => {
     expect(screen.queryByText("Refused")).not.toBeInTheDocument();
   });
 
-  it("still toasts, and renders no entry, for a launch failure of another kind", async () => {
-    vi.spyOn(inferenceApi, "launch").mockRejectedValue(
-      await thrown(INFERENCE_ANSWERS.missing_checkpoint),
-    );
+  it("shows a launch failure of another kind in place for its date, until that date launches again", async () => {
+    const missing = INFERENCE_ANSWERS.missing_checkpoint;
+    vi.spyOn(inferenceApi, "launch")
+      .mockRejectedValueOnce(await thrown(missing))
+      .mockResolvedValue(LAUNCHED);
+    const sentence = `Inference launch failed for ${DS_DATE}: ${missing.body.detail}`;
     await launchOneRefused();
 
-    await waitFor(() => expect(useStore.getState().toasts).toHaveLength(1));
+    expect(await screen.findByTestId("entry-in-place")).toHaveTextContent(sentence);
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: DS_DATE },
+      }),
+    ]);
     expect(screen.queryByText("Refused")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(await screen.findByText(HELD)).toBeInTheDocument();
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(entriesSaying(sentence)).toHaveLength(1);
   });
 
   it("drops refused entries on a model change", async () => {
