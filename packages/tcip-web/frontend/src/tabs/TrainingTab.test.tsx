@@ -899,8 +899,8 @@ describe("TrainingTab launch picker", () => {
   });
 
   /** Start the unlaunched run as recorded from the open picker, the relaunch door answering
-   *  `answer`; return the notices the person has been told about `answer`'s run. */
-  async function noticesOfStartAnswering(answer: typeof RUN_RELAUNCH) {
+   *  `answer`; return the notices the person has been told about `target`, the launched run. */
+  async function noticesOfStartAnswering(answer: typeof RUN_RELAUNCH, target: string) {
     openTestProject();
     vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(SPLIT_CHOICES);
     const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(answer);
@@ -909,7 +909,6 @@ describe("TrainingTab launch picker", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(relaunchSpy).toHaveBeenCalled());
-    const target = answer.kind === "sweep" ? answer.sweep_id : answer.experiment_id;
     await waitFor(() => expect(screen.queryByText("Runs and sweeps in this project")).toBeNull());
     return useStore
       .getState()
@@ -922,7 +921,7 @@ describe("TrainingTab launch picker", () => {
     }
     const { error } = RUN_RELAUNCH.tensorboard;
 
-    const notices = await noticesOfStartAnswering(RUN_RELAUNCH);
+    const notices = await noticesOfStartAnswering(RUN_RELAUNCH, RUN_RELAUNCH.experiment_id);
 
     expect(notices).toHaveLength(1);
     const [notice] = notices;
@@ -940,7 +939,7 @@ describe("TrainingTab launch picker", () => {
     const { experiment_id, warnings } = DRAWN_RELAUNCH;
     expect(warnings.some((w) => /candidate images .* will not train/.test(w))).toBe(true);
 
-    const notices = await noticesOfStartAnswering(DRAWN_RELAUNCH);
+    const notices = await noticesOfStartAnswering(DRAWN_RELAUNCH, experiment_id);
 
     for (const warning of warnings) {
       expect(notices.filter((e) => e.sentence === warning)).toEqual([
