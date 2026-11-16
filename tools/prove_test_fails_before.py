@@ -1,8 +1,19 @@
 """Run a test against a baseline tree without the change under test; report whether it fails.
 
 The baseline is materialized with ``git archive`` (the working tree is never touched), the current
-``tests/`` directory is overlaid on it, the baseline's own source is proved to be what gets
-imported, and pytest's per-test outcome is read rather than its exit code.
+test side is overlaid on it, and the test runner's per-test outcome is read rather than its exit
+code. The test side is every file under ``tests/`` and every test file under
+``packages/tcip-web/frontend/``, as the frontend's own rule (``scripts/testFiles.mjs``, asked
+through ``node``) names one; ``node`` is started only when a path under the frontend is to be
+judged.
+
+A file under ``tests/`` runs under pytest, and the baseline's own Python source is proved to be
+what gets imported. A test file under the frontend runs under the vitest of this checkout's
+frontend install, the baseline tree's frontend linked to that install for the run, vitest's results
+cache off and its configuration loaded without a bundled copy, so nothing is written through the
+link, and ``-k`` passed as vitest's ``-t`` test name pattern; the proof is weaker, that every
+test module vitest ran lies in the baseline tree, and it says nothing of where those modules'
+imports resolve. The link is removed before the scratch directory is.
 
     python tools/prove_test_fails_before.py tests/test_foo.py
     python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behavior"
@@ -11,32 +22,41 @@ imported, and pytest's per-test outcome is read rather than its exit code.
     python tools/prove_test_fails_before.py tests/test_foo.py --test-rev e2f9d837
         --baseline 90d974bd
     python tools/prove_test_fails_before.py tests/test_foo.py --per-test-timeout 30
+    python tools/prove_test_fails_before.py packages/tcip-web/frontend/src/lib/x.test.ts -k "name"
 
 Four verdicts, each its own exit code:
 
     GUARDS (0)         at least one selected test failed at the baseline in the call phase, on
                        the assertion it names (the raised exception's own class is
                        ``AssertionError`` or ``Failed``), on an exception raised from outside
-                       ``tests/`` (the code under test raised), or on any other exception raised
-                       in the test's own code except a ``TypeError``; the failing assertion is
-                       printed and recorded, each failure not counted is named beside it
+                       the test side (the code under test raised), or on any other exception
+                       raised in the test's own code except a ``TypeError``; the failing assertion
+                       is printed and recorded, each failure not counted is named beside it. At a
+                       baseline not shown to precede the change the verdict says so, as a fact
+                       about the baseline rather than proof the change is guarded
     VACUOUS (1)        every selected test passed at a baseline shown to precede the change
     INDETERMINATE (2)  every selected test passed, but the baseline is not shown to precede the
-                       change, so passing says nothing about the test; or, under
-                       ``--per-test-timeout``, a selected test did not finish within it, named in
-                       the verdict, so a hung baseline is told apart from a merely slow one
-    REFUSED (3)        no verdict is available: the test file is outside ``tests/`` or does not
+                       change, so passing says nothing about the test; or a selected test did not
+                       finish within its timeout (pytest-timeout's report, vitest's own "Test
+                       timed out in" message, or the test running when the process ended under
+                       ``--per-test-timeout``), named in the verdict, so a hung baseline is told
+                       apart from a merely slow one
+    REFUSED (3)        no verdict is available: the test file is not on the test side or does not
                        exist, ``--test-rev`` was given without ``--baseline``, the baseline does
                        not resolve or no tree here precedes the change, nothing was selected,
                        everything was skipped, the baseline could not collect the file, the
-                       baseline's own source was not what got imported, pytest did not finish
-                       within ``--timeout``, hit an internal error or never reported an outcome,
-                       or no failure is behavioral (each is ``unreached``, ``fixture`` or
-                       ``test_code``), so no behavior was compared. A setup or teardown
-                       failure that is neither a missing import or file nor a pytest-timeout
-                       report is ``fixture``, whatever raised it; a call-phase failure is
+                       baseline's own source was not what got imported (for vitest, a test module
+                       ran from outside the tree), the runner did not finish within ``--timeout``,
+                       hit an internal or unhandled error or never reported an outcome, ``node``
+                       is not on the path where a frontend path is to be judged, the frontend has
+                       no install or the link to it cannot be made, or no failure is behavioral
+                       (each is ``unreached``, ``fixture`` or ``test_code``), so no behavior was
+                       compared. A setup or teardown failure that is neither a missing import or
+                       file nor a timeout is ``fixture``, whatever raised it; under vitest that is
+                       a failure following a hook that started and did not end, or an error a
+                       suite or a module with tests carries of its own. A call-phase failure is
                        ``test_code``, raised in the test's own code, when it is a ``TypeError``
-                       whose crash frame is placed under ``tests/`` of the materialized tree (a
+                       whose crash frame is placed on the test side of the materialized tree (a
                        frame that cannot be placed there, a library's, is behavioral), whatever
                        its message. This is a
                        policy: the class and the place of the raise do not establish that a call
@@ -46,7 +66,7 @@ Four verdicts, each its own exit code:
                        asserting on what was returned before using it.
 
 Not closed, each still counted as behavioral: an exception of another class raised in the test's
-own code before the behavior is reached; a wrong call made in a helper outside ``tests/`` or
+own code before the behavior is reached; a wrong call made in a helper off the test side or
 inside package code (the second rightly, since the package's own behavior was reached); an
 assertion that fails before the call under test.
 
@@ -62,12 +82,14 @@ files, ignored files excluded) into a commit object and prints its hash, touchin
 working tree, the index nor the stash list, and computes no verdict.
 
 ``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout; a selected test that does
-not finish within it is named and the verdict is INDETERMINATE.
+not finish within it is named and the verdict is INDETERMINATE. A vitest run takes each test's
+own timeout.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import io
 import json
 import os
@@ -77,11 +99,14 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
 REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
+FRONTEND = "packages/tcip-web/frontend"
+TEST_FILE_RULE = f"{FRONTEND}/scripts/testFiles.mjs"
 PLUGIN_MODULE = "_fail_before_outcome"
 OUTCOME_ENV = "FAIL_BEFORE_OUTCOME_JSON"
 CURRENT_TEST_ENV = "FAIL_BEFORE_CURRENT_TEST"
@@ -100,10 +125,10 @@ FailureKind = Literal[
 
 
 class ObservedTest(TypedDict):
-    """One test's entry of the outcome record the plugin writes, as this tool reads it.
+    """One test's entry of the outcome record the pytest plugin or the vitest reporter writes.
 
-    The plugin writes the failure keys only for a failed or errored test, and the tool adds
-    ``kind`` to those.
+    Each writes the failure keys only for a failed or errored test, and the tool adds ``kind`` to
+    those.
     """
 
     nodeid: str
@@ -218,16 +243,113 @@ def pytest_sessionfinish(session, exitstatus):
         json.dump(_state, fh)
 '''
 
+REPORTER_SOURCE = r"""/** Record what vitest observed, in the pytest plugin's outcome record. */
+import { writeFileSync } from "node:fs";
+import { relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const FRAME = /^\s*at (?:.+ \()?(.+?):(\d+):\d+\)?$/;
+
+/** The first frame of the error's stack, as its file and line; nulls when it names none. */
+function crash(error) {
+  const line = (error.stack ?? "").split("\n").find((text) => /^\s*at /.test(text));
+  const frame = line?.match(FRAME);
+  if (!frame) return [null, null];
+  const file = frame[1].startsWith("file://") ? fileURLToPath(frame[1]) : frame[1];
+  return [file, Number(frame[2])];
+}
+
+/** `entry` carrying the failure keys of `error`. */
+function failure(entry, error) {
+  const [path, line] = crash(error);
+  return {
+    ...entry,
+    headline: `${error.name}: ${error.message.split("\n")[0]}`,
+    crash_path: path,
+    crash_lineno: line,
+    exc_typename: error.name,
+  };
+}
+
+export default class FailBeforeOutcome {
+  state = { collected: 0, collect_errors: [], tests: [], internal_error: null, modules: [] };
+  started = new Map();
+
+  onInit(vitest) {
+    this.root = vitest.config.root;
+  }
+
+  nodeid(module, name) {
+    const path = relative(this.root, module.moduleId).split(sep).join("/");
+    return name === undefined ? path : `${path}::${name}`;
+  }
+
+  onHookStart(hook) {
+    this.started.set(hook.entity.id, [...(this.started.get(hook.entity.id) ?? []), hook.name]);
+  }
+
+  onHookEnd(hook) {
+    const names = this.started.get(hook.entity.id) ?? [];
+    this.started.set(hook.entity.id, names.filter((name) => name !== hook.name));
+  }
+
+  onTestCaseResult(test) {
+    if (test.options.mode === "skip" || test.options.mode === "todo") return;
+    this.state.collected += 1;
+    const result = test.result();
+    const entry = {
+      nodeid: this.nodeid(test.module, test.fullName),
+      phase: this.started.get(test.id)?.[0] ?? "call",
+      outcome: result.state,
+    };
+    this.state.tests.push(result.state === "failed" ? failure(entry, result.errors[0]) : entry);
+  }
+
+  ownErrors(entity, nodeid) {
+    const phase = this.started.get(entity.id)?.[0] ?? "suite";
+    for (const error of entity.errors()) {
+      this.state.tests.push(failure({ nodeid, phase, outcome: "error" }, error));
+    }
+  }
+
+  onTestSuiteResult(suite) {
+    this.ownErrors(suite, this.nodeid(suite.module, suite.fullName));
+  }
+
+  onTestModuleEnd(module) {
+    this.state.modules.push(module.moduleId);
+    if ([...module.children.allTests()].length > 0) {
+      this.ownErrors(module, this.nodeid(module));
+      return;
+    }
+    for (const error of module.errors()) {
+      this.state.collect_errors.push({ nodeid: this.nodeid(module), detail: error.message });
+    }
+  }
+
+  onTestRunEnd(modules, unhandledErrors) {
+    if (unhandledErrors.length > 0) {
+      this.state.internal_error = unhandledErrors.map((error) => error.message).join("\n");
+    }
+    writeFileSync(process.env.FAIL_BEFORE_OUTCOME_JSON, JSON.stringify(this.state));
+  }
+}
+"""
+
+
+class RefusalError(Exception):
+    """No verdict is available; the message says why and what to do."""
+
 
 def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
-    """Return ``raw`` normalized to a repo-relative, forward-slash path under ``tests/``.
+    """Return ``raw`` normalized to a repo-relative, forward-slash path on the test side.
 
     Accepts a relative path as always, or an absolute one naming a file inside this repository;
     either way the return is a tree-relative path. A relative path is resolved against the
     repository root, never the caller's ``cwd``, and either spelling's ``..`` segments are
-    collapsed before the ``tests/`` check, so a path that only reads as inside ``tests/`` before
+    collapsed before the test-side check, so a path that only reads as inside ``tests/`` before
     normalizing (``tests/../tools/x.py``) is refused rather than admitted. Returns
-    ``(None, reason)`` when ``raw`` resolves outside ``tests/``.
+    ``(None, reason)`` when ``raw`` resolves off the test side.
     """
     path = Path(raw)
     anchored = path if path.is_absolute() else REPO / path
@@ -237,7 +359,10 @@ def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
         return None, f"{raw} is outside this repository ({REPO})."
     rel_str = str(rel).replace("\\", "/")
     if not _is_test_side(rel_str):
-        return None, f"{raw} resolves to {rel_str}, outside {TEST_TREE}/."
+        return None, (
+            f"{raw} resolves to {rel_str}, outside {TEST_TREE}/ and no test file under "
+            f"{FRONTEND}/."
+        )
     return rel_str, ""
 
 
@@ -253,13 +378,49 @@ def git_output(*args: str) -> str:
     return proc.stdout
 
 
-def _is_test_side(path: str) -> bool:
-    """Return whether the forward-slash ``path`` lies under ``tests/``.
+def _node() -> str:
+    """Return the ``node`` executable on the path; :class:`RefusalError` when there is none."""
+    node = shutil.which("node")
+    if node is None:
+        raise RefusalError(
+            f"no node on the path, which judging a path under {FRONTEND}/ and running vitest "
+            "need. Put Node.js on the path."
+        )
+    return node
 
-    A path under ``tests/`` is the test side: the tool overlays it from the current tree, so a diff
-    in it is not the change under test.
+
+def _test_side(paths: Iterable[str]) -> set[str]:
+    """Return those of the repo-relative, forward-slash ``paths`` that lie on the test side.
+
+    The test side is every path under ``tests/`` and every path under the frontend that its own
+    rule, ``TEST_FILE_RULE`` run under ``node``, calls a test file. The tool overlays the test side
+    from the tree the test comes from, so a diff in it is not the change under test. ``node`` is
+    started only when a path lies under the frontend; :class:`RefusalError` when the rule fails.
     """
-    return path.startswith(f"{TEST_TREE}/")
+    wanted = set(paths)
+    side = {p for p in wanted if p.startswith(f"{TEST_TREE}/")}
+    frontend = sorted(p for p in wanted if p.startswith(f"{FRONTEND}/"))
+    if not frontend:
+        return side
+    proc = subprocess.run(
+        [_node(), str(REPO / TEST_FILE_RULE)],
+        input=json.dumps([p.removeprefix(f"{FRONTEND}/") for p in frontend]),
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RefusalError(
+            f"the frontend's test file rule {TEST_FILE_RULE} failed: {proc.stderr.strip()}"
+        )
+    judged = zip(frontend, json.loads(proc.stdout), strict=True)
+    return side | {path for path, is_test in judged if is_test}
+
+
+@functools.cache
+def _is_test_side(path: str) -> bool:
+    """Return whether the repo-relative, forward-slash ``path`` lies on the test side."""
+    return path in _test_side([path])
 
 
 def _uncommitted_paths() -> list[str]:
@@ -286,8 +447,8 @@ def _resolve_baseline(
             return None, f"named by the caller as {named}", str(exc)
         return sha, f"named by the caller as {named}", ""
 
-    source_side = [p for p in _uncommitted_paths() if not _is_test_side(p)]
-    if source_side:
+    uncommitted = _uncommitted_paths()
+    if set(uncommitted) - _test_side(uncommitted):
         return (
             git_output("rev-parse", "HEAD").strip(),
             "HEAD, because the change under test is uncommitted",
@@ -325,7 +486,7 @@ def _changed_source_files(
             "diff", "--name-only", baseline, test_rev, "--"
         ).splitlines()
         untracked: list[str] = []
-        how = f"git diff {baseline[:8]}..{test_rev[:8]}, test tree excluded"
+        how = f"git diff {baseline[:8]}..{test_rev[:8]}, test side excluded"
     else:
         tracked = git_output(
             "diff", "--name-only", baseline, "--"
@@ -333,14 +494,9 @@ def _changed_source_files(
         untracked = git_output(
             "ls-files", "--others", "--exclude-standard"
         ).splitlines()
-        how = f"git diff against {baseline[:8]} plus untracked files, test tree excluded"
-    changed = sorted(
-        {
-            p.strip()
-            for p in [*tracked, *untracked]
-            if p.strip() and not _is_test_side(p.strip())
-        }
-    )
+        how = f"git diff against {baseline[:8]} plus untracked files, test side excluded"
+    differing = {p.strip() for p in [*tracked, *untracked] if p.strip()}
+    changed = sorted(differing - _test_side(differing))
     if declared:
         wanted = {p.replace("\\", "/") for p in declared}
         kept = sorted(wanted & set(changed))
@@ -454,31 +610,36 @@ def materialize(rev: str, dest: Path) -> None:
 
 
 def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
-    """Copy the whole test tree, from ``test_rev`` or the working tree, into ``dest``.
+    """Copy the whole test side, from ``test_rev`` or the working tree, into ``dest``.
 
-    Returns the number of files copied.
+    The working tree's test side is its tracked and untracked files git does not ignore. Returns
+    the number of files copied.
     """
     if test_rev:
         archive = subprocess.run(
-            ["git", "archive", test_rev, "--", TEST_TREE],
+            ["git", "archive", test_rev],
             cwd=REPO,
             check=True,
             stdout=subprocess.PIPE,
         ).stdout
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r") as tar:
             files = [m for m in tar.getmembers() if m.isfile()]
-            tar.extractall(dest, filter="data")
-        return len(files)
+            side = _test_side(m.name for m in files)
+            chosen = [m for m in files if m.name in side]
+            tar.extractall(dest, members=chosen, filter="data")
+        return len(chosen)
 
-    copied = 0
-    for path in (REPO / TEST_TREE).rglob("*"):
-        if "__pycache__" in path.parts or path.is_dir():
-            continue
-        target = dest / path.relative_to(REPO)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
-        copied += 1
-    return copied
+    listed = git_output(
+        "ls-files", "--cached", "--others", "--exclude-standard"
+    ).splitlines()
+    present = [p for p in listed if (REPO / p).is_file()]
+    side = _test_side(present)
+    for path in present:
+        if path in side:
+            target = dest / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / path, target)
+    return len(side)
 
 
 def child_env(
@@ -594,28 +755,105 @@ def run_capturing_outcome(
     proc = subprocess.run(
         cmd, cwd=tree, env=env, capture_output=True, text=True, timeout=timeout
     )
-    observed = None
-    if outcome_json.is_file():
-        observed = json.loads(outcome_json.read_text(encoding="utf-8"))
-        outcome_json.unlink()
-    return proc, observed
+    return proc, _read_outcome(outcome_json)
+
+
+def _read_outcome(outcome_json: Path) -> dict | None:
+    """Return the outcome record at ``outcome_json`` and remove the file; None if there is none."""
+    if not outcome_json.is_file():
+        return None
+    observed = json.loads(outcome_json.read_text(encoding="utf-8"))
+    outcome_json.unlink()
+    return observed
+
+
+def link_install(tree: Path) -> None:
+    """Link ``tree``'s frontend ``node_modules`` to this checkout's frontend install.
+
+    :class:`RefusalError` when that install holds no vitest, naming the command that installs it, or
+    when the link cannot be made, with the system's error.
+    """
+    install = REPO / FRONTEND / "node_modules"
+    if not (install / "vitest" / "package.json").is_file():
+        raise RefusalError(
+            f"{FRONTEND} has no installed vitest; run `npm ci` in {FRONTEND}."
+        )
+    try:
+        os.symlink(
+            install, tree / FRONTEND / "node_modules", target_is_directory=True
+        )
+    except OSError as error:
+        raise RefusalError(
+            f"the baseline tree's link to {install} could not be made: {error}"
+        ) from error
+
+
+def run_vitest_capturing_outcome(
+    tree: Path,
+    test_file: str,
+    expr: str,
+    outcome_json: Path,
+    timeout: int,
+) -> tuple[subprocess.CompletedProcess[str], dict | None]:
+    """Run vitest over ``test_file`` in ``tree``'s frontend and return its process and observation.
+
+    vitest is the one this checkout's frontend install holds, run with its root at the tree's
+    frontend, the outcome reporter written into ``tree``, and ``expr`` as its test name pattern.
+    Its results cache is off and its configuration is loaded without a bundled copy, since each
+    would be written under the tree's ``node_modules``, the link into the install. The observation
+    is None if it reported none.
+    """
+    package = REPO / FRONTEND / "node_modules" / "vitest"
+    entry = json.loads((package / "package.json").read_text(encoding="utf-8"))[
+        "bin"
+    ]["vitest"]
+    reporter = tree / f"{PLUGIN_MODULE}.mjs"
+    reporter.write_text(REPORTER_SOURCE, encoding="utf-8")
+    cmd = [
+        _node(),
+        str(package / entry),
+        "run",
+        test_file.removeprefix(f"{FRONTEND}/"),
+        "--root",
+        str(tree / FRONTEND),
+        "--reporter",
+        str(reporter),
+        "--no-cache",
+        "--configLoader",
+        "runner",
+    ]
+    if expr:
+        cmd += ["-t", expr]
+    proc = subprocess.run(
+        cmd,
+        cwd=tree / FRONTEND,
+        env={**os.environ, OUTCOME_ENV: str(outcome_json)},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+    return proc, _read_outcome(outcome_json)
 
 
 _TIMEOUT_HEADLINE = re.compile(
-    r"^(?:[A-Za-z_][\w.]*: )?Timeout \(>[\d.]+s\) from pytest-timeout\.$"
+    r"^(?:(?:[A-Za-z_][\w.]*: )?Timeout \(>[\d.]+s\) from pytest-timeout\."
+    r"|Error: Test timed out in \d+ms\.)$"
 )
 
 
 def _is_timeout(headline: str) -> bool:
-    """Return whether this failure is pytest-timeout's own signal-method report.
+    """Return whether this failure is a test runner's own report of a test timing out.
 
-    That report is its literal ``PYTEST_FAILURE_MESSAGE``; a hang the thread method reports
-    through the ``FAIL_BEFORE_CURRENT_TEST`` marker is not one.
+    That report is pytest-timeout's signal-method ``PYTEST_FAILURE_MESSAGE`` or vitest's ``Test
+    timed out in <n>ms.``; a hang pytest-timeout's thread method reports through the
+    ``FAIL_BEFORE_CURRENT_TEST`` marker is not one.
 
-    The leading exception class is optional because pytest writes the headline both ways: bare
-    where the timeout is the whole report, and prefixed ``Failed: `` where pytest-timeout's
-    signal method raises it as an ordinary ``Failed`` inside the test, which only hosts carrying
-    ``SIGALRM`` do.
+    pytest-timeout's leading exception class is optional because pytest writes the headline both
+    ways: bare where the timeout is the whole report, and prefixed ``Failed: `` where
+    pytest-timeout's signal method raises it as an ordinary ``Failed`` inside the test, which only
+    hosts carrying ``SIGALRM`` do.
     """
     return bool(_TIMEOUT_HEADLINE.match(headline.strip()))
 
@@ -623,10 +861,13 @@ def _is_timeout(headline: str) -> bool:
 def _is_unreached(headline: str, crash_path: str | None, tree: Path) -> bool:
     """Return whether a failure never reached the code under test.
 
-    A missing module or import always counts. A missing file counts only when its crash frame sits
-    outside ``tests/`` (:func:`_crash_outside_test_tree`).
+    A missing module or import always counts, vitest's ``Cannot find module`` among them. A missing
+    file counts only when its crash frame sits off the test side
+    (:func:`_crash_outside_test_tree`).
     """
-    if headline.startswith(("ModuleNotFoundError", "ImportError")):
+    if headline.startswith(
+        ("ModuleNotFoundError", "ImportError", "Error: Cannot find module")
+    ):
         return True
     if headline.startswith("FileNotFoundError"):
         return _crash_outside_test_tree(crash_path, tree)
@@ -649,19 +890,18 @@ def _crash_relative_to_tree(crash_path: str | None, tree: Path) -> str | None:
 
 
 def _crash_under_test_tree(crash_path: str | None, tree: Path) -> bool:
-    """Return whether the crash frame is placed positively under ``tests/`` in the tree.
+    """Return whether the crash frame is placed positively on the test side of the tree.
 
-    A frame under ``tests/`` is the test's own body or a fixture. A missing or unplaceable path
-    is not under it.
+    A frame there is the test's own body or a fixture. A missing or unplaceable path is not.
     """
     rel = _crash_relative_to_tree(crash_path, tree)
     return rel is not None and _is_test_side(rel)
 
 
 def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
-    """Return whether the crash frame is placed in the tree and outside ``tests/``.
+    """Return whether the crash frame is placed in the tree and off its test side.
 
-    One outside it is the code under test raising. A missing or unplaceable path is never outside.
+    One off it is the code under test raising. A missing or unplaceable path is never off it.
     """
     rel = _crash_relative_to_tree(crash_path, tree)
     return rel is not None and not _is_test_side(rel)
@@ -673,20 +913,20 @@ def _failure_kind(entry: ObservedTest, tree: Path) -> FailureKind:
     An errored test is classified the same way as a failed one.
 
     ``unreached``: the import never resolved, always; or a needed file was missing and the crash
-    frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
+    frame sits off the test side (:func:`_is_unreached`). A missing file whose crash frame sits
     inside the test's own body is left to the rest of this function instead.
 
-    ``timeout``: pytest-timeout's own signal-method report (:func:`_is_timeout`), checked before
-    the phase split below, so a timeout during setup is ``timeout`` too.
+    ``timeout``: the runner's own report of a test timing out (:func:`_is_timeout`), checked
+    before the phase split below, so a timeout during setup is ``timeout`` too.
 
-    After those two checks, a setup or teardown failure (``entry["phase"]`` is not ``"call"``) is
-    ``fixture``, whatever raised it, wherever the crash frame sits. The rest applies only to a
-    call-phase failure:
+    After those two checks, a setup or teardown failure (``entry["phase"]`` is not ``"call"``, a
+    pytest phase or a vitest hook's name) is ``fixture``, whatever raised it, wherever the crash
+    frame sits. The rest applies only to a call-phase failure:
 
     ``behavioral``: the test's own ``assert`` or ``pytest.fail``/``pytest.raises`` failed (the
     raised exception's own class is ``AssertionError`` or ``Failed``, read from
-    ``exc_typename``), or the crash frame sits outside ``tests/``, meaning the code under test
-    raised. ``test_code``: a ``TypeError`` whose crash frame is placed under ``tests/``
+    ``exc_typename``), or the crash frame sits off the test side, meaning the code under test
+    raised. ``test_code``: a ``TypeError`` whose crash frame is placed on the test side
     (:func:`_crash_under_test_tree`), whatever its message. The class and the place of the raise
     do not establish that a call failed to fit, so the tool reads no wording and claims no cause.
     Any other call-phase exception, and a ``TypeError`` whose crash frame cannot be placed under
@@ -744,7 +984,8 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
     if observed.get("internal_error"):
         return (
             REFUSED,
-            "pytest hit an internal error, so nothing it reported can be trusted.",
+            "the runner hit an internal or unhandled error, so nothing it reported can be "
+            "trusted.",
         )
     if observed["collect_errors"]:
         first = observed["collect_errors"][0]["nodeid"]
@@ -774,7 +1015,7 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
         names = ", ".join(t["nodeid"] for t in timed_out)
         return INDETERMINATE, (
             f"{len(timed_out)} of {observed['collected']} selected test(s) did not finish within "
-            f"--per-test-timeout ({names}), so passing or failing says nothing here: a hung "
+            f"their timeout ({names}), so passing or failing says nothing here: a hung "
             "baseline is a different fact from a slow pass or a real failure."
         )
     if failed and not behavioral and not_compared:
@@ -844,9 +1085,16 @@ def main() -> int:
     """Run the command line's test at its baseline, print the verdict, return its exit code."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
-        "test_file", help="path, repo-relative, e.g. tests/test_foo.py"
+        "test_file",
+        help="path, repo-relative, e.g. tests/test_foo.py or a test file under "
+        f"{FRONTEND}/",
     )
-    ap.add_argument("-k", dest="expr", default="", help="pytest -k expression")
+    ap.add_argument(
+        "-k",
+        dest="expr",
+        default="",
+        help="pytest -k expression, or vitest's -t test name pattern for a frontend test",
+    )
     ap.add_argument(
         "--baseline",
         default=None,
@@ -887,7 +1135,7 @@ def main() -> int:
         "--timeout",
         type=int,
         default=900,
-        help="seconds to allow pytest (default 900)",
+        help="seconds to allow the test runner (default 900)",
     )
     ap.add_argument(
         "--per-test-timeout",
@@ -924,7 +1172,18 @@ def main() -> int:
         "verdict": None,
         "test_tree_from": args.test_rev or "the working tree",
     }
+    try:
+        return _prove(args, record)
+    except RefusalError as refusal:
+        record.update(verdict=REFUSED, why=str(refusal))
+        return _report(record, args.json_out)
 
+
+def _prove(args: argparse.Namespace, record: dict) -> int:
+    """Run the test ``args`` names at its baseline into ``record``, report it, return the exit code.
+
+    A :class:`RefusalError` raised on the way propagates once the scratch directory is removed.
+    """
     test_file, refusal = _test_file_relative_to_repo(args.test_file)
     if test_file is None:
         record.update(verdict=REFUSED, why=refusal)
@@ -975,7 +1234,8 @@ def main() -> int:
         "baseline_precedes_change": baseline_precedes,
     }
 
-    scratch = tempfile.TemporaryDirectory(prefix="failbefore-")
+    runner = "vitest" if test_file.startswith(f"{FRONTEND}/") else "pytest"
+    scratch = tempfile.TemporaryDirectory(prefix="failbefore-", delete=False)
     tmp = Path(scratch.name)
     tree = tmp / "tree"
     outcome_json = tmp / "outcome.json"
@@ -984,31 +1244,41 @@ def main() -> int:
     try:
         materialize(rev, tree)
         record["test_tree_overlay"] = {
-            "from": f"{TEST_TREE}/ at {args.test_rev}"
+            "from": f"the test side at {args.test_rev}"
             if args.test_rev
-            else f"{TEST_TREE}/ in the working tree",
+            else "the test side in the working tree",
             "files": _overlay_test_tree(tree, args.test_rev),
         }
-        install_outcome_plugin(tree)
-
-        env = child_env(tree, outcome_json, current_test_path)
-        imports_ok, resolved = prove_tree_imports(tree, env)
-        record["harness_proof"] = {
-            "resolved": resolved,
-            "baseline_source_imported": imports_ok,
-        }
-        if not imports_ok:
-            record.update(
-                verdict=REFUSED,
-                why=(
-                    "the baseline tree's own source is not what got imported, so any verdict would "
-                    "describe the working checkout instead. Resolved module paths are recorded."
-                ),
+        if runner == "vitest":
+            link_install(tree)
+            run = functools.partial(
+                run_vitest_capturing_outcome,
+                tree,
+                test_file,
+                args.expr,
+                outcome_json,
+                args.timeout,
             )
-            return _report(record, args.json_out)
-
-        try:
-            proc, observed = run_capturing_outcome(
+        else:
+            install_outcome_plugin(tree)
+            env = child_env(tree, outcome_json, current_test_path)
+            imports_ok, resolved = prove_tree_imports(tree, env)
+            record["harness_proof"] = {
+                "resolved": resolved,
+                "baseline_source_imported": imports_ok,
+            }
+            if not imports_ok:
+                record.update(
+                    verdict=REFUSED,
+                    why=(
+                        "the baseline tree's own source is not what got imported, so any verdict "
+                        "would describe the working checkout instead. Resolved module paths are "
+                        "recorded."
+                    ),
+                )
+                return _report(record, args.json_out)
+            run = functools.partial(
+                run_capturing_outcome,
                 tree,
                 [test_file],
                 args.expr,
@@ -1018,14 +1288,17 @@ def main() -> int:
                 args.timeout,
                 per_test_timeout=args.per_test_timeout,
             )
+
+        try:
+            proc, observed = run()
         except subprocess.TimeoutExpired:
             record.update(
                 verdict=REFUSED,
-                why=f"pytest did not finish within {args.timeout}s.",
+                why=f"{runner} did not finish within {args.timeout}s.",
             )
             return _report(record, args.json_out)
 
-        record["pytest"] = {
+        record[runner] = {
             "exit_code": proc.returncode,
             "tail": proc.stdout.strip().splitlines()[-15:],
         }
@@ -1052,14 +1325,34 @@ def main() -> int:
             record.update(
                 verdict=REFUSED,
                 why=(
-                    "pytest reported no outcome record, which happens on a usage error before the "
-                    "session starts. Its output is recorded under pytest.tail."
+                    f"{runner} reported no outcome record, which happens on a usage error before "
+                    f"the run starts. Its output is recorded under {runner}.tail."
                 ),
             )
-            record["pytest"]["stderr_tail"] = proc.stderr.strip().splitlines()[
+            record[runner]["stderr_tail"] = proc.stderr.strip().splitlines()[
                 -15:
             ]
             return _report(record, args.json_out)
+
+        if runner == "vitest":
+            modules = observed["modules"]
+            inside = all(
+                Path(m).resolve().is_relative_to(tree.resolve())
+                for m in modules
+            )
+            record["harness_proof"] = {
+                "test_modules": modules,
+                "test_modules_in_baseline_tree": inside,
+            }
+            if not inside:
+                record.update(
+                    verdict=REFUSED,
+                    why=(
+                        "a test module vitest ran lies outside the baseline tree, so any verdict "
+                        "would describe another checkout. The modules are recorded."
+                    ),
+                )
+                return _report(record, args.json_out)
 
         # _failure_kind resolves crash_path against tree, so it runs before the materialized tree
         # is removed below.
@@ -1085,21 +1378,25 @@ def main() -> int:
         verdict, why = _classify(observed, baseline_precedes)
         record.update(verdict=verdict, why=why)
     finally:
-        _remove_scratch_directory(scratch)
+        _remove_scratch_directory(scratch, tree / FRONTEND / "node_modules")
 
     return _report(record, args.json_out)
 
 
 def _remove_scratch_directory(
-    scratch: tempfile.TemporaryDirectory[str],
+    scratch: tempfile.TemporaryDirectory[str], link: Path
 ) -> None:
-    """Remove the temporary directory `scratch` and everything under it.
+    """Remove ``link`` when it is a symbolic link, then the temporary directory `scratch`.
 
-    Read-only paths are made writable and retried by the library's own removal. When it still
-    cannot remove something, one line on standard error names the directory left in place and the
-    error, which names the path. Nothing is raised, so the verdict already reached stands.
+    The directory goes with everything under it; read-only paths are made writable and retried by
+    the library's own removal. When the link or anything else cannot be removed, the directory is
+    left in place, so no removal reaches through a link still standing, and one line on standard
+    error names the directory and the error, which names the path. Nothing is raised, so the
+    verdict already reached stands.
     """
     try:
+        if link.is_symlink():
+            link.unlink()
         scratch.cleanup()
     except OSError as error:
         print(

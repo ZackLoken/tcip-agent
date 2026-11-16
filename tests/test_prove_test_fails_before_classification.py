@@ -9,7 +9,9 @@ commit with the fix and the guard test) and run the real script against it. They
 - ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched;
 - ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
-  the directory cannot be removed.
+  the directory cannot be removed;
+- a vitest file under a scratch frontend whose installed packages are this checkout's, each verdict
+  and refusal it can reach, and a changed frontend test counted as the test side of a pytest run.
 """
 
 from __future__ import annotations
@@ -21,11 +23,12 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from tests import REPO_ROOT
+from tests import FRONTEND, REPO_ROOT
 from tools.prove_test_fails_before import _failure_kind
 
 SCRIPT = REPO_ROOT / "tools" / "prove_test_fails_before.py"
@@ -468,7 +471,7 @@ def _why(result: subprocess.CompletedProcess) -> str:
     return next(
         line
         for line in result.stdout.splitlines()
-        if line.startswith(("GUARDS:", "REFUSED:"))
+        if line.startswith(tuple(f"{verdict}:" for verdict in EXIT))
     )
 
 
@@ -1211,3 +1214,252 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
             time.sleep(0.05)
         for leftover in (tmp_path / "t").glob("failbefore-*"):
             shutil.rmtree(leftover)
+
+
+# ── a vitest file ────────────────────────────────────────────────────────────
+
+FRONTEND_PATH = FRONTEND.relative_to(REPO_ROOT).as_posix()
+INSTALL = FRONTEND / "node_modules"
+WIDGET_TEST = f"{FRONTEND_PATH}/src/widget.test.ts"
+
+
+def _scratch_frontend(repo: Path) -> Path:
+    """Give ``repo`` a frontend at the real frontend's path; return its directory.
+
+    It holds the real frontend's scripts, a ``tsconfig.json`` including ``src``, an empty vitest
+    configuration and an empty ``src``, and git ignores its ``node_modules``, so what is made there
+    is never committed nor counted as a change.
+    """
+    frontend = repo / FRONTEND_PATH
+    shutil.copytree(FRONTEND / "scripts", frontend / "scripts")
+    _write(frontend / "tsconfig.json", '{"include": ["src"]}\n')
+    _write(frontend / "package.json", '{"type": "module"}\n')
+    _write(frontend / "vitest.config.mjs", "export default {};\n")
+    (frontend / "src").mkdir()
+    _write(repo / ".git" / "info" / "exclude", "node_modules\n")
+    return frontend
+
+
+@pytest.fixture
+def linked_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Path]:
+    """Yield a scratch repository whose frontend's install links each package of this checkout's.
+
+    The scratch frontend's ``node_modules`` is a directory of its own holding one link per entry
+    of this checkout's install not named with a leading dot, so whatever a run writes into the
+    install it links to lands there, apart from every other test. The tool's temporary folder is
+    redirected under ``tmp_path``. Teardown removes the link a run left in its tree and then each
+    package link, before anything removes a directory holding one.
+    """
+    scratch_root = tmp_path / "t"
+    scratch_root.mkdir()
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(scratch_root))
+    repo = _scratch_repo(tmp_path)
+    install = _scratch_frontend(repo) / "node_modules"
+    install.mkdir()
+    packages = sorted(INSTALL.iterdir()) if INSTALL.is_dir() else []
+    for package in packages:
+        if not package.name.startswith("."):
+            (install / package.name).symlink_to(
+                package, target_is_directory=package.is_dir()
+            )
+    yield repo
+    for run in scratch_root.glob("failbefore-*"):
+        left = run / "tree" / FRONTEND_PATH / "node_modules"
+        if left.is_symlink():
+            left.unlink()
+    for entry in install.iterdir():
+        if entry.is_symlink():
+            entry.unlink()
+
+
+def _widget_repo(
+    repo: Path, baseline_source: str, head_source: str, test_source: str
+) -> str:
+    """Commit ``baseline_source`` as the frontend's widget, then the head's widget and its test.
+
+    Returns the baseline revision; the head commit leaves the working tree clean.
+    """
+    src = repo / FRONTEND_PATH / "src"
+    _write(src / "widget.ts", baseline_source)
+    baseline = _commit_all(repo, "the baseline's widget")
+    _write(src / "widget.ts", head_source)
+    _write(src / "widget.test.ts", test_source)
+    _commit_all(repo, "the head's widget and its test")
+    assert _git(repo, "status", "--porcelain") == ""
+    return baseline
+
+
+DOUBLE_TEST = (
+    'import { expect, test } from "vitest";\n'
+    "\n"
+    'import { double } from "./widget";\n'
+    "\n"
+    'test("double doubles", () => {\n'
+    "  expect(double(3)).toBe(6);\n"
+    "});\n"
+)
+NO_OP_DOUBLE = "export function double(x: number): number {\n  return x;\n}\n"
+DOUBLE = "export function double(x: number): number {\n  return x * 2;\n}\n"
+
+
+def test_a_vitest_assertion_failing_at_the_baseline_guards_and_leaves_the_install_alone(
+    linked_repo: Path,
+) -> None:
+    """A vitest assertion failing at the baseline scores GUARDS, behavioral, exit 0.
+
+    The install the baseline tree links to holds the same entries afterward, vitest among them, so
+    the run neither removed anything nor wrote a cache or a bundled configuration through the link.
+    """
+    baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    install = linked_repo / FRONTEND_PATH / "node_modules"
+    entries_before = sorted(entry.name for entry in install.iterdir())
+
+    result = _run(linked_repo, WIDGET_TEST, baseline, "-k", "double doubles")
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+    assert "GUARDS" in result.stdout
+    assert "[behavioral]" in result.stdout
+    assert (install / "vitest" / "package.json").is_file()
+    assert sorted(entry.name for entry in install.iterdir()) == entries_before
+
+
+def test_a_vitest_test_passing_at_a_baseline_before_a_source_change_is_vacuous(
+    linked_repo: Path,
+) -> None:
+    """A vitest test that passes at a baseline a source change follows scores VACUOUS, exit 1."""
+    baseline = _widget_repo(
+        linked_repo,
+        DOUBLE,
+        DOUBLE + "\nexport const TRIPLE = 3;\n",
+        DOUBLE_TEST,
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["VACUOUS"], result.stdout + result.stderr
+    assert "VACUOUS" in result.stdout
+
+
+def test_a_vitest_test_timing_out_at_the_baseline_is_indeterminate(
+    linked_repo: Path,
+) -> None:
+    """A vitest test that does not finish within its own timeout scores INDETERMINATE, exit 2."""
+    baseline = _widget_repo(
+        linked_repo,
+        "export function settle(): Promise<number> {\n  return new Promise(() => {});\n}\n",
+        "export function settle(): Promise<number> {\n  return Promise.resolve(1);\n}\n",
+        'import { expect, test } from "vitest";\n'
+        "\n"
+        'import { settle } from "./widget";\n'
+        "\n"
+        'test("settle settles", async () => {\n'
+        "  expect(await settle()).toBe(1);\n"
+        "}, 200);\n",
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["INDETERMINATE"], (
+        result.stdout + result.stderr
+    )
+    assert "settle settles" in _why(result)
+
+
+def test_a_type_error_raised_in_a_vitest_test_is_refused_as_not_compared(
+    linked_repo: Path,
+) -> None:
+    """A ``TypeError`` raised in a vitest test's own file at the baseline is refused, test_code."""
+    baseline = _widget_repo(
+        linked_repo,
+        "export function paint(): { color: string } | null {\n  return null;\n}\n",
+        'export function paint(): { color: string } | null {\n  return { color: "red" };\n}\n',
+        'import { expect, test } from "vitest";\n'
+        "\n"
+        'import { paint } from "./widget";\n'
+        "\n"
+        'test("paint carries a color", () => {\n'
+        '  expect(paint()!.color).toBe("red");\n'
+        "});\n",
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "[test_code]" in result.stdout
+    assert CALL_PHASE_SENTENCE in _why(result)
+
+
+@pytest.mark.parametrize("hook", ["beforeEach", "beforeAll"])
+def test_a_vitest_hook_raising_at_the_baseline_is_refused_as_a_fixture(
+    linked_repo: Path, hook: str
+) -> None:
+    """A vitest hook that raises at the baseline is refused as not compared, kind ``fixture``."""
+    baseline = _widget_repo(
+        linked_repo,
+        'export function prepare(): void {\n  throw new Error("not ready");\n}\n',
+        "export function prepare(): void {}\n",
+        f'import {{ {hook}, expect, test }} from "vitest";\n'
+        "\n"
+        'import { prepare } from "./widget";\n'
+        "\n"
+        f"{hook}(() => {{\n"
+        "  prepare();\n"
+        "});\n"
+        "\n"
+        'test("prepared", () => {\n'
+        "  expect(1).toBe(1);\n"
+        "});\n",
+    )
+
+    result = _run(linked_repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert "[fixture]" in result.stdout
+    assert f"a fixture failed during {hook}" in _why(result)
+
+
+def test_a_vitest_file_with_no_install_is_refused_naming_the_install_command(
+    tmp_path: Path,
+) -> None:
+    """A frontend with no installed packages is refused, naming the command that installs them."""
+    repo = _scratch_repo(tmp_path)
+    _scratch_frontend(repo)
+    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"npm ci` in {FRONTEND_PATH}" in _why(result)
+
+
+def test_a_changed_frontend_test_alone_leaves_a_pytest_pass_indeterminate(
+    tmp_path: Path,
+) -> None:
+    """A frontend test is the test side, so a pytest pass with no other change is INDETERMINATE.
+
+    The only difference between the baseline and the head is a frontend test file, so no source
+    file differs and the baseline is not shown to precede a change.
+    """
+    repo = _scratch_repo(tmp_path)
+    src = _scratch_frontend(repo) / "src"
+    _write(src / "widget.ts", DOUBLE)
+    _write(src / "widget.test.ts", DOUBLE_TEST)
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_passes():\n    assert True\n",
+    )
+    baseline = _commit_all(repo, "a passing pytest test and a frontend test")
+    _write(
+        src / "widget.test.ts", DOUBLE_TEST.replace("toBe(6)", "toEqual(6)")
+    )
+    _commit_all(repo, "the frontend test alone changes")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["INDETERMINATE"], (
+        result.stdout + result.stderr
+    )
+    assert "no source file differs" in _why(result)

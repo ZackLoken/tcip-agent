@@ -10,11 +10,13 @@ section instead.
 - `gate_baseline.py` - runs CI's own jobs locally; its module docstring says which jobs and steps
   it leaves out.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
-  current test tree so conftest and helpers travel with the test, proves the baseline's own source
-  is what gets imported, and reads pytest's per-test outcome to say whether a test actually fails
-  without its fix. Four verdicts, `GUARDS`, `VACUOUS`, `INDETERMINATE` and `REFUSED`, each its own
-  exit code; its module docstring states what each means and how the baseline is chosen, and only
-  `GUARDS` is evidence. `--test-rev` checks a guard claim already in the history.
+  current test side (`tests/` and the frontend's test files) so conftest and helpers travel with the
+  test, proves the baseline's own source is what runs, and reads the per-test outcome of pytest,
+  for a file under `tests/`, or of the frontend's installed vitest, for a frontend test file, to say
+  whether a test actually fails without its fix. Four verdicts, `GUARDS`, `VACUOUS`,
+  `INDETERMINATE` and `REFUSED`, each its own exit code; its module docstring states what each
+  means and how the baseline is chosen, and only `GUARDS` is evidence. `--test-rev` checks a guard
+  claim already in the history.
 - `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
   answers; its module docstring and `--help` say which families it runs, under which conditions,
   and what each run records.
