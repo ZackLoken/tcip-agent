@@ -1260,19 +1260,23 @@ def linked_repo(
     install = _scratch_frontend(repo) / "node_modules"
     install.mkdir()
     packages = sorted(INSTALL.iterdir()) if INSTALL.is_dir() else []
-    for package in packages:
-        if not package.name.startswith("."):
-            (install / package.name).symlink_to(
-                package, target_is_directory=package.is_dir()
-            )
-    yield repo
-    for run in scratch_root.glob("failbefore-*"):
-        left = run / "tree" / FRONTEND_PATH / "node_modules"
-        if left.is_symlink():
-            left.unlink()
-    for entry in install.iterdir():
-        if entry.is_symlink():
-            entry.unlink()
+    try:
+        for package in packages:
+            if not package.name.startswith("."):
+                (install / package.name).symlink_to(
+                    package, target_is_directory=package.is_dir()
+                )
+        yield repo
+    finally:
+        try:
+            for run in scratch_root.glob("failbefore-*"):
+                left = run / "tree" / FRONTEND_PATH / "node_modules"
+                if left.is_symlink():
+                    left.unlink()
+        finally:
+            for entry in install.iterdir():
+                if entry.is_symlink():
+                    entry.unlink()
 
 
 def _widget_repo(
