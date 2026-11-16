@@ -190,6 +190,59 @@ describe("the notifications area", () => {
   });
 });
 
+describe("the notifications button's glyph", () => {
+  const states: [string, () => void, string][] = [
+    ["no entry and no condition", () => {}, ""],
+    [
+      "a new entry",
+      () =>
+        useStore.getState().raiseNotification({
+          kind: "failure",
+          level: "error",
+          text: { sentence: "Could not load the registry." },
+          context: { project: "valley" },
+        }),
+      "1",
+    ],
+    [
+      "a holding condition already seen",
+      () => {
+        useStore.getState().holdCondition("bundle", "rebuild the bundle");
+        useStore.getState().markNotificationsSeen();
+      },
+      "",
+    ],
+    [
+      "a new entry and a holding condition",
+      () => {
+        useStore.getState().holdCondition("connection", CONNECTION_LOST);
+        useStore.getState().raiseNotification({
+          kind: "failure",
+          level: "error",
+          text: { sentence: "Could not load the registry." },
+          context: { project: "valley" },
+        });
+      },
+      "2",
+    ],
+  ];
+
+  it.each(states)(
+    "stands for the word with %s: a hidden icon, only the count as text, and a title equal to its name",
+    (_state, setUp, count) => {
+      renderClosedHost();
+      act(setUp);
+      const button = screen.getByRole("button", { name: /^Notifications/ });
+
+      expect(button.textContent).toBe(count);
+      const icon = button.querySelector("svg");
+      expect(icon).toHaveAttribute("aria-hidden", "true");
+      expect(button.title).not.toBe("");
+      expect(button).toHaveAccessibleName(button.title);
+    },
+  );
+});
+
 /** Raise a failure stating `sentence` for the project `project`, standing on no key. */
 function raiseFailure(
   sentence: string,

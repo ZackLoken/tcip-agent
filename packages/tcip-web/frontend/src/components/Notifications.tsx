@@ -1,3 +1,4 @@
+import { Bell } from "lucide-react";
 import { forwardRef, useId } from "react";
 
 import { dismissLabel } from "@/lib/dismissLabel";
@@ -36,6 +37,7 @@ export const NotificationsButton = forwardRef<
       onClick={onToggle}
       aria-expanded={open}
       aria-label={name}
+      title={name}
       className={`relative flex items-center gap-1.5 px-2.5 h-7 mr-1 rounded text-[13px] font-medium transition-colors ${
         open
           ? "bg-tcip-accent text-white"
@@ -49,7 +51,7 @@ export const NotificationsButton = forwardRef<
           className={`h-2 w-2 rounded-full ${LEVELS[holdingLevel].mark}`}
         />
       )}
-      Notifications
+      <Bell aria-hidden="true" className="tcip-icon" />
       {fresh > 0 && (
         <span
           aria-hidden="true"

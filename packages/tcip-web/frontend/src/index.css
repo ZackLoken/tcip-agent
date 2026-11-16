@@ -164,6 +164,13 @@ body,
   }
 }
 
+/* An icon beside text is one line of that text tall, whatever the text's size. */
+@utility tcip-icon {
+  width: 1lh;
+  height: 1lh;
+  flex-shrink: 0;
+}
+
 /* Secondary buttons hover to a neutral raised surface; only tcip-btn-primary
    hovers SI green, so action hierarchy survives the hover state. */
 @utility tcip-btn {

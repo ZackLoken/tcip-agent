@@ -1,6 +1,8 @@
+import { Terminal } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 
 import { TAB_NAMES } from "@/api/types.generated";
+import { AGENT_NAME } from "@/lib/agentName";
 import { TAB_LABELS } from "@/lib/tabLabels";
 import { useStore } from "@/store";
 import { selectAnnotatorNamed } from "@/store/slices/user";
@@ -105,19 +107,20 @@ export function TopBar({ notifications }: { notifications: ReactNode }) {
             title={
               handingOff
                 ? "The agent is writing its hand-off; open the rail to start the chosen harness once it is recorded"
-                : undefined
+                : AGENT_NAME
             }
-            className={`px-2.5 h-7 rounded text-[13px] font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-2.5 h-7 rounded text-[13px] font-medium transition-colors ${
               terminalOpen
                 ? "bg-tcip-accent text-white"
                 : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
             }`}
           >
-            TCIP Agent
+            <Terminal aria-hidden="true" className="tcip-icon" />
             {handingOff && (
               <span
                 aria-hidden="true"
-                className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-tcip-warn animate-pulse"
+                data-testid="handoff-mark"
+                className="h-1.5 w-1.5 rounded-full bg-tcip-warn animate-pulse"
               />
             )}
           </button>

@@ -29,6 +29,7 @@ import {
   type TerminalServedFrame,
   type TerminalStatus,
 } from "@/api/types.generated";
+import { AGENT_NAME } from "@/lib/agentName";
 import {
   createReconnectingSocket,
   jsonFrameHandlers,
@@ -570,7 +571,7 @@ export function TerminalRail() {
       </div>
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-medium text-tcip-muted">TCIP Agent</span>
+          <span className="text-[12px] font-medium text-tcip-muted">{AGENT_NAME}</span>
           {asked.kind === "answered" && (
             <select
               aria-label="Agent harness"
@@ -612,7 +613,7 @@ export function TerminalRail() {
           <button
             onClick={() => setOpen(false)}
             aria-label="Minimize agent terminal"
-            title="Minimize (the agent keeps running); reopen from the TCIP Agent button"
+            title="Minimize (the agent keeps running); reopen from the agent button in the top bar"
             className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
