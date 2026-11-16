@@ -346,4 +346,14 @@ describe("clearDataset", () => {
     s().clearDataset();
     expect(s().gui.dataset).toBeNull();
   });
+
+  it("clears a refused choice the page holds", () => {
+    const { refused_choice: refused } = REFUSED_ENVELOPE.state;
+    expect(refused).not.toBeNull();
+    useStore.setState({ gui: snapshot({ dataset: null, refused_choice: refused }) });
+
+    s().clearDataset();
+
+    expect(s().gui.refused_choice).toBeNull();
+  });
 });
