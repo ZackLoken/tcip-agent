@@ -4,8 +4,9 @@ In a scratch session (``tools/fixture_session.py``), the project ``tools.generat
 opens is laid down again by its own layout (``generate_open_fixture.captures``) and opened through
 the picker's route, and its capture of photographs is selected. Saves through
 ``POST /api/annotate/labels``, each built through the route's request model and echoing the token
-the last answer for its image named, write on each photograph a document holding no annotation,
-which ``GET /api/annotate/labels`` then loads (``loads``, each its own token), then write on the
+the last answer for its image named, write on each photograph, and last on the photograph of the
+later capture named as the first, a document holding no annotation, which
+``GET /api/annotate/labels`` then loads (``loads``, each its own token), then write on the
 first photograph one :data:`SUBJECT` box (``box``), no annotation (``cleared``) and one
 :data:`POINT_SUBJECT` point (``point``); once the second photograph holds a box,
 ``GET /api/annotate/states``
@@ -197,7 +198,9 @@ def produce() -> dict[str, JsonValue]:
     with scratch_session() as (workspace, client):
         valley = named_project(workspace / "valley", "valley")
         opened(client, valley)
-        root, date = captures(valley.root)["raw"]
+        written = captures(valley.root)
+        root, date = written["raw"]
+        later_root, later_date = written["later"]
         selected = answered(
             client,
             "select_dataset",
@@ -247,10 +250,30 @@ def produce() -> dict[str, JsonValue]:
             ).base_mtime
             return answer
 
-        for path in paths:
+        later = answered(
+            client,
+            "select_dataset",
+            200,
+            CaptureChoice(dataset_root=str(later_root), date=later_date),
+        )
+        assert isinstance(later, dict), later
+        twin, *_ = (
+            image["path"]
+            for image in cast(
+                "dict[str, list[dict[str, str]]]", later["selection"]
+            )["images"]
+        )
+        answered(
+            client,
+            "select_dataset",
+            200,
+            CaptureChoice(dataset_root=str(root), date=date),
+        )
+        tokens[twin] = None
+        for path in [*paths, twin]:
             save(path, [])
         served: dict[str, JsonValue] = {
-            "loads": [load(path) for path in paths]
+            "loads": [load(path) for path in [*paths, twin]]
         }
         saves: dict[str, JsonValue] = {
             "box": save(first, [box]),

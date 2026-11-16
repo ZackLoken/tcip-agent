@@ -20,7 +20,8 @@ import type { Refusal } from "@/test/refusals";
 
 /** What `tools/generate_annotate_fixture.py` received from the annotate routes over the open
  *  fixture's photographs, each scene on the first after the loads:
- *  - each photograph's document holding nothing, loaded (`loads`, in the selection's order);
+ *  - each photograph's document holding nothing, loaded (`loads`, in the selection's order, then
+ *    the later capture's photograph named as the first);
  *  - saves of one `subject_a` box (`box`), of nothing (`cleared`) and of one `tip` point
  *    (`point`); every photograph's state of `subject_a` once the second holds a box (`states`);
  *    the document marked complete over its box (`complete`), and its save marked complete holding
