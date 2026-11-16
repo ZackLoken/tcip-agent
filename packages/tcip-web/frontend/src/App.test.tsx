@@ -6,9 +6,16 @@ import { inferenceApi } from "@/api/inference";
 import { sessionsApi } from "@/api/sessions";
 import { subjectsApi } from "@/api/subjects";
 import { trainingApi } from "@/api/training";
-import type { OpenAnswer, Panel, PanelEnvelope, TrainingListing } from "@/api/types.generated";
+import type {
+  InferenceJobs,
+  OpenAnswer,
+  Panel,
+  PanelEnvelope,
+  TrainingListing,
+} from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
+import { INFERENCE_REFRESH_MS } from "@/hooks/useJobListings";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
@@ -22,7 +29,15 @@ import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import { changeSelection, stateEnvelope, SUBJECT_SELECT_ANSWER } from "@/test/store";
-import { CANCEL, RUNS, TRAINING_LISTING, TRAINING_REFUSALS } from "@/test/training";
+import {
+  CANCEL,
+  LISTING_BEFORE_FAILURE,
+  RUNS,
+  STALLED_LISTING,
+  SWEEPS,
+  TRAINING_LISTING,
+  TRAINING_REFUSALS,
+} from "@/test/training";
 
 // The state socket and the active-tab sync stand in for App's network effects.
 const stateSocket = vi.hoisted(() => ({
@@ -821,6 +836,287 @@ describe("App job listings", () => {
     act(() => useStore.getState().setActiveTab("inference"));
     expect(await screen.findByText("No jobs.")).toBeInTheDocument();
     expect(screen.queryByText(INFERENCE_ANSWERS.launched.job_id)).not.toBeInTheDocument();
+  });
+});
+
+describe("App job entries", () => {
+  const NO_ANSWER = () => new Promise<never>(() => {});
+  const streamed = RUNS.streamed.experiment_id;
+  const streamedBefore = LISTING_BEFORE_FAILURE.runs.find((r) => r.experiment_id === streamed);
+  const RUN_RUNNING = `Training run ${streamed}: running, epoch ${streamedBefore?.current_epoch}`;
+  const RUN_FAILED = `Training run ${streamed}: failed. ${RUNS.streamed.status_error}`;
+  const [failing] = INFERENCE_ANSWERS.failing_started.jobs;
+  const failingFailed = INFERENCE_ANSWERS.held_started.jobs.find(
+    (j) => j.job_id === failing.job_id,
+  );
+  const FAILING_RUNNING = `Inference job ${failing.job_id}: running`;
+  const FAILING_FAILED = `Inference job ${failing.job_id}: failed. ${
+    failingFailed?.state.status === "failed" ? failingFailed.state.error : ""
+  }`;
+  const held = INFERENCE_ANSWERS.launched.job_id;
+  const HELD_RUNNING = `Inference job ${held}: running`;
+
+  afterEach(() => vi.useRealTimers());
+
+  /** Open Valley farm on the Meta tab, its listings answering `training` and then `inference` in
+   *  turn and nothing after, and wait for each listing's first answer. */
+  async function watchFromMeta(training: TrainingListing[], inference: InferenceJobs[]) {
+    const answers = <T,>(read: { mockResolvedValueOnce: (v: T) => unknown }, each: T[]) =>
+      each.forEach((answer) => read.mockResolvedValueOnce(answer));
+    if (training.length)
+      answers(vi.mocked(trainingApi.listRuns).mockImplementation(NO_ANSWER), training);
+    if (inference.length)
+      answers(vi.mocked(inferenceApi.listJobs).mockImplementation(NO_ANSWER), inference);
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("meta"));
+    vi.useFakeTimers();
+    render(<App />);
+    await vi.waitFor(() => {
+      expect(trainingApi.listRuns).toHaveBeenCalledTimes(1);
+      expect(inferenceApi.listJobs).toHaveBeenCalledTimes(1);
+    });
+    await settle();
+  }
+
+  /** Let every answer already given land. */
+  const settle = () => act(() => vi.advanceTimersByTimeAsync(0));
+  /** Let the next read of a listing read every `ms` answer. */
+  const next = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+  const alert = () => screen.getByRole("alert");
+  const notificationsButton = () => screen.getByRole("button", { name: /^Notifications/ });
+  /** Open the notifications area, which counts every entry listed as seen, and close it. */
+  function lookAtArea() {
+    fireEvent.click(notificationsButton());
+    fireEvent.click(notificationsButton());
+  }
+  const entryOf = (sentence: string) =>
+    useStore.getState().notifications.find((e) => e.sentence === sentence);
+
+  it("tells a run the page did not launch from its first listing as running, and its end in the same entry, spoken", async () => {
+    await watchFromMeta([LISTING_BEFORE_FAILURE, TRAINING_LISTING], []);
+
+    expect(listedSentences()).toEqual(
+      expect.arrayContaining([
+        RUN_RUNNING,
+        `Training run ${RUNS.agent.experiment_id}: running`,
+        `Sweep ${SWEEPS.searched.sweep_id}: running`,
+        `Sweep ${SWEEPS.relaunched.sweep_id}: running`,
+      ]),
+    );
+    const listed = listedSentences().length;
+
+    await next(RUN_REFRESH_MS);
+
+    expect(listedSentences()).toHaveLength(listed);
+    expect(listedSentences()).not.toContain(RUN_RUNNING);
+    expect(entryOf(RUN_FAILED)).toEqual(
+      expect.objectContaining({
+        kind: "job",
+        level: "error",
+        context: { project: VALLEY.record.id, target: streamed },
+      }),
+    );
+    expect(alert()).toHaveTextContent(RUN_FAILED);
+  });
+
+  it("tells an inference job from first sight to its end in one entry, its progress unannounced and its end counted as new", async () => {
+    const { held_started, running, canceled } = INFERENCE_ANSWERS;
+    await watchFromMeta([], [INFERENCE_ANSWERS.failing_started, held_started, running, canceled]);
+    expect(listedSentences()).toEqual([FAILING_RUNNING]);
+
+    await next(INFERENCE_REFRESH_MS);
+    expect(listedSentences()).toEqual([HELD_RUNNING, FAILING_FAILED]);
+    expect(alert()).toHaveTextContent(FAILING_FAILED);
+
+    await next(INFERENCE_REFRESH_MS);
+    const progressed = `${HELD_RUNNING}, 1 of 9 images`;
+    expect(listedSentences()).toEqual([progressed, FAILING_FAILED]);
+    expect(alert()).toHaveTextContent(FAILING_FAILED);
+    for (const status of screen.getAllByRole("status")) expect(status).not.toHaveTextContent(held);
+
+    lookAtArea();
+    expect(notificationsButton()).toHaveAccessibleName("Notifications");
+    await next(INFERENCE_REFRESH_MS);
+    const ended = `Inference job ${held}: canceled`;
+    expect(listedSentences()).toEqual([FAILING_FAILED, ended]);
+    expect(notificationsButton()).toHaveAccessibleName("Notifications, 1 new");
+  });
+
+  it("adds nothing when the same end is answered again", async () => {
+    await watchFromMeta(
+      [LISTING_BEFORE_FAILURE, TRAINING_LISTING, TRAINING_LISTING, TRAINING_LISTING],
+      [],
+    );
+    await next(RUN_REFRESH_MS);
+    const told = useStore.getState().notifications;
+    expect(told.map((e) => e.sentence)).toContain(RUN_FAILED);
+
+    await next(RUN_REFRESH_MS);
+    await next(RUN_REFRESH_MS);
+
+    expect(useStore.getState().notifications).toEqual(told);
+    expect(alert()).toHaveTextContent(RUN_FAILED);
+  });
+
+  it("tells the end of a job that started and ended between two reads", async () => {
+    await watchFromMeta([], [{ jobs: [] }, INFERENCE_ANSWERS.held_started]);
+    expect(listedSentences()).toEqual([]);
+
+    await next(INFERENCE_REFRESH_MS);
+
+    expect(listedSentences()).toContain(FAILING_FAILED);
+  });
+
+  it("raises nothing for a dismissed running job until its end", async () => {
+    const { held_started, running, canceled } = INFERENCE_ANSWERS;
+    await watchFromMeta([], [held_started, running, canceled]);
+    expect(listedSentences()).toEqual([HELD_RUNNING]);
+
+    fireEvent.click(notificationsButton());
+    const area = within(screen.getByRole("region", { name: "Notifications" }));
+    fireEvent.click(
+      area.getByRole("button", { name: new RegExp(`^Dismiss: Inference job ${held}`) }),
+    );
+    expect(listedSentences()).toEqual([]);
+
+    await next(INFERENCE_REFRESH_MS);
+    expect(listedSentences()).toEqual([]);
+
+    await next(INFERENCE_REFRESH_MS);
+    expect(listedSentences()).toEqual([`Inference job ${held}: canceled`]);
+  });
+
+  it("tells a watched job an answer no longer lists as a warning claiming no cause", async () => {
+    await watchFromMeta([], [INFERENCE_ANSWERS.running, { jobs: [] }]);
+    expect(listedSentences()).toEqual([`${HELD_RUNNING}, 1 of 9 images`]);
+
+    await next(INFERENCE_REFRESH_MS);
+
+    const gone = `Inference job ${held}: no longer listed; its end was not seen here`;
+    expect(listedSentences()).toEqual([gone]);
+    fireEvent.click(notificationsButton());
+    const area = within(screen.getByRole("region", { name: "Notifications" }));
+    expect(area.getByRole("listitem")).toHaveTextContent(`${gone}Warning, job, ${held}`);
+  });
+
+  it("tells a run whose sign of life went stale as interrupted, counted as new, and its later end", async () => {
+    await watchFromMeta([LISTING_BEFORE_FAILURE, STALLED_LISTING, TRAINING_LISTING], []);
+    expect(listedSentences()).toContain(RUN_RUNNING);
+
+    lookAtArea();
+    await next(RUN_REFRESH_MS);
+    const stalled = `Training run ${streamed}: interrupted`;
+    expect(entryOf(stalled)).toEqual(expect.objectContaining({ level: "warning" }));
+    expect(listedSentences()).not.toContain(RUN_RUNNING);
+    expect(notificationsButton()).toHaveAccessibleName("Notifications, 1 new");
+
+    await next(RUN_REFRESH_MS);
+    expect(listedSentences()).not.toContain(stalled);
+    expect(alert()).toHaveTextContent(RUN_FAILED);
+  });
+
+  it("tells a run first seen interrupted nothing, and tells it once a later answer lists it running", async () => {
+    await watchFromMeta([STALLED_LISTING, LISTING_BEFORE_FAILURE], []);
+    expect(useStore.getState().notifications.map((e) => e.context.target)).not.toContain(streamed);
+
+    await next(RUN_REFRESH_MS);
+
+    expect(listedSentences()).toContain(RUN_RUNNING);
+  });
+
+  it("tells a run a later answer first lists interrupted nothing, nor its end after", async () => {
+    await watchFromMeta([{ runs: [], sweeps: [] }, STALLED_LISTING, TRAINING_LISTING], []);
+    const aboutStreamed = () =>
+      useStore.getState().notifications.filter((e) => e.context.target === streamed);
+
+    await next(RUN_REFRESH_MS);
+    expect(listedSentences()).toContain(`Training run ${RUNS.agent.experiment_id}: running`);
+    expect(aboutStreamed()).toEqual([]);
+
+    await next(RUN_REFRESH_MS);
+    expect(aboutStreamed()).toEqual([]);
+  });
+
+  it("tells nothing when another project opens and its listings answer empty, and what changed once the first opens again", async () => {
+    const valley = [LISTING_BEFORE_FAILURE, TRAINING_LISTING];
+    const inValley = () => useStore.getState().openProject?.id === VALLEY.record.id;
+    vi.mocked(trainingApi.listRuns).mockImplementation(() => {
+      if (!inValley()) return Promise.resolve({ runs: [], sweeps: [] });
+      const answer = valley.shift();
+      return answer ? Promise.resolve(answer) : NO_ANSWER();
+    });
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [] });
+    await watchFromMeta([], []);
+    const told = useStore.getState().notifications;
+    expect(told.map((e) => e.sentence)).toContain(RUN_RUNNING);
+
+    act(() =>
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 1, project: openedAs(RIDGE).project })),
+    );
+    await settle();
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().notifications).toEqual(told);
+
+    act(() =>
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 2, project: VALLEY_OPENED.project })),
+    );
+    await settle();
+    expect(listedSentences()).not.toContain(RUN_RUNNING);
+    expect(alert()).toHaveTextContent(RUN_FAILED);
+  });
+
+  it("tells nothing from an answer read for a project no longer open", async () => {
+    const held = Promise.withResolvers<TrainingListing>();
+    vi.mocked(trainingApi.listRuns).mockReturnValueOnce(held.promise);
+    await watchFromMeta([], []);
+
+    act(() =>
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 1, project: openedAs(RIDGE).project })),
+    );
+    await settle();
+    await act(() => Promise.resolve(held.resolve(LISTING_BEFORE_FAILURE)));
+    await settle();
+
+    expect(useStore.getState().notifications).toEqual([]);
+  });
+
+  it("tells nothing from a failed read, the jobs an answer left watched reading as they did", async () => {
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(LISTING_BEFORE_FAILURE)
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockImplementation(NO_ANSWER);
+    await watchFromMeta([], []);
+    const told = useStore.getState().notifications;
+    expect(told.map((e) => e.sentence)).toContain(RUN_RUNNING);
+
+    await next(RUN_REFRESH_MS);
+
+    expect(trainingApi.listRuns).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().notifications).toEqual(told);
+  });
+
+  it("counts a job told again as seen while the area is open over it", async () => {
+    await watchFromMeta([LISTING_BEFORE_FAILURE, TRAINING_LISTING], []);
+    fireEvent.click(notificationsButton());
+    await settle();
+    expect(notificationsButton()).toHaveAccessibleName("Notifications");
+
+    await next(RUN_REFRESH_MS);
+
+    expect(listedSentences()).toContain(RUN_FAILED);
+    expect(notificationsButton()).toHaveAccessibleName("Notifications");
+  });
+
+  it("tells nothing of a run a first listing already lists ended", async () => {
+    await watchFromMeta([TRAINING_LISTING], []);
+
+    expect(useStore.getState().notifications.map((e) => e.context.target)).not.toContain(streamed);
   });
 });
 

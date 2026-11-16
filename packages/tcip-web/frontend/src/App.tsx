@@ -34,7 +34,8 @@ function App() {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const listed = useStore((s) => s.notifications.length);
+  // A job told again keeps the count of listed entries and takes the newest id.
+  const newest = useStore((s) => s.notifications.at(-1)?.id);
   const markSeen = useStore((s) => s.markNotificationsSeen);
 
   useEffect(() => {
@@ -54,7 +55,7 @@ function App() {
 
   useEffect(() => {
     if (open) markSeen();
-  }, [open, listed, markSeen]);
+  }, [open, newest, markSeen]);
 
   // Browser ctrl+wheel zoom stays off inside the app; an iframe-embedded tool (TensorBoard)
   // receives wheel events inside its own document and keeps it.

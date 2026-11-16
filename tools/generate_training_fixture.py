@@ -26,7 +26,9 @@ pairs (``compare_rich``, ``compare_unstamped``, ``compare_unranked``), with the 
 of them and two refusals of the first; a relaunch of the first run bound to
 its selection and of the sweep, each spawn recorded by ``tests._producer_fixtures.fake_popen`` and
 starting nothing, and the comparison of the bound relaunch with its source (``compare_bound``); the
-refusal of the unimportable run's relaunch; the serving route's two no-logs refusals; the frames
+refusal of the unimportable run's relaunch; the serving route's two no-logs refusals; the listing
+taken while the second run's sign of life is aged past the stale window, before its stream opens,
+which lists it interrupted (``listing_stalled``), its sign of life then set back; the frames
 the metrics stream sends, live, while the second run logs :data:`STREAMED_ROWS` and then fails
 (``frames``), and for an id naming no run; the listing taken before that failure and the one taken
 once every scene ran; the detail of every listed run, sweep and trial; once a run over a
@@ -45,6 +47,7 @@ that does not include them. A refusal is kept with its status.
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -195,7 +198,9 @@ def produce() -> dict[str, JsonValue]:
     from tcip_mcp import agent_identity
     from tcip_mcp.audit import now
     from tcip_mcp.experiments import (
+        HEARTBEAT_STALE_SECONDS,
         TrainingListing,
+        last_alive,
         observe_run,
         write_final_status,
     )
@@ -223,7 +228,7 @@ def produce() -> dict[str, JsonValue]:
         FRAME_STATISTICS,
         training_config,
     )
-    from tests._producer_fixtures import fake_popen
+    from tests._producer_fixtures import beat, fake_popen
     from tests._record_damage_fixtures import damage_record
     from tests._training_values import drawn_split
     from tests._verified_checkpoint_fixtures import (
@@ -456,6 +461,10 @@ def produce() -> dict[str, JsonValue]:
         write_final_status(refused, "failed", FAILURE, ended=now())
 
         streamed = run_dirs[other]
+        alive = last_alive(streamed)
+        beat(streamed, HEARTBEAT_STALE_SECONDS + 1)
+        served["listing_stalled"] = answered(client, "list_runs_route", 200)
+        beat(streamed, time.time() - alive)
         context = TrainContext(
             run=observed_run(observe_run(streamed)), train_loader=None
         )

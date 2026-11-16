@@ -15,9 +15,7 @@ import {
 } from "@/api/types.generated";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
-import { trainingKey } from "@/lib/trainingKeys";
 import { useStore } from "@/store";
-import { selectStanding } from "@/store/slices/notifications";
 import { numericMetricKeys, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab } from "@/tabs/TrainingTab";
 import { renderBesideListings } from "@/test/jobListings";
@@ -664,7 +662,16 @@ describe("TrainingTab run end and stream error", () => {
   });
 
   const id = RUNS.streamed.experiment_id;
-  const ended = `Training ${id}: ${String(STATUS_FRAME.status?.state)}`;
+  const ended = `Training run ${id}: ${RUNS.streamed.state}. ${RUNS.streamed.status_error}`;
+  /** Every listed entry about the run `id`. */
+  const entriesOfRun = () =>
+    useStore.getState().notifications.filter((e) => e.context.target === id);
+  /** The run list answers the produced listing taken before the run failed, then the one after. */
+  const failing = () =>
+    vi
+      .spyOn(trainingApi, "listRuns")
+      .mockResolvedValueOnce(LISTING_BEFORE_FAILURE)
+      .mockResolvedValue(TRAINING_LISTING);
 
   it("raises no entry on selecting a run already known to be terminal, only rediscovering its state", async () => {
     listing();
@@ -677,28 +684,28 @@ describe("TrainingTab run end and stream error", () => {
     expect(entriesSaying(ended)).toEqual([]);
   });
 
-  it("raises one job entry naming the run when a watched live run ends, and none for the same end again", async () => {
-    listing(LISTING_BEFORE_FAILURE);
+  it("tells a watched live run's end in its one job entry from the listing its end asks for, and nothing for the same end again", async () => {
+    failing();
     streamFrames(STATUS_FRAME, STATUS_FRAME);
 
     renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     await waitFor(() => expect(entriesSaying(ended)).toHaveLength(1));
-    expect(selectStanding(trainingKey("end", TEST_PROJECT.id, id))(useStore.getState())).toEqual(
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(3));
+    expect(entriesOfRun()).toEqual([
       expect.objectContaining({
         kind: "job",
-        level: "info",
+        level: "error",
         count: 1,
         sentence: ended,
         context: { project: TEST_PROJECT.id, target: id },
       }),
-    );
-    expect(useStore.getState().notifications).toHaveLength(1);
+    ]);
   });
 
   it("keeps a run's failed Cancel in its row when that run's end arrives", async () => {
-    listing(LISTING_BEFORE_FAILURE);
+    failing();
     streamFrames(STATUS_FRAME);
     // What fetch rejects with when the backend cannot be reached.
     vi.spyOn(trainingApi, "cancel").mockRejectedValue(new TypeError("Failed to fetch"));
@@ -713,11 +720,14 @@ describe("TrainingTab run end and stream error", () => {
     expect(within(rowFor(id)).getByTestId("entry-in-place")).toHaveTextContent(failed);
   });
 
-  it("raises a stream error as one failure naming the run, then still shows a metric the reconnect delivers", async () => {
+  const streamError = `Training stream error: ${UNKNOWN_RUN_FRAME.error}`;
+  /** Whether the stream error's entry stands on a key, so a later raise there counts on it. */
+  const errorStands = () => entriesSaying(streamError)[0].key !== undefined;
+
+  it("raises a stream error as one failure naming the run, counted at each reconnect, standing until the reconnect delivers a metric, which shows", async () => {
     const [first] = METRIC_FRAMES;
     listing(LISTING_BEFORE_FAILURE);
     streamFrames(UNKNOWN_RUN_FRAME, UNKNOWN_RUN_FRAME, first);
-    const sentence = `Training stream error: ${UNKNOWN_RUN_FRAME.error}`;
 
     renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
@@ -725,19 +735,29 @@ describe("TrainingTab run end and stream error", () => {
     expect(
       within(await screen.findByRole("table")).getByText(String(first.row.loss)),
     ).toBeInTheDocument();
-    const run = UNKNOWN_RUN_FRAME.experiment_id;
-    expect(entriesSaying(sentence)).toHaveLength(1);
-    expect(
-      selectStanding(trainingKey("stream", TEST_PROJECT.id, run))(useStore.getState()),
-    ).toEqual(
+    expect(entriesSaying(streamError)).toEqual([
       expect.objectContaining({
         kind: "failure",
         level: "error",
         count: 2,
-        sentence,
-        context: { project: TEST_PROJECT.id, target: run },
+        context: { project: TEST_PROJECT.id, target: id },
       }),
-    );
+    ]);
+    expect(errorStands()).toBe(false);
+  });
+
+  it("ends a stream error's standing once the stream that raised it closes, the entry staying listed", async () => {
+    listing(LISTING_BEFORE_FAILURE);
+    streamFrames(UNKNOWN_RUN_FRAME);
+
+    const view = renderBesideListings(<TrainingTab />);
+    fireEvent.click(await screen.findByText(id));
+    expect(errorStands()).toBe(true);
+
+    view.unmount();
+
+    expect(entriesSaying(streamError)).toHaveLength(1);
+    expect(errorStands()).toBe(false);
   });
 });
 

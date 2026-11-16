@@ -4,7 +4,7 @@ import type { Raised } from "@/store/slices/notifications";
 /** Raise `sentence` as a `kind` of the open project about `target`, the thing within the project
  *  it concerns as the person reads it, standing on `key` when one is given. */
 export function tell(
-  kind: Raised["kind"],
+  kind: Exclude<Raised["kind"], "job">,
   level: Raised["level"],
   sentence: string,
   target: string,

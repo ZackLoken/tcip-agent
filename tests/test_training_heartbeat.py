@@ -5,30 +5,16 @@ It reads 'interrupted' when the heartbeat is past the stale window.
 
 from __future__ import annotations
 
-import os
-import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from tests._producer_fixtures import beat
 from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
-
-
-def _beat(run_dir: Path, seconds_ago: float) -> float:
-    """Touch ``run_dir``'s heartbeat through its own writer, then age it ``seconds_ago``.
-
-    Returns the instant the heartbeat now reads.
-    """
-    from tcip_mcp.experiments import HEARTBEAT_FILE, touch_heartbeat
-
-    touch_heartbeat(run_dir)
-    instant = time.time() - seconds_ago
-    os.utime(run_dir / HEARTBEAT_FILE, (instant, instant))
-    return instant
 
 
 def _listed(project: Path) -> dict:
@@ -46,16 +32,16 @@ def test_the_heartbeat_window_decides_running_against_interrupted(
     run_dir = opened_run(
         tmp_path, detection_config(tmp_path / "data", project=tmp_path)
     )
-    _beat(run_dir, 0)
+    beat(run_dir, 0)
     assert observe(run_dir).state == "running"
-    _beat(run_dir, HEARTBEAT_STALE_SECONDS - 30)
+    beat(run_dir, HEARTBEAT_STALE_SECONDS - 30)
     assert observe(run_dir).state == "running"
-    _beat(run_dir, HEARTBEAT_STALE_SECONDS + 60)
+    beat(run_dir, HEARTBEAT_STALE_SECONDS + 60)
     assert observe(run_dir).state == "interrupted"
 
 
 def test_listed_runs_read_running_against_interrupted(tmp_path: Path) -> None:
-    _beat(
+    beat(
         opened_run(
             tmp_path,
             detection_config(tmp_path / "data", project=tmp_path),
@@ -63,7 +49,7 @@ def test_listed_runs_read_running_against_interrupted(tmp_path: Path) -> None:
         ),
         0,
     )
-    _beat(
+    beat(
         opened_run(
             tmp_path,
             detection_config(tmp_path / "data", project=tmp_path),
@@ -82,7 +68,7 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path: Path) -> None:
 
     A 'running' row carries the heartbeat's instant itself beside the derived state.
     """
-    instant = _beat(
+    instant = beat(
         opened_run(
             tmp_path,
             detection_config(tmp_path / "data", project=tmp_path),
@@ -111,7 +97,7 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(
     from tcip_mcp.tools.training_tools import monitor_training
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", 30.0)
-    _beat(
+    beat(
         opened_run(
             tmp_path,
             detection_config(tmp_path / "data", project=tmp_path),

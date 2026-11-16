@@ -41,6 +41,7 @@ interface Refusals {
 const PRODUCED = produced as unknown as {
   listing: TrainingListing;
   listing_before_failure: TrainingListing;
+  listing_stalled: TrainingListing;
   details: TrainingDetail[];
   compare: Comparison;
   compare_same: Comparison;
@@ -81,6 +82,11 @@ export const TRAINING_LISTING = PRODUCED.listing;
 
 /** The produced listing taken while the run `RUNS.streamed` names still ran, before it failed. */
 export const LISTING_BEFORE_FAILURE = PRODUCED.listing_before_failure;
+
+/** The produced listing taken while the sign of life of the run `RUNS.streamed` names was stale,
+ *  before it logged anything: that run reads interrupted, every other as in
+ *  {@link LISTING_BEFORE_FAILURE}. */
+export const STALLED_LISTING = PRODUCED.listing_stalled;
 
 /** The listing's runs by what their scene left: `unlaunched` running with no launch event,
  *  `relaunched` running from a person's relaunch with no agent declared, `agent` running from a

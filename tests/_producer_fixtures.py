@@ -1102,6 +1102,22 @@ def dataset_over(
     return run_over(task, images_dir, ground_truth, **kwargs)[0]
 
 
+def beat(run_dir: Path, seconds_ago: float) -> float:
+    """Touch ``run_dir``'s heartbeat through its own writer, then age it ``seconds_ago``.
+
+    Returns the instant the heartbeat now reads.
+    """
+    import os
+    import time
+
+    from tcip_mcp.experiments import HEARTBEAT_FILE, touch_heartbeat
+
+    touch_heartbeat(run_dir)
+    instant = time.time() - seconds_ago
+    os.utime(run_dir / HEARTBEAT_FILE, (instant, instant))
+    return instant
+
+
 def fake_popen(
     monkeypatch: pytest.MonkeyPatch, captured: list[list[str]]
 ) -> type:
