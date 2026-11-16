@@ -2712,6 +2712,21 @@
     },
     "selections": []
   },
+  "drawn_relaunch": {
+    "kind": "run",
+    "experiment_id": "<drawn relaunch id>",
+    "output_dir": "/scratch/workspace/training/.tcip/experiments/<drawn relaunch id>",
+    "tensorboard": {
+      "kind": "failed",
+      "error": "no TensorBoard starts under this test: /scratch/workspace/training/.tcip/experiments/<drawn relaunch id>",
+      "output": null
+    },
+    "pid": 0,
+    "overfit_check": null,
+    "warnings": [
+      "data: 2/10 candidate images (20%) will not train, {'absent': 2}. 8 stem(s) admitted."
+    ]
+  },
   "compare_verified": {
     "experiments": [
       {

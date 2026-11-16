@@ -63,6 +63,7 @@ const PRODUCED = produced as unknown as {
   cancel: Answer<"cancel">;
   run_relaunch: Answer<"relaunch">;
   sweep_relaunch: Answer<"relaunch">;
+  drawn_relaunch: Answer<"relaunch">;
   frames: [...TrainingRowFrame[], TrainingStatusFrame];
   unknown_frame: TrainingErrorFrame;
 } & Refusals;
@@ -231,6 +232,10 @@ export const RUN_RELAUNCH = PRODUCED.run_relaunch;
 
 /** The produced answer to a relaunch of the sweep. */
 export const SWEEP_RELAUNCH = PRODUCED.sweep_relaunch;
+
+/** The produced answer to a relaunch, bound to no selection, of a run whose split is drawn over
+ *  data some of whose images will not train: its `warnings` carry the share that will not. */
+export const DRAWN_RELAUNCH = PRODUCED.drawn_relaunch;
 
 /** The training routes' produced refusals, each read whole or through `thrown`. */
 export const TRAINING_REFUSALS: Refusals = PRODUCED;
