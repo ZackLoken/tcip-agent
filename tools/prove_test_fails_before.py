@@ -34,13 +34,14 @@ Four verdicts, each its own exit code:
                        is printed and recorded, each failure not counted is named beside it. At a
                        baseline not shown to precede the change the verdict says so, as a fact
                        about the baseline rather than proof the change is guarded
-    VACUOUS (1)        every selected test passed at a baseline shown to precede the change
-    INDETERMINATE (2)  every selected test passed, but the baseline is not shown to precede the
-                       change, so passing says nothing about the test; or a selected test did not
-                       finish within its timeout (pytest-timeout's report, vitest's own "Test
-                       timed out in" message, or the test running when the process ended under
-                       ``--per-test-timeout``), named in the verdict, so a hung baseline is told
-                       apart from a merely slow one
+    VACUOUS (1)        no selected test failed and not every one was skipped, at a baseline shown
+                       to precede the change
+    INDETERMINATE (2)  no selected test failed and not every one was skipped, but the baseline is
+                       not shown to precede the change, so passing says nothing about the test; or
+                       a selected test did not finish within its timeout (pytest-timeout's report,
+                       vitest's own "Test timed out in" message, or the test running when the
+                       process ended under ``--per-test-timeout``), named in the verdict, so a
+                       hung baseline is told apart from a merely slow one
     REFUSED (3)        no verdict is available: the command line is not usable, the test file is
                        not on the test side or does not exist, ``--test-rev`` was given without
                        ``--baseline`` or does not resolve, the baseline does not resolve or no tree
@@ -1048,8 +1049,7 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
     outcomes = [t["outcome"] for t in observed["tests"]]
     if outcomes and all(o == "skipped" for o in outcomes):
         return REFUSED, (
-            f"all {len(outcomes)} selected tests were skipped, so nothing was evaluated. A "
-            "module-level importorskip at the baseline will do this."
+            f"all {len(outcomes)} selected tests were skipped, so nothing was evaluated."
         )
     unreached = [t for t in failed if t["kind"] == "unreached"]
     timed_out = [t for t in failed if t["kind"] == "timeout"]
