@@ -16,7 +16,9 @@ type Tree = Awaited<ReturnType<typeof api.dataset.tree>>;
  *  of five photographs, a later capture of one photograph named as the first of those, a capture
  *  of one band group and a capture whose label document will not read, the nav route's answer, three datasets' trees, the select route's answers for the
  *  photographs made for a subject, for the subject an agent's focus names and for that subject
- *  with a bucket, and the photographs' selection under a separator-ended root. */
+ *  with a bucket, the photographs' selection under a separator-ended root, and the envelopes
+ *  `/ws/state` sent after a reopen onto a refused saved capture and after a select following
+ *  it. */
 const PRODUCED = produced as unknown as {
   opened: OpenAnswer;
   envelope: StateSnapshotMessage;
@@ -32,6 +34,8 @@ const PRODUCED = produced as unknown as {
   focused: SelectAnswer;
   focused_bucket: SelectAnswer;
   separated: DatasetSelection;
+  refused_envelope: StateSnapshotMessage;
+  reselected_envelope: StateSnapshotMessage;
 };
 
 /** The dataset trees the generator received: the photographs' dataset (`ds`), the troubled
@@ -97,6 +101,15 @@ export const PRODUCED_OPEN_ANSWER = PRODUCED.opened;
 /** The state envelope the generator received after the open. */
 export const PRODUCED_ENVELOPE = PRODUCED.envelope;
 
+/** The state envelope the generator received after reopening {@link TEST_PROJECT} onto a saved
+ *  capture the backend refused to list: no selection, and that capture refused with its
+ *  sentence. */
+export const REFUSED_ENVELOPE = PRODUCED.refused_envelope;
+
+/** The state envelope the generator received after a select of {@link LATER_SELECTION}'s capture
+ *  made once {@link REFUSED_ENVELOPE} was sent: that selection, nothing refused. */
+export const RESELECTED_ENVELOPE = PRODUCED.reselected_envelope;
+
 /** The project every frontend test opens: the produced answer's. */
 export const TEST_PROJECT: SnapshotProject = PRODUCED_OPEN_ANSWER.project;
 
@@ -137,14 +150,14 @@ export function changeSelection(change: Omit<SelectionChange, "count">): void {
   });
 }
 
-/** Open {@link TEST_PROJECT} in the store on `dataset`, none when it is null, with `gui` over the
- *  rest of the GUI state. */
+/** Open {@link TEST_PROJECT} in the store on `dataset`, none when it is null and no capture
+ *  refused, with `gui` over the rest of the GUI state. */
 export function openTestProject(
   dataset: DatasetSelection | null = null,
-  gui: Partial<Omit<GuiState, "dataset">> = {},
+  gui: Partial<Omit<GuiState, "dataset" | "refused_choice">> = {},
 ): void {
   useStore.setState((s) => ({
-    gui: { ...s.gui, ...gui, dataset },
+    gui: { ...s.gui, ...gui, dataset, refused_choice: null },
     openProject: TEST_PROJECT,
   }));
 }

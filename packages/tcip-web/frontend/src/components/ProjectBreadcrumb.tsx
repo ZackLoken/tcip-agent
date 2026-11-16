@@ -21,6 +21,7 @@ const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "results"]);
 
 export function ProjectBreadcrumb() {
   const dataset = useStore((s) => s.gui.dataset);
+  const refused = useStore((s) => s.gui.refused_choice);
   const openProject = useStore((s) => s.openProject);
   const user = useStore((s) => s.user);
   const clearDataset = useStore((s) => s.clearDataset);
@@ -108,7 +109,7 @@ export function ProjectBreadcrumb() {
   const recentRowProblem = recentProblem ?? listingError;
 
   return (
-    <div ref={rootRef} className="relative flex items-center">
+    <div ref={rootRef} className="relative flex min-w-0 items-center">
       <span title="Your name" className="font-mono">
         {user}
       </span>
@@ -131,6 +132,11 @@ export function ProjectBreadcrumb() {
         >
           {dataset.date}
         </button>
+      ) : refused ? (
+        <span className="my-1 min-w-0 max-w-[36rem] shrink-[100] [overflow-wrap:anywhere]">
+          <span className="font-mono">{refused.choice.date}</span>{" "}
+          <span className="tcip-problem">{refused.sentence}</span>
+        </span>
       ) : (
         <span className="font-mono text-tcip-muted">No dated images</span>
       )}
