@@ -756,6 +756,26 @@ describe("App job listings", () => {
     expect(screen.queryByText(RUNS.unlaunched.experiment_id)).not.toBeInTheDocument();
   });
 
+  it("keeps the runs a read answered beside the failure of the read after it", async () => {
+    vi.mocked(trainingApi.listRuns)
+      .mockResolvedValueOnce(TRAINING_LISTING)
+      .mockRejectedValue(new TypeError("Failed to fetch"));
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    vi.useFakeTimers();
+    render(<App />);
+    await vi.waitFor(() =>
+      expect(screen.getByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
+    });
+
+    expect(screen.getByText("Could not load training runs: Failed to fetch")).toBeInTheDocument();
+    expect(screen.getByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument();
+  });
+
   it("shows the listing a read answers after a failed one, without a Retry", async () => {
     vi.mocked(trainingApi.listRuns)
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
