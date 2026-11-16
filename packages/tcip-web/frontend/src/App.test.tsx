@@ -732,6 +732,30 @@ describe("App job listings", () => {
     expect(screen.getByText("No runs.")).toBeInTheDocument();
   });
 
+  it("never shows the runs a read answers for the project open before another opened", async () => {
+    const held = Promise.withResolvers<TrainingListing>();
+    vi.mocked(trainingApi.listRuns)
+      .mockReturnValueOnce(held.promise)
+      .mockResolvedValue({ runs: [], sweeps: [] });
+    useStore.setState({ openProject: VALLEY_OPENED.project });
+    act(() => useStore.getState().setActiveTab("training"));
+    render(<App />);
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(1));
+
+    act(() =>
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 1, project: openedAs(RIDGE).project })),
+    );
+    act(() => useStore.getState().setActiveTab("training"));
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("No runs.")).toBeInTheDocument();
+    await act(() => Promise.resolve(held.resolve(TRAINING_LISTING)));
+
+    expect(screen.getByText("No runs.")).toBeInTheDocument();
+    expect(screen.queryByText(RUNS.unlaunched.experiment_id)).not.toBeInTheDocument();
+  });
+
   it("shows the listing a read answers after a failed one, without a Retry", async () => {
     vi.mocked(trainingApi.listRuns)
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
