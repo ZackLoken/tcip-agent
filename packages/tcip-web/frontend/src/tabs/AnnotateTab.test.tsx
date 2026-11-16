@@ -1374,6 +1374,127 @@ describe("AnnotateTab entries on the canvas", () => {
     expect(line).toHaveClass("top-12");
     expect(fit).toHaveClass("top-3");
   });
+
+  it("dismissed in place, puts focus on the canvas column", async () => {
+    await refusedSave(new Error("network down"));
+
+    const [entry] = onCanvas();
+    const column = entry.parentElement!.parentElement!;
+    fireEvent.click(
+      within(entry).getByRole("button", { name: /^Dismiss: Could not save annotations/ }),
+    );
+    expect(onCanvas()).toHaveLength(0);
+    expect(column).toHaveFocus();
+  });
+
+  it("shows a save canceled while its image is still loaded on the canvas, as a warning notice", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    const save = Promise.withResolvers<LoadedSave>();
+    saveSpy.mockReturnValueOnce(save.promise);
+    pressSave();
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-cancel-save" }));
+    await act(() => Promise.resolve(save.reject(new DOMException("aborted", "AbortError"))));
+
+    const [entry] = onCanvas();
+    expect(entry).toHaveTextContent("Save canceled.");
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "warning",
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
+  });
+
+  it("puts a failed reload on the canvas and keeps Reload offered", async () => {
+    await refusedSave(await versionConflict());
+    loadSpy.mockRejectedValueOnce(new Error("network down"));
+    fireEvent.click(within(onCanvas()[0]).getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+
+    const [failure, conflict] = onCanvas();
+    expect(failure).toHaveTextContent("Reload failed: network down");
+    expect(conflict).toHaveTextContent(CONFLICT_SENTENCE);
+    expect(within(conflict).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+  });
+
+  it("puts a failed proposals read on the canvas", async () => {
+    vi.spyOn(api.annotate, "stagings").mockRejectedValue(new Error("network down"));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    const [entry] = onCanvas();
+    expect(entry).toHaveTextContent("Could not load proposals: network down");
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
+  });
+
+  it("puts a refused find on the canvas", async () => {
+    vi.spyOn(api.annotate, "find").mockRejectedValue(new Error("network down"));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
+    await flush();
+
+    const [entry] = onCanvas();
+    expect(entry).toHaveTextContent("Could not find: network down");
+    expect(listed()).toEqual([expect.objectContaining({ kind: "failure", level: "error" })]);
+  });
+
+  it("lists found boxes answered after the image changed as an information notice naming the image, holding none", async () => {
+    const answer = Promise.withResolvers<Awaited<ReturnType<typeof api.annotate.find>>>();
+    vi.spyOn(api.annotate, "find").mockReturnValue(answer.promise);
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
+    await flush();
+    act(() => changeSelection({ current_image_index: 1 }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    await act(() => Promise.resolve(answer.resolve(ANNOTATE_ANSWERS.found)));
+
+    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([]);
+    expect(onCanvas()).toHaveLength(0);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "info",
+        sentence: `${ANNOTATE_ANSWERS.found.boxes.length} found on ${IMG1_NAME}, not held.`,
+        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
+      }),
+    ]);
+  });
+
+  it("lists a failed read of the images' states naming the capture, with nothing on the canvas", async () => {
+    vi.spyOn(api.annotate, "states").mockRejectedValue(new Error("network down"));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(onCanvas()).toHaveLength(0);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        sentence: "Could not read the images' states: network down",
+        key: undefined,
+        context: { project: TEST_PROJECT.id, target: useStore.getState().gui.dataset!.date },
+      }),
+    ]);
+  });
 });
 
 describe("AnnotateTab host size", () => {

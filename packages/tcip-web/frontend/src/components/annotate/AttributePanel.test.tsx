@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { subjectsApi } from "@/api/subjects";
@@ -232,6 +232,22 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
 
     expect(useStore.getState().registry.subjects).toEqual(LOADED.subjects);
     expect(tokenOf(useStore.getState().registry.version)).toBe(LOADED.version);
+  });
+
+  it("dismissed in place, takes the refused save from the list and puts focus on the panel", async () => {
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(LABEL_ANSWERS.registry_stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
+    render(<AttributePanel focused={null} />);
+    fillAttributeDraft("opening", ["closed", "open"]);
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+
+    const entry = screen.getByTestId("entry-in-place");
+    fireEvent.click(
+      within(entry).getByRole("button", { name: /^Dismiss: Could not update the attributes/ }),
+    );
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(useStore.getState().notifications).toEqual([]);
+    expect(screen.getByTestId("subject-attributes")).toHaveFocus();
   });
 
   it("shows a refused save in the panel and in the area, and in the panel only until the next save lands", async () => {

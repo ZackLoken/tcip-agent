@@ -652,6 +652,25 @@ describe("AnnotateToolbar review queue", () => {
     await screen.findByRole("option", { name: MODEL.entry.name });
   }
 
+  it("lists a failed scorers read in the notifications area, standing on no key", async () => {
+    openTestProject(QUEUE_SELECTION);
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue(REGISTERED_MODELS);
+    vi.spyOn(api.annotate, "scorers").mockRejectedValue(new Error("network down"));
+    renderToolbar();
+    fireEvent.change(imagesSelect(), { target: { value: "rank_queue" } });
+
+    await waitFor(() =>
+      expect(useStore.getState().notifications).toEqual([
+        expect.objectContaining({
+          kind: "failure",
+          level: "error",
+          sentence: "Could not read the scorers: network down",
+          key: undefined,
+        }),
+      ]),
+    );
+  });
+
   it("launches with the values the person states, none prefilled, and walks the completed queue in rank order", async () => {
     openTestProject(QUEUE_SELECTION);
     const launch = vi.spyOn(api.annotate, "launchQueue").mockResolvedValue(LAUNCHED);
