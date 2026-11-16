@@ -191,8 +191,8 @@ describe("the notifications area", () => {
 });
 
 describe("the notifications button's glyph", () => {
-  const states: [string, () => void][] = [
-    ["no entry and no condition", () => {}],
+  const states: [string, () => void, string][] = [
+    ["no entry and no condition", () => {}, ""],
     [
       "a new entry",
       () =>
@@ -202,6 +202,7 @@ describe("the notifications button's glyph", () => {
           text: { sentence: "Could not load the registry." },
           context: { project: "valley" },
         }),
+      "1",
     ],
     [
       "a holding condition already seen",
@@ -209,6 +210,7 @@ describe("the notifications button's glyph", () => {
         useStore.getState().holdCondition("bundle", "rebuild the bundle");
         useStore.getState().markNotificationsSeen();
       },
+      "",
     ],
     [
       "a new entry and a holding condition",
@@ -221,17 +223,18 @@ describe("the notifications button's glyph", () => {
           context: { project: "valley" },
         });
       },
+      "2",
     ],
   ];
 
   it.each(states)(
-    "stands for the word with %s: a hidden icon, no letters, and a title equal to its name",
-    (_state, setUp) => {
+    "stands for the word with %s: a hidden icon, only the count as text, and a title equal to its name",
+    (_state, setUp, count) => {
       renderClosedHost();
       act(setUp);
       const button = screen.getByRole("button", { name: /^Notifications/ });
 
-      expect(button.textContent).not.toMatch(/[A-Za-z]/);
+      expect(button.textContent).toBe(count);
       const icon = button.querySelector("svg");
       expect(icon).toHaveAttribute("aria-hidden", "true");
       expect(button.title).not.toBe("");
