@@ -68,6 +68,41 @@ def _run(
     return _tool(repo, test_file, "--baseline", baseline, *extra)
 
 
+DOUBLE_GUARD = (
+    "def test_double_doubles():\n"
+    "    from widgets import double\n"
+    "    assert double(3) == 6\n"
+)
+
+
+def _fixed_double(
+    tmp_path: Path, test_source: str = DOUBLE_GUARD
+) -> tuple[Path, str]:
+    """Build a scratch repository whose baseline ``double`` is a no-op and whose head fixes it.
+
+    The head commit also holds ``test_source`` as ``tests/test_widgets.py``. Returns the
+    repository at its head and the baseline revision.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    baseline = commit_all(repo, "double is a no-op")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    write(repo / "tests" / "test_widgets.py", test_source)
+    commit_all(repo, "double actually doubles")
+    return repo, baseline
+
+
+def _redirect_temporary_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Point the tool's temporary folder at a new folder under ``tmp_path`` and return it."""
+    scratch_root = tmp_path / "t"
+    scratch_root.mkdir()
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(scratch_root))
+    return scratch_root
+
+
 def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
     """A setup fixture error is refused.
 
@@ -103,18 +138,7 @@ def test_an_assertion_failure_guards(tmp_path: Path) -> None:
     The test's own assert failing on the value the baseline produced is reported GUARDS,
     behavioral.
     """
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = commit_all(repo, "double is a no-op")
-
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    write(
-        repo / "tests" / "test_widgets.py",
-        "def test_double_doubles():\n"
-        "    from widgets import double\n"
-        "    assert double(3) == 6\n",
-    )
-    commit_all(repo, "double actually doubles")
+    repo, baseline = _fixed_double(tmp_path)
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -982,17 +1006,7 @@ def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
     ``--json`` names a directory, so writing the record of a run that reached its verdict raises,
     and no verdict line is printed.
     """
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = commit_all(repo, "double is a no-op")
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    write(
-        repo / "tests" / "test_widgets.py",
-        "def test_double_doubles():\n"
-        "    from widgets import double\n"
-        "    assert double(3) == 6\n",
-    )
-    commit_all(repo, "double actually doubles")
+    repo, baseline = _fixed_double(tmp_path)
     record = tmp_path / "record"
     record.mkdir()
 
@@ -1034,29 +1048,6 @@ def test_a_refused_run_whose_record_cannot_be_written_exits_with_the_tools_own_c
 
 
 # ── the test file and the tree it comes from ─────────────────────────────────
-
-DOUBLE_GUARD = (
-    "def test_double_doubles():\n"
-    "    from widgets import double\n"
-    "    assert double(3) == 6\n"
-)
-
-
-def _fixed_double(
-    tmp_path: Path, test_source: str = DOUBLE_GUARD
-) -> tuple[Path, str]:
-    """Build a scratch repository whose baseline ``double`` is a no-op and whose head fixes it.
-
-    The head commit also holds ``test_source`` as ``tests/test_widgets.py``. Returns the
-    repository at its head and the baseline revision.
-    """
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = commit_all(repo, "double is a no-op")
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    write(repo / "tests" / "test_widgets.py", test_source)
-    commit_all(repo, "double actually doubles")
-    return repo, baseline
 
 
 def _baseline_line(result: subprocess.CompletedProcess) -> str:
@@ -1288,10 +1279,7 @@ def _gizmo_repo(
     ``GIZMO_GUARD``. The tool's temporary folder is redirected to a folder under ``tmp_path``.
     Returns the repository at its head, the baseline revision and that folder.
     """
-    scratch_root = tmp_path / "t"
-    scratch_root.mkdir()
-    for name in ("TMPDIR", "TEMP", "TMP"):
-        monkeypatch.setenv(name, str(scratch_root))
+    scratch_root = _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
     package = repo / "packages" / "gizmo" / "src" / "gizmo"
     package.mkdir(parents=True)
@@ -1830,18 +1818,8 @@ def _run_baseline_leaving(
     The run's temporary folder is redirected to a folder under ``tmp_path``, returned beside the
     result, so a scratch directory left behind is found there.
     """
-    scratch_root = tmp_path / "t"
-    scratch_root.mkdir()
-    for name in ("TMPDIR", "TEMP", "TMP"):
-        monkeypatch.setenv(name, str(scratch_root))
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    baseline = commit_all(repo, "double is a no-op")
-
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    write(repo / "tests" / "test_widgets.py", test_source)
-    commit_all(repo, "double actually doubles")
-
+    scratch_root = _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo, baseline = _fixed_double(tmp_path, test_source)
     return _run(repo, "tests/test_widgets.py", baseline), scratch_root
 
 
@@ -1965,10 +1943,7 @@ def linked_repo(
     redirected under ``tmp_path``. Teardown removes the link a run left in its tree and then each
     package link, before anything removes a directory holding one.
     """
-    scratch_root = tmp_path / "t"
-    scratch_root.mkdir()
-    for name in ("TMPDIR", "TEMP", "TMP"):
-        monkeypatch.setenv(name, str(scratch_root))
+    scratch_root = _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
     install = _scratch_frontend(repo) / "node_modules"
     install.mkdir()
