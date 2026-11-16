@@ -2,9 +2,9 @@
  * The frontend's non-test sources, their reads of the generated route module, their backend path
  * literals and their declarations, as the TypeScript compiler parses them.
  *
- * A non-test source is a `.ts` or `.tsx` file under the source directory whose name carries no
- * `.test.` and that lies outside the directory's `test` folder. A read is a property access whose
- * object is the identifier `ROUTES`; a destructuring or an element access of `ROUTES` is not one.
+ * A non-test source is a `.ts` or `.tsx` file under the source directory that is no test file
+ * (`isTestFile`). A read is a property access whose object is the identifier `ROUTES`; a
+ * destructuring or an element access of `ROUTES` is not one.
  * A backend path literal is a string or template literal starting `/api/` or `/ws/`.
  *
  * Run as `node scripts/routeReads.mjs <src>`, it prints one JSON object over the non-test sources
