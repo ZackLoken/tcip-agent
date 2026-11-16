@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +20,7 @@ import { useStore } from "@/store";
 import { selectStanding } from "@/store/slices/notifications";
 import { numericMetricKeys, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab } from "@/tabs/TrainingTab";
+import { renderBesideListings } from "@/test/jobListings";
 import { entriesSaying } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { openTestProject, TEST_PROJECT } from "@/test/store";
@@ -113,7 +114,7 @@ describe("TrainingTab run list", () => {
     listing();
     const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue(CANCEL);
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     expect(await screen.findByText(unlaunched.experiment_id)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", cancelOf(unlaunched.experiment_id)));
@@ -126,7 +127,7 @@ describe("TrainingTab run list", () => {
     atHeartbeat(unlaunched, 3);
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(unlaunched.experiment_id);
     expect(
       within(rowFor(unlaunched.experiment_id)).getByText(/running, last heartbeat 3 min ago/),
@@ -145,7 +146,7 @@ describe("TrainingTab run list", () => {
   it("shows a run's recorded error in its row", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(unlogged.experiment_id);
     expect(
       within(rowFor(unlogged.experiment_id)).getByText(String(unlogged.status_error)),
@@ -155,7 +156,7 @@ describe("TrainingTab run list", () => {
   it("offers no stop control for a run in a terminal state", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(completed.experiment_id);
     for (const { experiment_id } of [completed, unlogged]) {
       expect(
@@ -167,7 +168,7 @@ describe("TrainingTab run list", () => {
   it("names the best value's own metric exactly as the record carries it, and shows nothing for a row carrying no best value", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(completed.experiment_id);
     expect(within(rowFor(completed.experiment_id)).getByText(BEST)).toBeInTheDocument();
     expect(within(rowFor(unlaunched.experiment_id)).queryByText(/^best /)).not.toBeInTheDocument();
@@ -177,12 +178,12 @@ describe("TrainingTab run list", () => {
   it("says No runs. for an empty listing", async () => {
     const listRuns = listing({ runs: [], sweeps: [] });
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     expect(await screen.findByText("No runs.")).toBeInTheDocument();
 
     cleanup();
     listRuns.mockResolvedValue(TRAINING_LISTING);
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     expect(await screen.findByText(unlaunched.experiment_id)).toBeInTheDocument();
     expect(screen.queryByText(/sorted by experiment id/)).not.toBeInTheDocument();
   });
@@ -190,7 +191,7 @@ describe("TrainingTab run list", () => {
   it("names the row's own select control with the id and state", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
         name: `${unlaunched.experiment_id} running, ${FRESH}, no launch event recorded`,
@@ -201,7 +202,7 @@ describe("TrainingTab run list", () => {
   it("shows the row's best value at four significant figures, with no title", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(completed.experiment_id);
     const value = within(rowFor(completed.experiment_id)).getByText(BEST);
     expect(value).not.toHaveAttribute("title");
@@ -210,7 +211,7 @@ describe("TrainingTab run list", () => {
   it("names the row's accessible name with its best value and metric when the record carries one", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
         name: `${completed.experiment_id} completed, no launch event recorded, ${BEST}`,
@@ -223,7 +224,7 @@ describe("TrainingTab run list", () => {
     const cancel = Promise.withResolvers<Awaited<ReturnType<typeof trainingApi.cancel>>>();
     vi.spyOn(trainingApi, "cancel").mockReturnValue(cancel.promise);
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     const button = await screen.findByRole("button", cancelOf(unlaunched.experiment_id));
     fireEvent.click(button);
 
@@ -246,7 +247,7 @@ describe("TrainingTab run list", () => {
       .mockReturnValue(new Promise(() => {}));
     const sentence = "Cancel failed: Failed to fetch";
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByRole("button", cancelOf(id)));
 
     const line = await within(rowFor(id)).findByTestId("entry-in-place");
@@ -279,7 +280,7 @@ describe("TrainingTab sweeps", () => {
     const best = outcome.best_value;
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     const group = await screen.findByRole("group", sweepGroupNamed);
     expect(within(group).getByText(TRIALS.completed.experiment_id)).toBeInTheDocument();
     expect(within(group).getByText(TRIALS.running.experiment_id)).toBeInTheDocument();
@@ -297,7 +298,7 @@ describe("TrainingTab sweeps", () => {
     const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue(CANCEL);
     const trial = TRIALS.running.experiment_id;
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByRole("button", { name: `Cancel ${trial}` }));
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(trial, { user: "jordan" }));
     fireEvent.click(screen.getByRole("button", { name: `Cancel ${searched.sweep_id}` }));
@@ -312,7 +313,7 @@ describe("TrainingTab sweeps", () => {
     // What fetch rejects with when the backend cannot be reached.
     vi.spyOn(trainingApi, "cancel").mockRejectedValue(new TypeError("Failed to fetch"));
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByRole("button", { name: `Cancel ${searched.sweep_id}` }));
 
     const group = screen.getByRole("group", sweepGroupNamed);
@@ -330,7 +331,7 @@ describe("TrainingTab sweeps", () => {
     const getRun = details();
     const trial = TRIALS.completed.experiment_id;
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(trial));
     await waitFor(() =>
       expect(openTrainingStream).toHaveBeenCalledWith(trial, expect.any(Function)),
@@ -352,7 +353,7 @@ describe("TrainingTab run launcher mark", () => {
   it("states who launched the run from its launch event alone", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(agent.experiment_id);
 
     expect(
@@ -375,7 +376,7 @@ describe("TrainingTab run launcher mark", () => {
   it("names the declared client in the agent row's accessible description", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     const button = await screen.findByRole("button", {
       name: `${agent.experiment_id} running, ${FRESH}, started by the agent`,
     });
@@ -390,7 +391,7 @@ describe("TrainingTab run launcher mark", () => {
   it("describes a launch with no agent named", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     const button = await screen.findByRole("button", {
       name: `${relaunched.experiment_id} running, ${FRESH}, started with no agent declared`,
     });
@@ -404,7 +405,7 @@ describe("TrainingTab run launcher mark", () => {
   it("makes a missing launch event's explanation reachable by assistive technology", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     const button = await screen.findByRole("button", {
       name: `${unlaunched.experiment_id} running, ${FRESH}, no launch event recorded`,
     });
@@ -420,7 +421,7 @@ describe("TrainingTab run launcher mark", () => {
 describe("TrainingTab heading", () => {
   it("renders exactly one top-level heading naming the tab", async () => {
     listing();
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalled());
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
@@ -433,7 +434,7 @@ describe("TrainingTab heading", () => {
     details();
     vi.spyOn(trainingApi, "launchTensorboard").mockResolvedValue(servingOf(id));
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     expect(await screen.findByRole("heading", { level: 2, name: "Runs" })).toBeInTheDocument();
     fireEvent.click(await screen.findByText(id));
     expect(
@@ -452,7 +453,7 @@ describe("TrainingTab tensorboard panel", () => {
       await thrown(TRAINING_REFUSALS.no_logs_refusal),
     );
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     expect(
@@ -467,7 +468,7 @@ describe("TrainingTab tensorboard panel", () => {
     details();
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(new Error("connection refused"));
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     expect(
@@ -486,7 +487,7 @@ describe("TrainingTab tensorboard panel", () => {
       await thrown(TRAINING_REFUSALS.crashed_no_logs_refusal),
     );
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     expect(await screen.findByText(message)).toBeInTheDocument();
@@ -503,7 +504,7 @@ describe("TrainingTab tensorboard panel", () => {
       .spyOn(trainingApi, "launchTensorboard")
       .mockImplementation((experimentId: string) => Promise.resolve(servingOf(experimentId)));
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(first));
     await waitFor(() => expect(launchSpy).toHaveBeenCalledWith(first));
 
@@ -524,7 +525,7 @@ describe("TrainingTab tensorboard panel", () => {
       return () => {};
     });
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
     const frame = (await screen.findByTitle("TensorBoard")) as HTMLIFrameElement;
     const page = frame.contentDocument as Document;
@@ -570,7 +571,7 @@ describe("TrainingTab epoch table", () => {
   async function streamed(answer: TrainingListing, frames: Frame[]) {
     listing(answer);
     streamFrames(...frames);
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
     return screen.findByRole("table", { name: `${id} metrics by epoch` });
   }
@@ -578,7 +579,7 @@ describe("TrainingTab epoch table", () => {
   it("says a terminal run recorded no metrics, rather than waiting on one that will never arrive", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(RUNS.empty.experiment_id));
 
     expect(await screen.findByText("This run recorded no metrics.")).toBeInTheDocument();
@@ -588,7 +589,7 @@ describe("TrainingTab epoch table", () => {
   it("marks the waiting placeholder as a live region on a run with no metrics yet", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(RUNS.unlaunched.experiment_id));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Waiting for metrics…");
@@ -669,7 +670,7 @@ describe("TrainingTab run end and stream error", () => {
     listing();
     streamFrames(STATUS_FRAME);
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalledTimes(2));
@@ -680,7 +681,7 @@ describe("TrainingTab run end and stream error", () => {
     listing(LISTING_BEFORE_FAILURE);
     streamFrames(STATUS_FRAME, STATUS_FRAME);
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     await waitFor(() => expect(entriesSaying(ended)).toHaveLength(1));
@@ -703,7 +704,7 @@ describe("TrainingTab run end and stream error", () => {
     vi.spyOn(trainingApi, "cancel").mockRejectedValue(new TypeError("Failed to fetch"));
     const failed = "Cancel failed: Failed to fetch";
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByRole("button", { name: `Cancel ${id}` }));
     expect(await within(rowFor(id)).findByTestId("entry-in-place")).toHaveTextContent(failed);
     fireEvent.click(screen.getByText(id));
@@ -718,7 +719,7 @@ describe("TrainingTab run end and stream error", () => {
     streamFrames(UNKNOWN_RUN_FRAME, UNKNOWN_RUN_FRAME, first);
     const sentence = `Training stream error: ${UNKNOWN_RUN_FRAME.error}`;
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(await screen.findByText(id));
 
     expect(
@@ -752,7 +753,7 @@ describe("TrainingTab stream lifecycle", () => {
 
     vi.useFakeTimers();
     try {
-      render(<TrainingTab />);
+      renderBesideListings(<TrainingTab />);
       await vi.waitFor(() => expect(screen.getByText(id)).toBeInTheDocument());
       fireEvent.click(screen.getByText(id));
       await vi.waitFor(() => expect(openTrainingStream).toHaveBeenCalledTimes(1));
@@ -777,7 +778,7 @@ describe("TrainingTab launch picker", () => {
   /** Render the tab over the produced listing and open the picker; return it. */
   async function openPicker(shown: string = id): Promise<HTMLElement> {
     listing();
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findAllByText(shown);
     fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
     return screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
@@ -917,7 +918,7 @@ describe("TrainingTab launch picker", () => {
       .mockRejectedValueOnce(new Error("network error"))
       .mockResolvedValue({ runs: [], sweeps: [] });
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
     const picker = screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
 
@@ -934,7 +935,7 @@ describe("TrainingTab launch picker", () => {
   it("shows one failed-listing error and one Retry on the whole screen while the picker is open", async () => {
     vi.spyOn(trainingApi, "listRuns").mockRejectedValue(new Error("network error"));
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
 
     expect(await screen.findAllByText("Could not load training runs: network error")).toHaveLength(
@@ -949,7 +950,7 @@ describe("TrainingTab launch picker", () => {
       .mockRejectedValueOnce(new Error("network error"))
       .mockResolvedValue(TRAINING_LISTING);
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
 
     expect(await screen.findAllByText("Could not load training runs: network error")).toHaveLength(
       1,
@@ -974,7 +975,7 @@ describe("TrainingTab compare", () => {
     vi.mocked(openTrainingStream).mockReturnValueOnce(stopSingle);
     vi.spyOn(trainingApi, "compare").mockResolvedValue(compared);
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(first);
     fireEvent.click(within(rowFor(first)).getByText(first));
     await waitFor(() =>
@@ -991,7 +992,7 @@ describe("TrainingTab compare", () => {
   it("every row's Compare toggle stays live: one id, no resolution to wait on", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(first);
 
     expect(toggle(first)).not.toBeDisabled();
@@ -1006,7 +1007,7 @@ describe("TrainingTab compare", () => {
     const sentence = "Compare fits at most 4 runs at once; unmark one first.";
 
     // As main.tsx renders the app, so an updater React runs twice would raise twice.
-    render(
+    renderBesideListings(
       <StrictMode>
         <TrainingTab />
       </StrictMode>,
@@ -1032,7 +1033,7 @@ describe("TrainingTab compare", () => {
   it("groups Compare and Cancel as one action group", async () => {
     listing();
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(first);
 
     const group = within(rowFor(first)).getByRole("group", { name: "Run actions" });
@@ -1045,7 +1046,7 @@ describe("TrainingTab compare", () => {
     listing();
     vi.spyOn(trainingApi, "compare").mockResolvedValue(compared);
 
-    render(<TrainingTab />);
+    renderBesideListings(<TrainingTab />);
     await screen.findByText(first);
     fireEvent.click(toggle(first));
     fireEvent.click(toggle(second));

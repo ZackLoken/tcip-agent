@@ -88,6 +88,16 @@ const cancelKey = (projectId: string | undefined, jobId: string) =>
  *  is dismissed. */
 const watchControlId = (jobId: string) => `watch-${jobId}`;
 
+/** Ask the shell's reader to list the inference jobs again now. */
+const listJobsNow = () => useStore.getState().askListing("inference");
+
+/** The job the tab watches, as its latest record came to the tab (the listing's, its launch's
+ *  answer, the refusal naming it, its stream's last frame), and the listing as it stood then. */
+interface Watched {
+  record: InferenceJob;
+  listedAt: Record<string, InferenceJob>;
+}
+
 /** The failure standing on the last cancel of the job `jobId`, in place as a row under that job's
  *  own, spanning the table's `columns`. */
 function CancelFailureRow({
@@ -161,23 +171,28 @@ export function InferenceTab() {
   const [masks, setMasks] = useState<Stated["masks"]>(null);
   // Why the run states the values above, carried on its execution record.
   const [rationale, setRationale] = useState("");
-  // Each job's one record by its id: the listed jobs', each launched or watched since, and the
-  // watched one's once a poll delisted it.
-  const [jobs, setJobs] = useState<Record<string, InferenceJob>>({});
+  const listed = useStore((s) => s.jobListings.inference.answer);
+  const listFailure = useStore((s) => s.jobListings.inference.failure);
+  const jobsError = listFailure && `Could not load inference jobs: ${listFailure}`;
+  const [watched, setWatched] = useState<Watched | null>(null);
+  const activeJobId = watched?.record.job_id ?? null;
   // What each watched job's stream said once the backend held no record of it, by its id.
   const [gone, setGone] = useState<Record<string, string>>({});
-  // The watched job the last poll did not list: it shows its last error alone rather than a status
-  // line frozen on a job that is gone; null while the watched job is listed.
-  const [delisted, setDelisted] = useState<string | null>(null);
-  const [jobsError, setJobsError] = useState<string | null>(null);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  // Whether a listing was read since the watched job's record came: the newer of the two shows.
+  const relisted = watched !== null && listed !== watched.listedAt;
+  // The watched job that listing does not list: it shows its last error alone rather than a status
+  // line frozen on a job that is gone; null while it is listed.
+  const delisted = relisted && !(watched.record.job_id in listed) ? watched.record.job_id : null;
+  const activeJob =
+    watched && (relisted && !delisted ? listed[watched.record.job_id] : watched.record);
+  // Each job's one record by its id: the listed jobs', and the watched one's in its place.
+  const jobs = activeJob ? { ...listed, [activeJob.job_id]: activeJob } : listed;
   // Each bucket_exists refusal, keyed by the date it was refused for.
   const [refusedLaunches, setRefusedLaunches] = useState<Record<string, BucketExistsRefusal>>({});
   const [launching, setLaunching] = useState(false);
   const streamRef = useRef<(() => void) | null>(null);
   const launchButtonRef = useRef<HTMLButtonElement>(null);
   const prevRefusedDatesRef = useRef<string[]>([]);
-  const activeJob = activeJobId === null ? undefined : jobs[activeJobId];
   const listedJobs = Object.values(jobs).filter((j) => j.job_id !== delisted);
   const modelAssessments = assessmentsOf(assessed?.assessments ?? [], model);
 
@@ -242,33 +257,6 @@ export function InferenceTab() {
     refreshDates();
   }, [refreshDates]);
 
-  const refreshJobs = useCallback(
-    () =>
-      inferenceApi
-        .listJobs()
-        .then((r) => {
-          const polled = Object.fromEntries(r.jobs.map((j) => [j.job_id, j]));
-          const watchedGone = activeJobId !== null && !(activeJobId in polled);
-          setJobs((prev) =>
-            watchedGone && activeJobId in prev
-              ? { ...polled, [activeJobId]: prev[activeJobId] }
-              : polled,
-          );
-          setDelisted(watchedGone ? activeJobId : null);
-          setJobsError(null);
-        })
-        .catch((e) => {
-          setJobsError(`Could not load inference jobs: ${messageOf(e)}`);
-        }),
-    [activeJobId],
-  );
-
-  useEffect(() => {
-    void refreshJobs();
-    const t = setInterval(refreshJobs, 3000);
-    return () => clearInterval(t);
-  }, [refreshJobs]);
-
   useEffect(() => {
     if (!activeJobId) return;
     streamRef.current?.();
@@ -276,11 +264,22 @@ export function InferenceTab() {
       if (frame.type === "missing") {
         setGone((prev) => ({ ...prev, [activeJobId]: frame.error }));
       } else {
-        setJobs((prev) => ({ ...prev, [activeJobId]: frame.job }));
+        const { answer } = useStore.getState().jobListings.inference;
+        setWatched((prev) =>
+          prev?.record.job_id === activeJobId ? { record: frame.job, listedAt: answer } : prev,
+        );
       }
     });
     return () => streamRef.current?.();
   }, [activeJobId]);
+
+  /** Watch the job `record` is the latest record of, unless it is the one watched; the listing is
+   *  read again, so a job it no longer lists is known as gone. */
+  function watch(record: InferenceJob) {
+    if (record.job_id === activeJobId) return;
+    setWatched({ record, listedAt: useStore.getState().jobListings.inference.answer });
+    listJobsNow();
+  }
 
   function toggleDate(date: string) {
     setSelectedDates((prev) =>
@@ -338,8 +337,7 @@ export function InferenceTab() {
         assessment_id: assessmentId,
         user: useStore.getState().user,
       });
-      setJobs((prev) => ({ [launched.job_id]: launched, ...prev }));
-      setActiveJobId(launched.job_id);
+      watch(launched);
       dropRefusal(date);
     } catch (e) {
       const refusal = refusalOf<BucketExistsRefusal>(e, BUCKET_EXISTS);
@@ -372,8 +370,7 @@ export function InferenceTab() {
 
   // The refusal's record is the job's until the tab holds one of its own.
   function onWatchRefusedJob({ job }: BucketExistsRefusal) {
-    setJobs((prev) => (job.job_id in prev ? prev : { ...prev, [job.job_id]: job }));
-    setActiveJobId(job.job_id);
+    watch(jobs[job.job_id] ?? job);
   }
 
   // Jobs whose cancel was requested and not yet reported terminal by the backend; the row reads
@@ -569,9 +566,7 @@ export function InferenceTab() {
 
       <div className="p-4 overflow-auto">
         <div className="tcip-heading mb-3">Jobs</div>
-        {jobsError && (
-          <ErrorRetry message={jobsError} onRetry={() => void refreshJobs()} className="mb-2" />
-        )}
+        {jobsError && <ErrorRetry message={jobsError} onRetry={listJobsNow} className="mb-2" />}
         {listedJobs.length === 0 ? (
           !jobsError && <div className="text-tcip-muted">No jobs.</div>
         ) : (
@@ -608,7 +603,7 @@ export function InferenceTab() {
                         <button
                           id={watchControlId(j.job_id)}
                           className="tcip-btn"
-                          onClick={() => setActiveJobId(j.job_id)}
+                          onClick={() => watch(j)}
                         >
                           Watch
                         </button>
