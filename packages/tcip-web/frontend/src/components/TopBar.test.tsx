@@ -41,6 +41,40 @@ describe("TopBar before a name is committed", () => {
   });
 });
 
+describe("TopBar agent button", () => {
+  const agentButton = () => screen.getByRole("button", { name: "Toggle agent terminal" });
+
+  it("shows a hidden icon and no word, its title the rail header's own words", () => {
+    renderTopBar();
+    const button = agentButton();
+
+    expect(button.textContent).not.toMatch(/[A-Za-z]/);
+    expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(button).toHaveAttribute("title", "TCIP Agent");
+    expect(screen.queryByTestId("handoff-mark")).not.toBeInTheDocument();
+  });
+
+  it("is pressed while the rail is open and not otherwise", () => {
+    renderTopBar();
+    expect(agentButton()).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(agentButton());
+    expect(useStore.getState().terminalOpen).toBe(true);
+    expect(agentButton()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("says the agent is writing its hand-off, with a mark, while the rail is closed and the switch waits", () => {
+    renderTopBar();
+    act(() => useStore.getState().setTerminalPhase("handing-off"));
+    expect(agentButton().title).toMatch(/writing its hand-off/);
+    expect(screen.getByTestId("handoff-mark")).toBeInTheDocument();
+
+    act(() => useStore.getState().setTerminalOpen(true));
+    expect(agentButton()).toHaveAttribute("title", "TCIP Agent");
+    expect(screen.queryByTestId("handoff-mark")).not.toBeInTheDocument();
+  });
+});
+
 describe("TopBar tab strip accessibility", () => {
   it("exposes the strip as a tablist and marks the active tab selected", () => {
     renderTopBar();

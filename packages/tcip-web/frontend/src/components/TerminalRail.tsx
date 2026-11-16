@@ -612,7 +612,7 @@ export function TerminalRail() {
           <button
             onClick={() => setOpen(false)}
             aria-label="Minimize agent terminal"
-            title="Minimize (the agent keeps running); reopen from the TCIP Agent button"
+            title="Minimize (the agent keeps running); reopen from the agent button in the top bar"
             className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
