@@ -2303,13 +2303,18 @@ def test_a_rejection_a_vitest_test_leaves_unhandled_is_refused_as_an_unhandled_e
     assert observed["counts"] == {"passed": 1}
 
 
-def _collect_errors(
-    repo: Path, baseline: str, record_path: Path
-) -> tuple[subprocess.CompletedProcess, list[dict]]:
-    """Run the widget test at ``baseline``; return the result and the collection errors recorded."""
+def _not_collected_errors(repo: Path, baseline: str) -> list[dict]:
+    """Run the widget test at ``baseline`` and return the collection errors its record holds.
+
+    The run's refusal as not collected, its exit code and its verdict line, is asserted with the
+    tool's output in the message before the record is read.
+    """
+    record_path = repo.parent / "record.json"
     result = _run(repo, WIDGET_TEST, baseline, "--json", str(record_path))
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert f"{NOT_COLLECTED_SENTENCE} src/widget.test.ts" in _why(result)
     record = json.loads(record_path.read_text(encoding="utf-8"))
-    return result, record["observed"]["collect_errors"]
+    return record["observed"]["collect_errors"]
 
 
 def test_a_vitest_module_throwing_at_its_top_level_is_refused_as_not_collected(
@@ -2320,12 +2325,8 @@ def test_a_vitest_module_throwing_at_its_top_level_is_refused_as_not_collected(
         linked_repo, NO_OP_DOUBLE, DOUBLE, 'throw new Error("not ready");\n'
     )
 
-    result, errors = _collect_errors(
-        linked_repo, baseline, linked_repo.parent / "record.json"
-    )
+    errors = _not_collected_errors(linked_repo, baseline)
 
-    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert f"{NOT_COLLECTED_SENTENCE} src/widget.test.ts" in _why(result)
     assert [error["detail"] for error in errors] == ["not ready"]
 
 
@@ -2372,12 +2373,8 @@ def test_a_vitest_module_importing_what_the_baseline_lacks_is_refused_as_not_col
     """
     baseline = _gadget_repo(linked_repo, GADGET_TEST_IMPORTING_AT_THE_TOP)
 
-    result, errors = _collect_errors(
-        linked_repo, baseline, linked_repo.parent / "record.json"
-    )
+    errors = _not_collected_errors(linked_repo, baseline)
 
-    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert f"{NOT_COLLECTED_SENTENCE} src/widget.test.ts" in _why(result)
     assert len(errors) == 1
     assert errors[0]["detail"].startswith("Cannot find module './gadget'")
 
