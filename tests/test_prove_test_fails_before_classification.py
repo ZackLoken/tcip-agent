@@ -1249,10 +1249,11 @@ def test_an_uncommitted_source_change_takes_head_as_the_baseline(
 def test_an_uncommitted_source_change_in_a_repository_with_no_commit_is_refused_by_git(
     tmp_path: Path,
 ) -> None:
-    """With no commit and no ``--baseline``, HEAD is read for the uncommitted source and refused.
+    """With no commit and no ``--baseline``, the one read of HEAD is refused by git.
 
-    The untracked tool copy is a source change, so HEAD is taken as the baseline, and git's own
-    refusal of that read is the reason, not the merge-base sentence.
+    The read comes before either automatic baseline is chosen. The untracked tool copy is a
+    source change, so this fixture would choose HEAD as the baseline, and git's own refusal of
+    the read is the reason, not the merge-base sentence.
     """
     repo = scratch_repo(tmp_path)
     write(
@@ -1273,10 +1274,11 @@ def test_an_uncommitted_source_change_in_a_repository_with_no_commit_is_refused_
 def test_an_unreadable_head_on_the_merge_base_baseline_is_refused_by_git(
     tmp_path: Path,
 ) -> None:
-    """With no commit and only a test-side change, git's refusal to read HEAD is the reason.
+    """With no commit and only a test-side change, the one read of HEAD is refused by git.
 
-    The tool copy is excluded, so the one uncommitted path is a test file and the baseline is the
-    merge-base; the unreadable HEAD is not worded as a missing merge-base.
+    The read comes before either automatic baseline is chosen. The tool copy is excluded, so the
+    one uncommitted path is a test file and this fixture would choose the merge-base; the
+    unreadable HEAD is not worded as a missing merge-base.
     """
     repo = scratch_repo(tmp_path)
     write(repo / ".git" / "info" / "exclude", "tools/\n")
