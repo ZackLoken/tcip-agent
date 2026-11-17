@@ -356,11 +356,12 @@ jobs:
         run: npm run build
 
       # The shipped bundle's dependencies and the dev tooling that builds and tests it; last, and
-      # whatever the gates above answered, so an advisory fails the job without hiding them.
+      # whatever the gates above answered, so an advisory fails the job without hiding them. An
+      # advisory is excepted only by an entry of the exceptions file, with a note and an expiry.
       - name: Dependency audit (npm audit over the full set)
         if: ${{ !cancelled() }}
         working-directory: packages/tcip-web/frontend
-        run: npm audit --audit-level=high
+        run: npx --yes better-npm-audit@4.2.1 audit --level high
 
   # The files no other job reads: the workflow, the Dockerfile, every YAML file, the documents
   # an adopter reads, and the whole history for a leaked secret.
