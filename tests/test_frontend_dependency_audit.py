@@ -40,6 +40,9 @@ def test_every_exception_is_active_with_a_note_and_a_calendar_date_expiry() -> (
     None
 ):
     assert EXCEPTIONS_FILE.is_file(), f"{EXCEPTIONS_FILE} does not exist"
+    # Per the tool's readme, a JavaScript exceptions file beside it wins over it.
+    for script in (".nsprc.cjs", ".nsprc.js"):
+        assert not (FRONTEND / script).exists(), script
     # The tool reads the file as YAML, which also accepts the JSON the file is written in.
     exceptions: dict[str, Any] = yaml.safe_load(
         EXCEPTIONS_FILE.read_text(encoding="utf-8")
@@ -63,10 +66,11 @@ def test_the_audit_stage_fails_at_level_high_over_the_full_set_in_the_frontend()
     tool_arguments = next(
         tokens[i + 1 :] for i, t in enumerate(tokens) if AUDIT_TOOL in t
     )
-    # The options below are the tool's own, from its readme and `--help`.
+    # The options below are the tool's own, from its readme and `audit --help`.
     options = argparse.ArgumentParser(add_help=False)
     options.add_argument("-l", "--level")
     options.add_argument("-p", "--production", action="store_true")
+    options.add_argument("--skip-optional", action="store_true")
     options.add_argument("-x", "--exclude")
     options.add_argument("-m", "--module-ignore")
     options.add_argument("--ignore-dependencies-of")
@@ -75,6 +79,7 @@ def test_the_audit_stage_fails_at_level_high_over_the_full_set_in_the_frontend()
     assert stage.cwd == FRONTEND
     assert parsed.level == "high"
     assert not parsed.production
+    assert not parsed.skip_optional
     assert parsed.exclude is None
     assert parsed.module_ignore is None
     assert parsed.ignore_dependencies_of is None
