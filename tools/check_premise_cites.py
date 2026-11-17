@@ -17,7 +17,8 @@ the file. Lines are counted on newline bytes alone, as git counts them. A premis
 spans hold identifier tokens fails when none of them appears in the union of its cited ranges. A
 premise with no cite in the writer's form fails. Prints PASS with the number of blocks checked and
 the rule it applied, or each failing premise and FAIL, and exits 1 on FAIL or when any premise
-block cannot be read.
+block cannot be read. A failing premise and a block's refusal are each printed after the block's
+name: its place among the issue's headers, their count and the header's words.
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 
-class PremiseHalfError(ValueError):
+class PremiseBlockError(ValueError):
     """A premise block in the issue text cannot be read, or the text holds none."""
 
 
@@ -69,14 +70,15 @@ class Cite:
 
 
 @dataclass(frozen=True)
-class PremiseHalf:
-    """One premise block: the commits its premises were read at, by repository label, and its lines.
+class PremiseBlock:
+    """One premise block: its commits by repository label, its premise lines and its header's words.
 
     A commit whose repository the header does not label is keyed None.
     """
 
     commits: dict[str | None, str]
     premises: list[str]
+    header_words: str
 
 
 def fetch_issue(issue: int) -> str:
@@ -95,21 +97,36 @@ def fetch_issue(issue: int) -> str:
     )
 
 
-def _premise_block(text: str, header: re.Match[str]) -> PremiseHalf:
+def _header_words(header: re.Match[str]) -> str:
+    """Return the header's text from ``Premises, read at`` through its ``refs`` group, on one line.
+
+    The ``refs`` group is whatever stands between ``read at`` and the terminating colon or period:
+    the commits and any words around them, or nothing that is a commit. Each run of whitespace, a
+    line break included, is one space; the terminator and any prose after it are left out.
+    """
+    return " ".join(header.string[header.start() : header.end("refs")].split())
+
+
+def block_name(place: int, count: int, header_words: str) -> str:
+    """Return the prefix that names the block at ``place`` of ``count`` headers, from one."""
+    return f'block {place} of {count}, "{header_words}": '
+
+
+def _premise_block(text: str, header: re.Match[str]) -> PremiseBlock:
     """Return the block that ``header``, a match of HEADER in ``text``, opens.
 
-    Raises PremiseHalfError when the header names no commit or two commits for one repository, or
+    Raises PremiseBlockError when the header names no commit or two commits for one repository, or
     no premise line follows it.
     """
     commits: dict[str | None, str] = {}
     for match in REPOSITORY_COMMIT.finditer(header["refs"]):
         if match["label"] in commits:
-            raise PremiseHalfError(
+            raise PremiseBlockError(
                 f"the header names two commits for repository {match['label']!r}"
             )
         commits[match["label"]] = match["commit"]
     if not commits:
-        raise PremiseHalfError("the header names no commit")
+        raise PremiseBlockError("the header names no commit")
     premises: list[str] = []
     for raw in text[header.end() :].split("\n")[1:]:
         line = raw.rstrip("\r")
@@ -122,21 +139,28 @@ def _premise_block(text: str, header: re.Match[str]) -> PremiseHalf:
         else:
             break
     if not premises:
-        raise PremiseHalfError("no premise line follows the header")
-    return PremiseHalf(commits, premises)
+        raise PremiseBlockError("no premise line follows the header")
+    return PremiseBlock(commits, premises, _header_words(header))
 
 
-def parse_premise_blocks(text: str) -> list[PremiseHalf]:
+def parse_premise_blocks(text: str) -> list[PremiseBlock]:
     """Return the block of every ``Premises, read at`` header in ``text``, in order.
 
     A block ends at the first line that is neither a bullet nor indented, so the next header
-    begins the next block. Raises PremiseHalfError when there is no header or a block cannot be
-    read.
+    begins the next block. Raises PremiseBlockError when there is no header, or when a block
+    cannot be read, its sentence then led by the block's name.
     """
     headers = list(HEADER.finditer(text))
     if not headers:
-        raise PremiseHalfError("no 'Premises, read at <commit>:' header")
-    return [_premise_block(text, header) for header in headers]
+        raise PremiseBlockError("no 'Premises, read at <commit>:' header")
+    blocks: list[PremiseBlock] = []
+    for place, header in enumerate(headers, 1):
+        try:
+            blocks.append(_premise_block(text, header))
+        except PremiseBlockError as err:
+            name = block_name(place, len(headers), _header_words(header))
+            raise PremiseBlockError(f"{name}{err}") from err
+    return blocks
 
 
 def parse_cites(line: str) -> list[Cite]:
@@ -189,7 +213,7 @@ def cited_text(checkout: Path, commit: str, cite: Cite) -> str:
 
 
 def repository_of(
-    line: str, half: PremiseHalf, checkouts: dict[str, Path], home: Path
+    line: str, block: PremiseBlock, checkouts: dict[str, Path], home: Path
 ) -> tuple[str, Path]:
     """Return the commit and checkout the premise ``line`` is read against.
 
@@ -198,26 +222,26 @@ def repository_of(
     """
     prefix = PREMISE_LABEL.match(line)
     label = prefix["label"] if prefix else None
-    if label is None and len(half.commits) == 1:
-        label = next(iter(half.commits))
-    if label not in half.commits:
+    if label is None and len(block.commits) == 1:
+        label = next(iter(block.commits))
+    if label not in block.commits:
         raise CiteError(f"repository {label!r} is not one the header names")
     if label is not None and label in checkouts:
-        return half.commits[label], checkouts[label]
+        return block.commits[label], checkouts[label]
     if label is None:
-        return half.commits[label], home
+        return block.commits[label], home
     raise CiteError(f"no --checkout for repository {label!r}")
 
 
 def check_premise(
-    line: str, half: PremiseHalf, checkouts: dict[str, Path], home: Path
+    line: str, block: PremiseBlock, checkouts: dict[str, Path], home: Path
 ) -> list[str]:
     """Return one message per way the premise ``line`` fails; empty when its cites hold."""
     cites = parse_cites(line)
     if not cites:
         return [f"not in the writer's form: {line}"]
     try:
-        commit, checkout = repository_of(line, half, checkouts, home)
+        commit, checkout = repository_of(line, block, checkouts, home)
         texts = [cited_text(checkout, commit, cite) for cite in cites]
     except CiteError as err:
         return [f"{err}: {line}"]
@@ -260,12 +284,12 @@ def main(
     checkouts = dict(args.checkout)
     try:
         blocks = parse_premise_blocks(fetch(args.issue))
-    except PremiseHalfError as err:
+    except PremiseBlockError as err:
         print(f"{err}\nFAIL")
         return 1
     failures = [
-        message
-        for block in blocks
+        f"{block_name(place, len(blocks), block.header_words)}{message}"
+        for place, block in enumerate(blocks, 1)
         for line in block.premises
         for message in check_premise(line, block, checkouts, Path.cwd())
     ]
