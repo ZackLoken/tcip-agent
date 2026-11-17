@@ -498,14 +498,11 @@ def _resolve_baseline(named: str | None, integration: str) -> tuple[str, str]:
         return _commit("--baseline", named), f"named by the caller as {named}"
 
     uncommitted = _uncommitted_paths()
+    head = git_output("rev-parse", "HEAD").strip()
     if set(uncommitted) - _test_side(uncommitted):
-        return (
-            git_output("rev-parse", "HEAD").strip(),
-            "HEAD, because the change under test is uncommitted",
-        )
+        return head, "HEAD, because the change under test is uncommitted"
 
     try:
-        head = git_output("rev-parse", "HEAD").strip()
         base = git_output("merge-base", "HEAD", integration).strip()
     except RefusalError as refusal:
         raise RefusalError(

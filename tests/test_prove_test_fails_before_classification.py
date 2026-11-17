@@ -1231,6 +1231,45 @@ def test_an_uncommitted_source_change_in_a_repository_with_no_commit_is_refused_
     assert "no merge-base" not in why
 
 
+def test_an_unreadable_head_on_the_merge_base_baseline_is_refused_by_git(
+    tmp_path: Path,
+) -> None:
+    """With no commit and only a test-side change, git's refusal to read HEAD is the reason.
+
+    The tool copy is excluded, so the one uncommitted path is a test file and the baseline is the
+    merge-base; the unreadable HEAD is not worded as a missing merge-base.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / ".git" / "info" / "exclude", "tools/\n")
+    write(
+        repo / "tests" / "test_widgets.py",
+        "def test_passes():\n    assert True\n",
+    )
+
+    result = _tool(repo, "tests/test_widgets.py")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert why.startswith("REFUSED: git rev-parse HEAD failed: "), (
+        result.stdout
+    )
+    assert "no merge-base" not in why
+
+
+def test_a_named_baseline_needs_no_readable_head(tmp_path: Path) -> None:
+    """A baseline the caller names is used where HEAD cannot be read.
+
+    ``git checkout --orphan`` leaves HEAD on a branch with no commit while the fix and its test
+    stay in the working tree.
+    """
+    repo, baseline = _fixed_double(tmp_path)
+    git(repo, "checkout", "-q", "--orphan", "fresh")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
+
+
 def test_a_committed_change_takes_its_merge_base_with_the_integration_branch(
     tmp_path: Path,
 ) -> None:
