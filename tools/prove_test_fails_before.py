@@ -821,12 +821,17 @@ def _read_outcome(outcome_json: Path) -> dict | None:
     return observed
 
 
+def _vitest_manifest() -> Path:
+    """Return the path of the installed vitest's ``package.json`` under ``INSTALL``."""
+    return INSTALL / "vitest" / "package.json"
+
+
 def require_installed_vitest() -> None:
     """Return when ``INSTALL`` holds vitest.
 
     :class:`RefusalError` otherwise, naming the command that installs it.
     """
-    if not (INSTALL / "vitest" / "package.json").is_file():
+    if not _vitest_manifest().is_file():
         raise RefusalError(
             f"{FRONTEND} has no installed vitest; run `npm ci` in {FRONTEND}."
         )
@@ -886,8 +891,8 @@ def run_vitest_capturing_outcome(
     link into the install. The observation is None if it reported none. :class:`RefusalError` when
     the installed vitest's manifest cannot be read or decoded or has no ``bin`` entry for vitest.
     """
-    package = INSTALL / "vitest"
-    entry = _vitest_entry(package / "package.json")
+    manifest = _vitest_manifest()
+    entry = _vitest_entry(manifest)
     reporter = tree / f"{PLUGIN_MODULE}.mjs"
     reporter.write_text(
         f"{REPORTER_SOURCE}\nconst OUTCOME_ENV = {json.dumps(OUTCOME_ENV)};\n",
@@ -895,7 +900,7 @@ def run_vitest_capturing_outcome(
     )
     cmd = [
         _node(),
-        str(package / entry),
+        str(manifest.parent / entry),
         "run",
         test_file.removeprefix(f"{FRONTEND}/"),
         "--root",
