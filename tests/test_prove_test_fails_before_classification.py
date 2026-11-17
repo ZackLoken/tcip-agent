@@ -16,8 +16,9 @@ commit with the fix and the guard test) and run the real script against it. They
 - ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
   the directory cannot be removed;
-- a vitest file under a scratch frontend whose installed packages are this checkout's, each verdict
-  and refusal it can reach, ``--test-rev`` among them, except an outcome record that is not JSON,
+- a vitest file under a scratch frontend whose installed packages are this checkout's, the fixture
+  building it refusing in its setup when the checkout has none, each verdict and refusal it can
+  reach, ``--test-rev`` among them, except an outcome record that is not JSON,
   a pass at a baseline no source change follows, and a failure there scoring GUARDS with the
   caveat that no source file differs, which the pytest path alone holds; and a changed frontend
   test counted as the test side of a pytest run;
@@ -50,18 +51,15 @@ from tests._scratch_repo_fixtures import (
     write,
 )
 from tools.prove_test_fails_before import (
+    EXIT,
+    INSTALL,
     OUTCOME_ENV,
     TEST_FILE_RULE,
+    TOOL_FAILURE,
+    RefusalError,
     _failure_kind,
+    require_installed_vitest,
 )
-
-EXIT = {
-    "GUARDS": 0,
-    "VACUOUS": 1,
-    "INDETERMINATE": 2,
-    "REFUSED": 3,
-    "TOOL_FAILURE": 4,
-}
 
 
 def _tool(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -118,11 +116,16 @@ def _double_repo(repo: Path, test_source: str = DOUBLE_GUARD) -> str:
     return baseline
 
 
+def _temporary_folder(tmp_path: Path) -> Path:
+    """Return the folder under ``tmp_path`` the tool's temporary folder is redirected to."""
+    return tmp_path / "t"
+
+
 def _redirect_temporary_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Path:
     """Point the tool's temporary folder at a new folder under ``tmp_path`` and return it."""
-    scratch_root = tmp_path / "t"
+    scratch_root = _temporary_folder(tmp_path)
     scratch_root.mkdir()
     for name in ("TMPDIR", "TEMP", "TMP"):
         monkeypatch.setenv(name, str(scratch_root))
@@ -286,6 +289,7 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(
     assert "REFUSED" in result.stdout
     assert FIXTURE_SENTENCE in result.stdout
     assert "[fixture]" in result.stdout
+    assert "widgets are not ready yet" in result.stdout
 
 
 # ── a test's own code raising TypeError ──────────────────────────────────────
@@ -1034,9 +1038,7 @@ def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
         repo, "tests/test_widgets.py", baseline, "--json", str(record)
     )
 
-    assert result.returncode == EXIT["TOOL_FAILURE"], (
-        result.stdout + result.stderr
-    )
+    assert result.returncode == TOOL_FAILURE, result.stdout + result.stderr
     assert "Traceback" in result.stderr
     assert _why(result) == "", result.stdout
 
@@ -1060,9 +1062,7 @@ def test_a_refused_run_whose_record_cannot_be_written_exits_with_the_tools_own_c
         str(record),
     )
 
-    assert result.returncode == EXIT["TOOL_FAILURE"], (
-        result.stdout + result.stderr
-    )
+    assert result.returncode == TOOL_FAILURE, result.stdout + result.stderr
     assert "Traceback" in result.stderr
     assert _why(result) == "", result.stdout
 
@@ -1991,14 +1991,13 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
         deadline = time.monotonic() + 60
         while not (hold / "done").exists() and time.monotonic() < deadline:
             time.sleep(0.05)
-        for leftover in (tmp_path / "t").glob("failbefore-*"):
+        for leftover in _temporary_folder(tmp_path).glob("failbefore-*"):
             shutil.rmtree(leftover)
 
 
 # ── a vitest file ────────────────────────────────────────────────────────────
 
 FRONTEND_PATH = FRONTEND.relative_to(REPO_ROOT).as_posix()
-INSTALL = FRONTEND / "node_modules"
 WIDGET_TEST = f"{FRONTEND_PATH}/src/widget.test.ts"
 VITEST_CONFIG = f"{FRONTEND_PATH}/vitest.config.mjs"
 
@@ -2030,15 +2029,16 @@ def linked_repo(
     of this checkout's install not named with a leading dot, so whatever a run writes into the
     install it links to lands there, apart from every other test. The tool's temporary folder is
     redirected under ``tmp_path``. Teardown removes the link a run left in its tree and then each
-    package link, before anything removes a directory holding one.
+    package link, before anything removes a directory holding one. The tool's own refusal for a
+    checkout whose install holds no vitest is raised in the setup, before anything is built.
     """
+    require_installed_vitest()
     scratch_root = _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
     install = _scratch_frontend(repo) / "node_modules"
     install.mkdir()
-    packages = sorted(INSTALL.iterdir()) if INSTALL.is_dir() else []
     try:
-        for package in packages:
+        for package in sorted(INSTALL.iterdir()):
             if not package.name.startswith("."):
                 (install / package.name).symlink_to(
                     package, target_is_directory=package.is_dir()
@@ -2054,6 +2054,22 @@ def linked_repo(
             for entry in install.iterdir():
                 if entry.is_symlink():
                     entry.unlink()
+
+
+def test_linked_repo_refuses_in_its_setup_when_the_install_holds_no_vitest(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fixture raises the tool's refusal naming ``npm ci``, before it builds a repository."""
+    monkeypatch.setattr(
+        "tools.prove_test_fails_before.INSTALL", tmp_path / "no_install"
+    )
+
+    with pytest.raises(RefusalError, match="npm ci"):
+        request.getfixturevalue("linked_repo")
+
+    assert not any(tmp_path.iterdir())
 
 
 def _widget_repo(
@@ -2563,7 +2579,7 @@ VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS = (
     reason="only Windows refuses to delete a file another process holds open",
 )
 def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
-    linked_repo: Path, monkeypatch: pytest.MonkeyPatch
+    linked_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A vitest run's scratch directory the tool cannot remove is left holding no link.
 
@@ -2572,7 +2588,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
     install is gone all the same, since the tool removes it first. This test releases the process
     and removes the directory left behind.
     """
-    hold = linked_repo.parent / "hold"
+    hold = tmp_path / "hold"
     hold.mkdir()
     write(hold / "holder.py", FILE_HOLDER)
     monkeypatch.setenv("FILE_HOLD_DIR", str(hold))
@@ -2583,7 +2599,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
         DOUBLE + "\nexport const TRIPLE = 3;\n",
         VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS,
     )
-    scratch_root = linked_repo.parent / "t"
+    scratch_root = _temporary_folder(tmp_path)
 
     try:
         result = _run(linked_repo, WIDGET_TEST, baseline)
