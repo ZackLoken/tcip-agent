@@ -343,6 +343,80 @@ def test_each_block_is_read_at_its_own_commit_and_the_pass_counts_them(
     assert exit_code == 0
     assert len(out_lines) == 1
     assert "2 premise blocks checked" in out_lines[0]
+    assert "block 1 of" not in out_lines[0]
+
+
+def _failure_line_of(out_lines: list[str], premise: str) -> str:
+    [line] = [line for line in out_lines if premise in line]
+    return line
+
+
+def test_each_failing_premise_is_named_with_its_own_block(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, first = _repository(tmp_path)
+    second = _second_commit(repo)
+    first_header = f"Premises, read at repo {first}"
+    second_header = f"Premises, read at repo {second}"
+    first_premise = "- at c.txt:5 names `target_name`."
+    second_premise = "- at c.txt:4 names `added_name`."
+    text = (
+        f"{first_header}:\n{first_premise}\n\n"
+        f"{second_header}:\n{second_premise}\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out_lines = capsys.readouterr().out.splitlines()
+    first_line = _failure_line_of(out_lines, first_premise)
+    second_line = _failure_line_of(out_lines, second_premise)
+    assert exit_code == 1
+    assert out_lines[-1] == "FAIL"
+    assert first_line.startswith(f'block 1 of 2, "{first_header}": ')
+    assert second_line.startswith(f'block 2 of 2, "{second_header}": ')
+
+
+def test_a_failing_premise_of_the_second_of_two_blocks_at_one_commit_is_named_second(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    header = f"Premises, read at repo {commit}"
+    failing = "- at b.txt:9 the file says `two`."
+    text = (
+        f"{header}:\n- at a.py:3 returns `beta_value`.\n\n"
+        f"{header}:\n{failing}\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out_lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 1
+    assert len(out_lines) == 2
+    assert out_lines[0].startswith(f'block 2 of 2, "{header}": ')
+    assert failing in out_lines[0]
+
+
+def test_a_header_whose_commit_is_on_the_next_line_is_named_on_one_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    failing = "- at c.txt:5 names `target_name`."
+    text = f"Premises, read at\nrepo {commit}:\n{failing}\n"
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out_lines = capsys.readouterr().out.splitlines()
+    line = _failure_line_of(out_lines, failing)
+    assert exit_code == 1
+    assert line.startswith(
+        f'block 1 of 1, "Premises, read at repo {commit}": '
+    )
 
 
 def test_a_superseded_block_is_not_read(
@@ -367,15 +441,27 @@ def test_a_superseded_block_is_not_read(
 
 
 @pytest.mark.parametrize(
-    "later_block",
+    ("later_block", "later_header"),
     [
-        "Premises, read at the last release:\n- at a.py:1 X.\n",
-        "Premises, read at repo {commit} and repo {commit}:\n- at a.py:1 X.\n",
-        "Premises, read at repo {commit}:\nNo bullets follow.\n",
+        (
+            "Premises, read at the last release:\n- at a.py:1 X.\n",
+            "Premises, read at the last release",
+        ),
+        (
+            "Premises, read at repo {commit} and repo {commit}:\n- at a.py:1 X.\n",
+            "Premises, read at repo {commit} and repo {commit}",
+        ),
+        (
+            "Premises, read at repo {commit}:\nNo bullets follow.\n",
+            "Premises, read at repo {commit}",
+        ),
     ],
 )
 def test_a_later_block_that_cannot_be_read_fails_the_run(
-    later_block: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    later_block: str,
+    later_header: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo, commit = _repository(tmp_path)
     text = (
@@ -391,3 +477,6 @@ def test_a_later_block_that_cannot_be_read_fails_the_run(
     assert exit_code == 1
     assert out.endswith("FAIL\n")
     assert "PASS" not in out
+    assert out.startswith(
+        f'block 2 of 2, "{later_header.format(commit=commit)}": '
+    )
