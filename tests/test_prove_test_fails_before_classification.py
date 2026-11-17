@@ -3013,3 +3013,30 @@ def test_an_installed_vitest_manifest_that_does_not_read_is_refused_naming_it(
     )
     assert sentence in why
     assert _unread_locations(why, sentence) == unread_locations
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="a file mode that allows no read binds neither on Windows nor for root",
+)
+def test_an_installed_vitest_manifest_that_cannot_be_read_is_refused_naming_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manifest that exists and whose mode allows no read is refused as one that cannot be read.
+
+    Its text is of the installed shape, so the refusal is for the read and not for the validation.
+    """
+    repo, baseline, manifest_path = _frontend_with_manifest(
+        tmp_path, monkeypatch, b'{"bin": {"vitest": "./vitest.mjs"}}'
+    )
+    manifest_path.chmod(0)
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert (
+        f"the installed vitest's manifest {manifest_path.resolve()} could not be read"
+        in why
+    )
+    assert "is not an object whose bin holds" not in why
