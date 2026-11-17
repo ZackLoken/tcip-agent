@@ -1,0 +1,7 @@
+{
+  "GHSA-fc5q-39xc-vjpf": {
+    "active": true,
+    "notes": "picomatch: a slow match on a supplied glob pattern. As read on 2026-11-17 no patched version was published, and the audit without dev dependencies found nothing. Issue 808.",
+    "expiry": "2026-12-17"
+  }
+}
