@@ -2933,10 +2933,13 @@ def test_a_test_file_rule_answer_printed_over_several_lines_is_refused_on_one_li
     result = _run(repo, WIDGET_TEST, baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert (
+    why = _why(result)
+    sentence = (
         f"{TEST_FILE_RULE} answered '[\\n  \"yes\"\\n]', not a list of one true or "
-        "false for each path it was asked about (1): "
-    ) in _why(result)
+        "false for each path it was asked about (1)"
+    )
+    assert sentence in why
+    assert _unread_locations(why, sentence) == [[0]]
 
 
 def _frontend_with_manifest(
