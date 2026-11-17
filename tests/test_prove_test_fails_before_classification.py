@@ -16,8 +16,9 @@ commit with the fix and the guard test) and run the real script against it. They
 - ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
   the directory cannot be removed;
-- a vitest file under a scratch frontend whose installed packages are this checkout's, each verdict
-  and refusal it can reach, ``--test-rev`` among them, except an outcome record that is not JSON,
+- a vitest file under a scratch frontend whose installed packages are this checkout's, the fixture
+  building it refusing in its setup when the checkout has none, each verdict and refusal it can
+  reach, ``--test-rev`` among them, except an outcome record that is not JSON,
   a pass at a baseline no source change follows, and a failure there scoring GUARDS with the
   caveat that no source file differs, which the pytest path alone holds; and a changed frontend
   test counted as the test side of a pytest run;
@@ -52,7 +53,9 @@ from tests._scratch_repo_fixtures import (
 from tools.prove_test_fails_before import (
     OUTCOME_ENV,
     TEST_FILE_RULE,
+    RefusalError,
     _failure_kind,
+    require_installed_vitest,
 )
 
 EXIT = {
@@ -291,6 +294,7 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(
     assert "REFUSED" in result.stdout
     assert FIXTURE_SENTENCE in result.stdout
     assert "[fixture]" in result.stdout
+    assert "widgets are not ready yet" in result.stdout
 
 
 # ── a test's own code raising TypeError ──────────────────────────────────────
@@ -2031,15 +2035,16 @@ def linked_repo(
     of this checkout's install not named with a leading dot, so whatever a run writes into the
     install it links to lands there, apart from every other test. The tool's temporary folder is
     redirected under ``tmp_path``. Teardown removes the link a run left in its tree and then each
-    package link, before anything removes a directory holding one.
+    package link, before anything removes a directory holding one. The tool's own refusal for a
+    checkout whose install holds no vitest is raised in the setup, before anything is built.
     """
+    require_installed_vitest()
     scratch_root = _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
     install = _scratch_frontend(repo) / "node_modules"
     install.mkdir()
-    packages = sorted(INSTALL.iterdir()) if INSTALL.is_dir() else []
     try:
-        for package in packages:
+        for package in sorted(INSTALL.iterdir()):
             if not package.name.startswith("."):
                 (install / package.name).symlink_to(
                     package, target_is_directory=package.is_dir()
@@ -2055,6 +2060,22 @@ def linked_repo(
             for entry in install.iterdir():
                 if entry.is_symlink():
                     entry.unlink()
+
+
+def test_linked_repo_refuses_in_its_setup_when_the_install_holds_no_vitest(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fixture raises the tool's refusal naming ``npm ci``, before it builds a repository."""
+    monkeypatch.setattr(
+        "tools.prove_test_fails_before.INSTALL", tmp_path / "no_install"
+    )
+
+    with pytest.raises(RefusalError, match="npm ci"):
+        request.getfixturevalue("linked_repo")
+
+    assert not (tmp_path / "scratch").exists()
 
 
 def _widget_repo(
