@@ -24,7 +24,9 @@ commit with the fix and the guard test) and run the real script against it. They
   test counted as the test side of a pytest run;
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
-  rule failing or answering with something that is not JSON.
+  rule failing, answering with something that is not JSON, or answering with something that is not
+  a list of one boolean for each path asked; and an installed vitest whose manifest cannot be
+  decoded or has no ``bin`` entry for vitest, in a scratch frontend whose install is its own.
 """
 
 from __future__ import annotations
@@ -2102,6 +2104,17 @@ NO_OP_DOUBLE = "export function double(x: number): number {\n  return x;\n}\n"
 DOUBLE = "export function double(x: number): number {\n  return x * 2;\n}\n"
 
 
+def _scratch_widget_repo(tmp_path: Path) -> tuple[Path, str]:
+    """Build a scratch repository with a frontend of no install and the widget test's commits.
+
+    The baseline's ``double`` is a no-op, the head fixes it and adds ``DOUBLE_TEST``. Returns the
+    repository and the baseline revision.
+    """
+    repo = scratch_repo(tmp_path)
+    _scratch_frontend(repo)
+    return repo, _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+
+
 def test_a_vitest_assertion_failing_at_the_baseline_guards_and_leaves_the_install_alone(
     linked_repo: Path,
 ) -> None:
@@ -2222,9 +2235,7 @@ def test_a_vitest_file_with_no_install_is_refused_naming_the_install_command(
     tmp_path: Path,
 ) -> None:
     """A frontend with no installed packages is refused, naming the command that installs them."""
-    repo = scratch_repo(tmp_path)
-    _scratch_frontend(repo)
-    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    repo, baseline = _scratch_widget_repo(tmp_path)
 
     result = _run(repo, WIDGET_TEST, baseline)
 
@@ -2653,9 +2664,7 @@ def test_a_vitest_file_with_no_node_on_the_path_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A frontend test file is judged by the frontend's rule under ``node``, which is absent."""
-    repo = scratch_repo(tmp_path)
-    _scratch_frontend(repo)
-    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    repo, baseline = _scratch_widget_repo(tmp_path)
     _leave_only_git_on_the_path(monkeypatch)
 
     result = _run(repo, WIDGET_TEST, baseline)
@@ -2705,9 +2714,7 @@ def _frontend_with_rule(tmp_path: Path, rule: str) -> tuple[Path, str]:
     The replacement is left uncommitted, where the tool runs it. Returns the repository and the
     baseline revision.
     """
-    repo = scratch_repo(tmp_path)
-    _scratch_frontend(repo)
-    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    repo, baseline = _scratch_widget_repo(tmp_path)
     write(repo / TEST_FILE_RULE, rule)
     return repo, baseline
 
@@ -2737,3 +2744,94 @@ def test_a_test_file_rule_answering_with_no_json_is_refused(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert f"{TEST_FILE_RULE} answered with no JSON" in _why(result)
+
+
+@pytest.mark.parametrize(
+    ("answer_expression", "answer_echoed"),
+    [
+        pytest.param("[]", "[]", id="a_shorter_list"),
+        pytest.param("[true, true]", "[true, true]", id="a_longer_list"),
+        pytest.param('"x"', '"x"', id="a_string_as_long_as_the_paths"),
+        pytest.param("true", "true", id="a_scalar"),
+        pytest.param(
+            'paths.map(() => "yes")',
+            '["yes"]',
+            id="a_list_of_the_length_without_booleans",
+        ),
+    ],
+)
+def test_a_test_file_rule_answer_that_is_no_list_of_one_boolean_per_path_is_refused(
+    tmp_path: Path, answer_expression: str, answer_echoed: str
+) -> None:
+    """Any answer but a list of one boolean per path is refused, naming the rule and the answer.
+
+    The rule answers each call from the paths it is given, so an answer of the right length
+    is refused for its items on the first path judged, not for its length on a later call.
+    """
+    repo, baseline = _frontend_with_rule(
+        tmp_path,
+        'import { readFileSync } from "node:fs";\n'
+        'const paths = JSON.parse(readFileSync(0, "utf8"));\n'
+        f"process.stdout.write(JSON.stringify({answer_expression}));\n",
+    )
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert (
+        f"{TEST_FILE_RULE} answered {answer_echoed}, not a list of one true or false"
+        in _why(result)
+    )
+
+
+def _frontend_with_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest: str
+) -> tuple[Path, str, Path]:
+    """Build a scratch repository holding the widget test and an installed vitest of ``manifest``.
+
+    The scratch frontend's own ``node_modules`` holds nothing else, so no run reaches this
+    checkout's install. Returns the repository, the baseline revision and the manifest's path.
+    """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo, baseline = _scratch_widget_repo(tmp_path)
+    manifest_path = (
+        repo / FRONTEND_PATH / "node_modules" / "vitest" / "package.json"
+    )
+    manifest_path.parent.mkdir(parents=True)
+    write(manifest_path, manifest)
+    return repo, baseline, manifest_path
+
+
+@pytest.mark.parametrize(
+    ("manifest", "what_did_not_read"),
+    [
+        pytest.param(
+            "{not json", "could not be read or decoded", id="no_json"
+        ),
+        pytest.param(
+            '{"name": "vitest"}', "holds no bin entry for vitest", id="no_bin"
+        ),
+        pytest.param(
+            '{"bin": {"vite": "vite.mjs"}}',
+            "holds no bin entry for vitest",
+            id="a_bin_without_vitest",
+        ),
+        pytest.param("[]", "holds no bin entry for vitest", id="no_object"),
+    ],
+)
+def test_an_installed_vitest_manifest_that_does_not_read_is_refused_naming_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: str,
+    what_did_not_read: str,
+) -> None:
+    repo, baseline, manifest_path = _frontend_with_manifest(
+        tmp_path, monkeypatch, manifest
+    )
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert str(manifest_path.resolve()) in why
+    assert what_did_not_read in why
