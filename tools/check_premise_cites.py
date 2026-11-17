@@ -1,20 +1,23 @@
-"""Check the line cites of a work order's premise half before the premise checker reads it.
+"""Check the line cites of every premise block of a work order before the premise checker reads it.
 
     python tools/check_premise_cites.py <issue> [--checkout <label>=<path>]...
 
-The issue's body and comments are read with ``gh issue view``. The premise half opens at the line
-``Premises, read at <commit>:``, whose header names one or more commits, each optionally preceded
-by a repository label, and continues as the contiguous bullet list that follows it, an indented
-line continuing the bullet before it. A premise's repository is its ``[<label>]`` prefix, or the
-only one the header names. The unlabeled repository is the checkout the script runs from; a
-labeled one is the path its ``--checkout`` names, and a label with none is a failing premise.
+The issue's body and comments are read with ``gh issue view``. A premise block (a premise half, a
+supplement, a half read again) opens at a line ``Premises, read at <commit>:``, whose header names
+one or more commits, each optionally preceded by a repository label, and continues as the
+contiguous bullet list that follows it, an indented line continuing the bullet before it. Each
+block is checked against the commits its own header names. A premise's repository is its
+``[<label>]`` prefix, or the only one the header names. The unlabeled repository is the checkout
+the script runs from; a labeled one is the path its ``--checkout`` names, and a label with none is
+a failing premise.
 
 Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>``, is read with
 ``git show <commit>:<path>``. It fails when the path is absent at the commit or the range is past
 the file. Lines are counted on newline bytes alone, as git counts them. A premise whose backticked
 spans hold identifier tokens fails when none of them appears in the union of its cited ranges. A
-premise with no cite in the writer's form fails. Prints PASS and the rule it applied, or each
-failing premise and FAIL, and exits 1 on FAIL or when no premise half can be read.
+premise with no cite in the writer's form fails. Prints PASS with the number of blocks checked and
+the rule it applied, or each failing premise and FAIL, and exits 1 on FAIL or when any premise
+block cannot be read.
 """
 
 from __future__ import annotations
@@ -40,16 +43,16 @@ CITE = re.compile(
     r"\bat\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
 )
 PASS_LINE = (
-    "PASS: each premise has one or more cites in the writer's form and every one resolves "
-    "at its commit, and a premise that backticks any name has one or more of them on its "
-    "cited lines."
+    "PASS: {blocks} checked; each premise has one or more cites in the writer's form and every "
+    "one resolves at its commit, and a premise that backticks any name has one or more of them "
+    "on its cited lines."
 )
 BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 
 class PremiseHalfError(ValueError):
-    """The issue text holds no premise half that can be read."""
+    """A premise block in the issue text cannot be read, or the text holds none."""
 
 
 class CiteError(ValueError):
@@ -67,7 +70,7 @@ class Cite:
 
 @dataclass(frozen=True)
 class PremiseHalf:
-    """The commits the premises were read at, by repository label, and the premise lines.
+    """One premise block: the commits its premises were read at, by repository label, and its lines.
 
     A commit whose repository the header does not label is keyed None.
     """
@@ -92,15 +95,12 @@ def fetch_issue(issue: int) -> str:
     )
 
 
-def parse_premise_half(text: str) -> PremiseHalf:
-    """Return the commits of the first ``Premises, read at`` header in ``text`` and its bullet list.
+def _premise_block(text: str, header: re.Match[str]) -> PremiseHalf:
+    """Return the block that ``header``, a match of HEADER in ``text``, opens.
 
-    Raises PremiseHalfError when there is no header, no commit, two commits for one repository, or
-    no premise line.
+    Raises PremiseHalfError when the header names no commit or two commits for one repository, or
+    no premise line follows it.
     """
-    header = HEADER.search(text)
-    if header is None:
-        raise PremiseHalfError("no 'Premises, read at <commit>:' header")
     commits: dict[str | None, str] = {}
     for match in REPOSITORY_COMMIT.finditer(header["refs"]):
         if match["label"] in commits:
@@ -124,6 +124,19 @@ def parse_premise_half(text: str) -> PremiseHalf:
     if not premises:
         raise PremiseHalfError("no premise line follows the header")
     return PremiseHalf(commits, premises)
+
+
+def parse_premise_blocks(text: str) -> list[PremiseHalf]:
+    """Return the block of every ``Premises, read at`` header in ``text``, in order.
+
+    A block ends at the first line that is neither a bullet nor indented, so the next header
+    begins the next block. Raises PremiseHalfError when there is no header or a block cannot be
+    read.
+    """
+    headers = list(HEADER.finditer(text))
+    if not headers:
+        raise PremiseHalfError("no 'Premises, read at <commit>:' header")
+    return [_premise_block(text, header) for header in headers]
 
 
 def parse_cites(line: str) -> list[Cite]:
@@ -233,7 +246,7 @@ def main(
     *,
     fetch: Callable[[int], str] = fetch_issue,
 ) -> int:
-    """Return 0 when no premise of the issue's premise half fails, and 1 otherwise."""
+    """Return 0 when no premise of any of the issue's premise blocks fails, and 1 otherwise."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("issue", type=int)
     parser.add_argument(
@@ -246,16 +259,22 @@ def main(
     args = parser.parse_args(argv)
     checkouts = dict(args.checkout)
     try:
-        half = parse_premise_half(fetch(args.issue))
+        blocks = parse_premise_blocks(fetch(args.issue))
     except PremiseHalfError as err:
         print(f"{err}\nFAIL")
         return 1
     failures = [
         message
-        for line in half.premises
-        for message in check_premise(line, half, checkouts, Path.cwd())
+        for block in blocks
+        for line in block.premises
+        for message in check_premise(line, block, checkouts, Path.cwd())
     ]
-    print("\n".join([*failures, "FAIL" if failures else PASS_LINE]))
+    count = f"{len(blocks)} premise block{'s' if len(blocks) != 1 else ''}"
+    print(
+        "\n".join(
+            [*failures, "FAIL" if failures else PASS_LINE.format(blocks=count)]
+        )
+    )
     return 1 if failures else 0
 
 

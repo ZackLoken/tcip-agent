@@ -1,4 +1,4 @@
-"""tools/check_premise_cites.py: the premise half's header, its cites and the verdict it prints.
+"""tools/check_premise_cites.py: every premise block's header, its cites and the verdict it prints.
 
 Every cite is read from a git repository the test commits, so `git show` is the real producer.
 """
@@ -58,11 +58,23 @@ def _repository(root: Path, name: str = "repo") -> tuple[Path, str]:
     return repo, _git(repo, "rev-parse", "HEAD")
 
 
+def _second_commit(repo: Path) -> str:
+    (repo / "c.txt").write_text(
+        "head still line one\nrenamed_target\nadded_name\n",
+        newline="\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "rename and add")
+    return _git(repo, "rev-parse", "HEAD")
+
+
 def _half(commit: str, *premises: str) -> cites.PremiseHalf:
     bullets = "\n".join(f"- {p}" for p in premises)
-    return cites.parse_premise_half(
+    [half] = cites.parse_premise_blocks(
         f"Premises, read at {commit}:\n\n{bullets}\n"
     )
+    return half
 
 
 def _failures(
@@ -81,7 +93,7 @@ def test_a_one_commit_header_yields_its_commit_and_premise_cites() -> None:
         "Unplaced:\n\n- a later bullet that is not a premise\n"
     )
 
-    half = cites.parse_premise_half(text)
+    [half] = cites.parse_premise_blocks(text)
 
     assert half.commits == {None: "0123abc"}
     assert len(half.premises) == 2
@@ -103,7 +115,7 @@ def test_a_two_commit_labeled_header_yields_each_label_commit() -> None:
         "Contradictions with the issue:\n\n- a bullet that is not a premise\n"
     )
 
-    half = cites.parse_premise_half(text)
+    [half] = cites.parse_premise_blocks(text)
 
     assert half.commits == {
         "tcip-agent": "5807271",
@@ -128,7 +140,7 @@ def test_a_half_with_no_commit_premise_or_header_is_refused(
     text: str,
 ) -> None:
     with pytest.raises(cites.PremiseHalfError):
-        cites.parse_premise_half(text)
+        cites.parse_premise_blocks(text)
 
 
 def test_a_cite_holding_its_identifier_passes(tmp_path: Path) -> None:
@@ -213,7 +225,7 @@ def test_a_wrapped_bullet_joins_its_lines_and_later_premises_are_read(
         "- at a.py:2 the code returns `beta_value`.\n"
     )
 
-    half = cites.parse_premise_half(text)
+    [half] = cites.parse_premise_blocks(text)
     exit_code = cites.main(
         ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
     )
@@ -239,7 +251,7 @@ def test_a_labeled_repository_without_a_checkout_fails(
 ) -> None:
     repo, commit = _repository(tmp_path)
     text = f"Premises, read at one {commit} and two {commit}:\n\n"
-    half = cites.parse_premise_half(
+    [half] = cites.parse_premise_blocks(
         text + "- [two] at a.py:3 returns `beta_value`.\n"
     )
 
@@ -248,7 +260,7 @@ def test_a_labeled_repository_without_a_checkout_fails(
         half.premises[0], half, {"two": repo}, tmp_path
     )
 
-    single = cites.parse_premise_half(
+    [single] = cites.parse_premise_blocks(
         f"Premises, read at one {commit}:\n\n- at a.py:3 returns `beta_value`.\n"
     )
     single_failures = cites.check_premise(single.premises[0], single, {}, repo)
@@ -285,3 +297,97 @@ def test_main_exits_zero_on_an_all_passing_half_and_one_otherwise(
     assert "a.py:2-2" in failed_out
     assert unreadable == 1
     assert unreadable_out.endswith("FAIL\n")
+
+
+def test_a_bad_cite_in_a_later_block_fails_the_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, first = _repository(tmp_path)
+    second = _second_commit(repo)
+    text = (
+        f"Premises, read at repo {first}:\n\n"
+        "- at a.py:3 returns `beta_value`.\n\n"
+        "## Premise supplement\n\n"
+        f"Premises, read at repo {second}:\n\n"
+        "- at c.txt:4 names `added_name`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "c.txt:4-4 is outside the file (3 lines): - at c.txt:4" in out
+    assert out.endswith("FAIL\n")
+
+
+def test_each_block_is_read_at_its_own_commit_and_the_pass_counts_them(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, first = _repository(tmp_path)
+    second = _second_commit(repo)
+    text = (
+        f"Premises, read at repo {first}:\n"
+        "- at c.txt:2 names `target_name`.\n\n"
+        f"Premises, read at repo {second}:\n"
+        "- at c.txt:2 names `renamed_target`.\n"
+        "- at c.txt:3 names `added_name`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out_lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert len(out_lines) == 1
+    assert "2 premise blocks checked" in out_lines[0]
+
+
+def test_a_superseded_block_is_not_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    text = (
+        f"Superseded premises, read at repo {commit}:\n"
+        "- at b.txt:9 a cite past the end of its file.\n\n"
+        f"Premises, read at repo {commit}:\n"
+        "- at a.py:3 returns `beta_value`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert len(out) == 1
+    assert "1 premise block checked" in out[0]
+
+
+@pytest.mark.parametrize(
+    "later_block",
+    [
+        "Premises, read at the last release:\n- at a.py:1 X.\n",
+        "Premises, read at repo {commit} and repo {commit}:\n- at a.py:1 X.\n",
+        "Premises, read at repo {commit}:\nNo bullets follow.\n",
+    ],
+)
+def test_a_later_block_that_cannot_be_read_fails_the_run(
+    later_block: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    text = (
+        f"Premises, read at repo {commit}:\n- at a.py:3 returns `beta_value`.\n\n"
+        + later_block.format(commit=commit)
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert out.endswith("FAIL\n")
+    assert "PASS" not in out

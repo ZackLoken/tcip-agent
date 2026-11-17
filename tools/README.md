@@ -35,8 +35,8 @@ section instead.
   resolution proved first (the editable installs point at the main checkout, so a worktree needs its
   own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves outside it; each
   requested gate runs in the foreground, stopping at the first failure with its exit code.
-- `check_premise_cites.py` - checks the line cites of an issue's work order premise half against
-  the commits it names.
+- `check_premise_cites.py` - checks the line cites of every premise block on an issue against
+  the commits its own header names.
 - `generate_frontend_routes.py` - generates the browser's route-path module, over FastAPI's
   effective route contexts whose names the frontend's non-test sources read as `ROUTES.<name>` (the
   reads `tests.READS_SCRIPT` finds through the TypeScript compiler, run under `node`
