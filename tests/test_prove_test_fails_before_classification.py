@@ -60,8 +60,8 @@ EXIT = {
     "VACUOUS": 1,
     "INDETERMINATE": 2,
     "REFUSED": 3,
-    "TOOL_FAILURE": 4,
 }
+TOOL_FAILURE = 4
 
 
 def _tool(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -1039,9 +1039,7 @@ def test_an_exception_the_tool_does_not_name_exits_with_its_own_failure_code(
         repo, "tests/test_widgets.py", baseline, "--json", str(record)
     )
 
-    assert result.returncode == EXIT["TOOL_FAILURE"], (
-        result.stdout + result.stderr
-    )
+    assert result.returncode == TOOL_FAILURE, result.stdout + result.stderr
     assert "Traceback" in result.stderr
     assert _why(result) == "", result.stdout
 
@@ -1065,9 +1063,7 @@ def test_a_refused_run_whose_record_cannot_be_written_exits_with_the_tools_own_c
         str(record),
     )
 
-    assert result.returncode == EXIT["TOOL_FAILURE"], (
-        result.stdout + result.stderr
-    )
+    assert result.returncode == TOOL_FAILURE, result.stdout + result.stderr
     assert "Traceback" in result.stderr
     assert _why(result) == "", result.stdout
 
