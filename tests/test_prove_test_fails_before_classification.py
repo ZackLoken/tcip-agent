@@ -25,8 +25,9 @@ commit with the fix and the guard test) and run the real script against it. They
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
   rule failing, answering with something that is not JSON, or answering with something that is not
-  a list of one boolean for each path asked; and an installed vitest whose manifest cannot be
-  decoded or has no ``bin`` entry for vitest, in a scratch frontend whose install is its own.
+  a list of one boolean for each path asked; and an installed vitest whose manifest is not an
+  object whose ``bin`` holds a string for ``vitest``, in a scratch frontend whose install is its
+  own.
 """
 
 from __future__ import annotations
@@ -56,10 +57,12 @@ from tools.prove_test_fails_before import (
     EXIT,
     INSTALL,
     OUTCOME_ENV,
+    REPO,
     TEST_FILE_RULE,
     TOOL_FAILURE,
     RefusalError,
     _failure_kind,
+    _vitest_manifest,
     require_installed_vitest,
 )
 
@@ -2084,6 +2087,11 @@ WIDGET_TEST = f"{FRONTEND_PATH}/src/widget.test.ts"
 VITEST_CONFIG = f"{FRONTEND_PATH}/vitest.config.mjs"
 
 
+def _scratch_vitest_manifest(repo: Path) -> Path:
+    """Return where the tool's copy in ``repo`` looks for the installed vitest's manifest."""
+    return repo / _vitest_manifest().relative_to(REPO)
+
+
 def _scratch_frontend(repo: Path) -> Path:
     """Give ``repo`` a frontend at the real frontend's path; return its directory.
 
@@ -2212,7 +2220,7 @@ def test_a_vitest_assertion_failing_at_the_baseline_guards_and_leaves_the_instal
     assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
     assert "GUARDS" in result.stdout
     assert "[behavioral]" in result.stdout
-    assert (install / "vitest" / "package.json").is_file()
+    assert _scratch_vitest_manifest(linked_repo).is_file()
     assert sorted(entry.name for entry in install.iterdir()) == entries_before
 
 
@@ -2799,6 +2807,33 @@ def _frontend_with_rule(tmp_path: Path, rule: str) -> tuple[Path, str]:
     return repo, baseline
 
 
+def _rule_printing(
+    tmp_path: Path, answer_expression: str, indent: int | None = None
+) -> tuple[Path, str]:
+    """Build a scratch repository whose rule prints the JavaScript value ``answer_expression``.
+
+    The expression may use ``paths``, the list of paths the rule is asked about. It is printed by
+    ``JSON.stringify`` with ``indent``. Returns the repository and the baseline revision.
+    """
+    return _frontend_with_rule(
+        tmp_path,
+        'import { readFileSync } from "node:fs";\n'
+        'const paths = JSON.parse(readFileSync(0, "utf8"));\n'
+        "process.stdout.write(JSON.stringify("
+        f"{answer_expression}, null, {json.dumps(indent)}));\n",
+    )
+
+
+def _unread_locations(why: str, sentence: str) -> list[list[str | int]]:
+    """Return the ``loc`` of each error the verdict line ``why`` carries after ``sentence``.
+
+    A refusal's sentence is followed by ``: `` and the validation's errors as a JSON array.
+    """
+    tail = why.partition(sentence)[2]
+    assert tail.startswith(": "), why
+    return [entry["loc"] for entry in json.loads(tail.removeprefix(": "))]
+
+
 def test_a_test_file_rule_that_fails_is_refused_naming_the_rule_and_its_error(
     tmp_path: Path,
 ) -> None:
@@ -2823,49 +2858,92 @@ def test_a_test_file_rule_answering_with_no_json_is_refused(
     result = _run(repo, WIDGET_TEST, baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert f"{TEST_FILE_RULE} answered with no JSON" in _why(result)
+    why = _why(result)
+    sentence = (
+        f"{TEST_FILE_RULE} answered 'not json', not a list of one true or false "
+        "for each path it was asked about (1)"
+    )
+    assert sentence in why
+    assert _unread_locations(why, sentence) == [[]]
 
 
 @pytest.mark.parametrize(
-    ("answer_expression", "answer_echoed"),
+    ("answer_expression", "answer_printed", "unread_locations"),
     [
-        pytest.param("[]", "[]", id="a_shorter_list"),
-        pytest.param("[true, true]", "[true, true]", id="a_longer_list"),
-        pytest.param('"x"', '"x"', id="a_string_as_long_as_the_paths"),
-        pytest.param("true", "true", id="a_scalar"),
+        pytest.param("[]", "[]", None, id="a_shorter_list"),
+        pytest.param("[true, true]", "[true,true]", None, id="a_longer_list"),
+        pytest.param('"x"', '"x"', [[]], id="a_string_as_long_as_the_paths"),
+        pytest.param("true", "true", [[]], id="a_scalar"),
         pytest.param(
             'paths.map(() => "yes")',
             '["yes"]',
-            id="a_list_of_the_length_without_booleans",
+            [[0]],
+            id="a_list_of_the_length_of_strings",
+        ),
+        pytest.param(
+            "paths.map(() => 1)",
+            "[1]",
+            [[0]],
+            id="a_list_of_the_length_of_numbers",
         ),
     ],
 )
 def test_a_test_file_rule_answer_that_is_no_list_of_one_boolean_per_path_is_refused(
-    tmp_path: Path, answer_expression: str, answer_echoed: str
+    tmp_path: Path,
+    answer_expression: str,
+    answer_printed: str,
+    unread_locations: list[list[str | int]] | None,
 ) -> None:
     """Any answer but a list of one boolean per path is refused, naming the rule and the answer.
 
     The rule answers each call from the paths it is given, so an answer of the right length
-    is refused for its items on the first path judged, not for its length on a later call.
+    is refused for its items on the first path judged, not for its length on a later call. An
+    answer that is a list of booleans of the wrong length ends the sentence; any other carries
+    where the validation stopped reading it.
     """
-    repo, baseline = _frontend_with_rule(
-        tmp_path,
-        'import { readFileSync } from "node:fs";\n'
-        'const paths = JSON.parse(readFileSync(0, "utf8"));\n'
-        f"process.stdout.write(JSON.stringify({answer_expression}));\n",
+    repo, baseline = _rule_printing(tmp_path, answer_expression)
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    sentence = (
+        f"{TEST_FILE_RULE} answered {answer_printed!r}, not a list of one true or "
+        "false for each path it was asked about (1)"
+    )
+    assert sentence in why
+    if unread_locations is None:
+        assert why.endswith(sentence)
+    else:
+        assert _unread_locations(why, sentence) == unread_locations
+
+
+def test_a_test_file_rule_answer_printed_over_several_lines_is_refused_on_one_line(
+    tmp_path: Path,
+) -> None:
+    """An answer of the right length with items that are no booleans stays on the verdict line.
+
+    The line holds the sentence through its count and the validation's errors after it, so the
+    answer's own line breaks did not carry the sentence onto the lines after it.
+    """
+    repo, baseline = _rule_printing(
+        tmp_path, 'paths.map(() => "yes")', indent=2
     )
 
     result = _run(repo, WIDGET_TEST, baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert (
-        f"{TEST_FILE_RULE} answered {answer_echoed}, not a list of one true or false"
-        in _why(result)
+    why = _why(result)
+    sentence = (
+        f"{TEST_FILE_RULE} answered '[\\n  \"yes\"\\n]', not a list of one true or "
+        "false for each path it was asked about (1)"
     )
+    assert sentence in why
+    assert _unread_locations(why, sentence) == [[0]]
 
 
 def _frontend_with_manifest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest: bytes
 ) -> tuple[Path, str, Path]:
     """Build a scratch repository holding the widget test and an installed vitest of ``manifest``.
 
@@ -2874,37 +2952,53 @@ def _frontend_with_manifest(
     """
     _redirect_temporary_folder(tmp_path, monkeypatch)
     repo, baseline = _scratch_widget_repo(tmp_path)
-    manifest_path = (
-        repo / FRONTEND_PATH / "node_modules" / "vitest" / "package.json"
-    )
+    manifest_path = _scratch_vitest_manifest(repo)
     manifest_path.parent.mkdir(parents=True)
-    write(manifest_path, manifest)
+    manifest_path.write_bytes(manifest)
     return repo, baseline, manifest_path
 
 
 @pytest.mark.parametrize(
-    ("manifest", "what_did_not_read"),
+    ("manifest", "unread_locations"),
     [
+        pytest.param(b"{not json", [[]], id="no_json"),
+        pytest.param(b'{"name": "vitest"}', [["bin"]], id="no_bin"),
         pytest.param(
-            "{not json", "could not be read or decoded", id="no_json"
-        ),
-        pytest.param(
-            '{"name": "vitest"}', "holds no bin entry for vitest", id="no_bin"
-        ),
-        pytest.param(
-            '{"bin": {"vite": "vite.mjs"}}',
-            "holds no bin entry for vitest",
+            b'{"bin": {"vite": "vite.mjs"}}',
+            [["bin", "vitest"]],
             id="a_bin_without_vitest",
         ),
-        pytest.param("[]", "holds no bin entry for vitest", id="no_object"),
+        pytest.param(b"[]", [[]], id="no_object"),
+        pytest.param(
+            b'{"bin": {"vitest": 3}}',
+            [["bin", "vitest"]],
+            id="a_number_for_vitest",
+        ),
+        pytest.param(
+            b'{"bin": "vitest.mjs"}', [["bin"]], id="a_string_for_bin"
+        ),
+        pytest.param(
+            b'\xef\xbb\xbf{"bin": {"vitest": "./vitest.mjs"}}',
+            [[]],
+            id="a_byte_order_mark",
+        ),
+        pytest.param(
+            b'{"name": "\xff", "bin": {"vitest": "./vitest.mjs"}}',
+            [[]],
+            id="not_utf_8",
+        ),
     ],
 )
 def test_an_installed_vitest_manifest_that_does_not_read_is_refused_naming_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    manifest: str,
-    what_did_not_read: str,
+    manifest: bytes,
+    unread_locations: list[list[str | int]],
 ) -> None:
+    """A manifest that is no object whose ``bin`` holds a string for ``vitest`` is refused.
+
+    The verdict names the manifest and where the validation stopped reading it.
+    """
     repo, baseline, manifest_path = _frontend_with_manifest(
         tmp_path, monkeypatch, manifest
     )
@@ -2913,5 +3007,36 @@ def test_an_installed_vitest_manifest_that_does_not_read_is_refused_naming_it(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     why = _why(result)
-    assert str(manifest_path.resolve()) in why
-    assert what_did_not_read in why
+    sentence = (
+        f"the installed vitest's manifest {manifest_path.resolve()} is not an object "
+        "whose bin holds a string for vitest"
+    )
+    assert sentence in why
+    assert _unread_locations(why, sentence) == unread_locations
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="a file mode that allows no read binds neither on Windows nor for root",
+)
+def test_an_installed_vitest_manifest_that_cannot_be_read_is_refused_naming_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manifest that exists and whose mode allows no read is refused as one that cannot be read.
+
+    Its text is of the installed shape, so the refusal is for the read and not for the validation.
+    """
+    repo, baseline, manifest_path = _frontend_with_manifest(
+        tmp_path, monkeypatch, b'{"bin": {"vitest": "./vitest.mjs"}}'
+    )
+    manifest_path.chmod(0)
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert (
+        f"the installed vitest's manifest {manifest_path.resolve()} could not be read"
+        in why
+    )
+    assert "is not an object whose bin holds" not in why
