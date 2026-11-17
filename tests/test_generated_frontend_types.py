@@ -45,6 +45,7 @@ def _source(declaration: dict) -> str:
     return Path(declaration["file"]).relative_to(REPO_ROOT).as_posix()
 
 
+@pytest.mark.usefixtures("frontend_install")
 def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
     None
 ):

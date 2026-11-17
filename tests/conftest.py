@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import tests
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -73,6 +75,20 @@ def pytest_collection_modifyitems(
         raise pytest.UsageError(
             f"Collected only {len(items)} tests (< TCIP_MIN_TESTS={floor}). A core "
             "dependency is likely missing: module-level importorskip silently skipped files."
+        )
+
+
+@pytest.fixture
+def frontend_install() -> None:
+    """Fail the test's setup when the frontend's install, ``tests.FRONTEND_INSTALL``, is no folder.
+
+    The failure names the missing folder and the command that installs it.
+    """
+    if not tests.FRONTEND_INSTALL.is_dir():
+        pytest.fail(
+            f"the frontend's install {tests.FRONTEND_INSTALL} is not a folder; run `npm ci` in "
+            f"{tests.FRONTEND.relative_to(tests.REPO_ROOT).as_posix()} of this checkout and run "
+            "again"
         )
 
 

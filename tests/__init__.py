@@ -67,7 +67,9 @@ FRONTEND_SRC = (
 )
 """The browser's sources, the directory the frontend's ``tsconfig.json`` includes first."""
 
-PRETTIER = FRONTEND / "node_modules" / "prettier" / "bin" / "prettier.cjs"
+FRONTEND_INSTALL = FRONTEND / "node_modules"
+"""The frontend's installed packages, which its Node scripts and Prettier read."""
+PRETTIER = FRONTEND_INSTALL / "prettier" / "bin" / "prettier.cjs"
 """The frontend's installed Prettier."""
 SCRIPTS = FRONTEND / "scripts"
 """The frontend's Node scripts, each printing one JSON object (:func:`printed_json`)."""

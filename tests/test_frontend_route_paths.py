@@ -67,6 +67,7 @@ def test_no_frontend_source_writes_a_backend_path_of_its_own(
     )
 
 
+@pytest.mark.usefixtures("frontend_install")
 def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
     None
 ):
@@ -175,6 +176,7 @@ def _orchard_app() -> FastAPI:
     return fresh
 
 
+@pytest.mark.usefixtures("frontend_install")
 def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -> (
     None
 ):
