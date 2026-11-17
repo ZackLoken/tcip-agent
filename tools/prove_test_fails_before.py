@@ -52,8 +52,8 @@ Four verdicts, each its own exit code:
                        runner did not finish within ``--timeout``, hit an internal or unhandled
                        error, never reported an outcome or wrote one that is not JSON, ``node`` is
                        not on the path where a frontend path is to be judged, the frontend's test
-                       file rule failed or answered with something that is not JSON or not a list
-                       of one boolean for each path it was asked about, the frontend has no
+                       file rule failed or answered with anything but a JSON list of one boolean
+                       for each path it was asked about, the frontend has no
                        install, an installed vitest whose manifest cannot be read or decoded or
                        has no ``bin`` entry for vitest, the link to the install cannot be made, or
                        no failure is behavioral (each is ``unreached``, ``fixture`` or
@@ -113,6 +113,8 @@ import traceback
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Literal, NoReturn, NotRequired, TypedDict
+
+from pydantic import StrictBool, TypeAdapter, ValidationError
 
 REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
@@ -434,14 +436,25 @@ def _node() -> str:
     return node
 
 
+RULE_ANSWER = TypeAdapter(list[StrictBool])
+
+
+def _what_did_not_read(error: ValidationError) -> str:
+    """Return ``error``'s errors as one line of JSON, each with its location and message."""
+    return error.json(
+        include_url=False, include_context=False, include_input=False
+    )
+
+
 def _test_side(paths: Iterable[str]) -> set[str]:
     """Return those of the repo-relative, forward-slash ``paths`` that lie on the test side.
 
     The test side is every path under ``tests/`` and every path under the frontend that its own
     rule, ``TEST_FILE_RULE`` run under ``node``, calls a test file. The tool overlays the test side
     from the tree the test comes from, so a diff in it is not the change under test. ``node`` is
-    started only when a path lies under the frontend; :class:`RefusalError` when the rule fails,
-    its answer is not JSON, or its answer is not a list of one boolean for each frontend path.
+    started only when a path lies under the frontend; :class:`RefusalError` when the rule fails or
+    its answer is not a JSON list of one boolean for each frontend path, the refusal echoing the
+    answer and, for one the list type refuses, where it stopped reading.
     """
     wanted = set(paths)
     side = {p for p in wanted if p.startswith(f"{TEST_TREE}/")}
@@ -459,21 +472,18 @@ def _test_side(paths: Iterable[str]) -> set[str]:
         raise RefusalError(
             f"the frontend's test file rule {TEST_FILE_RULE} failed: {proc.stderr.strip()}"
         )
+    refusal = (
+        f"the frontend's test file rule {TEST_FILE_RULE} answered {proc.stdout.strip()!r}, not "
+        f"a list of one true or false for each path it was asked about ({len(frontend)})"
+    )
     try:
-        answer = json.loads(proc.stdout)
-    except json.JSONDecodeError as error:
+        answer = RULE_ANSWER.validate_json(proc.stdout)
+    except ValidationError as error:
         raise RefusalError(
-            f"the frontend's test file rule {TEST_FILE_RULE} answered with no JSON: {error}"
+            f"{refusal}: {_what_did_not_read(error)}"
         ) from error
-    if (
-        not isinstance(answer, list)
-        or len(answer) != len(frontend)
-        or not all(isinstance(is_test, bool) for is_test in answer)
-    ):
-        raise RefusalError(
-            f"the frontend's test file rule {TEST_FILE_RULE} answered {json.dumps(answer)}, not "
-            f"a list of one true or false for each path it was asked about ({len(frontend)})"
-        )
+    if len(answer) != len(frontend):
+        raise RefusalError(refusal)
     return side | {path for path, is_test in zip(frontend, answer) if is_test}
 
 
