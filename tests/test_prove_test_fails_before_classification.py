@@ -51,20 +51,14 @@ from tests._scratch_repo_fixtures import (
     write,
 )
 from tools.prove_test_fails_before import (
+    EXIT,
     OUTCOME_ENV,
     TEST_FILE_RULE,
+    TOOL_FAILURE,
     RefusalError,
     _failure_kind,
     require_installed_vitest,
 )
-
-EXIT = {
-    "GUARDS": 0,
-    "VACUOUS": 1,
-    "INDETERMINATE": 2,
-    "REFUSED": 3,
-}
-TOOL_FAILURE = 4
 
 
 def _tool(repo: Path, *args: str) -> subprocess.CompletedProcess:
