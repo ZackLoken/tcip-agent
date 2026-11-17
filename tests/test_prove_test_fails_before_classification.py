@@ -52,6 +52,7 @@ from tests._scratch_repo_fixtures import (
 )
 from tools.prove_test_fails_before import (
     EXIT,
+    INSTALL,
     OUTCOME_ENV,
     TEST_FILE_RULE,
     TOOL_FAILURE,
@@ -1997,7 +1998,6 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
 # ── a vitest file ────────────────────────────────────────────────────────────
 
 FRONTEND_PATH = FRONTEND.relative_to(REPO_ROOT).as_posix()
-INSTALL = FRONTEND / "node_modules"
 WIDGET_TEST = f"{FRONTEND_PATH}/src/widget.test.ts"
 VITEST_CONFIG = f"{FRONTEND_PATH}/vitest.config.mjs"
 
