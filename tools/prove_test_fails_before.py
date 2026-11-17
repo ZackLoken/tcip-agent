@@ -7,13 +7,15 @@ code. The test side is every file under ``tests/`` and every test file under
 through ``node``) names one; ``node`` is started only when a path under the frontend is to be
 judged.
 
-A file under ``tests/`` runs under pytest, and the baseline's own Python source is proved to be
-what gets imported. A test file under the frontend runs under the vitest of this checkout's
-frontend install, the baseline tree's frontend linked to that install for the run, vitest's results
-cache off and its configuration loaded without a bundled copy, so nothing is written through the
-link, and ``-k`` passed as vitest's ``-t`` test name pattern; the proof is weaker, that every
-test module vitest ran lies in the baseline tree, and it says nothing of where those modules'
-imports resolve. The link is removed before the scratch directory is.
+Whenever this checkout's frontend install is a folder, the baseline tree's frontend is linked to it
+for the run, whichever runner runs, and the link is removed before the scratch directory is. A
+file under ``tests/`` runs under pytest, and the baseline's own Python source is proved to be what
+gets imported. A test file under the frontend runs under the vitest of that install, vitest's
+results cache off and its configuration loaded without a bundled copy, so nothing is written
+through the link, and ``-k`` passed as vitest's ``-t`` test name pattern; the proof is weaker, that
+every test module vitest ran lies in the baseline tree, and it says nothing of where those modules'
+imports resolve. The link gives the baseline the packages of this checkout, which need not be the
+versions the baseline's tracked files ask for.
 
     python tools/prove_test_fails_before.py tests/test_foo.py
     python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behavior"
@@ -53,10 +55,10 @@ Four verdicts, each its own exit code:
                        error, never reported an outcome or wrote one that is not JSON, ``node`` is
                        not on the path where a frontend path is to be judged, the frontend's test
                        file rule failed or answered with anything but a JSON list of one boolean
-                       for each path it was asked about, the frontend has no
-                       install, an installed vitest whose manifest cannot be read or is not an
-                       object whose ``bin`` holds a string for ``vitest``, the link to the
-                       install cannot be made, or
+                       for each path it was asked about, a frontend test file's frontend has
+                       no installed vitest, an installed vitest whose manifest cannot be read
+                       or is not an object whose ``bin`` holds a string for ``vitest``, the
+                       link to the install cannot be made, or
                        no failure is behavioral (each is ``unreached``, ``fixture`` or
                        ``test_code``), so no behavior was compared. A setup or teardown failure
                        that is neither a missing import or file nor a timeout is ``fixture``,
@@ -825,12 +827,12 @@ def require_installed_vitest() -> None:
 def link_install(tree: Path) -> Path:
     """Link ``tree``'s frontend ``node_modules`` to ``INSTALL``; return the link.
 
-    :class:`RefusalError` when that install holds no vitest, naming the command that installs it, or
-    when the link cannot be made, with the system's error.
+    The folder the link goes into is made when ``tree`` has none. :class:`RefusalError` when the
+    link cannot be made, with the system's error.
     """
-    require_installed_vitest()
     link = tree / INSTALL.relative_to(REPO)
     try:
+        link.parent.mkdir(parents=True, exist_ok=True)
         os.symlink(INSTALL, link, target_is_directory=True)
     except OSError as error:
         raise RefusalError(
@@ -1345,7 +1347,10 @@ def _prove(args: argparse.Namespace, record: dict) -> None:
             "files": _overlay_test_tree(tree, test_rev),
         }
         if runner == "vitest":
+            require_installed_vitest()
+        if INSTALL.is_dir():
             link = link_install(tree)
+        if runner == "vitest":
             run = functools.partial(
                 run_vitest_capturing_outcome,
                 tree,

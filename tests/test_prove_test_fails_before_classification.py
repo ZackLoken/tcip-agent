@@ -20,8 +20,9 @@ commit with the fix and the guard test) and run the real script against it. They
   building it refusing in its setup when the checkout has none, each verdict and refusal it can
   reach, ``--test-rev`` among them, except an outcome record that is not JSON,
   a pass at a baseline no source change follows, and a failure there scoring GUARDS with the
-  caveat that no source file differs, which the pytest path alone holds; and a changed frontend
-  test counted as the test side of a pytest run;
+  caveat that no source file differs, which the pytest path alone holds; a changed frontend
+  test counted as the test side of a pytest run; and a pytest test reading a file under the
+  checkout's untracked install, which the baseline tree finds through the link;
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
   rule failing, answering with something that is not JSON, or answering with something that is not
@@ -2097,6 +2098,11 @@ def _scratch_install(repo: Path) -> Path:
     return repo / INSTALL.relative_to(REPO)
 
 
+def _ignore_install(repo: Path) -> None:
+    """Have git ignore the frontend's install folder in ``repo``, so nothing there is committed."""
+    write(repo / ".git" / "info" / "exclude", f"{INSTALL.name}\n")
+
+
 def _scratch_frontend(repo: Path) -> Path:
     """Give ``repo`` a frontend at the real frontend's path; return its directory.
 
@@ -2110,7 +2116,7 @@ def _scratch_frontend(repo: Path) -> Path:
     write(frontend / "package.json", '{"type": "module"}\n')
     write(repo / VITEST_CONFIG, "export default {};\n")
     (frontend / "src").mkdir()
-    write(repo / ".git" / "info" / "exclude", f"{INSTALL.name}\n")
+    _ignore_install(repo)
     return frontend
 
 
@@ -2363,6 +2369,40 @@ def test_a_changed_frontend_test_alone_leaves_a_pytest_pass_indeterminate(
         result.stdout + result.stderr
     )
     assert "no source file differs" in _why(result)
+
+
+def test_a_pytest_test_reading_the_frontends_install_finds_the_checkouts_at_the_baseline(
+    tmp_path: Path,
+) -> None:
+    """A pytest test passing on a file under the frontend's install passes in the baseline tree.
+
+    The file is untracked and ignored, so the baseline tree built from the revision holds none;
+    the checkout's install is linked there, so the pass at a baseline a source change follows is
+    VACUOUS, and the file stays in the checkout.
+    """
+    repo = scratch_repo(tmp_path)
+    _ignore_install(repo)
+    marker = _scratch_install(repo) / "marker.txt"
+    marker.parent.mkdir(parents=True)
+    write(marker, "the checkout's install\n")
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    write(
+        repo / "tests" / "test_install.py",
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def test_the_install_holds_the_marker():\n"
+        "    tree = Path(__file__).resolve().parent.parent\n"
+        f"    assert (tree / {INSTALL.relative_to(REPO).as_posix()!r} / 'marker.txt').is_file()\n",
+    )
+    baseline = commit_all(repo, "a test reading the install")
+    assert marker.name not in git(repo, "ls-files")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+
+    result = _run(repo, "tests/test_install.py", baseline)
+
+    assert result.returncode == EXIT["VACUOUS"], result.stdout + result.stderr
+    assert marker.is_file()
 
 
 def test_a_vitest_file_taken_from_test_rev_guards(linked_repo: Path) -> None:
