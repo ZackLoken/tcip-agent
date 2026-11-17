@@ -810,16 +810,24 @@ def _read_outcome(outcome_json: Path) -> dict | None:
     return observed
 
 
+def require_installed_vitest() -> None:
+    """Return when ``INSTALL`` holds vitest.
+
+    :class:`RefusalError` otherwise, naming the command that installs it.
+    """
+    if not (INSTALL / "vitest" / "package.json").is_file():
+        raise RefusalError(
+            f"{FRONTEND} has no installed vitest; run `npm ci` in {FRONTEND}."
+        )
+
+
 def link_install(tree: Path) -> Path:
     """Link ``tree``'s frontend ``node_modules`` to ``INSTALL``; return the link.
 
     :class:`RefusalError` when that install holds no vitest, naming the command that installs it, or
     when the link cannot be made, with the system's error.
     """
-    if not (INSTALL / "vitest" / "package.json").is_file():
-        raise RefusalError(
-            f"{FRONTEND} has no installed vitest; run `npm ci` in {FRONTEND}."
-        )
+    require_installed_vitest()
     link = tree / INSTALL.relative_to(REPO)
     try:
         os.symlink(INSTALL, link, target_is_directory=True)
