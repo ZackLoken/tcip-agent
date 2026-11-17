@@ -77,7 +77,7 @@ inside package code (the second rightly, since the package's own behavior was re
 assertion that fails before the call under test.
 
 An exception the tool does not name above is its own failure: its traceback goes to standard error
-and the exit code is 4, which no verdict uses.
+and the exit code is ``TOOL_FAILURE``, which no verdict uses.
 
 The baseline is ``--baseline`` when given, else ``HEAD`` for uncommitted work, else the
 merge-base against the integration branch; the baseline used, how it was chosen and the source
