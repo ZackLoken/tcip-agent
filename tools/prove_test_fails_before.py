@@ -491,8 +491,9 @@ def _uncommitted_paths() -> list[str]:
 def _resolve_baseline(named: str | None, integration: str) -> tuple[str, str]:
     """Return the baseline revision and how it was chosen.
 
-    :class:`RefusalError` when ``named`` is no commit, when the merge-base against
-    ``integration`` cannot be read, or when that merge-base is HEAD itself.
+    :class:`RefusalError` when ``named`` is no commit, when HEAD cannot be read (a named baseline
+    reads none), when the merge-base against ``integration`` cannot be read, or when that
+    merge-base is HEAD itself.
     """
     if named:
         return _commit("--baseline", named), f"named by the caller as {named}"
