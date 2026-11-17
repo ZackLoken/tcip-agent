@@ -867,7 +867,7 @@ def test_a_snapshot_in_a_repository_with_no_commit_is_refused(
 
 
 def test_a_snapshot_neither_form_can_make_is_refused(tmp_path: Path) -> None:
-    """A snapshot neither form makes is refused with the sentence naming both forms.
+    """A snapshot neither form makes is refused with what each form reported, on the verdict line.
 
     The repository has a commit and a clean tracked tree beside an untracked folder that is a
     repository with no commit of its own, which ``git add -A`` refuses to stage, and ``git stash
@@ -883,7 +883,46 @@ def test_a_snapshot_neither_form_can_make_is_refused(tmp_path: Path) -> None:
     proc = _snapshot(repo, "tests/test_widgets.py")
 
     assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
-    assert "could not snapshot the working tree" in _why(proc)
+    why = _why(proc)
+    assert "could not snapshot the working tree" in why
+    assert "git add -A failed" in why
+    assert "inner" in why
+    assert "git stash create made nothing" in why
+    assert "most likely because" not in proc.stdout + proc.stderr
+
+
+def test_a_snapshot_both_forms_refuse_carries_each_forms_git_message(
+    tmp_path: Path,
+) -> None:
+    """A snapshot refused by git in both forms names both failed commands on the verdict line.
+
+    A merge left unmerged, so ``git stash create`` exits non-zero, beside the untracked folder
+    that is a repository with no commit, which ``git add -A`` refuses to stage.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    commit_all(repo, "double is a no-op")
+    git(repo, "checkout", "-q", "-b", "side")
+    write(repo / "widgets.py", "def double(x):\n    return x + x\n")
+    commit_all(repo, "double adds")
+    git(repo, "checkout", "-q", "-")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    commit_all(repo, "double multiplies")
+    merged = subprocess.run(
+        ["git", "merge", "side"], cwd=str(repo), capture_output=True, text=True
+    )
+    assert merged.returncode == 1, merged.stdout + merged.stderr
+    inner = repo / "inner"
+    inner.mkdir()
+    git(inner, "init", "-q")
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+
+    assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
+    why = _why(proc)
+    assert "git add -A failed" in why
+    assert re.search(r"git stash create .* failed: ", why), why
+    assert "Cannot save the current index state" in why
 
 
 def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
@@ -1210,10 +1249,11 @@ def test_an_uncommitted_source_change_takes_head_as_the_baseline(
 def test_an_uncommitted_source_change_in_a_repository_with_no_commit_is_refused_by_git(
     tmp_path: Path,
 ) -> None:
-    """With no commit and no ``--baseline``, HEAD is read for the uncommitted source and refused.
+    """With no commit and no ``--baseline``, the one read of HEAD is refused by git.
 
-    The untracked tool copy is a source change, so HEAD is taken as the baseline, and git's own
-    refusal of that read is the reason, not the merge-base sentence.
+    The read comes before either automatic baseline is chosen. The untracked tool copy is a
+    source change, so this fixture would choose HEAD as the baseline, and git's own refusal of
+    the read is the reason, not the merge-base sentence.
     """
     repo = scratch_repo(tmp_path)
     write(
@@ -1229,6 +1269,46 @@ def test_an_uncommitted_source_change_in_a_repository_with_no_commit_is_refused_
         result.stdout
     )
     assert "no merge-base" not in why
+
+
+def test_an_unreadable_head_on_the_merge_base_baseline_is_refused_by_git(
+    tmp_path: Path,
+) -> None:
+    """With no commit and only a test-side change, the one read of HEAD is refused by git.
+
+    The read comes before either automatic baseline is chosen. The tool copy is excluded, so the
+    one uncommitted path is a test file and this fixture would choose the merge-base; the
+    unreadable HEAD is not worded as a missing merge-base.
+    """
+    repo = scratch_repo(tmp_path)
+    write(repo / ".git" / "info" / "exclude", "tools/\n")
+    write(
+        repo / "tests" / "test_widgets.py",
+        "def test_passes():\n    assert True\n",
+    )
+
+    result = _tool(repo, "tests/test_widgets.py")
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert why.startswith("REFUSED: git rev-parse HEAD failed: "), (
+        result.stdout
+    )
+    assert "no merge-base" not in why
+
+
+def test_a_named_baseline_needs_no_readable_head(tmp_path: Path) -> None:
+    """A baseline the caller names is used where HEAD cannot be read.
+
+    ``git checkout --orphan`` leaves HEAD on a branch with no commit while the fix and its test
+    stay in the working tree.
+    """
+    repo, baseline = _fixed_double(tmp_path)
+    git(repo, "checkout", "-q", "--orphan", "fresh")
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
 
 
 def test_a_committed_change_takes_its_merge_base_with_the_integration_branch(

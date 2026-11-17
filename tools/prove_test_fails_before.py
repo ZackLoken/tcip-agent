@@ -110,7 +110,7 @@ import sys
 import tarfile
 import tempfile
 import traceback
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Literal, NoReturn, NotRequired, TypedDict
 
@@ -388,21 +388,27 @@ def _test_file_relative_to_repo(raw: str) -> str:
     return rel_str
 
 
-def _git(*args: str) -> bytes:
+def _git(*args: str, env: Mapping[str, str] | None = None) -> bytes:
     """Return git's standard output for ``args`` run in the repository, as bytes.
 
-    :class:`RefusalError` naming the command and git's own error when git exits non-zero.
+    ``env`` is git's whole environment, the process's own when ``None``. :class:`RefusalError`
+    naming the command and git's own error, its line breaks written as spaces, when git exits
+    non-zero.
     """
-    proc = subprocess.run(["git", *args], cwd=REPO, capture_output=True)
+    proc = subprocess.run(
+        ["git", *args], cwd=REPO, env=env, capture_output=True
+    )
     if proc.returncode != 0:
-        stderr = proc.stderr.decode(errors="replace").strip()
+        stderr = " ".join(
+            proc.stderr.decode(errors="replace").strip().splitlines()
+        )
         raise RefusalError(f"git {' '.join(args)} failed: {stderr}")
     return proc.stdout
 
 
-def git_output(*args: str) -> str:
+def git_output(*args: str, env: Mapping[str, str] | None = None) -> str:
     """Return git's standard output for ``args`` as text; :class:`RefusalError` as :func:`_git`."""
-    return _git(*args).decode()
+    return _git(*args, env=env).decode()
 
 
 def _commit(flag: str, named: str) -> str:
@@ -491,21 +497,19 @@ def _uncommitted_paths() -> list[str]:
 def _resolve_baseline(named: str | None, integration: str) -> tuple[str, str]:
     """Return the baseline revision and how it was chosen.
 
-    :class:`RefusalError` when ``named`` is no commit, when the merge-base against
-    ``integration`` cannot be read, or when that merge-base is HEAD itself.
+    :class:`RefusalError` when ``named`` is no commit, when HEAD cannot be read (a named baseline
+    reads none), when the merge-base against ``integration`` cannot be read, or when that
+    merge-base is HEAD itself.
     """
     if named:
         return _commit("--baseline", named), f"named by the caller as {named}"
 
     uncommitted = _uncommitted_paths()
+    head = git_output("rev-parse", "HEAD").strip()
     if set(uncommitted) - _test_side(uncommitted):
-        return (
-            git_output("rev-parse", "HEAD").strip(),
-            "HEAD, because the change under test is uncommitted",
-        )
+        return head, "HEAD, because the change under test is uncommitted"
 
     try:
-        head = git_output("rev-parse", "HEAD").strip()
         base = git_output("merge-base", "HEAD", integration).strip()
     except RefusalError as refusal:
         raise RefusalError(
@@ -558,71 +562,31 @@ def _changed_source_files(
     return changed, how
 
 
-def _snapshot_via_temporary_index(head: str, index_path: Path) -> str | None:
-    """Build the snapshot commit through a scratch index; ``None`` if this form fails here."""
+SNAPSHOT_MESSAGE = "prove_test_fails_before.py working-tree snapshot"
+
+
+def _snapshot_via_temporary_index(head: str, index_path: Path) -> str:
+    """Build the snapshot commit through a scratch index and return its hash.
+
+    :class:`RefusalError` naming the command and git's error when any of git's commands fails.
+    """
     env = {**os.environ, "GIT_INDEX_FILE": str(index_path)}
-    read = subprocess.run(
-        ["git", "read-tree", head],
-        cwd=REPO,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    if read.returncode != 0:
-        return None
-    added = subprocess.run(
-        ["git", "add", "-A"], cwd=REPO, env=env, capture_output=True, text=True
-    )
-    if added.returncode != 0:
-        return None
-    tree = subprocess.run(
-        ["git", "write-tree"],
-        cwd=REPO,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    if tree.returncode != 0 or not tree.stdout.strip():
-        return None
-    commit = subprocess.run(
-        [
-            "git",
-            "commit-tree",
-            tree.stdout.strip(),
-            "-p",
-            head,
-            "-m",
-            "prove_test_fails_before.py working-tree snapshot",
-        ],
-        cwd=REPO,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    if commit.returncode != 0 or not commit.stdout.strip():
-        return None
-    return commit.stdout.strip()
+    git_output("read-tree", head, env=env)
+    git_output("add", "-A", env=env)
+    tree = git_output("write-tree", env=env).strip()
+    return git_output(
+        "commit-tree", tree, "-p", head, "-m", SNAPSHOT_MESSAGE, env=env
+    ).strip()
 
 
 def _snapshot_via_stash_create() -> str | None:
     """Snapshot through ``git stash create``; ``None`` when it produces nothing.
 
     The fallback when the temporary-index form fails here: covers tracked changes only, and
-    touches neither the tree, the index, nor the stash list.
+    touches neither the tree, the index, nor the stash list. :class:`RefusalError` naming the
+    command and git's error when git exits non-zero.
     """
-    out = subprocess.run(
-        [
-            "git",
-            "stash",
-            "create",
-            "prove_test_fails_before.py working-tree snapshot",
-        ],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-    )
-    hashed = out.stdout.strip()
-    return hashed or None
+    return git_output("stash", "create", SNAPSHOT_MESSAGE).strip() or None
 
 
 def snapshot_working_tree() -> tuple[str, str]:
@@ -630,20 +594,30 @@ def snapshot_working_tree() -> tuple[str, str]:
 
     It holds tracked modifications and untracked files, ignored files excluded. Returns
     ``(commit_hash, method)``. Touches neither the working tree, the real index, nor the stash
-    list. :class:`RefusalError` when HEAD cannot be read or neither form makes a commit.
+    list. :class:`RefusalError` when HEAD cannot be read, or when neither form makes a commit,
+    naming what each form reported.
     """
     with tempfile.TemporaryDirectory(prefix="failbefore-index-") as scratch:
         head = git_output("rev-parse", "HEAD").strip()
-        commit = _snapshot_via_temporary_index(head, Path(scratch) / "index")
-        if commit:
+        try:
+            commit = _snapshot_via_temporary_index(
+                head, Path(scratch) / "index"
+            )
+        except RefusalError as refusal:
+            index_refusal = refusal
+        else:
             return commit, "temporary index (git add -A, git write-tree)"
-    commit = _snapshot_via_stash_create()
-    if commit:
-        return commit, "git stash create (tracked changes only)"
+    try:
+        stash_commit = _snapshot_via_stash_create()
+    except RefusalError as refusal:
+        stash_outcome = str(refusal)
+    else:
+        if stash_commit:
+            return stash_commit, "git stash create (tracked changes only)"
+        stash_outcome = "git stash create made nothing"
     raise RefusalError(
-        "could not snapshot the working tree: the temporary-index form failed here and git "
-        "stash create produced nothing, most likely because there are no tracked changes to stash"
-    )
+        f"could not snapshot the working tree: {index_refusal}; then {stash_outcome}"
+    ) from index_refusal
 
 
 def materialize(rev: str, dest: Path) -> None:
