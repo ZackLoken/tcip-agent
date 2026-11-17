@@ -25,7 +25,8 @@ commit with the fix and the guard test) and run the real script against it. They
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
   rule failing, answering with something that is not JSON, or answering with something that is not
-  a list of one boolean for each path asked.
+  a list of one boolean for each path asked; and an installed vitest whose manifest cannot be read
+  or decoded or has no ``bin`` entry for vitest, in a scratch frontend whose install is its own.
 """
 
 from __future__ import annotations
@@ -2776,3 +2777,56 @@ def test_a_test_file_rule_answer_that_is_no_list_of_one_boolean_per_path_is_refu
         f"{TEST_FILE_RULE} answered {answer_echoed}, not a list of one true or false"
         in _why(result)
     )
+
+
+def _frontend_with_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest: str
+) -> tuple[Path, str, Path]:
+    """Build a scratch repository holding the widget test and an installed vitest of ``manifest``.
+
+    The scratch frontend's own ``node_modules`` holds nothing else, so no run reaches this
+    checkout's install. Returns the repository, the baseline revision and the manifest's path.
+    """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo = scratch_repo(tmp_path)
+    frontend = _scratch_frontend(repo)
+    manifest_path = frontend / "node_modules" / "vitest" / "package.json"
+    manifest_path.parent.mkdir(parents=True)
+    write(manifest_path, manifest)
+    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    return repo, baseline, manifest_path
+
+
+@pytest.mark.parametrize(
+    ("manifest", "what_did_not_read"),
+    [
+        pytest.param(
+            "{not json", "could not be read or decoded", id="no_json"
+        ),
+        pytest.param(
+            '{"name": "vitest"}', "holds no bin entry for vitest", id="no_bin"
+        ),
+        pytest.param(
+            '{"bin": {"vite": "vite.mjs"}}',
+            "holds no bin entry for vitest",
+            id="a_bin_without_vitest",
+        ),
+        pytest.param("[]", "holds no bin entry for vitest", id="no_object"),
+    ],
+)
+def test_an_installed_vitest_manifest_that_does_not_read_is_refused_naming_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: str,
+    what_did_not_read: str,
+) -> None:
+    repo, baseline, manifest_path = _frontend_with_manifest(
+        tmp_path, monkeypatch, manifest
+    )
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert str(manifest_path.resolve()) in why
+    assert what_did_not_read in why
