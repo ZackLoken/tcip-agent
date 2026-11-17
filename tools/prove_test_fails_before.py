@@ -862,13 +862,13 @@ def _vitest_entry(manifest: Path) -> str:
     where the validation stopped reading.
     """
     try:
-        text = manifest.read_bytes()
+        raw = manifest.read_bytes()
     except OSError as error:
         raise RefusalError(
             f"the installed vitest's manifest {manifest} could not be read: {error}"
         ) from error
     try:
-        return VITEST_MANIFEST.validate_json(text)["bin"]["vitest"]
+        return VITEST_MANIFEST.validate_json(raw)["bin"]["vitest"]
     except ValidationError as error:
         raise RefusalError(
             f"the installed vitest's manifest {manifest} is not an object whose bin holds a "

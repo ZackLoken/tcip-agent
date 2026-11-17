@@ -2923,8 +2923,8 @@ def test_a_test_file_rule_answer_printed_over_several_lines_is_refused_on_one_li
 ) -> None:
     """An answer of the right length with items that are no booleans stays on the verdict line.
 
-    The line ends with the count the sentence ends on, so the answer's own line breaks did not
-    carry the sentence onto the lines after it.
+    The line holds the sentence through its count and the validation's errors after it, so the
+    answer's own line breaks did not carry the sentence onto the lines after it.
     """
     repo, baseline = _rule_printing(
         tmp_path, 'paths.map(() => "yes")', indent=2
