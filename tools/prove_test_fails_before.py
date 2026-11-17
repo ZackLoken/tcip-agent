@@ -468,9 +468,7 @@ def _test_side(paths: Iterable[str]) -> set[str]:
             f"the frontend's test file rule {TEST_FILE_RULE} answered {json.dumps(answer)}, not "
             f"a list of one true or false for each path it was asked about ({len(frontend)})"
         )
-    return side | {
-        path for path, is_test in zip(frontend, answer, strict=True) if is_test
-    }
+    return side | {path for path, is_test in zip(frontend, answer) if is_test}
 
 
 @functools.cache
