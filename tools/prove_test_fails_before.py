@@ -54,8 +54,9 @@ Four verdicts, each its own exit code:
                        not on the path where a frontend path is to be judged, the frontend's test
                        file rule failed or answered with anything but a JSON list of one boolean
                        for each path it was asked about, the frontend has no
-                       install, an installed vitest whose manifest cannot be read or decoded or
-                       has no ``bin`` entry for vitest, the link to the install cannot be made, or
+                       install, an installed vitest whose manifest cannot be read or is not an
+                       object whose ``bin`` holds a string for ``vitest``, the link to the
+                       install cannot be made, or
                        no failure is behavioral (each is ``unreached``, ``fixture`` or
                        ``test_code``), so no behavior was compared. A setup or teardown failure
                        that is neither a missing import or file nor a timeout is ``fixture``,
@@ -838,25 +839,41 @@ def link_install(tree: Path) -> Path:
     return link
 
 
+class VitestBins(TypedDict):
+    """The ``bin`` object of the installed vitest's manifest, as far as the tool reads it."""
+
+    vitest: str
+
+
+class VitestManifest(TypedDict):
+    """The installed vitest's ``package.json``, as far as the tool reads it."""
+
+    bin: VitestBins
+
+
+VITEST_MANIFEST = TypeAdapter(VitestManifest)
+
+
 def _vitest_entry(manifest: Path) -> str:
     """Return the ``bin`` entry for vitest in the package manifest at ``manifest``.
 
-    :class:`RefusalError` naming ``manifest`` when it cannot be read or decoded, or when it is not
-    an object with a ``bin`` object holding a string for ``vitest``.
+    :class:`RefusalError` naming ``manifest`` when it cannot be read, or when its bytes are not
+    JSON for an object with a ``bin`` object holding a string for ``vitest``, the refusal carrying
+    where the validation stopped reading.
     """
     try:
-        decoded = json.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        text = manifest.read_bytes()
+    except OSError as error:
         raise RefusalError(
-            f"the installed vitest's manifest {manifest} could not be read or decoded: {error}"
+            f"the installed vitest's manifest {manifest} could not be read: {error}"
         ) from error
-    bins = decoded.get("bin") if isinstance(decoded, dict) else None
-    entry = bins.get("vitest") if isinstance(bins, dict) else None
-    if not isinstance(entry, str):
+    try:
+        return VITEST_MANIFEST.validate_json(text)["bin"]["vitest"]
+    except ValidationError as error:
         raise RefusalError(
-            f"the installed vitest's manifest {manifest} holds no bin entry for vitest"
-        )
-    return entry
+            f"the installed vitest's manifest {manifest} is not an object whose bin holds a "
+            f"string for vitest: {_what_did_not_read(error)}"
+        ) from error
 
 
 def run_vitest_capturing_outcome(
@@ -873,7 +890,8 @@ def run_vitest_capturing_outcome(
     ``expr`` as its test name pattern. Its results cache is off and its configuration is loaded
     without a bundled copy, since each would be written under the tree's ``node_modules``, the
     link into the install. The observation is None if it reported none. :class:`RefusalError` when
-    the installed vitest's manifest cannot be read or decoded or has no ``bin`` entry for vitest.
+    the installed vitest's manifest cannot be read or is not an object whose ``bin`` holds a string
+    for ``vitest``.
     """
     manifest = _vitest_manifest()
     entry = _vitest_entry(manifest)
