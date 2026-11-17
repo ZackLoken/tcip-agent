@@ -118,11 +118,16 @@ def _double_repo(repo: Path, test_source: str = DOUBLE_GUARD) -> str:
     return baseline
 
 
+def _temporary_folder(tmp_path: Path) -> Path:
+    """Return the folder under ``tmp_path`` the tool's temporary folder is redirected to."""
+    return tmp_path / "t"
+
+
 def _redirect_temporary_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Path:
     """Point the tool's temporary folder at a new folder under ``tmp_path`` and return it."""
-    scratch_root = tmp_path / "t"
+    scratch_root = _temporary_folder(tmp_path)
     scratch_root.mkdir()
     for name in ("TMPDIR", "TEMP", "TMP"):
         monkeypatch.setenv(name, str(scratch_root))
@@ -1991,7 +1996,7 @@ def test_a_scratch_directory_that_cannot_be_removed_is_named_on_standard_error(
         deadline = time.monotonic() + 60
         while not (hold / "done").exists() and time.monotonic() < deadline:
             time.sleep(0.05)
-        for leftover in (tmp_path / "t").glob("failbefore-*"):
+        for leftover in _temporary_folder(tmp_path).glob("failbefore-*"):
             shutil.rmtree(leftover)
 
 
@@ -2583,7 +2588,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
         DOUBLE + "\nexport const TRIPLE = 3;\n",
         VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS,
     )
-    scratch_root = linked_repo.parent / "t"
+    scratch_root = _temporary_folder(linked_repo.parent)
 
     try:
         result = _run(linked_repo, WIDGET_TEST, baseline)
