@@ -56,10 +56,12 @@ from tools.prove_test_fails_before import (
     EXIT,
     INSTALL,
     OUTCOME_ENV,
+    REPO,
     TEST_FILE_RULE,
     TOOL_FAILURE,
     RefusalError,
     _failure_kind,
+    _vitest_manifest,
     require_installed_vitest,
 )
 
@@ -2084,6 +2086,11 @@ WIDGET_TEST = f"{FRONTEND_PATH}/src/widget.test.ts"
 VITEST_CONFIG = f"{FRONTEND_PATH}/vitest.config.mjs"
 
 
+def _scratch_vitest_manifest(repo: Path) -> Path:
+    """Return where the tool's copy in ``repo`` looks for the installed vitest's manifest."""
+    return repo / _vitest_manifest().relative_to(REPO)
+
+
 def _scratch_frontend(repo: Path) -> Path:
     """Give ``repo`` a frontend at the real frontend's path; return its directory.
 
@@ -2212,7 +2219,7 @@ def test_a_vitest_assertion_failing_at_the_baseline_guards_and_leaves_the_instal
     assert result.returncode == EXIT["GUARDS"], result.stdout + result.stderr
     assert "GUARDS" in result.stdout
     assert "[behavioral]" in result.stdout
-    assert (install / "vitest" / "package.json").is_file()
+    assert _scratch_vitest_manifest(linked_repo).is_file()
     assert sorted(entry.name for entry in install.iterdir()) == entries_before
 
 
@@ -2874,9 +2881,7 @@ def _frontend_with_manifest(
     """
     _redirect_temporary_folder(tmp_path, monkeypatch)
     repo, baseline = _scratch_widget_repo(tmp_path)
-    manifest_path = (
-        repo / FRONTEND_PATH / "node_modules" / "vitest" / "package.json"
-    )
+    manifest_path = _scratch_vitest_manifest(repo)
     manifest_path.parent.mkdir(parents=True)
     write(manifest_path, manifest)
     return repo, baseline, manifest_path
