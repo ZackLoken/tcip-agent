@@ -52,8 +52,9 @@ Four verdicts, each its own exit code:
                        runner did not finish within ``--timeout``, hit an internal or unhandled
                        error, never reported an outcome or wrote one that is not JSON, ``node`` is
                        not on the path where a frontend path is to be judged, the frontend's test
-                       file rule failed or answered with something that is not JSON, the frontend
-                       has no install or the link to it cannot be made, or no failure is
+                       file rule failed or answered with something that is not JSON or not a list
+                       of one boolean for each path it was asked about, the frontend has no
+                       install or the link to it cannot be made, or no failure is
                        behavioral (each is ``unreached``, ``fixture`` or ``test_code``), so no
                        behavior was compared. A setup or teardown failure that is neither a
                        missing import or file nor a timeout is ``fixture``, whatever raised it;
@@ -431,8 +432,8 @@ def _test_side(paths: Iterable[str]) -> set[str]:
     The test side is every path under ``tests/`` and every path under the frontend that its own
     rule, ``TEST_FILE_RULE`` run under ``node``, calls a test file. The tool overlays the test side
     from the tree the test comes from, so a diff in it is not the change under test. ``node`` is
-    started only when a path lies under the frontend; :class:`RefusalError` when the rule fails or
-    its answer is not JSON.
+    started only when a path lies under the frontend; :class:`RefusalError` when the rule fails,
+    its answer is not JSON, or its answer is not a list of one boolean for each frontend path.
     """
     wanted = set(paths)
     side = {p for p in wanted if p.startswith(f"{TEST_TREE}/")}
@@ -456,8 +457,18 @@ def _test_side(paths: Iterable[str]) -> set[str]:
         raise RefusalError(
             f"the frontend's test file rule {TEST_FILE_RULE} answered with no JSON: {error}"
         ) from error
-    judged = zip(frontend, answer, strict=True)
-    return side | {path for path, is_test in judged if is_test}
+    if (
+        not isinstance(answer, list)
+        or len(answer) != len(frontend)
+        or not all(isinstance(is_test, bool) for is_test in answer)
+    ):
+        raise RefusalError(
+            f"the frontend's test file rule {TEST_FILE_RULE} answered {json.dumps(answer)}, not "
+            f"a list of one true or false for each path it was asked about ({len(frontend)})"
+        )
+    return side | {
+        path for path, is_test in zip(frontend, answer, strict=True) if is_test
+    }
 
 
 @functools.cache

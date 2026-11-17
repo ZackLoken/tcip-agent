@@ -24,7 +24,8 @@ commit with the fix and the guard test) and run the real script against it. They
   test counted as the test side of a pytest run;
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
-  rule failing or answering with something that is not JSON.
+  rule failing, answering with something that is not JSON, or answering with something that is not
+  a list of one boolean for each path asked.
 """
 
 from __future__ import annotations
@@ -2737,3 +2738,41 @@ def test_a_test_file_rule_answering_with_no_json_is_refused(
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
     assert f"{TEST_FILE_RULE} answered with no JSON" in _why(result)
+
+
+@pytest.mark.parametrize(
+    ("answer_expression", "answer_echoed"),
+    [
+        pytest.param("[]", "[]", id="a_shorter_list"),
+        pytest.param("[true, true]", "[true, true]", id="a_longer_list"),
+        pytest.param('"x"', '"x"', id="a_string_as_long_as_the_paths"),
+        pytest.param("true", "true", id="a_scalar"),
+        pytest.param(
+            'paths.map(() => "yes")',
+            '["yes"]',
+            id="a_list_of_the_length_without_booleans",
+        ),
+    ],
+)
+def test_a_test_file_rule_answer_that_is_no_list_of_one_boolean_per_path_is_refused(
+    tmp_path: Path, answer_expression: str, answer_echoed: str
+) -> None:
+    """Any answer but a list of one boolean per path is refused, naming the rule and the answer.
+
+    The rule answers each call from the paths it is given, so an answer of the right length
+    is refused for its items on the first path judged, not for its length on a later call.
+    """
+    repo, baseline = _frontend_with_rule(
+        tmp_path,
+        'import { readFileSync } from "node:fs";\n'
+        'const paths = JSON.parse(readFileSync(0, "utf8"));\n'
+        f"process.stdout.write(JSON.stringify({answer_expression}));\n",
+    )
+
+    result = _run(repo, WIDGET_TEST, baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    assert (
+        f"{TEST_FILE_RULE} answered {answer_echoed}, not a list of one true or false"
+        in _why(result)
+    )
