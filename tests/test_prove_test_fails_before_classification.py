@@ -2069,7 +2069,7 @@ def test_linked_repo_refuses_in_its_setup_when_the_install_holds_no_vitest(
     with pytest.raises(RefusalError, match="npm ci"):
         request.getfixturevalue("linked_repo")
 
-    assert not (tmp_path / "scratch").exists()
+    assert not any(tmp_path.iterdir())
 
 
 def _widget_repo(
@@ -2579,7 +2579,7 @@ VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS = (
     reason="only Windows refuses to delete a file another process holds open",
 )
 def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
-    linked_repo: Path, monkeypatch: pytest.MonkeyPatch
+    linked_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A vitest run's scratch directory the tool cannot remove is left holding no link.
 
@@ -2588,7 +2588,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
     install is gone all the same, since the tool removes it first. This test releases the process
     and removes the directory left behind.
     """
-    hold = linked_repo.parent / "hold"
+    hold = tmp_path / "hold"
     hold.mkdir()
     write(hold / "holder.py", FILE_HOLDER)
     monkeypatch.setenv("FILE_HOLD_DIR", str(hold))
@@ -2599,7 +2599,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
         DOUBLE + "\nexport const TRIPLE = 3;\n",
         VITEST_TEST_LEAVING_A_FILE_A_PROCESS_HOLDS,
     )
-    scratch_root = _temporary_folder(linked_repo.parent)
+    scratch_root = _temporary_folder(tmp_path)
 
     try:
         result = _run(linked_repo, WIDGET_TEST, baseline)
