@@ -98,10 +98,11 @@ def fetch_issue(issue: int) -> str:
 
 
 def _header_words(header: re.Match[str]) -> str:
-    """Return the header's text from ``Premises, read at`` through its commits, on one line.
+    """Return the header's text from ``Premises, read at`` through its ``refs`` group, on one line.
 
-    Each run of whitespace, a line break included, is one space; the terminating colon or period
-    and any prose after it are left out.
+    The ``refs`` group is whatever stands between ``read at`` and the terminating colon or period:
+    the commits and any words around them, or nothing that is a commit. Each run of whitespace, a
+    line break included, is one space; the terminator and any prose after it are left out.
     """
     return " ".join(header.string[header.start() : header.end("refs")].split())
 
