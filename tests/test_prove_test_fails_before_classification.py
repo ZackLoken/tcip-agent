@@ -2104,6 +2104,17 @@ NO_OP_DOUBLE = "export function double(x: number): number {\n  return x;\n}\n"
 DOUBLE = "export function double(x: number): number {\n  return x * 2;\n}\n"
 
 
+def _scratch_widget_repo(tmp_path: Path) -> tuple[Path, str]:
+    """Build a scratch repository with a frontend of no install and the widget test's commits.
+
+    The baseline's ``double`` is a no-op, the head fixes it and adds ``DOUBLE_TEST``. Returns the
+    repository and the baseline revision.
+    """
+    repo = scratch_repo(tmp_path)
+    _scratch_frontend(repo)
+    return repo, _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+
+
 def test_a_vitest_assertion_failing_at_the_baseline_guards_and_leaves_the_install_alone(
     linked_repo: Path,
 ) -> None:
@@ -2224,9 +2235,7 @@ def test_a_vitest_file_with_no_install_is_refused_naming_the_install_command(
     tmp_path: Path,
 ) -> None:
     """A frontend with no installed packages is refused, naming the command that installs them."""
-    repo = scratch_repo(tmp_path)
-    _scratch_frontend(repo)
-    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    repo, baseline = _scratch_widget_repo(tmp_path)
 
     result = _run(repo, WIDGET_TEST, baseline)
 
@@ -2655,9 +2664,7 @@ def test_a_vitest_file_with_no_node_on_the_path_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A frontend test file is judged by the frontend's rule under ``node``, which is absent."""
-    repo = scratch_repo(tmp_path)
-    _scratch_frontend(repo)
-    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    repo, baseline = _scratch_widget_repo(tmp_path)
     _leave_only_git_on_the_path(monkeypatch)
 
     result = _run(repo, WIDGET_TEST, baseline)
@@ -2707,9 +2714,7 @@ def _frontend_with_rule(tmp_path: Path, rule: str) -> tuple[Path, str]:
     The replacement is left uncommitted, where the tool runs it. Returns the repository and the
     baseline revision.
     """
-    repo = scratch_repo(tmp_path)
-    _scratch_frontend(repo)
-    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
+    repo, baseline = _scratch_widget_repo(tmp_path)
     write(repo / TEST_FILE_RULE, rule)
     return repo, baseline
 
@@ -2788,12 +2793,12 @@ def _frontend_with_manifest(
     checkout's install. Returns the repository, the baseline revision and the manifest's path.
     """
     _redirect_temporary_folder(tmp_path, monkeypatch)
-    repo = scratch_repo(tmp_path)
-    frontend = _scratch_frontend(repo)
-    manifest_path = frontend / "node_modules" / "vitest" / "package.json"
+    repo, baseline = _scratch_widget_repo(tmp_path)
+    manifest_path = (
+        repo / FRONTEND_PATH / "node_modules" / "vitest" / "package.json"
+    )
     manifest_path.parent.mkdir(parents=True)
     write(manifest_path, manifest)
-    baseline = _widget_repo(repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
     return repo, baseline, manifest_path
 
 
