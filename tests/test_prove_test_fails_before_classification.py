@@ -2092,6 +2092,11 @@ def _scratch_vitest_manifest(repo: Path) -> Path:
     return repo / _vitest_manifest().relative_to(REPO)
 
 
+def _scratch_install(repo: Path) -> Path:
+    """Return where the tool's copy in ``repo`` looks for the frontend's installed packages."""
+    return repo / INSTALL.relative_to(REPO)
+
+
 def _scratch_frontend(repo: Path) -> Path:
     """Give ``repo`` a frontend at the real frontend's path; return its directory.
 
@@ -2105,7 +2110,7 @@ def _scratch_frontend(repo: Path) -> Path:
     write(frontend / "package.json", '{"type": "module"}\n')
     write(repo / VITEST_CONFIG, "export default {};\n")
     (frontend / "src").mkdir()
-    write(repo / ".git" / "info" / "exclude", "node_modules\n")
+    write(repo / ".git" / "info" / "exclude", f"{INSTALL.name}\n")
     return frontend
 
 
@@ -2125,7 +2130,8 @@ def linked_repo(
     require_installed_vitest()
     scratch_root = _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
-    install = _scratch_frontend(repo) / "node_modules"
+    _scratch_frontend(repo)
+    install = _scratch_install(repo)
     install.mkdir()
     try:
         for package in sorted(INSTALL.iterdir()):
@@ -2137,7 +2143,7 @@ def linked_repo(
     finally:
         try:
             for run in scratch_root.glob("failbefore-*"):
-                left = run / "tree" / FRONTEND_PATH / "node_modules"
+                left = _scratch_install(run / "tree")
                 if left.is_symlink():
                     left.unlink()
         finally:
@@ -2212,7 +2218,7 @@ def test_a_vitest_assertion_failing_at_the_baseline_guards_and_leaves_the_instal
     the run neither removed anything nor wrote a cache or a bundled configuration through the link.
     """
     baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
-    install = linked_repo / FRONTEND_PATH / "node_modules"
+    install = _scratch_install(linked_repo)
     entries_before = sorted(entry.name for entry in install.iterdir())
 
     result = _run(linked_repo, WIDGET_TEST, baseline, "-k", "double doubles")
@@ -2380,7 +2386,7 @@ def test_a_baseline_tree_already_holding_the_install_folder_is_refused_at_the_li
     The materialized tree holds that folder where the link to the install goes, so the link is
     refused with the system's error, which names the folder.
     """
-    install = linked_repo / FRONTEND_PATH / "node_modules"
+    install = _scratch_install(linked_repo)
     write(install / "tracked.txt", "tracked past the ignore\n")
     git(linked_repo, "add", "-f", str(install / "tracked.txt"))
     baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
@@ -2391,7 +2397,7 @@ def test_a_baseline_tree_already_holding_the_install_folder_is_refused_at_the_li
     why = _why(result)
     assert "the baseline tree's link to" in why
     assert "could not be made: [" in why
-    assert "node_modules'" in why.partition("could not be made: ")[2]
+    assert f"{INSTALL.name}'" in why.partition("could not be made: ")[2]
 
 
 def test_a_rejection_a_vitest_test_leaves_unhandled_is_refused_as_an_unhandled_error(
@@ -2712,9 +2718,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
             result.stdout + result.stderr
         )
         assert "held.txt" in result.stderr
-        assert not os.path.lexists(
-            left[0] / "tree" / FRONTEND_PATH / "node_modules"
-        )
+        assert not os.path.lexists(_scratch_install(left[0] / "tree"))
     finally:
         write(hold / "release", "")
         # The holder closes its file within one 0.05 s poll of the release; 60 s only bounds a hang.
@@ -2722,7 +2726,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
         while not (hold / "done").exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         for leftover in scratch_root.glob("failbefore-*"):
-            link = leftover / "tree" / FRONTEND_PATH / "node_modules"
+            link = _scratch_install(leftover / "tree")
             if link.is_symlink():
                 link.unlink()
             shutil.rmtree(leftover)
