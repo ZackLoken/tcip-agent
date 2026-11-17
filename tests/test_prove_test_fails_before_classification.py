@@ -25,8 +25,8 @@ commit with the fix and the guard test) and run the real script against it. They
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
   rule failing, answering with something that is not JSON, or answering with something that is not
-  a list of one boolean for each path asked; and an installed vitest whose manifest cannot be read
-  or decoded or has no ``bin`` entry for vitest, in a scratch frontend whose install is its own.
+  a list of one boolean for each path asked; and an installed vitest whose manifest cannot be
+  decoded or has no ``bin`` entry for vitest, in a scratch frontend whose install is its own.
 """
 
 from __future__ import annotations
