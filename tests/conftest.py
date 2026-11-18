@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import tests
+from tools import prove_test_fails_before
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,15 +80,15 @@ def pytest_collection_modifyitems(
 
 @pytest.fixture
 def frontend_install() -> None:
-    """Fail the test's setup when the frontend's install, ``tests.FRONTEND_INSTALL``, is no folder.
+    """Fail the test's setup when the fail-before tool's ``INSTALL`` is no folder.
 
     The failure names the missing folder and the command that installs it.
     """
-    if not tests.FRONTEND_INSTALL.is_dir():
+    install = prove_test_fails_before.INSTALL
+    if not install.is_dir():
         pytest.fail(
-            f"the frontend's install {tests.FRONTEND_INSTALL} is not a folder; run `npm ci` in "
-            f"{tests.FRONTEND.relative_to(tests.REPO_ROOT).as_posix()} of this checkout and run "
-            "again"
+            f"the frontend's install {install} is not a folder; run `npm ci` in "
+            f"{prove_test_fails_before.FRONTEND} of this checkout and run again"
         )
 
 

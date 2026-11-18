@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tools.prove_test_fails_before import INSTALL
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 """The repository this suite belongs to."""
 
@@ -67,9 +69,7 @@ FRONTEND_SRC = (
 )
 """The browser's sources, the directory the frontend's ``tsconfig.json`` includes first."""
 
-FRONTEND_INSTALL = FRONTEND / "node_modules"
-"""The frontend's installed packages, which its Node scripts and Prettier read."""
-PRETTIER = FRONTEND_INSTALL / "prettier" / "bin" / "prettier.cjs"
+PRETTIER = INSTALL / "prettier" / "bin" / "prettier.cjs"
 """The frontend's installed Prettier."""
 SCRIPTS = FRONTEND / "scripts"
 """The frontend's Node scripts, each printing one JSON object (:func:`printed_json`)."""

@@ -12,9 +12,9 @@ def test_the_frontend_install_fixture_fails_in_its_setup_naming_the_folder_and_t
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A suite install that is no folder fails the request, naming that folder and ``npm ci``."""
+    """An install that is no folder fails the request, naming that folder and ``npm ci``."""
     missing = tmp_path / "no_install"
-    monkeypatch.setattr("tests.FRONTEND_INSTALL", missing)
+    monkeypatch.setattr("tools.prove_test_fails_before.INSTALL", missing)
 
     with pytest.raises(pytest.fail.Exception) as refused:
         request.getfixturevalue("frontend_install")
