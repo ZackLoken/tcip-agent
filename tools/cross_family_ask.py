@@ -512,8 +512,9 @@ def checkout_commit(directory: pathlib.Path) -> str | None:
 
     A directory is in no checkout when neither it nor any parent holds a ``.git`` entry; that is
     read from the filesystem and runs no command. Inside a checkout the answer is
-    ``git rev-parse HEAD``'s, and any failure of that command raises :class:`CommitReadError`
-    carrying git's message, never None.
+    ``git rev-parse HEAD``'s, and any failure of that command raises :class:`CommitReadError`,
+    never None: carrying git's own message when git ran and exited nonzero, and the operating
+    system's error when git could not be started.
     """
     resolved = directory.resolve()
     if not any((d / ".git").exists() for d in (resolved, *resolved.parents)):
@@ -755,12 +756,14 @@ def run_one(
     response and ``meta.json``. The harness runs through :func:`launch_harness`, under a
     ``browser`` condition in ``tcip_web.terminal.inherited_env``'s environment. Refuses what
     :func:`refuse_unsupported` refuses before anything is written or launched. Inside a checkout
-    the commit is read before the launch, and a failed read raises :class:`CommitReadError` with
-    no harness started; the record's ``commit_at_start`` and ``commit_at_end`` are None for a
-    directory in no checkout, and a failed read after the launch is kept in ``commit_read_error``.
+    the commit is read next, and a failed read raises :class:`CommitReadError` with nothing
+    written and no harness started; the record's ``commit_at_start`` and ``commit_at_end`` are
+    None for a directory in no checkout, and a failed read after the launch is kept in
+    ``commit_read_error``.
     """
     family = launch.family
     refuse_unsupported(condition_name, family, cwd)
+    commit_at_start = checkout_commit(cwd)
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
     # A prior meta.json here is this family's own earlier run under the same question and condition.
@@ -793,7 +796,6 @@ def run_one(
         from tcip_web.terminal import inherited_env
 
         env = inherited_env()
-    commit_at_start = checkout_commit(cwd)
     started = now()
     clock = datetime.datetime.now()
     stdout: str | bytes

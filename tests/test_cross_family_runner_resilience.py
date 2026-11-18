@@ -1848,11 +1848,6 @@ def _stand_in_harness(
     monkeypatch.setattr(
         cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
-    monkeypatch.setitem(
-        cross_family_ask.BUILDERS,
-        "codex",
-        lambda *a, **k: (["stub", "argv"], None),
-    )
 
 
 def _run_codex_in(cwd: Path, out: Path) -> dict:
@@ -2025,7 +2020,10 @@ def test_a_checkout_whose_commit_cannot_be_read_after_the_run_keeps_the_record_a
 def test_a_checkout_whose_commit_cannot_be_read_refuses_the_run_before_the_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A repository with no commit refuses the run with git's message and starts no harness."""
+    """A repository with no commit refuses the run with git's message and writes nothing.
+
+    No harness is started.
+    """
     repo = scratch_repo(tmp_path)
     git_says = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -2043,6 +2041,7 @@ def test_a_checkout_whose_commit_cannot_be_read_refuses_the_run_before_the_launc
 
     assert type(raised.value) is cross_family_ask.CommitReadError
     assert seen == []
+    assert not (tmp_path / "out").exists()
 
 
 def test_a_directory_in_no_checkout_records_no_commit_and_runs_no_git(
