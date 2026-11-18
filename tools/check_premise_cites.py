@@ -5,13 +5,13 @@
 The issue's body and comments are read with ``gh issue view``. A premise block (a premise half, a
 supplement, a half read again) opens at a line ``Premises, read at <commit>:``, whose header names
 one or more commits, each optionally preceded by a repository label, and ends at its colon or at a
-period followed by whitespace. The header's commits may run onto one next line that is neither
-blank nor a bullet. The block continues as the contiguous bullet list that begins on the line
-after the header's own last line, an indented line continuing the bullet before it. Each block
-is checked against the commits its own header names. A premise's repository is its ``[<label>]``
-prefix, or the only one the header names. The unlabeled repository is the checkout the script runs
-from; a labeled one is the path its ``--checkout`` names, and a label with none is a failing
-premise.
+period followed by whitespace. The header's commits may continue onto the next line, which then
+begins with a commit, labeled or not. The block continues as the contiguous bullet list that
+begins on the line after the header's own last line, an indented line continuing the bullet before
+it. Each block is checked against the commits its own header names. A premise's repository is its
+``[<label>]`` prefix, or the only one the header names. The unlabeled repository is the checkout
+the script runs from; a labeled one is the path its ``--checkout`` names, and a label with none is
+a failing premise.
 
 Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>`` with ``at`` lowercase or
 capitalized, is read with ``git show <commit>:<path>``. It fails when the path is absent at the
@@ -35,14 +35,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-HEADER = re.compile(
-    r"^Premises, read at\s+"
-    r"(?P<refs>[^:\n]*?(?:\n(?![-*] )(?=[ \t]*\S)[^:\n]*?)?)"
-    r"(?::|\.(?=\s|$))",
-    re.IGNORECASE | re.MULTILINE,
-)
 REPOSITORY_COMMIT = re.compile(
     r"(?:\b(?!and\b)(?P<label>[A-Za-z][\w-]*)\s+)?\b(?P<commit>[0-9a-f]{7,40})\b"
+)
+HEADER = re.compile(
+    r"^Premises, read at\s+"
+    rf"(?P<refs>[^:\n]*?(?:\n[ \t]*(?-i:{REPOSITORY_COMMIT.pattern})[^:\n]*?)?)"
+    r"(?::|\.(?=\s|$))",
+    re.IGNORECASE | re.MULTILINE,
 )
 PREMISE_LABEL = re.compile(r"^[-*]\s+\[(?P<label>[^\]]+)\]")
 CITE = re.compile(

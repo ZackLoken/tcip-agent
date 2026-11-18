@@ -466,12 +466,22 @@ def test_a_header_continued_onto_a_second_line_opens_a_checked_block(
     assert exit_code == 1
 
 
-def test_an_unterminated_header_line_followed_by_a_bullet_opens_no_block(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    "premise",
+    [
+        "- at b.txt:9 the file says `two`.",
+        "  - at b.txt:9 the file says `two`.",
+        "-at b.txt:9 the file says `two`.",
+        "1. at b.txt:9 the file says `two`.",
+    ],
+)
+def test_an_unterminated_header_line_followed_by_a_premise_opens_no_block(
+    premise: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repo, commit = _repository(tmp_path)
     text = (
-        f"Premises, read at repo {commit}\n- at b.txt:9 the file says `two`.\n"
+        f"Premises, read at repo {commit}\n{premise}\n"
+        "- at a.py:3 returns `beta_value`.\n"
     )
 
     exit_code = cites.main(
