@@ -6,14 +6,16 @@ export function entriesSaying(text: string): NotificationEntry[] {
   return useStore.getState().notifications.filter((e) => textOf(e) === text);
 }
 
-/** Every text the live region `region` has been given since it began being watched. */
+/** Every text the live region `region` has been given since it began being watched: each node
+ *  added to it, and each text rewritten in place. */
 export function announcements(region: HTMLElement): string[] {
   const told: string[] = [];
   new MutationObserver((records) => {
     for (const record of records) {
+      if (record.type === "characterData") told.push(record.target.textContent ?? "");
       record.addedNodes.forEach((node) => told.push(node.textContent ?? ""));
     }
-  }).observe(region, { childList: true, subtree: true });
+  }).observe(region, { childList: true, subtree: true, characterData: true });
   return told;
 }
 
