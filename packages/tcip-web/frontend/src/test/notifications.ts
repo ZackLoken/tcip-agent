@@ -6,6 +6,17 @@ export function entriesSaying(text: string): NotificationEntry[] {
   return useStore.getState().notifications.filter((e) => textOf(e) === text);
 }
 
+/** Every text the live region `region` has been given since it began being watched. */
+export function announcements(region: HTMLElement): string[] {
+  const told: string[] = [];
+  new MutationObserver((records) => {
+    for (const record of records) {
+      record.addedNodes.forEach((node) => told.push(node.textContent ?? ""));
+    }
+  }).observe(region, { childList: true, subtree: true });
+  return told;
+}
+
 /** The sentence of the listed entry `condition`'s current occurrence raised, null while the
  *  condition does not hold or its entry was dismissed. */
 export function holdingSentence(condition: ConditionName): string | null {

@@ -13,6 +13,7 @@ import {
 import { dismissLabel } from "@/lib/dismissLabel";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
+import { announcements } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS } from "@/test/sessions";
 import { PRODUCED_ENVELOPE, openTestProject } from "@/test/store";
@@ -41,17 +42,6 @@ function renderOpenHost() {
       <NotificationsLiveRegion />
     </StrictMode>,
   );
-}
-
-/** Every text the assertive live region has been given since `region` began being watched. */
-function announcements(region: HTMLElement): string[] {
-  const told: string[] = [];
-  new MutationObserver((records) => {
-    for (const record of records) {
-      record.addedNodes.forEach((node) => told.push(node.textContent ?? ""));
-    }
-  }).observe(region, { childList: true, subtree: true });
-  return told;
 }
 
 async function flush() {
