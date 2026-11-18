@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tools import prove_test_fails_before
-
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -84,6 +82,8 @@ def frontend_install() -> None:
 
     The failure names the missing folder and the command that installs it.
     """
+    from tools import prove_test_fails_before
+
     install = prove_test_fails_before.INSTALL
     if not install.is_dir():
         pytest.fail(
