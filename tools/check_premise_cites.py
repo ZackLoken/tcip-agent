@@ -13,14 +13,15 @@ prefix, or the only one the header names. The unlabeled repository is the checko
 from; a labeled one is the path its ``--checkout`` names, and a label with none is a failing
 premise.
 
-Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>``, is read with
-``git show <commit>:<path>``. It fails when the path is absent at the commit or the range is past
-the file. Lines are counted on newline bytes alone, as git counts them. A premise whose backticked
-spans hold identifier tokens fails when none of them appears in the union of its cited ranges. A
-premise with no cite in the writer's form fails. Prints PASS with the number of blocks checked and
-the rule it applied, or each failing premise and FAIL, and exits 1 on FAIL or when any premise
-block cannot be read. A failing premise and a block's refusal are each printed after the block's
-name: its place among the issue's headers, their count and the header's words.
+Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>`` with ``at`` lowercase or
+capitalized, is read with ``git show <commit>:<path>``. It fails when the path is absent at the
+commit or the range is past the file. Lines are counted on newline bytes alone, as git counts them.
+A premise whose backticked spans hold identifier tokens fails when none of them appears in the
+union of its cited ranges. A premise with no cite in the writer's form fails. Prints PASS with the
+number of blocks checked and the rule it applied, or each failing premise and FAIL, and exits 1 on
+FAIL or when any premise block cannot be read. A failing premise and a block's refusal are each
+printed after the block's name: its place among the issue's headers, their count and the header's
+words.
 """
 
 from __future__ import annotations
@@ -45,7 +46,7 @@ REPOSITORY_COMMIT = re.compile(
 )
 PREMISE_LABEL = re.compile(r"^[-*]\s+\[(?P<label>[^\]]+)\]")
 CITE = re.compile(
-    r"\bat\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
+    r"\b[Aa]t\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
 )
 PASS_LINE = (
     "PASS: {blocks} checked; each premise has one or more cites in the writer's form and every "
@@ -168,7 +169,7 @@ def parse_premise_blocks(text: str) -> list[PremiseBlock]:
 
 
 def parse_cites(line: str) -> list[Cite]:
-    """Return each ``at <path>:<a>[-<b>]`` cite in ``line``.
+    """Return each ``at <path>:<a>[-<b>]`` cite in ``line``, ``at`` lowercase or capitalized.
 
     A bare ``:12`` or a basename without ``at`` is not one.
     """

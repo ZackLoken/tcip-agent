@@ -483,6 +483,24 @@ def test_an_unterminated_header_line_followed_by_a_bullet_opens_no_block(
     assert exit_code == 1
 
 
+def test_a_capitalized_cite_is_resolved_like_a_lowercase_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    text = (
+        f"Premises, read at repo {commit}:\n"
+        "- at a.py:3 returns `beta_value`. At b.txt:9 the file says `two`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out
+    assert "b.txt:9-9 is outside the file (3 lines)" in out
+    assert exit_code == 1
+
+
 def test_a_superseded_block_is_not_read(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
