@@ -7,7 +7,8 @@ commit with the fix and the guard test) and run the real script against it. They
   apart from one at the guard's own assertion;
 - ``--test-rev``, over a third revision that removes the test;
 - ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched,
-  and its refusal beside ``--baseline``, with no commit to snapshot, or when neither form makes one;
+  and its refusal beside ``--baseline``, with no commit to snapshot, or where git cannot stage the
+  working tree;
 - a command line naming no test file and a ``--test-rev`` naming no revision, each refused, and an
   exception the tool does not name, which exits with the tool's own failure code;
 - the test file's place and the tree it comes from, each way the baseline is chosen or refused,
@@ -789,13 +790,15 @@ def _snapshot(repo: Path, test_file: str) -> subprocess.CompletedProcess:
 
 
 def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untouched(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A working-tree baseline captures tracked and untracked changes and leaves them untouched.
 
-    A tracked modification and an untracked file both land in the printed snapshot's tree, and the
-    working tree, the index, and the stash list are all unchanged afterward.
+    A tracked modification and an untracked file both land in the printed snapshot's tree, the
+    first line printed is the snapshot and its hash alone, and the working tree, the index, and
+    the stash list are all unchanged afterward.
     """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
     write(repo / "widgets.py", "def double(x):\n    return x\n")
     commit_all(repo, "double is a no-op")
@@ -810,6 +813,7 @@ def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untou
     assert match, proc.stdout
     snapshot = match.group(1)
 
+    assert proc.stdout.splitlines()[0] == f"snapshot {snapshot}"
     assert "x * 2" in git(repo, "show", f"{snapshot}:widgets.py")
     assert "NEW = True" in git(repo, "show", f"{snapshot}:untracked.py")
     assert git(repo, "status", "--porcelain") == status_before
@@ -853,12 +857,10 @@ def test_baseline_from_working_tree_together_with_baseline_is_refused(
 
 
 def test_a_snapshot_in_a_repository_with_no_commit_is_refused(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A snapshot in a repository with no commit is refused on git's failure to read HEAD.
-
-    The refusal is git's own, before either form of the snapshot is tried.
-    """
+    """A snapshot in a repository with no commit is refused on git's failure to read HEAD."""
+    _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
 
     proc = _snapshot(repo, "tests/test_widgets.py")
@@ -866,17 +868,58 @@ def test_a_snapshot_in_a_repository_with_no_commit_is_refused(
     why = _why(proc)
     assert why.startswith("REFUSED: "), proc.stdout + proc.stderr
     assert "git rev-parse HEAD failed" in why
-    assert "could not snapshot" not in why
     assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
 
 
-def test_a_snapshot_neither_form_can_make_is_refused(tmp_path: Path) -> None:
-    """A snapshot neither form makes is refused with what each form reported, on the verdict line.
+def _repository_with_a_tracked_change(tmp_path: Path) -> Path:
+    """Build a scratch repository whose committed ``widgets.py`` is modified in the working tree."""
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    commit_all(repo, "double is a no-op")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    return repo
+
+
+def _printed_a_snapshot(proc: subprocess.CompletedProcess) -> bool:
+    """Return whether ``proc`` printed a line starting with ``snapshot``."""
+    return any(
+        line.startswith("snapshot") for line in proc.stdout.splitlines()
+    )
+
+
+def test_a_snapshot_git_cannot_stage_is_refused_beside_a_tracked_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A snapshot git refuses to stage is refused on git's message, though a tracked change exists.
+
+    The repository holds a tracked modification and an untracked file beside an untracked folder
+    that is a repository with no commit of its own, which ``git add -A`` refuses to stage.
+    """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo = _repository_with_a_tracked_change(tmp_path)
+    write(repo / "untracked.py", "NEW = True\n")
+    inner = repo / "inner"
+    inner.mkdir()
+    git(inner, "init", "-q")
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+
+    assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
+    why = _why(proc)
+    assert why.startswith("REFUSED: git add -A failed: "), proc.stdout
+    assert "inner" in why
+    assert not _printed_a_snapshot(proc), proc.stdout
+
+
+def test_a_snapshot_git_cannot_stage_is_refused_with_no_tracked_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A snapshot git refuses to stage is refused on git's message when the tracked tree is clean.
 
     The repository has a commit and a clean tracked tree beside an untracked folder that is a
-    repository with no commit of its own, which ``git add -A`` refuses to stage, and ``git stash
-    create`` makes nothing of a clean tracked tree.
+    repository with no commit of its own, which ``git add -A`` refuses to stage.
     """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
     write(repo / "widgets.py", "def double(x):\n    return x\n")
     commit_all(repo, "double is a no-op")
@@ -888,45 +931,9 @@ def test_a_snapshot_neither_form_can_make_is_refused(tmp_path: Path) -> None:
 
     assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
     why = _why(proc)
-    assert "could not snapshot the working tree" in why
     assert "git add -A failed" in why
     assert "inner" in why
-    assert "git stash create made nothing" in why
     assert "most likely because" not in proc.stdout + proc.stderr
-
-
-def test_a_snapshot_both_forms_refuse_carries_each_forms_git_message(
-    tmp_path: Path,
-) -> None:
-    """A snapshot refused by git in both forms names both failed commands on the verdict line.
-
-    A merge left unmerged, so ``git stash create`` exits non-zero, beside the untracked folder
-    that is a repository with no commit, which ``git add -A`` refuses to stage.
-    """
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    commit_all(repo, "double is a no-op")
-    git(repo, "checkout", "-q", "-b", "side")
-    write(repo / "widgets.py", "def double(x):\n    return x + x\n")
-    commit_all(repo, "double adds")
-    git(repo, "checkout", "-q", "-")
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    commit_all(repo, "double multiplies")
-    merged = subprocess.run(
-        ["git", "merge", "side"], cwd=str(repo), capture_output=True, text=True
-    )
-    assert merged.returncode == 1, merged.stdout + merged.stderr
-    inner = repo / "inner"
-    inner.mkdir()
-    git(inner, "init", "-q")
-
-    proc = _snapshot(repo, "tests/test_widgets.py")
-
-    assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
-    why = _why(proc)
-    assert "git add -A failed" in why
-    assert re.search(r"git stash create .* failed: ", why), why
-    assert "Cannot save the current index state" in why
 
 
 def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(

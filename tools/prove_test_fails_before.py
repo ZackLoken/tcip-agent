@@ -89,10 +89,10 @@ files the change touches are recorded with the verdict.
 ``--test-rev`` takes the test tree from a revision instead of the working tree, and requires
 ``--baseline``.
 
-``--baseline-from-working-tree`` snapshots the working tree (tracked modifications and untracked
-files, ignored files excluded) into a commit object and prints its hash, touching neither the
-working tree, the index nor the stash list, and computes no verdict. It exits 0 when the snapshot
-is made and REFUSED when it cannot be.
+``--baseline-from-working-tree`` snapshots the working tree as git stages it (tracked
+modifications and untracked files, ignored files excluded) into a commit object and prints its
+hash, touching neither the working tree, the index nor the stash list, and computes no verdict. It
+exits 0 when the snapshot is made and REFUSED when git refuses to stage the working tree.
 
 ``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout; a selected test that does
 not finish within it is named and the verdict is INDETERMINATE. A vitest run takes each test's
@@ -578,59 +578,23 @@ def _changed_source_files(
 SNAPSHOT_MESSAGE = "prove_test_fails_before.py working-tree snapshot"
 
 
-def _snapshot_via_temporary_index(head: str, index_path: Path) -> str:
-    """Build the snapshot commit through a scratch index and return its hash.
+def snapshot_working_tree() -> str:
+    """Make a commit object for the working tree as git stages it and return its hash.
 
-    :class:`RefusalError` naming the command and git's error when any of git's commands fails.
-    """
-    env = {**os.environ, "GIT_INDEX_FILE": str(index_path)}
-    git_output("read-tree", head, env=env)
-    git_output("add", "-A", env=env)
-    tree = git_output("write-tree", env=env).strip()
-    return git_output(
-        "commit-tree", tree, "-p", head, "-m", SNAPSHOT_MESSAGE, env=env
-    ).strip()
-
-
-def _snapshot_via_stash_create() -> str | None:
-    """Snapshot through ``git stash create``; ``None`` when it produces nothing.
-
-    The fallback when the temporary-index form fails here: covers tracked changes only, and
-    touches neither the tree, the index, nor the stash list. :class:`RefusalError` naming the
-    command and git's error when git exits non-zero.
-    """
-    return git_output("stash", "create", SNAPSHOT_MESSAGE).strip() or None
-
-
-def snapshot_working_tree() -> tuple[str, str]:
-    """Make a commit object for the working tree exactly as it stands now.
-
-    It holds tracked modifications and untracked files, ignored files excluded. Returns
-    ``(commit_hash, method)``. Touches neither the working tree, the real index, nor the stash
-    list. :class:`RefusalError` when HEAD cannot be read, or when neither form makes a commit,
-    naming what each form reported.
+    The commit's tree holds every tracked and untracked file that is not ignored, each as git
+    stages it, built through a scratch index, so the working tree, the real index and the stash
+    list are untouched. :class:`RefusalError` when HEAD cannot be read or git refuses a step of
+    the build, with git's own message.
     """
     with tempfile.TemporaryDirectory(prefix="failbefore-index-") as scratch:
         head = git_output("rev-parse", "HEAD").strip()
-        try:
-            commit = _snapshot_via_temporary_index(
-                head, Path(scratch) / "index"
-            )
-        except RefusalError as refusal:
-            index_refusal = refusal
-        else:
-            return commit, "temporary index (git add -A, git write-tree)"
-    try:
-        stash_commit = _snapshot_via_stash_create()
-    except RefusalError as refusal:
-        stash_outcome = str(refusal)
-    else:
-        if stash_commit:
-            return stash_commit, "git stash create (tracked changes only)"
-        stash_outcome = "git stash create made nothing"
-    raise RefusalError(
-        f"could not snapshot the working tree: {index_refusal}; then {stash_outcome}"
-    ) from index_refusal
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        git_output("read-tree", head, env=env)
+        git_output("add", "-A", env=env)
+        tree = git_output("write-tree", env=env).strip()
+        return git_output(
+            "commit-tree", tree, "-p", head, "-m", SNAPSHOT_MESSAGE, env=env
+        ).strip()
 
 
 def materialize(rev: str, dest: Path) -> None:
@@ -1267,9 +1231,9 @@ def _run_command_line() -> int:
             )
         json_out = args.json_out
         if args.baseline_from_working_tree:
-            commit, method = snapshot_working_tree()
+            commit = snapshot_working_tree()
             expr_flag = f"-k {args.expr!r} " if args.expr else ""
-            print(f"snapshot {commit} ({method})")
+            print(f"snapshot {commit}")
             print(
                 "computes no verdict by itself. This is the working tree as it stands right now: "
                 "a snapshot that already holds the fix is a baseline the change does not precede, "
