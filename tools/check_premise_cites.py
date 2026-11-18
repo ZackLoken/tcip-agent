@@ -44,7 +44,8 @@ HEADER = re.compile(
     r"(?::|\.(?=\s|$))",
     re.IGNORECASE | re.MULTILINE,
 )
-PREMISE_LABEL = re.compile(r"^[-*]\s+\[(?P<label>[^\]]+)\]")
+BULLET = re.compile(r"[-*] ")
+PREMISE_LABEL = re.compile(rf"^{BULLET.pattern}\s*\[(?P<label>[^\]]+)\]")
 CITE = re.compile(
     r"\b[Aa]t\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
 )
@@ -136,7 +137,7 @@ def _premise_block(
         line = raw.rstrip("\r")
         if not line.strip():
             continue
-        if line.startswith(("- ", "* ")):
+        if BULLET.match(line):
             premises.append(line)
         elif premises and line[0] in " \t":
             premises[-1] += " " + line.strip()
