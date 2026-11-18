@@ -70,6 +70,9 @@ export type NotificationEntry = EntryText &
     /** How many times it was raised. */
     count: number;
     context: EntryContext;
+    /** What the live region announces for it: its text and level as first raised, which no later
+     *  change of the entry rewrites. */
+    announcement: { text: string; level: MessageLevel };
   };
 
 /** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal. A job
@@ -90,9 +93,6 @@ export interface NotificationsSlice {
   holding: Partial<Record<ConditionName, number>>;
   /** The id of the newest entry the person has had the area open over; any later one is new. */
   seenThrough: number;
-  /** The entries the live region announces, each as it was when raised, in the order raised; an
-   *  entry's announcement leaves with the entry, when it is dismissed or told again as a new one. */
-  announced: NotificationEntry[];
   /** Hold `condition` stating `sentence`, or end it with null. A condition not holding raises a
    *  new entry, announced once; one holding updates its entry's sentence in place, or nothing
    *  once that entry is dismissed. */
@@ -152,7 +152,6 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
   notifications: [],
   holding: {},
   seenThrough: 0,
-  announced: [],
 
   holdCondition: (condition, sentence) =>
     set((s) => {
@@ -170,20 +169,21 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
           ),
         };
       }
+      const level = CONDITION_LEVEL[condition];
       const entry: NotificationEntry = {
         id: nextEntryId++,
         kind: "condition",
         condition,
-        level: CONDITION_LEVEL[condition],
+        level,
         time: Date.now(),
         count: 1,
         context: {},
         sentence,
+        announcement: { text: sentence, level },
       };
       return {
         notifications: [...s.notifications, entry],
         holding: { ...s.holding, [condition]: entry.id },
-        announced: [...s.announced, entry],
       };
     }),
 
@@ -225,16 +225,13 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         count: 1,
         context,
         action,
+        announcement: { text: textOf(said), level },
         ...said,
       } as NotificationEntry;
       const earlier = s.notifications.flatMap((e) =>
         e !== standing ? [e] : standingJob ? [] : [unkeyed(e)],
       );
-      const listed = new Set(earlier.map((e) => e.id));
-      return {
-        notifications: [...earlier, entry],
-        announced: [...s.announced.filter((e) => listed.has(e.id)), entry],
-      };
+      return { notifications: [...earlier, entry] };
     }),
 
   releaseNotification: (key) =>
@@ -245,10 +242,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
     ),
 
   dismissNotification: (id) =>
-    set((s) => ({
-      notifications: s.notifications.filter((e) => e.id !== id),
-      announced: s.announced.filter((e) => e.id !== id),
-    })),
+    set((s) => ({ notifications: s.notifications.filter((e) => e.id !== id) })),
 
   markNotificationsSeen: () =>
     set((s) => {

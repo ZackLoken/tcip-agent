@@ -193,11 +193,11 @@ export function NotificationsPane() {
 /** The application's one standing live region: it announces each new entry once as it is
  *  raised, at its level's politeness, whether or not the area is open. */
 export function NotificationsLiveRegion() {
-  const announced = useStore((s) => s.announced);
+  const entries = useStore((s) => s.notifications);
   const spans = (live: "polite" | "assertive") =>
-    announced
-      .filter((e) => LEVELS[e.level].live === live)
-      .map((e) => <span key={e.id}>{textOf(e)}</span>);
+    entries
+      .filter((e) => LEVELS[e.announcement.level].live === live)
+      .map((e) => <span key={e.id}>{e.announcement.text}</span>);
   return (
     <div className="sr-only">
       <div role="status" aria-live="polite" aria-atomic="false">
