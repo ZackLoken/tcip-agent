@@ -789,6 +789,21 @@ def _snapshot(repo: Path, test_file: str) -> subprocess.CompletedProcess:
     return _tool(repo, test_file, "--baseline-from-working-tree")
 
 
+def _printed_snapshot(proc: subprocess.CompletedProcess) -> str | None:
+    """Return the snapshot hash ``proc`` printed, or ``None`` when it printed none."""
+    match = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout)
+    return match.group(1) if match else None
+
+
+def _repository_with_a_tracked_change(tmp_path: Path) -> Path:
+    """Build a scratch repository whose committed ``widgets.py`` is modified in the working tree."""
+    repo = scratch_repo(tmp_path)
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    commit_all(repo, "double is a no-op")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    return repo
+
+
 def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -799,19 +814,14 @@ def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untou
     the stash list are all unchanged afterward.
     """
     _redirect_temporary_folder(tmp_path, monkeypatch)
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    commit_all(repo, "double is a no-op")
-
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+    repo = _repository_with_a_tracked_change(tmp_path)
     write(repo / "untracked.py", "NEW = True\n")
     status_before = git(repo, "status", "--porcelain")
 
     proc = _snapshot(repo, "tests/test_widgets.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    match = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout)
-    assert match, proc.stdout
-    snapshot = match.group(1)
+    snapshot = _printed_snapshot(proc)
+    assert snapshot, proc.stdout
 
     assert proc.stdout.splitlines()[0] == f"snapshot {snapshot}"
     assert "x * 2" in git(repo, "show", f"{snapshot}:widgets.py")
@@ -831,7 +841,8 @@ def test_baseline_from_working_tree_excludes_ignored_files(
 
     proc = _snapshot(repo, "tests/test_widgets.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    snapshot = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout).group(1)
+    snapshot = _printed_snapshot(proc)
+    assert snapshot, proc.stdout
 
     listing = git(repo, "ls-tree", "-r", "--name-only", snapshot)
     assert "ignored.txt" not in listing
@@ -871,22 +882,6 @@ def test_a_snapshot_in_a_repository_with_no_commit_is_refused(
     assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
 
 
-def _repository_with_a_tracked_change(tmp_path: Path) -> Path:
-    """Build a scratch repository whose committed ``widgets.py`` is modified in the working tree."""
-    repo = scratch_repo(tmp_path)
-    write(repo / "widgets.py", "def double(x):\n    return x\n")
-    commit_all(repo, "double is a no-op")
-    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    return repo
-
-
-def _printed_a_snapshot(proc: subprocess.CompletedProcess) -> bool:
-    """Return whether ``proc`` printed a line starting with ``snapshot``."""
-    return any(
-        line.startswith("snapshot") for line in proc.stdout.splitlines()
-    )
-
-
 def test_a_snapshot_git_cannot_stage_is_refused_beside_a_tracked_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -908,7 +903,7 @@ def test_a_snapshot_git_cannot_stage_is_refused_beside_a_tracked_change(
     why = _why(proc)
     assert why.startswith("REFUSED: git add -A failed: "), proc.stdout
     assert "inner" in why
-    assert not _printed_a_snapshot(proc), proc.stdout
+    assert _printed_snapshot(proc) is None, proc.stdout
 
 
 def test_a_snapshot_git_cannot_stage_is_refused_with_no_tracked_change(
@@ -961,8 +956,8 @@ def test_a_snapshot_holding_a_repository_as_a_link_is_refused_naming_its_path(
     assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
     why = _why(proc)
     assert why.startswith("REFUSED: "), proc.stdout
-    assert "inner" in why
-    assert not _printed_a_snapshot(proc), proc.stdout
+    assert why.endswith("holds a repository as a link at: inner"), why
+    assert _printed_snapshot(proc) is None, proc.stdout
 
 
 def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
@@ -981,7 +976,8 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
 
     proc = _snapshot(repo, "tests/test_widgets.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    snapshot = re.search(r"snapshot ([0-9a-f]{40})", proc.stdout).group(1)
+    snapshot = _printed_snapshot(proc)
+    assert snapshot, proc.stdout
 
     write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
 
