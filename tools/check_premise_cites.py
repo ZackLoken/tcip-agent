@@ -76,14 +76,16 @@ class Cite:
 
 @dataclass(frozen=True)
 class PremiseBlock:
-    """One premise block: its commits by repository label, its premise lines and its header's words.
+    """One premise block: its commits by repository label, its premise lines and its name.
 
-    A commit whose repository the header does not label is keyed None.
+    A commit whose repository the header does not label is keyed None. The name is the prefix that
+    leads each message about the block: its place among the issue's headers, their count and the
+    header's words.
     """
 
     commits: dict[str | None, str]
     premises: list[str]
-    header_words: str
+    name: str
 
 
 def fetch_issue(issue: int) -> str:
@@ -112,13 +114,10 @@ def _header_words(header: re.Match[str]) -> str:
     return " ".join(header.string[header.start() : header.end("refs")].split())
 
 
-def block_name(place: int, count: int, header_words: str) -> str:
-    """Return the prefix that names the block at ``place`` of ``count`` headers, from one."""
-    return f'block {place} of {count}, "{header_words}": '
-
-
-def _premise_block(text: str, header: re.Match[str]) -> PremiseBlock:
-    """Return the block that ``header``, a match of HEADER in ``text``, opens.
+def _premise_block(
+    text: str, header: re.Match[str], name: str
+) -> PremiseBlock:
+    """Return the block called ``name`` that ``header``, a match of HEADER in ``text``, opens.
 
     Raises PremiseBlockError when the header names no commit or two commits for one repository, or
     no premise line follows it.
@@ -145,11 +144,11 @@ def _premise_block(text: str, header: re.Match[str]) -> PremiseBlock:
             break
     if not premises:
         raise PremiseBlockError("no premise line follows the header")
-    return PremiseBlock(commits, premises, _header_words(header))
+    return PremiseBlock(commits, premises, name)
 
 
 def parse_premise_blocks(text: str) -> list[PremiseBlock]:
-    """Return the block of every ``Premises, read at`` header in ``text``, in order.
+    """Return the block of every ``Premises, read at`` header in ``text``, in order, each named.
 
     A block ends at the first line that is neither a bullet nor indented, so the next header
     begins the next block. Raises PremiseBlockError when there is no header, or when a block
@@ -160,10 +159,10 @@ def parse_premise_blocks(text: str) -> list[PremiseBlock]:
         raise PremiseBlockError("no 'Premises, read at <commit>:' header")
     blocks: list[PremiseBlock] = []
     for place, header in enumerate(headers, 1):
+        name = f'block {place} of {len(headers)}, "{_header_words(header)}": '
         try:
-            blocks.append(_premise_block(text, header))
+            blocks.append(_premise_block(text, header, name))
         except PremiseBlockError as err:
-            name = block_name(place, len(headers), _header_words(header))
             raise PremiseBlockError(f"{name}{err}") from err
     return blocks
 
@@ -293,8 +292,8 @@ def main(
         print(f"{err}\nFAIL")
         return 1
     failures = [
-        f"{block_name(place, len(blocks), block.header_words)}{message}"
-        for place, block in enumerate(blocks, 1)
+        f"{block.name}{message}"
+        for block in blocks
         for line in block.premises
         for message in check_premise(line, block, checkouts, Path.cwd())
     ]
