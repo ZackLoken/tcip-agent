@@ -77,6 +77,22 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture
+def frontend_install() -> None:
+    """Fail the test's setup when the fail-before tool's ``INSTALL`` is no folder.
+
+    The failure names the missing folder and the command that installs it.
+    """
+    from tools import prove_test_fails_before
+
+    install = prove_test_fails_before.INSTALL
+    if not install.is_dir():
+        pytest.fail(
+            f"the frontend's install {install} is not a folder; run `npm ci` in "
+            f"{prove_test_fails_before.FRONTEND} of this checkout and run again"
+        )
+
+
+@pytest.fixture
 def _backend(
     tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest
 ) -> Iterator[tuple[Path, TestClient]]:

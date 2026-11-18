@@ -20,8 +20,9 @@ commit with the fix and the guard test) and run the real script against it. They
   building it refusing in its setup when the checkout has none, each verdict and refusal it can
   reach, ``--test-rev`` among them, except an outcome record that is not JSON,
   a pass at a baseline no source change follows, and a failure there scoring GUARDS with the
-  caveat that no source file differs, which the pytest path alone holds; and a changed frontend
-  test counted as the test side of a pytest run;
+  caveat that no source file differs, which the pytest path alone holds; a changed frontend
+  test counted as the test side of a pytest run; and a pytest test reading a file under the
+  checkout's untracked install, which the baseline tree finds through the link;
 - ``node`` absent from the path, for a frontend test file, for a pytest file in a repository
   holding frontend files and for one in a repository holding none, and the frontend's test file
   rule failing, answering with something that is not JSON, or answering with something that is not
@@ -2092,6 +2093,16 @@ def _scratch_vitest_manifest(repo: Path) -> Path:
     return repo / _vitest_manifest().relative_to(REPO)
 
 
+def _scratch_install(repo: Path) -> Path:
+    """Return where the tool's copy in ``repo`` looks for the frontend's installed packages."""
+    return repo / INSTALL.relative_to(REPO)
+
+
+def _ignore_install(repo: Path) -> None:
+    """Have git ignore the frontend's install folder in ``repo``, so nothing there is committed."""
+    write(repo / ".git" / "info" / "exclude", f"{INSTALL.name}\n")
+
+
 def _scratch_frontend(repo: Path) -> Path:
     """Give ``repo`` a frontend at the real frontend's path; return its directory.
 
@@ -2105,7 +2116,7 @@ def _scratch_frontend(repo: Path) -> Path:
     write(frontend / "package.json", '{"type": "module"}\n')
     write(repo / VITEST_CONFIG, "export default {};\n")
     (frontend / "src").mkdir()
-    write(repo / ".git" / "info" / "exclude", "node_modules\n")
+    _ignore_install(repo)
     return frontend
 
 
@@ -2125,7 +2136,8 @@ def linked_repo(
     require_installed_vitest()
     scratch_root = _redirect_temporary_folder(tmp_path, monkeypatch)
     repo = scratch_repo(tmp_path)
-    install = _scratch_frontend(repo) / "node_modules"
+    _scratch_frontend(repo)
+    install = _scratch_install(repo)
     install.mkdir()
     try:
         for package in sorted(INSTALL.iterdir()):
@@ -2137,7 +2149,7 @@ def linked_repo(
     finally:
         try:
             for run in scratch_root.glob("failbefore-*"):
-                left = run / "tree" / FRONTEND_PATH / "node_modules"
+                left = _scratch_install(run / "tree")
                 if left.is_symlink():
                     left.unlink()
         finally:
@@ -2212,7 +2224,7 @@ def test_a_vitest_assertion_failing_at_the_baseline_guards_and_leaves_the_instal
     the run neither removed anything nor wrote a cache or a bundled configuration through the link.
     """
     baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
-    install = linked_repo / FRONTEND_PATH / "node_modules"
+    install = _scratch_install(linked_repo)
     entries_before = sorted(entry.name for entry in install.iterdir())
 
     result = _run(linked_repo, WIDGET_TEST, baseline, "-k", "double doubles")
@@ -2359,6 +2371,40 @@ def test_a_changed_frontend_test_alone_leaves_a_pytest_pass_indeterminate(
     assert "no source file differs" in _why(result)
 
 
+def test_a_pytest_test_reading_the_frontends_install_finds_the_checkouts_at_the_baseline(
+    tmp_path: Path,
+) -> None:
+    """A pytest test passing on a file under the frontend's install passes in the baseline tree.
+
+    The file is untracked and ignored, so the baseline tree built from the revision holds none;
+    the checkout's install is linked there, so the pass at a baseline a source change follows is
+    VACUOUS, and the file stays in the checkout.
+    """
+    repo = scratch_repo(tmp_path)
+    _ignore_install(repo)
+    marker = _scratch_install(repo) / "marker.txt"
+    marker.parent.mkdir(parents=True)
+    write(marker, "the checkout's install\n")
+    write(repo / "widgets.py", "def double(x):\n    return x\n")
+    write(
+        repo / "tests" / "test_install.py",
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def test_the_install_holds_the_marker():\n"
+        "    tree = Path(__file__).resolve().parent.parent\n"
+        f"    assert (tree / {INSTALL.relative_to(REPO).as_posix()!r} / 'marker.txt').is_file()\n",
+    )
+    baseline = commit_all(repo, "a test reading the install")
+    assert marker.name not in git(repo, "ls-files")
+    write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
+
+    result = _run(repo, "tests/test_install.py", baseline)
+
+    assert result.returncode == EXIT["VACUOUS"], result.stdout + result.stderr
+    assert marker.is_file()
+
+
 def test_a_vitest_file_taken_from_test_rev_guards(linked_repo: Path) -> None:
     """A vitest file the head no longer holds is run from ``--test-rev`` and scores GUARDS."""
     baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
@@ -2380,7 +2426,7 @@ def test_a_baseline_tree_already_holding_the_install_folder_is_refused_at_the_li
     The materialized tree holds that folder where the link to the install goes, so the link is
     refused with the system's error, which names the folder.
     """
-    install = linked_repo / FRONTEND_PATH / "node_modules"
+    install = _scratch_install(linked_repo)
     write(install / "tracked.txt", "tracked past the ignore\n")
     git(linked_repo, "add", "-f", str(install / "tracked.txt"))
     baseline = _widget_repo(linked_repo, NO_OP_DOUBLE, DOUBLE, DOUBLE_TEST)
@@ -2391,7 +2437,7 @@ def test_a_baseline_tree_already_holding_the_install_folder_is_refused_at_the_li
     why = _why(result)
     assert "the baseline tree's link to" in why
     assert "could not be made: [" in why
-    assert "node_modules'" in why.partition("could not be made: ")[2]
+    assert f"{INSTALL.name}'" in why.partition("could not be made: ")[2]
 
 
 def test_a_rejection_a_vitest_test_leaves_unhandled_is_refused_as_an_unhandled_error(
@@ -2712,9 +2758,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
             result.stdout + result.stderr
         )
         assert "held.txt" in result.stderr
-        assert not os.path.lexists(
-            left[0] / "tree" / FRONTEND_PATH / "node_modules"
-        )
+        assert not os.path.lexists(_scratch_install(left[0] / "tree"))
     finally:
         write(hold / "release", "")
         # The holder closes its file within one 0.05 s poll of the release; 60 s only bounds a hang.
@@ -2722,7 +2766,7 @@ def test_a_scratch_directory_left_in_place_holds_no_link_to_the_install(
         while not (hold / "done").exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         for leftover in scratch_root.glob("failbefore-*"):
-            link = leftover / "tree" / FRONTEND_PATH / "node_modules"
+            link = _scratch_install(leftover / "tree")
             if link.is_symlink():
                 link.unlink()
             shutil.rmtree(leftover)

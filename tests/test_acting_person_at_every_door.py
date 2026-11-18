@@ -181,6 +181,7 @@ def test_a_recorded_identity_is_exactly_the_spelling_actor_records() -> None:
     assert all(is_person(actor(stated)) for stated, _ in ADMITTED_NAMES)
 
 
+@pytest.mark.usefixtures("frontend_install")
 def test_the_browsers_rule_admits_exactly_what_actor_admits() -> None:
     names = [stated for stated, _ in ADMITTED_NAMES] + REFUSED_NAMES
     assert dict(zip(names, _browser_admits(names))) == {

@@ -67,8 +67,6 @@ FRONTEND_SRC = (
 )
 """The browser's sources, the directory the frontend's ``tsconfig.json`` includes first."""
 
-PRETTIER = FRONTEND / "node_modules" / "prettier" / "bin" / "prettier.cjs"
-"""The frontend's installed Prettier."""
 SCRIPTS = FRONTEND / "scripts"
 """The frontend's Node scripts, each printing one JSON object (:func:`printed_json`)."""
 READS_SCRIPT = SCRIPTS / "routeReads.mjs"
@@ -91,10 +89,16 @@ def printed_json(script: Path, argument: Path) -> dict:
 def formatted(text: str, path: Path) -> str:
     """Return ``text`` as the frontend's installed Prettier formats a file at ``path``.
 
-    Prettier reads the frontend's own configuration for ``path``.
+    Prettier is the one under the fail-before tool's ``INSTALL``, read when this is called, and
+    reads the frontend's own configuration for ``path``.
     """
+    from tools import prove_test_fails_before
+
+    prettier = (
+        prove_test_fails_before.INSTALL / "prettier" / "bin" / "prettier.cjs"
+    )
     return subprocess.run(
-        ["node", str(PRETTIER), "--stdin-filepath", str(path)],
+        ["node", str(prettier), "--stdin-filepath", str(path)],
         input=text,
         capture_output=True,
         text=True,
