@@ -49,7 +49,7 @@ def test_the_audit_stage_runs_the_pinned_tool_over_the_full_set_requiring_notes_
     assert shlex.split(stage.run or "") == [
         "npx",
         "--yes",
-        "better-npm-audit@4.2.1",
+        f"{AUDIT_TOOL}@4.2.1",
         "audit",
         "--level",
         "high",
