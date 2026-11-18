@@ -5,11 +5,14 @@ import type { AppState } from "@/store/appState";
 /** How loud a message to the person is. */
 export type MessageLevel = "error" | "warning" | "info";
 
+/** How insistently a live region announces what it is given. */
+export type Politeness = "assertive" | "polite";
+
 /** How each level is shown and told, read by every message component: its word, its text tone,
  *  the color of its mark, and the politeness its live region announces it with. */
 export const LEVELS: Record<
   MessageLevel,
-  { word: string; tone: string; mark: string; live: "assertive" | "polite" }
+  { word: string; tone: string; mark: string; live: Politeness }
 > = {
   error: { word: "Error", tone: "tcip-problem", mark: "bg-tcip-fp", live: "assertive" },
   warning: { word: "Warning", tone: "text-tcip-warn", mark: "bg-tcip-warn", live: "polite" },

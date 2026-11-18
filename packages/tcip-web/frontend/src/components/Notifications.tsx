@@ -7,6 +7,7 @@ import {
   type EntryAction,
   LEVELS,
   type NotificationEntry,
+  type Politeness,
   selectHoldingLevel,
   selectNewCount,
   selectStanding,
@@ -194,7 +195,7 @@ export function NotificationsPane() {
  *  raised, at its level's politeness, whether or not the area is open. */
 export function NotificationsLiveRegion() {
   const entries = useStore((s) => s.notifications);
-  const spans = (live: "polite" | "assertive") =>
+  const spans = (live: Politeness) =>
     entries
       .filter((e) => LEVELS[e.announcement.level].live === live)
       .map((e) => <span key={e.id}>{e.announcement.text}</span>);
