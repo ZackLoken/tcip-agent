@@ -439,15 +439,18 @@ def test_a_header_ending_in_a_period_and_a_line_break_keeps_its_first_bullet(
     assert exit_code == 1
 
 
+@pytest.mark.parametrize(
+    "wrap", [" and\nother ", "\nand other "], ids=["after-and", "before-and"]
+)
 def test_a_header_continued_onto_a_second_line_opens_a_checked_block(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    wrap: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repo, first = _repository(tmp_path)
     second = _second_commit(repo)
     failing = "- [other] at c.txt:4 names `added_name`."
     text = (
         f"Premises, read at repo {first}:\n- at a.py:3 returns `beta_value`.\n\n"
-        f"Premises, read at repo {first} and\nother {second}:\n{failing}\n"
+        f"Premises, read at repo {first}{wrap}{second}:\n{failing}\n"
     )
 
     exit_code = cites.main(
