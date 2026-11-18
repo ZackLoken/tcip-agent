@@ -189,7 +189,7 @@ describe("StateSocket lost connection", () => {
     lastSocket().open();
 
     expect(useStore.getState().notifications).toEqual([]);
-    expect(useStore.getState().announced).toBeNull();
+    expect(useStore.getState().announced).toEqual([]);
     socket.close();
   });
 
@@ -226,7 +226,7 @@ describe("StateSocket lost connection", () => {
     vi.advanceTimersByTime(60_000);
 
     expect(useStore.getState().notifications).toEqual([]);
-    expect(useStore.getState().announced).toBeNull();
+    expect(useStore.getState().announced).toEqual([]);
     socket.close();
   });
 });

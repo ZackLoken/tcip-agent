@@ -194,14 +194,17 @@ export function NotificationsPane() {
  *  raised, at its level's politeness, whether or not the area is open. */
 export function NotificationsLiveRegion() {
   const announced = useStore((s) => s.announced);
-  const live = announced && LEVELS[announced.level].live;
+  const spans = (live: "polite" | "assertive") =>
+    announced
+      .filter((e) => LEVELS[e.level].live === live)
+      .map((e) => <span key={e.id}>{textOf(e)}</span>);
   return (
     <div className="sr-only">
       <div role="status" aria-live="polite">
-        {announced && live === "polite" && <span key={announced.id}>{textOf(announced)}</span>}
+        {spans("polite")}
       </div>
       <div role="alert" aria-live="assertive">
-        {announced && live === "assertive" && <span key={announced.id}>{textOf(announced)}</span>}
+        {spans("assertive")}
       </div>
     </div>
   );
