@@ -92,9 +92,9 @@ files the change touches are recorded with the verdict.
 ``--baseline-from-working-tree`` snapshots the working tree as git stages it (tracked
 modifications and untracked files, ignored files excluded) into a commit object and prints its
 hash, touching neither the working tree, the index nor the stash list, and computes no verdict. It
-exits 0 when the snapshot is made and REFUSED when git refuses to stage the working tree or the
-staged tree holds a repository (a nested repository or a submodule) as a link, which stands for
-none of that repository's files.
+exits 0 when the snapshot is made and REFUSED when HEAD cannot be read, git refuses a step of the
+build, or the staged tree holds a repository (a nested repository or a submodule) as a link, which
+stands for none of that repository's files.
 
 ``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout; a selected test that does
 not finish within it is named and the verdict is INDETERMINATE. A vitest run takes each test's
