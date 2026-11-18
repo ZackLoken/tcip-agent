@@ -5,8 +5,9 @@
 The issue's body and comments are read with ``gh issue view``. A premise block (a premise half, a
 supplement, a half read again) opens at a line ``Premises, read at <commit>:``, whose header names
 one or more commits, each optionally preceded by a repository label, and ends at its colon or at a
-period followed by whitespace. The block continues as the contiguous bullet list that begins on
-the line after the header's own line, an indented line continuing the bullet before it. Each block
+period followed by whitespace. The header's commits may run onto one next line that is neither
+blank nor a bullet. The block continues as the contiguous bullet list that begins on the line
+after the header's own last line, an indented line continuing the bullet before it. Each block
 is checked against the commits its own header names. A premise's repository is its ``[<label>]``
 prefix, or the only one the header names. The unlabeled repository is the checkout the script runs
 from; a labeled one is the path its ``--checkout`` names, and a label with none is a failing
@@ -34,7 +35,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HEADER = re.compile(
-    r"^Premises, read at\s+(?P<refs>[^:\n]*?)(?::|\.(?=\s|$))",
+    r"^Premises, read at\s+"
+    r"(?P<refs>[^:\n]*?(?:\n(?![-*] )(?=[ \t]*\S)[^:\n]*?)?)"
+    r"(?::|\.(?=\s|$))",
     re.IGNORECASE | re.MULTILINE,
 )
 REPOSITORY_COMMIT = re.compile(
