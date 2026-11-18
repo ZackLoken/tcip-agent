@@ -419,6 +419,26 @@ def test_a_header_whose_commit_is_on_the_next_line_is_named_on_one_line(
     )
 
 
+def test_a_header_ending_in_a_period_and_a_line_break_keeps_its_first_bullet(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    failing = "- at b.txt:9 the file says `two`."
+    text = (
+        f"Premises, read at repo {commit}.\n"
+        f"{failing}\n"
+        "- at a.py:3 returns `beta_value`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out
+    assert f"outside the file (3 lines): {failing}" in out
+    assert exit_code == 1
+
+
 def test_a_superseded_block_is_not_read(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
