@@ -361,7 +361,7 @@ jobs:
       - name: Dependency audit (npm audit over the full set)
         if: ${{ !cancelled() }}
         working-directory: packages/tcip-web/frontend
-        run: npx --yes better-npm-audit@4.2.1 audit --level high
+        run: npx --yes better-npm-audit@4.2.1 audit --level high --require-notes --require-expiry
 
   # The files no other job reads: the workflow, the Dockerfile, every YAML file, the documents
   # an adopter reads, and the whole history for a leaked secret.
