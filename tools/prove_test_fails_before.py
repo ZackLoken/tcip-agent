@@ -51,8 +51,11 @@ Four verdicts, each its own exit code:
                        could not be made, nothing was selected, everything was skipped, the
                        baseline could not collect the file, the baseline's own source was not what
                        got imported (for vitest, a test module ran from outside the tree), the
-                       runner did not finish within ``--timeout``, hit an internal or unhandled
-                       error, never reported an outcome or wrote one that is not JSON, ``node`` is
+                       import probe's answer is not a JSON object of strings, the runner did not
+                       finish within ``--timeout``, hit an internal or unhandled error, never
+                       reported an outcome or wrote one that does not read as the record the tool
+                       declares for it (not JSON, a field missing, a value of another type or a
+                       key the record does not declare), ``node`` is
                        not on the path where a frontend path is to be judged, the frontend's test
                        file rule failed or answered with anything but a JSON list of one boolean
                        for each path it was asked about, a frontend test file's frontend has
@@ -119,7 +122,14 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Literal, NoReturn, NotRequired, TypedDict
 
-from pydantic import StrictBool, TypeAdapter, ValidationError
+from pydantic import (
+    ConfigDict,
+    StrictBool,
+    StrictStr,
+    TypeAdapter,
+    ValidationError,
+    with_config,
+)
 
 REPO = Path(__file__).resolve().parent.parent
 TEST_TREE = "tests"
@@ -144,21 +154,65 @@ FailureKind = Literal[
 ]
 
 
+RECORD_CONFIG = ConfigDict(strict=True, extra="forbid")
+
+
+@with_config(RECORD_CONFIG)
 class ObservedTest(TypedDict):
     """One test's entry of the outcome record the pytest plugin or the vitest reporter writes.
 
-    Each writes the failure keys only for a failed or errored test, and the tool adds ``kind`` to
-    those.
+    Each writes the failure keys only for a failed or errored test (the pytest plugin alone writes
+    ``detail``), and the tool adds ``kind`` to those.
     """
 
     nodeid: str
     phase: str
     outcome: str
+    detail: NotRequired[str]
     headline: NotRequired[str]
     crash_path: NotRequired[str | None]
     crash_lineno: NotRequired[int | None]
     exc_typename: NotRequired[str | None]
     kind: NotRequired[FailureKind]
+
+
+@with_config(RECORD_CONFIG)
+class CollectError(TypedDict):
+    """One collection error of the outcome record."""
+
+    nodeid: str
+    detail: str
+
+
+@with_config(RECORD_CONFIG)
+class ObservedRecord(TypedDict):
+    """The outcome record's fields that the pytest plugin and the vitest reporter both write.
+
+    ``collected`` is null in a pytest record whose collection never finished.
+    """
+
+    collected: int | None
+    collect_errors: list[CollectError]
+    tests: list[ObservedTest]
+    internal_error: str | None
+
+
+@with_config(RECORD_CONFIG)
+class PytestRecord(ObservedRecord):
+    """The pytest plugin's outcome record, which also holds the session's exit status."""
+
+    exitstatus: int
+
+
+@with_config(RECORD_CONFIG)
+class VitestRecord(ObservedRecord):
+    """The vitest reporter's outcome record, which also lists every test module vitest ran."""
+
+    modules: list[str]
+
+
+PYTEST_RECORD = TypeAdapter(PytestRecord)
+VITEST_RECORD = TypeAdapter(VitestRecord)
 
 
 PLUGIN_SOURCE = '''\
@@ -442,6 +496,7 @@ def _node() -> str:
 
 
 RULE_ANSWER = TypeAdapter(list[StrictBool])
+PROBE_ANSWER = TypeAdapter(dict[str, StrictStr])
 
 
 def _what_did_not_read(error: ValidationError) -> str:
@@ -678,6 +733,9 @@ def prove_tree_imports(
 
     Returns whether every package under ``tree``'s ``packages/*/src`` imported from inside
     ``tree`` under ``env``, and each package's resolved path or import failure.
+    :class:`RefusalError` when the probe's answer is not a JSON object whose values are all
+    strings, the refusal carrying where the validation stopped reading, what the probe printed and
+    the end of its standard error.
     """
     names = sorted(
         {p.parent.name for p in tree.glob("packages/*/src/*/__init__.py")}
@@ -700,14 +758,17 @@ def prove_tree_imports(
         cwd=tree,
         env=env,
         capture_output=True,
-        text=True,
     )
     try:
-        resolved = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return False, {
-            "probe": f"probe produced no JSON: {proc.stdout!r} {proc.stderr[-500:]!r}"
-        }
+        resolved = PROBE_ANSWER.validate_json(proc.stdout)
+    except ValidationError as error:
+        printed = proc.stdout.decode(errors="replace")
+        stderr_end = proc.stderr.decode(errors="replace")[-500:]
+        raise RefusalError(
+            "the import probe's answer did not read as a mapping of package name to path: "
+            f"{_what_did_not_read(error)}. The probe printed {printed!r}; the end of its "
+            f"standard error is {stderr_end!r}."
+        ) from error
     root = str(tree.resolve()).lower()
     ok = all(
         str(Path(p).resolve()).lower().startswith(root)
@@ -729,21 +790,20 @@ def install_outcome_plugin(tree: Path) -> None:
     )
 
 
-def run_capturing_outcome(
+def run_pytest(
     tree: Path,
     targets: list[str],
     expr: str,
     env: dict[str, str],
-    outcome_json: Path,
     basetemp: Path,
     timeout: int,
     per_test_timeout: float | None = None,
-) -> tuple[subprocess.CompletedProcess[str], dict | None]:
-    """Run pytest in `tree` and return its process plus what it observed.
+) -> subprocess.CompletedProcess[str]:
+    """Run pytest in `tree` and return its process.
 
-    The child's temporary root is `basetemp`, which the caller places outside `tree` so a test's
-    `tmp_path` never lies under the baseline's own repository. The observation is None if it
-    reported none.
+    The outcome plugin writes its record where `env` names. The child's temporary root is
+    `basetemp`, which the caller places outside `tree` so a test's `tmp_path` never lies under the
+    baseline's own repository.
     """
     # basetemp is this run's own folder: pytest deletes all but the last few roots under the
     # shared one, including another session's, at every start.
@@ -766,24 +826,26 @@ def run_capturing_outcome(
         cmd += ["-k", expr]
     if per_test_timeout:
         cmd += ["--timeout", str(per_test_timeout)]
-    proc = subprocess.run(
+    return subprocess.run(
         cmd, cwd=tree, env=env, capture_output=True, text=True, timeout=timeout
     )
-    return proc, _read_outcome(outcome_json)
 
 
-def _read_outcome(outcome_json: Path) -> dict | None:
-    """Return the outcome record at ``outcome_json`` and remove the file; None if there is none.
+def _read_outcome[R](outcome_json: Path, record: TypeAdapter[R]) -> R | None:
+    """Return the outcome record at ``outcome_json`` as ``record`` types it, removing the file.
 
-    :class:`RefusalError` when the record is not JSON.
+    None if there is no file. :class:`RefusalError` naming ``outcome_json`` when its bytes are not
+    JSON for the record ``record`` declares, the refusal carrying where the validation stopped
+    reading.
     """
     if not outcome_json.is_file():
         return None
     try:
-        observed = json.loads(outcome_json.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+        observed = record.validate_json(outcome_json.read_bytes())
+    except ValidationError as error:
         raise RefusalError(
-            f"the runner's outcome record {outcome_json} is not JSON: {error}"
+            f"the runner's outcome record {outcome_json} did not read as an outcome record: "
+            f"{_what_did_not_read(error)}"
         ) from error
     outcome_json.unlink()
     return observed
@@ -859,22 +921,22 @@ def _vitest_entry(manifest: Path) -> str:
         ) from error
 
 
-def run_vitest_capturing_outcome(
+def run_vitest(
     tree: Path,
     test_file: str,
     expr: str,
     outcome_json: Path,
     timeout: int,
-) -> tuple[subprocess.CompletedProcess[str], dict | None]:
-    """Run vitest over ``test_file`` in ``tree``'s frontend and return its process and observation.
+) -> subprocess.CompletedProcess[str]:
+    """Run vitest over ``test_file`` in ``tree``'s frontend and return its process.
 
     vitest is the one ``INSTALL`` holds, run with its root at the tree's frontend, the outcome
     reporter written into ``tree`` with the ``OUTCOME_ENV`` it reads assigned at its end, and
-    ``expr`` as its test name pattern. Its results cache is off and its configuration is loaded
-    without a bundled copy, since each would be written under the tree's ``node_modules``, the
-    link into the install. The observation is None if it reported none. :class:`RefusalError` when
-    the installed vitest's manifest cannot be read or is not an object whose ``bin`` holds a string
-    for ``vitest``.
+    ``expr`` as its test name pattern; the reporter writes its record to ``outcome_json``. Its
+    results cache is off and its configuration is loaded without a bundled copy, since each would
+    be written under the tree's ``node_modules``, the link into the install.
+    :class:`RefusalError` when the installed vitest's manifest cannot be read or is not an object
+    whose ``bin`` holds a string for ``vitest``.
     """
     manifest = _vitest_manifest()
     entry = _vitest_entry(manifest)
@@ -898,7 +960,7 @@ def run_vitest_capturing_outcome(
     ]
     if expr:
         cmd += ["-t", expr]
-    proc = subprocess.run(
+    return subprocess.run(
         cmd,
         cwd=tree / FRONTEND,
         env={**os.environ, OUTCOME_ENV: str(outcome_json)},
@@ -908,7 +970,6 @@ def run_vitest_capturing_outcome(
         errors="replace",
         timeout=timeout,
     )
-    return proc, _read_outcome(outcome_json)
 
 
 _TIMEOUT_HEADLINE = re.compile(
@@ -1011,7 +1072,7 @@ def _failure_kind(entry: ObservedTest, tree: Path) -> FailureKind:
         return "unreached"
     if _is_timeout(headline):
         return "timeout"
-    if entry.get("phase") != "call":
+    if entry["phase"] != "call":
         return "fixture"
     if entry.get("exc_typename") in ("AssertionError", "Failed"):
         return "behavioral"
@@ -1040,22 +1101,25 @@ def _not_counted(entry: ObservedTest) -> str:
     return f"{where}: a fixture failed during {entry['phase']} ({headline})"
 
 
-def _record_failure_kinds(observed: dict, tree: Path) -> None:
+def _record_failure_kinds(observed: ObservedRecord, tree: Path) -> None:
     """Write :func:`_failure_kind` under ``kind`` onto each failed or errored test's entry."""
     for t in _failures(observed):
         t["kind"] = _failure_kind(t, tree)
 
 
-def _failures(observed: dict) -> list[ObservedTest]:
+def _failures(observed: ObservedRecord) -> list[ObservedTest]:
     """Return the entries of ``observed["tests"]`` whose outcome is ``failed`` or ``error``."""
-    tests: list[ObservedTest] = observed["tests"]
-    return [t for t in tests if t["outcome"] in ("failed", "error")]
+    return [
+        t for t in observed["tests"] if t["outcome"] in ("failed", "error")
+    ]
 
 
-def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
+def _classify(
+    observed: ObservedRecord, baseline_precedes: bool
+) -> tuple[str, str]:
     """Return the verdict and its sentence for ``observed``."""
     failed = _failures(observed)
-    if observed.get("internal_error"):
+    if observed["internal_error"]:
         return (
             REFUSED,
             "the runner hit an internal or unhandled error, so nothing it reported can be "
@@ -1333,7 +1397,7 @@ def _prove(args: argparse.Namespace, record: dict) -> None:
             link = link_install(tree)
         if runner == "vitest":
             run = functools.partial(
-                run_vitest_capturing_outcome,
+                run_vitest,
                 tree,
                 test_file,
                 args.expr,
@@ -1355,19 +1419,18 @@ def _prove(args: argparse.Namespace, record: dict) -> None:
                     "recorded."
                 )
             run = functools.partial(
-                run_capturing_outcome,
+                run_pytest,
                 tree,
                 [test_file],
                 args.expr,
                 env,
-                outcome_json,
                 basetemp,
                 args.timeout,
                 per_test_timeout=args.per_test_timeout,
             )
 
         try:
-            proc, observed = run()
+            proc = run()
         except subprocess.TimeoutExpired as expired:
             raise RefusalError(
                 f"{runner} did not finish within {args.timeout}s."
@@ -1376,7 +1439,17 @@ def _prove(args: argparse.Namespace, record: dict) -> None:
         record[runner] = {
             "exit_code": proc.returncode,
             "tail": proc.stdout.strip().splitlines()[-15:],
+            "stderr_tail": proc.stderr.strip().splitlines()[-15:],
         }
+        observed: ObservedRecord | None
+        vitest_modules: list[str] | None = None
+        if runner == "vitest":
+            vitest_observed = _read_outcome(outcome_json, VITEST_RECORD)
+            observed = vitest_observed
+            if vitest_observed is not None:
+                vitest_modules = vitest_observed["modules"]
+        else:
+            observed = _read_outcome(outcome_json, PYTEST_RECORD)
         if observed is None:
             timed_out_nodeid = (
                 current_test_path.read_text(encoding="utf-8").strip()
@@ -1397,22 +1470,18 @@ def _prove(args: argparse.Namespace, record: dict) -> None:
                     ),
                 )
                 return
-            record[runner]["stderr_tail"] = proc.stderr.strip().splitlines()[
-                -15:
-            ]
             raise RefusalError(
                 f"{runner} reported no outcome record, which happens on a usage error before "
                 f"the run starts. Its output is recorded under {runner}.tail."
             )
 
-        if runner == "vitest":
-            modules = observed["modules"]
+        if vitest_modules is not None:
             inside = all(
                 Path(m).resolve().is_relative_to(tree.resolve())
-                for m in modules
+                for m in vitest_modules
             )
             record["harness_proof"] = {
-                "test_modules": modules,
+                "test_modules": vitest_modules,
                 "test_modules_in_baseline_tree": inside,
             }
             if not inside:

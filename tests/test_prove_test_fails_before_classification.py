@@ -13,13 +13,15 @@ commit with the fix and the guard test) and run the real script against it. They
   exception the tool does not name, which exits with the tool's own failure code;
 - the test file's place and the tree it comes from, each way the baseline is chosen or refused,
   the import proof over a tree holding a package, one raising at import and one naming a file
-  outside the tree, and each cause of a pytest run's verdict;
+  outside the tree, one assigning a file that is no string and one printing at import, each refused
+  as an answer that did not read, and each cause of a pytest run's verdict, an outcome record
+  that did not read among them;
 - ``--per-test-timeout``, one case calling ``_failure_kind`` directly on a headline;
 - the run's scratch directory, where the baseline's temporary root lies and the line printed when
   the directory cannot be removed;
 - a vitest file under a scratch frontend whose installed packages are this checkout's, the fixture
   building it refusing in its setup when the checkout has none, each verdict and refusal it can
-  reach, ``--test-rev`` among them, except an outcome record that is not JSON,
+  reach, ``--test-rev`` among them, except an outcome record that did not read,
   a pass at a baseline no source change follows, and a failure there scoring GUARDS with the
   caveat that no source file differs, which the pytest path alone holds; a changed frontend
   test counted as the test side of a pytest run; and a pytest test reading a file under the
@@ -370,6 +372,8 @@ NOTHING_SELECTED_SENTENCE = "nothing was selected"
 ALL_SKIPPED_SENTENCE = "selected tests were skipped"
 RUN_TIMEOUT_SENTENCE = "did not finish within"
 NO_OUTCOME_SENTENCE = "reported no outcome record"
+PROBE_ANSWER_SENTENCE = "the import probe's answer did not read as"
+OUTCOME_RECORD_SENTENCE = "did not read as an outcome record"
 
 
 def _one_call_repo(
@@ -1572,6 +1576,49 @@ def test_a_baseline_package_reporting_a_file_outside_the_tree_is_refused(
     assert Path(proof["resolved"]["gizmo"]) == Path(os.__file__)
 
 
+def test_a_baseline_package_whose_file_is_no_string_is_refused_naming_the_probes_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A package assigning a truthy non-string ``__file__`` makes an answer of another shape.
+
+    The probe's JSON carries the number, so the answer is JSON that does not read as a mapping of
+    package name to path; the refusal names the package.
+    """
+    repo, baseline, _ = _gizmo_repo(
+        tmp_path,
+        monkeypatch,
+        "__file__ = 1\n\n\ndef double(x):\n    return x\n",
+    )
+
+    result = _run(repo, "tests/test_gizmo.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert PROBE_ANSWER_SENTENCE in why
+    assert '"loc":["gizmo"]' in why
+
+
+def test_a_baseline_package_printing_at_import_is_refused_naming_the_probes_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A package printing a line when imported makes the probe's answer no JSON.
+
+    The refusal names the probe's answer and holds the printed line.
+    """
+    repo, baseline, _ = _gizmo_repo(
+        tmp_path,
+        monkeypatch,
+        "print('GIZMO_PRINTED_AT_IMPORT')\n\n\ndef double(x):\n    return x\n",
+    )
+
+    result = _run(repo, "tests/test_gizmo.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert PROBE_ANSWER_SENTENCE in why
+    assert "GIZMO_PRINTED_AT_IMPORT" in why
+
+
 # ── the run ──────────────────────────────────────────────────────────────────
 
 
@@ -1610,8 +1657,14 @@ def test_a_run_that_ends_before_its_session_finishes_is_refused(
     assert f"pytest {NO_OUTCOME_SENTENCE}" in _why(result)
 
 
-def test_an_outcome_record_that_is_not_json_is_refused(tmp_path: Path) -> None:
-    """A test writing text that is not JSON where the record goes, then ending, is refused."""
+def test_an_outcome_record_holding_text_that_is_not_json_is_refused_as_unread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A test writing text that is not JSON where the record goes, then ending, is refused.
+
+    The refusal says the record did not read and names the record's path.
+    """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
     repo, baseline = _fixed_double(
         tmp_path,
         "import os\n"
@@ -1626,7 +1679,103 @@ def test_an_outcome_record_that_is_not_json_is_refused(tmp_path: Path) -> None:
     result = _run(repo, "tests/test_widgets.py", baseline)
 
     assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
-    assert "is not JSON" in _why(result)
+    why = _why(result)
+    assert OUTCOME_RECORD_SENTENCE in why
+    assert "outcome.json" in why
+
+
+DROPS_A_FIELD = (
+    "import _fail_before_outcome\n"
+    "\n"
+    "\n"
+    "def test_drops_a_field_of_the_record():\n"
+    "    del _fail_before_outcome._state['collected']\n"
+)
+ADDS_A_KEY_TO_THE_RECORD = (
+    "import _fail_before_outcome\n"
+    "\n"
+    "\n"
+    "def test_adds_a_key_to_the_record():\n"
+    "    _fail_before_outcome._state['surprise_record_key'] = 1\n"
+)
+ADDS_A_KEY_TO_AN_ENTRY = (
+    "import pytest\n"
+    "\n"
+    "\n"
+    "@pytest.fixture\n"
+    "def marks_its_entry():\n"
+    "    yield\n"
+    "    import _fail_before_outcome\n"
+    "\n"
+    "    _fail_before_outcome._state['tests'][-1]['surprise_entry_key'] = 1\n"
+    "\n"
+    "\n"
+    "def test_adds_a_key_to_its_entry(marks_its_entry):\n"
+    "    pass\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("test_source", "named"),
+    [
+        pytest.param(
+            DROPS_A_FIELD, "collected", id="a field the record lacks"
+        ),
+        pytest.param(
+            ADDS_A_KEY_TO_THE_RECORD,
+            "surprise_record_key",
+            id="a key the record does not declare",
+        ),
+        pytest.param(
+            ADDS_A_KEY_TO_AN_ENTRY,
+            "surprise_entry_key",
+            id="a key a test's entry does not declare",
+        ),
+    ],
+)
+def test_an_outcome_record_the_plugin_wrote_in_another_shape_is_refused_naming_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    test_source: str,
+    named: str,
+) -> None:
+    """A test changing the loaded plugin's record, which the plugin then writes, is refused.
+
+    The session ends normally, so the plugin writes the changed record itself. The refusal names
+    the record's path and the field or key that did not read.
+    """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo, baseline = _fixed_double(tmp_path, test_source)
+
+    result = _run(repo, "tests/test_widgets.py", baseline)
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    why = _why(result)
+    assert OUTCOME_RECORD_SENTENCE in why
+    assert "outcome.json" in why
+    assert named in why
+
+
+def test_an_outcome_record_that_does_not_read_leaves_the_runners_exit_code_and_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused record leaves the runner's exit code and both output tails on the run's record."""
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo, baseline = _fixed_double(
+        tmp_path,
+        DROPS_A_FIELD + "    assert False, 'RUNNER_SAID_THIS'\n",
+    )
+    record_path = tmp_path / "record.json"
+
+    result = _run(
+        repo, "tests/test_widgets.py", baseline, "--json", str(record_path)
+    )
+
+    assert result.returncode == EXIT["REFUSED"], result.stdout + result.stderr
+    ran = json.loads(record_path.read_text(encoding="utf-8"))["pytest"]
+    assert ran["exit_code"] == 1
+    assert any("RUNNER_SAID_THIS" in line for line in ran["tail"])
+    assert isinstance(ran["stderr_tail"], list)
 
 
 def test_an_internal_error_of_the_runner_is_refused(tmp_path: Path) -> None:
