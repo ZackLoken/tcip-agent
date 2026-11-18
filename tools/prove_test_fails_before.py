@@ -92,7 +92,9 @@ files the change touches are recorded with the verdict.
 ``--baseline-from-working-tree`` snapshots the working tree as git stages it (tracked
 modifications and untracked files, ignored files excluded) into a commit object and prints its
 hash, touching neither the working tree, the index nor the stash list, and computes no verdict. It
-exits 0 when the snapshot is made and REFUSED when git refuses to stage the working tree.
+exits 0 when the snapshot is made and REFUSED when git refuses to stage the working tree or the
+staged tree holds a repository (a nested repository or a submodule) as a link, which stands for
+none of that repository's files.
 
 ``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout; a selected test that does
 not finish within it is named and the verdict is INDETERMINATE. A vitest run takes each test's
@@ -576,6 +578,8 @@ def _changed_source_files(
 
 
 SNAPSHOT_MESSAGE = "prove_test_fails_before.py working-tree snapshot"
+# The mode git's ls-tree prints for an entry that links to another repository's commit.
+REPOSITORY_LINK_MODE = b"160000"
 
 
 def snapshot_working_tree() -> str:
@@ -584,7 +588,9 @@ def snapshot_working_tree() -> str:
     The commit's tree holds every tracked and untracked file that is not ignored, each as git
     stages it, built through a scratch index, so the working tree, the real index and the stash
     list are untouched. :class:`RefusalError` when HEAD cannot be read or git refuses a step of
-    the build, with git's own message.
+    the build, with git's own message, and when the tree holds a repository as a link (a nested
+    repository or a submodule, which git stages as a link to a commit and none of its files),
+    naming each such path.
     """
     with tempfile.TemporaryDirectory(prefix="failbefore-index-") as scratch:
         head = git_output("rev-parse", "HEAD").strip()
@@ -592,6 +598,17 @@ def snapshot_working_tree() -> str:
         git_output("read-tree", head, env=env)
         git_output("add", "-A", env=env)
         tree = git_output("write-tree", env=env).strip()
+        records = _git("ls-tree", "-r", "-z", tree).split(b"\0")
+        links = [
+            path.decode(errors="replace")
+            for meta, _, path in (r.partition(b"\t") for r in records if r)
+            if meta.split()[0] == REPOSITORY_LINK_MODE
+        ]
+        if links:
+            raise RefusalError(
+                "working-tree snapshot mode does not hold a repository's files, and the "
+                f"working tree holds a repository as a link at: {', '.join(links)}"
+            )
         return git_output(
             "commit-tree", tree, "-p", head, "-m", SNAPSHOT_MESSAGE, env=env
         ).strip()

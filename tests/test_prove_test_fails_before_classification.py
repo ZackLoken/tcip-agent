@@ -7,8 +7,8 @@ commit with the fix and the guard test) and run the real script against it. They
   apart from one at the guard's own assertion;
 - ``--test-rev``, over a third revision that removes the test;
 - ``--baseline-from-working-tree``, the snapshot it prints and leaves the working tree untouched,
-  and its refusal beside ``--baseline``, with no commit to snapshot, or where git cannot stage the
-  working tree;
+  and its refusal beside ``--baseline``, with no commit to snapshot, where git cannot stage the
+  working tree, or where the staged tree holds a repository as a link;
 - a command line naming no test file and a ``--test-rev`` naming no revision, each refused, and an
   exception the tool does not name, which exits with the tool's own failure code;
 - the test file's place and the tree it comes from, each way the baseline is chosen or refused,
@@ -934,6 +934,35 @@ def test_a_snapshot_git_cannot_stage_is_refused_with_no_tracked_change(
     assert "git add -A failed" in why
     assert "inner" in why
     assert "most likely because" not in proc.stdout + proc.stderr
+
+
+def test_a_snapshot_holding_a_repository_as_a_link_is_refused_naming_its_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A snapshot whose tree holds a repository as a link is refused naming the path.
+
+    The untracked folder is a repository with a commit of its own, which git stages as a link to
+    that commit and none of its files, beside a tracked modification.
+    """
+    _redirect_temporary_folder(tmp_path, monkeypatch)
+    repo = _repository_with_a_tracked_change(tmp_path)
+    inner = repo / "inner"
+    inner.mkdir()
+    git(inner, "init", "-q")
+    git(inner, "config", "user.email", "inner@example.com")
+    git(inner, "config", "user.name", "Inner")
+    # A proof run's deep scratch folder exceeds git's default Windows path limit for these objects.
+    git(inner, "config", "core.longpaths", "true")
+    write(inner / "a.txt", "a\n")
+    commit_all(inner, "inner commit")
+
+    proc = _snapshot(repo, "tests/test_widgets.py")
+
+    assert proc.returncode == EXIT["REFUSED"], proc.stdout + proc.stderr
+    why = _why(proc)
+    assert why.startswith("REFUSED: "), proc.stdout
+    assert "inner" in why
+    assert not _printed_a_snapshot(proc), proc.stdout
 
 
 def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
