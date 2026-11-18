@@ -929,14 +929,14 @@ describe("App job entries", () => {
     const statuses = announcements(status);
 
     await next(INFERENCE_REFRESH_MS);
-    expect(listedSentences()).toEqual([HELD_RUNNING, FAILING_FAILED]);
+    expect(listedSentences()).toEqual([FAILING_FAILED, HELD_RUNNING]);
     expect(alert()).toHaveTextContent(FAILING_FAILED);
     expect(alerts).toEqual([FAILING_FAILED]);
     expect(statuses).toEqual([HELD_RUNNING]);
 
     await next(INFERENCE_REFRESH_MS);
     const progressed = `${HELD_RUNNING}, 1 of 9 images`;
-    expect(listedSentences()).toEqual([progressed, FAILING_FAILED]);
+    expect(listedSentences()).toEqual([FAILING_FAILED, progressed]);
     expect(alert()).toHaveTextContent(FAILING_FAILED);
     expect(alerts).toEqual([FAILING_FAILED]);
     expect(statuses).toEqual([HELD_RUNNING]);
