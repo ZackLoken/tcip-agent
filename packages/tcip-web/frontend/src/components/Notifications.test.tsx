@@ -407,6 +407,13 @@ describe("the live region", () => {
       context: { project: "valley" },
     });
 
+  it("marks both of its regions as presenting only what is added, as markup", () => {
+    renderClosedHost();
+
+    expect(screen.getByRole("status")).toHaveAttribute("aria-atomic", "false");
+    expect(screen.getByRole("alert")).toHaveAttribute("aria-atomic", "false");
+  });
+
   it("is given each of two notices raised in one act, in the order raised", async () => {
     renderClosedHost();
     const statuses = announcements(screen.getByRole("status"));

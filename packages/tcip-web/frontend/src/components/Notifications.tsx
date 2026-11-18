@@ -200,10 +200,10 @@ export function NotificationsLiveRegion() {
       .map((e) => <span key={e.id}>{textOf(e)}</span>);
   return (
     <div className="sr-only">
-      <div role="status" aria-live="polite">
+      <div role="status" aria-live="polite" aria-atomic="false">
         {spans("polite")}
       </div>
-      <div role="alert" aria-live="assertive">
+      <div role="alert" aria-live="assertive" aria-atomic="false">
         {spans("assertive")}
       </div>
     </div>
