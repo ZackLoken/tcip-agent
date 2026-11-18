@@ -4,21 +4,24 @@
 
 The issue's body and comments are read with ``gh issue view``. A premise block (a premise half, a
 supplement, a half read again) opens at a line ``Premises, read at <commit>:``, whose header names
-one or more commits, each optionally preceded by a repository label, and continues as the
-contiguous bullet list that follows it, an indented line continuing the bullet before it. Each
-block is checked against the commits its own header names. A premise's repository is its
-``[<label>]`` prefix, or the only one the header names. The unlabeled repository is the checkout
-the script runs from; a labeled one is the path its ``--checkout`` names, and a label with none is
-a failing premise.
+one or more commits, each optionally preceded by a repository label, and ends at its colon or at a
+period followed by whitespace. The header's commits may continue onto a next line that begins
+with "and" or a commit, and a label may then be followed by its commit on a later line. The block
+continues as the contiguous bullet list that begins on the line after the header's own last line,
+an indented line continuing the bullet before it. Each block is checked against the commits its own
+header names. A premise's repository is its ``[<label>]`` prefix, or the only one the header names.
+The unlabeled repository is the checkout the script runs from; a labeled one is the path its
+``--checkout`` names, and a label with none is a failing premise.
 
-Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>``, is read with
-``git show <commit>:<path>``. It fails when the path is absent at the commit or the range is past
-the file. Lines are counted on newline bytes alone, as git counts them. A premise whose backticked
-spans hold identifier tokens fails when none of them appears in the union of its cited ranges. A
-premise with no cite in the writer's form fails. Prints PASS with the number of blocks checked and
-the rule it applied, or each failing premise and FAIL, and exits 1 on FAIL or when any premise
-block cannot be read. A failing premise and a block's refusal are each printed after the block's
-name: its place among the issue's headers, their count and the header's words.
+Each cite in the writer's form, ``at <path>:<a>`` or ``at <path>:<a>-<b>`` with ``at`` lowercase or
+capitalized, is read with ``git show <commit>:<path>``. It fails when the path is absent at the
+commit or the range is past the file. Lines are counted on newline bytes alone, as git counts them.
+A premise whose backticked spans hold identifier tokens fails when none of them appears in the
+union of its cited ranges. A premise with no cite in the writer's form fails. Prints PASS with the
+number of blocks checked and the rule it applied, or each failing premise and FAIL, and exits 1 on
+FAIL or when any premise block cannot be read. A failing premise and a block's refusal are each
+printed after the block's name: its place among the issue's headers, their count and the header's
+words.
 """
 
 from __future__ import annotations
@@ -32,16 +35,22 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+JOINER = "and"
+REPOSITORY_COMMIT = re.compile(
+    rf"(?:\b(?!{JOINER}\b)(?P<label>[A-Za-z][\w-]*)\s+)?"
+    r"\b(?P<commit>[0-9a-f]{7,40})\b"
+)
 HEADER = re.compile(
-    r"^Premises, read at\s+(?P<refs>[^:\n]*?)(?::|\.(?:\s|$))",
+    r"^Premises, read at\s+"
+    r"(?P<refs>[^:\n]*?"
+    rf"(?:\n[ \t]*(?:{JOINER}[ \t]+)?(?-i:{REPOSITORY_COMMIT.pattern})[^:\n]*?)?)"
+    r"(?::|\.(?=\s|$))",
     re.IGNORECASE | re.MULTILINE,
 )
-REPOSITORY_COMMIT = re.compile(
-    r"(?:\b(?!and\b)(?P<label>[A-Za-z][\w-]*)\s+)?\b(?P<commit>[0-9a-f]{7,40})\b"
-)
-PREMISE_LABEL = re.compile(r"^[-*]\s+\[(?P<label>[^\]]+)\]")
+BULLET = re.compile(r"[-*] ")
+PREMISE_LABEL = re.compile(rf"^{BULLET.pattern}\s*\[(?P<label>[^\]]+)\]")
 CITE = re.compile(
-    r"\bat\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
+    r"\b[Aa]t\s+`?(?P<path>[\w./-]+):(?P<first>\d+)(?:-(?P<last>\d+))?"
 )
 PASS_LINE = (
     "PASS: {blocks} checked; each premise has one or more cites in the writer's form and every "
@@ -71,14 +80,16 @@ class Cite:
 
 @dataclass(frozen=True)
 class PremiseBlock:
-    """One premise block: its commits by repository label, its premise lines and its header's words.
+    """One premise block: its commits by repository label, its premise lines and its name.
 
-    A commit whose repository the header does not label is keyed None.
+    A commit whose repository the header does not label is keyed None. The name is the prefix that
+    leads each message about the block: its place among the issue's headers, their count and the
+    header's words.
     """
 
     commits: dict[str | None, str]
     premises: list[str]
-    header_words: str
+    name: str
 
 
 def fetch_issue(issue: int) -> str:
@@ -107,13 +118,10 @@ def _header_words(header: re.Match[str]) -> str:
     return " ".join(header.string[header.start() : header.end("refs")].split())
 
 
-def block_name(place: int, count: int, header_words: str) -> str:
-    """Return the prefix that names the block at ``place`` of ``count`` headers, from one."""
-    return f'block {place} of {count}, "{header_words}": '
-
-
-def _premise_block(text: str, header: re.Match[str]) -> PremiseBlock:
-    """Return the block that ``header``, a match of HEADER in ``text``, opens.
+def _premise_block(
+    text: str, header: re.Match[str], name: str
+) -> PremiseBlock:
+    """Return the block called ``name`` that ``header``, a match of HEADER in ``text``, opens.
 
     Raises PremiseBlockError when the header names no commit or two commits for one repository, or
     no premise line follows it.
@@ -132,7 +140,7 @@ def _premise_block(text: str, header: re.Match[str]) -> PremiseBlock:
         line = raw.rstrip("\r")
         if not line.strip():
             continue
-        if line.startswith(("- ", "* ")):
+        if BULLET.match(line):
             premises.append(line)
         elif premises and line[0] in " \t":
             premises[-1] += " " + line.strip()
@@ -140,11 +148,11 @@ def _premise_block(text: str, header: re.Match[str]) -> PremiseBlock:
             break
     if not premises:
         raise PremiseBlockError("no premise line follows the header")
-    return PremiseBlock(commits, premises, _header_words(header))
+    return PremiseBlock(commits, premises, name)
 
 
 def parse_premise_blocks(text: str) -> list[PremiseBlock]:
-    """Return the block of every ``Premises, read at`` header in ``text``, in order.
+    """Return the block of every ``Premises, read at`` header in ``text``, in order, each named.
 
     A block ends at the first line that is neither a bullet nor indented, so the next header
     begins the next block. Raises PremiseBlockError when there is no header, or when a block
@@ -155,16 +163,16 @@ def parse_premise_blocks(text: str) -> list[PremiseBlock]:
         raise PremiseBlockError("no 'Premises, read at <commit>:' header")
     blocks: list[PremiseBlock] = []
     for place, header in enumerate(headers, 1):
+        name = f'block {place} of {len(headers)}, "{_header_words(header)}": '
         try:
-            blocks.append(_premise_block(text, header))
+            blocks.append(_premise_block(text, header, name))
         except PremiseBlockError as err:
-            name = block_name(place, len(headers), _header_words(header))
             raise PremiseBlockError(f"{name}{err}") from err
     return blocks
 
 
 def parse_cites(line: str) -> list[Cite]:
-    """Return each ``at <path>:<a>[-<b>]`` cite in ``line``.
+    """Return each ``at <path>:<a>[-<b>]`` cite in ``line``, ``at`` lowercase or capitalized.
 
     A bare ``:12`` or a basename without ``at`` is not one.
     """
@@ -288,8 +296,8 @@ def main(
         print(f"{err}\nFAIL")
         return 1
     failures = [
-        f"{block_name(place, len(blocks), block.header_words)}{message}"
-        for place, block in enumerate(blocks, 1)
+        f"{block.name}{message}"
+        for block in blocks
         for line in block.premises
         for message in check_premise(line, block, checkouts, Path.cwd())
     ]

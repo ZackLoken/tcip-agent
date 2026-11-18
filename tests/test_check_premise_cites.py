@@ -419,6 +419,101 @@ def test_a_header_whose_commit_is_on_the_next_line_is_named_on_one_line(
     )
 
 
+def test_a_header_ending_in_a_period_and_a_line_break_keeps_its_first_bullet(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    failing = "- at b.txt:9 the file says `two`."
+    text = (
+        f"Premises, read at repo {commit}.\n"
+        f"{failing}\n"
+        "- at a.py:3 returns `beta_value`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out
+    assert f"outside the file (3 lines): {failing}" in out
+    assert exit_code == 1
+
+
+@pytest.mark.parametrize(
+    "wrap", [" and\nother ", "\nand other "], ids=["after-and", "before-and"]
+)
+def test_a_header_continued_onto_a_second_line_opens_a_checked_block(
+    wrap: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, first = _repository(tmp_path)
+    second = _second_commit(repo)
+    failing = "- [other] at c.txt:4 names `added_name`."
+    text = (
+        f"Premises, read at repo {first}:\n- at a.py:3 returns `beta_value`.\n\n"
+        f"Premises, read at repo {first}{wrap}{second}:\n{failing}\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}", "--checkout", f"other={repo}"],
+        fetch=lambda issue: text,
+    )
+
+    name = (
+        f'block 2 of 2, "Premises, read at repo {first} and other {second}": '
+    )
+    out_lines = capsys.readouterr().out.splitlines()
+    assert (
+        f"{name}c.txt:4-4 is outside the file (3 lines): {failing}"
+        in out_lines
+    )
+    assert exit_code == 1
+
+
+@pytest.mark.parametrize(
+    "premise",
+    [
+        "- at b.txt:9 the file says `two`.",
+        "  - at b.txt:9 the file says `two`.",
+        "-at b.txt:9 the file says `two`.",
+        "1. at b.txt:9 the file says `two`.",
+    ],
+)
+def test_an_unterminated_header_line_followed_by_a_premise_opens_no_block(
+    premise: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    text = (
+        f"Premises, read at repo {commit}\n{premise}\n"
+        "- at a.py:3 returns `beta_value`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out
+    assert out.startswith("no 'Premises, read at <commit>:' header")
+    assert exit_code == 1
+
+
+def test_a_capitalized_cite_is_resolved_like_a_lowercase_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, commit = _repository(tmp_path)
+    text = (
+        f"Premises, read at repo {commit}:\n"
+        "- at a.py:3 returns `beta_value`. At b.txt:9 the file says `two`.\n"
+    )
+
+    exit_code = cites.main(
+        ["12", "--checkout", f"repo={repo}"], fetch=lambda issue: text
+    )
+
+    out = capsys.readouterr().out
+    assert "b.txt:9-9 is outside the file (3 lines)" in out
+    assert exit_code == 1
+
+
 def test_a_superseded_block_is_not_read(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
