@@ -7,6 +7,7 @@ transcript. A harness that produces no stdout does not raise inside the worker.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from typing import TYPE_CHECKING, NoReturn
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING, NoReturn
 import pytest
 
 from tcip_web import terminal
+from tests._scratch_repo_fixtures import commit_all, scratch_repo, write
 from tests._scratch_server_fixtures import recording_launch
 from tests._web_fixtures import backend_session
 from tools import cross_family_ask
@@ -1835,3 +1837,235 @@ def test_the_command_refuses_browser_only_for_codex_before_claude_launches(
     with pytest.raises(SystemExit, match="claude alone"):
         cross_family_ask.main()
     assert seen == []
+
+
+def _stand_in_harness(
+    monkeypatch: pytest.MonkeyPatch,
+    launch: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Replace the harness launch and its version probe, leaving git and the builders real."""
+    monkeypatch.setattr(cross_family_ask, "launch_harness", launch)
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+
+
+def _run_codex_in(cwd: Path, out: Path) -> dict:
+    """Run one codex family on one question from ``cwd``, its run folder under ``out``."""
+    return cross_family_ask.run_one(
+        "qid",
+        "as-shipped",
+        "question",
+        cwd,
+        out,
+        5,
+        cross_family_ask.resolve_launch("codex", "stub-model", None),
+    )
+
+
+def _meta_on_disk(out: Path) -> dict:
+    """Return the ``meta.json`` the codex run of :func:`_run_codex_in` wrote under ``out``."""
+    path = out / "qid" / "as-shipped" / "codex" / "meta.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _commit_while_running(repo: Path, made: list[str]) -> Callable[[], None]:
+    """Return a stand-in's action that commits a new file in ``repo`` and appends the new HEAD."""
+
+    def commit() -> None:
+        write(repo / "moved.txt", "moved")
+        made.append(commit_all(repo, "moved while the harness ran"))
+
+    return commit
+
+
+def test_a_checkout_that_moved_during_the_run_is_named_in_the_fault_by_both_commits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stand-in commits while it runs: the fault names both hashes and the record holds each."""
+    repo = scratch_repo(tmp_path)
+    first = commit_all(repo, "first")
+    made: list[str] = []
+    _stand_in_harness(
+        monkeypatch,
+        recording_launch([], during=_commit_while_running(repo, made)),
+    )
+
+    meta = _run_codex_in(repo, tmp_path / "out")
+
+    (second,) = made
+    assert first in meta["fault"]
+    assert second in meta["fault"]
+    assert meta["commit_at_start"] == first
+    assert meta["commit_at_end"] == second
+    assert meta == _meta_on_disk(tmp_path / "out")
+
+
+def test_a_checkout_left_alone_records_one_commit_at_both_ends_and_no_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stand-in that leaves the repository alone: both keys hold HEAD and nothing is faulted."""
+    repo = scratch_repo(tmp_path)
+    head = commit_all(repo, "first")
+    _stand_in_harness(monkeypatch, recording_launch([]))
+
+    meta = _run_codex_in(repo, tmp_path / "out")
+
+    assert "commit_at_start" in meta
+    assert meta["commit_at_start"] == head
+    assert meta["commit_at_end"] == head
+    assert meta["commit_read_error"] == ""
+    assert meta["fault"] == ""
+    assert meta == _meta_on_disk(tmp_path / "out")
+
+
+def test_the_command_exits_nonzero_for_a_moved_checkout_and_the_summary_row_agrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Through ``main`` the moved checkout is exit 1, and summary row and record carry one fault."""
+    repo = scratch_repo(tmp_path)
+    first = commit_all(repo, "first")
+    made: list[str] = []
+    _stand_in_harness(
+        monkeypatch,
+        recording_launch([], during=_commit_while_running(repo, made)),
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
+    )
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "cross_family_ask.py",
+            "--question-id",
+            "qid",
+            "--prompt-file",
+            str(tmp_path / "q.txt"),
+            "--families",
+            "codex",
+            "--model",
+            "stub-model",
+            "--cwd",
+            str(repo),
+            "--out",
+            str(out),
+            "--timeout",
+            "5",
+        ],
+    )
+
+    assert cross_family_ask.main() == 1
+
+    (second,) = made
+    summary = json.loads(
+        (out / "qid" / "as-shipped" / "summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    (row,) = summary
+    fault = _meta_on_disk(out)["fault"]
+    assert row["fault"] == fault
+    assert first in fault
+    assert second in fault
+
+
+def test_a_failed_harness_and_a_moved_checkout_are_both_in_the_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stand-in that commits and exits 1: the fault names the exit and both hashes."""
+    repo = scratch_repo(tmp_path)
+    first = commit_all(repo, "first")
+    made: list[str] = []
+    _stand_in_harness(
+        monkeypatch,
+        recording_launch([], code=1, during=_commit_while_running(repo, made)),
+    )
+
+    meta = _run_codex_in(repo, tmp_path / "out")
+
+    (second,) = made
+    assert first in meta["fault"]
+    assert second in meta["fault"]
+    assert "the harness exited 1" in meta["fault"]
+
+
+def test_a_checkout_whose_commit_cannot_be_read_after_the_run_keeps_the_record_and_faults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stand-in that damages HEAD: the record is written, holds git's message and is faulted."""
+    repo = scratch_repo(tmp_path)
+    head = commit_all(repo, "first")
+    _stand_in_harness(
+        monkeypatch,
+        recording_launch(
+            [],
+            during=lambda: write(
+                repo / ".git" / "HEAD", "ref: refs/heads/missing\n"
+            ),
+        ),
+    )
+
+    meta = _run_codex_in(repo, tmp_path / "out")
+
+    assert meta["commit_read_error"] != ""
+    assert meta["commit_read_error"] in meta["fault"]
+    assert meta["commit_at_start"] == head
+    assert meta["commit_at_end"] is None
+    assert meta == _meta_on_disk(tmp_path / "out")
+
+
+def test_a_checkout_whose_commit_cannot_be_read_refuses_the_run_before_the_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repository with no commit refuses the run with git's message and writes nothing.
+
+    No harness is started.
+    """
+    repo = scratch_repo(tmp_path)
+    git_says = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stderr.strip()
+    assert git_says
+    seen: list[dict] = []
+    _stand_in_harness(monkeypatch, recording_launch(seen))
+
+    with pytest.raises(RuntimeError, match=re.escape(git_says)) as raised:
+        _run_codex_in(repo, tmp_path / "out")
+
+    assert type(raised.value) is cross_family_ask.CommitReadError
+    assert seen == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_directory_in_no_checkout_records_no_commit_and_runs_no_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """From a directory with no checkout the commit keys hold None, with no fault and no command."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    commands: list[object] = []
+
+    def record_command(*args: object, **_kwargs: object) -> NoReturn:
+        commands.append(args)
+        raise AssertionError(
+            "no command is run for a directory in no checkout"
+        )
+
+    _stand_in_harness(monkeypatch, recording_launch([]))
+    monkeypatch.setattr(cross_family_ask.subprocess, "run", record_command)
+
+    meta = _run_codex_in(plain, tmp_path / "out")
+
+    assert "commit_at_start" in meta
+    assert meta["commit_at_start"] is None
+    assert meta["commit_at_end"] is None
+    assert meta["fault"] == ""
+    assert commands == []
+    assert meta == _meta_on_disk(tmp_path / "out")

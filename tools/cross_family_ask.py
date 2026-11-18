@@ -2,7 +2,9 @@
 
 Each run writes a directory holding the exact prompt, the exact argv, the harness's
 stdout and stderr, the extracted final response, and metadata describing what the
-harness was and how long it took.
+harness was, how long it took, and the commit the working directory's checkout was at when the
+harness started and when it ended. The two commits are the ends of the run: they do not catch an
+uncommitted edit, a stash, or a checkout moved away and back between the reads.
 
 Conditions control what the harness could reach, not what it was asked. An attached image adds
 one family-specific preface line ahead of the question, since each harness takes an image
@@ -501,23 +503,73 @@ EXECUTABLES = {"claude": CLAUDE, "codex": CODEX, "antigravity": AGY}
 STDIN_FAMILIES = {"claude", "codex"}
 
 
+class CommitReadError(RuntimeError):
+    """Git failed to name the commit of a directory that is inside a checkout."""
+
+
+def checkout_commit(directory: pathlib.Path) -> str | None:
+    """Return the commit ``directory``'s checkout is at, or None when it is in no checkout.
+
+    A directory is in no checkout when neither it nor any parent holds a ``.git`` entry; that is
+    read from the filesystem and runs no command. Inside a checkout the answer is
+    ``git rev-parse HEAD``'s, and any failure of that command raises :class:`CommitReadError`,
+    never None: carrying git's own message when git ran and exited nonzero, and the operating
+    system's error when git could not be started.
+    """
+    resolved = directory.resolve()
+    if not any((d / ".git").exists() for d in (resolved, *resolved.parents)):
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(resolved),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise CommitReadError(
+            f"cannot read the commit {resolved} is at: {exc}"
+        ) from exc
+    if out.returncode != 0:
+        raise CommitReadError(
+            f"cannot read the commit {resolved} is at: {out.stderr.strip()}"
+        )
+    return out.stdout.strip()
+
+
 def describe_fault(meta: dict) -> str:
     """Return why this run does not count as an answer, or an empty string when it does.
 
     A nonzero exit code, a captured response that is empty once stripped of whitespace
     (``response_chars`` of zero), or a model mismatch each make a run no answer, whatever code
-    path emptied the response out.
+    path emptied the response out; the first that applies is named. A checkout whose commit
+    differs between ``commit_at_start`` and ``commit_at_end``, and a nonempty
+    ``commit_read_error``, are each added to it, so a run with several faults names all of them,
+    joined by "; ". A row holding none of the commit keys has neither.
     """
+    faults = []
     if meta["exit_code"] != 0:
-        return f"the harness exited {meta['exit_code']}"
-    if meta["response_chars"] == 0:
-        return "it produced no answer text, so there is nothing to review"
-    if meta.get("model_mismatch"):
-        return (
+        faults.append(f"the harness exited {meta['exit_code']}")
+    elif meta["response_chars"] == 0:
+        faults.append(
+            "it produced no answer text, so there is nothing to review"
+        )
+    elif meta.get("model_mismatch"):
+        faults.append(
             f"it ran on {meta.get('model_used')} after {meta['model_resolved']} was asked for, "
             "so the answer is not the comparison that was requested"
         )
-    return ""
+    read_error = meta.get("commit_read_error", "")
+    start, end = meta.get("commit_at_start"), meta.get("commit_at_end")
+    if read_error:
+        faults.append(read_error)
+    elif start != end:
+        faults.append(
+            f"the checkout moved from {start} to {end} while the harness ran, so the commit the "
+            "harness was started at is not the one it ended at"
+        )
+    return "; ".join(faults)
 
 
 def print_verdict(faults: list[tuple[str, str]], total: int) -> None:
@@ -703,10 +755,15 @@ def run_one(
     directory under ``out_root`` receives the prompt, the argv, stdout, stderr, the extracted
     response and ``meta.json``. The harness runs through :func:`launch_harness`, under a
     ``browser`` condition in ``tcip_web.terminal.inherited_env``'s environment. Refuses what
-    :func:`refuse_unsupported` refuses before anything is written or launched.
+    :func:`refuse_unsupported` refuses before anything is written or launched. Inside a checkout
+    the commit is read next, and a failed read raises :class:`CommitReadError` with nothing
+    written and no harness started; the record's ``commit_at_start`` and ``commit_at_end`` are
+    None for a directory in no checkout, and a failed read after the launch is kept in
+    ``commit_read_error``.
     """
     family = launch.family
     refuse_unsupported(condition_name, family, cwd)
+    commit_at_start = checkout_commit(cwd)
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
     # A prior meta.json here is this family's own earlier run under the same question and condition.
@@ -772,6 +829,12 @@ def run_one(
         )
 
     duration = (datetime.datetime.now() - clock).total_seconds()
+    commit_at_end: str | None = None
+    commit_read_error = ""
+    try:
+        commit_at_end = checkout_commit(cwd)
+    except CommitReadError as exc:
+        commit_read_error = str(exc)
     stdout, stderr = as_text(stdout), as_text(stderr)
     (run_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
@@ -815,6 +878,9 @@ def run_one(
         "rerun": rerun,
         "images": [str(image) for image in resolved_images],
         "started": started,
+        "commit_at_start": commit_at_start,
+        "commit_at_end": commit_at_end,
+        "commit_read_error": commit_read_error,
         "duration_s": round(duration, 1),
         "exit_code": code,
         "timed_out": timed_out,
