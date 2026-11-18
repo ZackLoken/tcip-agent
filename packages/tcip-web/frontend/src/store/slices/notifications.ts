@@ -5,11 +5,14 @@ import type { AppState } from "@/store/appState";
 /** How loud a message to the person is. */
 export type MessageLevel = "error" | "warning" | "info";
 
+/** How insistently a live region announces what it is given. */
+export type Politeness = "assertive" | "polite";
+
 /** How each level is shown and told, read by every message component: its word, its text tone,
  *  the color of its mark, and the politeness its live region announces it with. */
 export const LEVELS: Record<
   MessageLevel,
-  { word: string; tone: string; mark: string; live: "assertive" | "polite" }
+  { word: string; tone: string; mark: string; live: Politeness }
 > = {
   error: { word: "Error", tone: "tcip-problem", mark: "bg-tcip-fp", live: "assertive" },
   warning: { word: "Warning", tone: "text-tcip-warn", mark: "bg-tcip-warn", live: "polite" },
@@ -70,6 +73,9 @@ export type NotificationEntry = EntryText &
     /** How many times it was raised. */
     count: number;
     context: EntryContext;
+    /** What the live region announces for it: its text and level as first raised, which no later
+     *  change of the entry rewrites. */
+    announcement: { text: string; level: MessageLevel };
   };
 
 /** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal. A job
@@ -90,8 +96,6 @@ export interface NotificationsSlice {
   holding: Partial<Record<ConditionName, number>>;
   /** The id of the newest entry the person has had the area open over; any later one is new. */
   seenThrough: number;
-  /** The entry the live region announces: the one raised last, null before any. */
-  announced: NotificationEntry | null;
   /** Hold `condition` stating `sentence`, or end it with null. A condition not holding raises a
    *  new entry, announced once; one holding updates its entry's sentence in place, or nothing
    *  once that entry is dismissed. */
@@ -151,7 +155,6 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
   notifications: [],
   holding: {},
   seenThrough: 0,
-  announced: null,
 
   holdCondition: (condition, sentence) =>
     set((s) => {
@@ -169,20 +172,21 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
           ),
         };
       }
+      const level = CONDITION_LEVEL[condition];
       const entry: NotificationEntry = {
         id: nextEntryId++,
         kind: "condition",
         condition,
-        level: CONDITION_LEVEL[condition],
+        level,
         time: Date.now(),
         count: 1,
         context: {},
         sentence,
+        announcement: { text: sentence, level },
       };
       return {
         notifications: [...s.notifications, entry],
         holding: { ...s.holding, [condition]: entry.id },
-        announced: entry,
       };
     }),
 
@@ -224,12 +228,13 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         count: 1,
         context,
         action,
+        announcement: { text: textOf(said), level },
         ...said,
       } as NotificationEntry;
       const earlier = s.notifications.flatMap((e) =>
         e !== standing ? [e] : standingJob ? [] : [unkeyed(e)],
       );
-      return { notifications: [...earlier, entry], announced: entry };
+      return { notifications: [...earlier, entry] };
     }),
 
   releaseNotification: (key) =>

@@ -7,6 +7,7 @@ import {
   type EntryAction,
   LEVELS,
   type NotificationEntry,
+  type Politeness,
   selectHoldingLevel,
   selectNewCount,
   selectStanding,
@@ -193,15 +194,18 @@ export function NotificationsPane() {
 /** The application's one standing live region: it announces each new entry once as it is
  *  raised, at its level's politeness, whether or not the area is open. */
 export function NotificationsLiveRegion() {
-  const announced = useStore((s) => s.announced);
-  const live = announced && LEVELS[announced.level].live;
+  const entries = useStore((s) => s.notifications);
+  const spans = (live: Politeness) =>
+    entries
+      .filter((e) => LEVELS[e.announcement.level].live === live)
+      .map((e) => <span key={e.id}>{e.announcement.text}</span>);
   return (
     <div className="sr-only">
-      <div role="status" aria-live="polite">
-        {announced && live === "polite" && <span key={announced.id}>{textOf(announced)}</span>}
+      <div role="status" aria-live="polite" aria-atomic="false">
+        {spans("polite")}
       </div>
-      <div role="alert" aria-live="assertive">
-        {announced && live === "assertive" && <span key={announced.id}>{textOf(announced)}</span>}
+      <div role="alert" aria-live="assertive" aria-atomic="false">
+        {spans("assertive")}
       </div>
     </div>
   );

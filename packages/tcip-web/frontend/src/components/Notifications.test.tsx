@@ -13,6 +13,7 @@ import {
 import { dismissLabel } from "@/lib/dismissLabel";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
+import { announcements } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS } from "@/test/sessions";
 import { PRODUCED_ENVELOPE, openTestProject } from "@/test/store";
@@ -41,17 +42,6 @@ function renderOpenHost() {
       <NotificationsLiveRegion />
     </StrictMode>,
   );
-}
-
-/** Every text the assertive live region has been given since `region` began being watched. */
-function announcements(region: HTMLElement): string[] {
-  const told: string[] = [];
-  new MutationObserver((records) => {
-    for (const record of records) {
-      record.addedNodes.forEach((node) => told.push(node.textContent ?? ""));
-    }
-  }).observe(region, { childList: true, subtree: true });
-  return told;
 }
 
 async function flush() {
@@ -403,6 +393,67 @@ describe("a job", () => {
       }),
     );
     expect(screen.getByRole("button", { name: "Notifications" })).toBeInTheDocument();
+  });
+});
+
+describe("the live region", () => {
+  const FIRST = "Renamed Valley farm to Valley east.";
+  const SECOND = "Removed Ridge farm.";
+  const raiseNotice = (sentence: string) =>
+    useStore.getState().raiseNotification({
+      kind: "notice",
+      level: "info",
+      text: { sentence },
+      context: { project: "valley" },
+    });
+
+  it("marks both of its regions as presenting only what is added, as markup", () => {
+    renderClosedHost();
+
+    expect(screen.getByRole("status")).toHaveAttribute("aria-atomic", "false");
+    expect(screen.getByRole("alert")).toHaveAttribute("aria-atomic", "false");
+  });
+
+  it("is given each of two notices raised in one act, in the order raised", async () => {
+    renderClosedHost();
+    const statuses = announcements(screen.getByRole("status"));
+
+    act(() => {
+      raiseNotice(FIRST);
+      raiseNotice(SECOND);
+    });
+    await act(flush);
+
+    expect(statuses).toEqual([FIRST, SECOND]);
+  });
+
+  it("holds the text of an announced entry only while the entry is listed", () => {
+    renderClosedHost();
+    const status = screen.getByRole("status");
+    act(() => raiseNotice(FIRST));
+    expect(status).toHaveTextContent(FIRST);
+
+    act(() => useStore.getState().dismissNotification(useStore.getState().notifications[0].id));
+
+    expect(status).toBeEmptyDOMElement();
+  });
+
+  it("is given nothing new by the dismissal of one of two announced entries, and keeps the other's text", async () => {
+    renderClosedHost();
+    const status = screen.getByRole("status");
+    const statuses = announcements(status);
+    act(() => {
+      raiseNotice(FIRST);
+      raiseNotice(SECOND);
+    });
+    const [first] = useStore.getState().notifications;
+
+    act(() => useStore.getState().dismissNotification(first.id));
+    await act(flush);
+
+    expect(statuses).toEqual([FIRST, SECOND]);
+    expect(status).not.toHaveTextContent(FIRST);
+    expect(status).toHaveTextContent(SECOND);
   });
 });
 

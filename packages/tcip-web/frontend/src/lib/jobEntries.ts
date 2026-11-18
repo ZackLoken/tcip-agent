@@ -5,7 +5,7 @@ import { TERMINAL_STATES } from "@/lib/runStatus";
 import { jobKey } from "@/lib/trainingKeys";
 import { useStore } from "@/store";
 import type { JobListings, JobsTold, ListingName } from "@/store/slices/jobListings";
-import { LEVELS, type MessageLevel, selectStanding } from "@/store/slices/notifications";
+import { type MessageLevel, selectStanding } from "@/store/slices/notifications";
 
 /** One job as an answer lists it: its id, how the person reads its name, its state, and the
  *  sentence telling it. */
@@ -124,11 +124,7 @@ export function tellJobs<N extends ListingName>(
     raises.push({ id, level: "warning", sentence, retell: true, release: true });
   }
   keepJobsTold(project, listing, { listed: listedIds, watched });
-  // The live region announces the last raise alone, so an assertive one goes after every polite.
-  const assertive = (r: JobRaise) => Number(LEVELS[r.level].live === "assertive");
-  for (const { id, level, sentence, retell, release } of raises.sort(
-    (a, b) => assertive(a) - assertive(b),
-  )) {
+  for (const { id, level, sentence, retell, release } of raises) {
     raiseNotification({
       kind: "job",
       level,

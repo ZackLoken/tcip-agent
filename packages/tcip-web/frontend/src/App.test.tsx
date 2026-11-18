@@ -24,6 +24,7 @@ import { BAND_ANSWERS } from "@/test/bands";
 import { measureWindow, PANE_FOCUS } from "@/test/dock";
 import { INFERENCE_ANSWERS } from "@/test/inference";
 import { LABEL_ANSWERS } from "@/test/labels";
+import { announcements } from "@/test/notifications";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
@@ -923,22 +924,31 @@ describe("App job entries", () => {
     const { held_started, running, canceled } = INFERENCE_ANSWERS;
     await watchFromMeta([], [INFERENCE_ANSWERS.failing_started, held_started, running, canceled]);
     expect(listedSentences()).toEqual([FAILING_RUNNING]);
+    const alerts = announcements(alert());
+    const status = within(alert().parentElement!).getByRole("status");
+    const statuses = announcements(status);
 
     await next(INFERENCE_REFRESH_MS);
-    expect(listedSentences()).toEqual([HELD_RUNNING, FAILING_FAILED]);
+    expect(listedSentences()).toEqual([FAILING_FAILED, HELD_RUNNING]);
     expect(alert()).toHaveTextContent(FAILING_FAILED);
+    expect(alerts).toEqual([FAILING_FAILED]);
+    expect(statuses).toEqual([HELD_RUNNING]);
 
     await next(INFERENCE_REFRESH_MS);
     const progressed = `${HELD_RUNNING}, 1 of 9 images`;
-    expect(listedSentences()).toEqual([progressed, FAILING_FAILED]);
+    expect(listedSentences()).toEqual([FAILING_FAILED, progressed]);
     expect(alert()).toHaveTextContent(FAILING_FAILED);
-    for (const status of screen.getAllByRole("status")) expect(status).not.toHaveTextContent(held);
+    expect(alerts).toEqual([FAILING_FAILED]);
+    expect(statuses).toEqual([HELD_RUNNING]);
 
     lookAtArea();
     expect(notificationsButton()).toHaveAccessibleName("Notifications");
     await next(INFERENCE_REFRESH_MS);
     const ended = `Inference job ${held}: canceled`;
     expect(listedSentences()).toEqual([FAILING_FAILED, ended]);
+    expect(statuses).toEqual([HELD_RUNNING, ended]);
+    expect(status).toHaveTextContent(ended);
+    expect(status).not.toHaveTextContent(HELD_RUNNING);
     expect(notificationsButton()).toHaveAccessibleName("Notifications, 1 new");
   });
 
