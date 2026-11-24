@@ -1,19 +1,9 @@
-"""Scratch git repositories the tool tests build, each holding a copy of the fail-before script.
-
-The copy acts on the repository that holds it, so a test runs it there as its users do.
-"""
+"""Scratch git repositories the tool tests build, each holding one plain file to commit."""
 
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-
-from tests import REPO_ROOT
-
-SCRIPT_RELATIVE_PATH = "tools/prove_test_fails_before.py"
-"""The fail-before script's path under a repository's root, this one's and each scratch copy's."""
-SCRIPT = REPO_ROOT / SCRIPT_RELATIVE_PATH
-SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
 
 
 def git(repo: Path, *args: str) -> str:
@@ -31,15 +21,13 @@ def write(path: Path, text: str) -> None:
 
 
 def scratch_repo(tmp_path: Path) -> Path:
-    """Make a git repository holding a copy of the fail-before script and an empty ``tests/``.
+    """Make a git repository at ``tmp_path / "scratch"`` holding one file, ``notes.txt``.
 
-    The copy sits at ``SCRIPT_RELATIVE_PATH`` and nothing is committed. Returns the root.
+    Nothing is committed. Returns the root.
     """
     repo = tmp_path / "scratch"
-    copy = repo / SCRIPT_RELATIVE_PATH
-    copy.parent.mkdir(parents=True)
-    (repo / "tests").mkdir()
-    write(copy, SCRIPT_SOURCE)
+    repo.mkdir()
+    write(repo / "notes.txt", "notes\n")
     git(repo, "init", "-q")
     git(repo, "config", "user.email", "test@example.com")
     git(repo, "config", "user.name", "Test")
