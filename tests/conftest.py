@@ -78,17 +78,16 @@ def pytest_collection_modifyitems(
 
 @pytest.fixture
 def frontend_install() -> None:
-    """Fail the test's setup when the fail-before tool's ``INSTALL`` is no folder.
+    """Fail the test's setup when ``tests.INSTALL``, read at the request, is no folder.
 
     The failure names the missing folder and the command that installs it.
     """
-    from tools import prove_test_fails_before
+    import tests
 
-    install = prove_test_fails_before.INSTALL
-    if not install.is_dir():
+    if not tests.INSTALL.is_dir():
         pytest.fail(
-            f"the frontend's install {install} is not a folder; run `npm ci` in "
-            f"{prove_test_fails_before.FRONTEND} of this checkout and run again"
+            f"the frontend's install {tests.INSTALL} is not a folder; run `npm ci` in "
+            f"{tests.FRONTEND} and run again"
         )
 
 

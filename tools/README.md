@@ -9,16 +9,6 @@ section instead.
 
 - `gate_baseline.py` - runs CI's own jobs locally; its module docstring says which jobs and steps
   it leaves out.
-- `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
-  current test side (`tests/` and the frontend's test files) so conftest and helpers travel with the
-  test, and reads the per-test outcome to say whether a test actually fails without its fix. A
-  file under `tests/` runs under pytest, after a proof that the baseline's own Python source is
-  what gets imported; a frontend test file runs under the frontend's installed vitest, after which
-  the proof is only that every test module vitest ran lies in the baseline tree, never where their
-  imports resolve. Four verdicts, `GUARDS`, `VACUOUS`,
-  `INDETERMINATE` and `REFUSED`, each its own exit code; its module docstring states what each
-  means and how the baseline is chosen, and only `GUARDS` is evidence. `--test-rev` checks a guard
-  claim already in the history.
 - `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
   answers; its module docstring and `--help` say which families it runs, under which conditions,
   and what each run records.
@@ -29,14 +19,6 @@ section instead.
   docstring says what each walk records and how the caller builds the scratch project.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
   for "how many domain tools exist," since the count drifts as tools are added/renamed.
-- `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)
-  for a commit, a `rev1..rev2` range, `<rev>..` for the working tree against `rev`, or `--cached`.
-- `worktree_gate.py` - runs ruff, mypy and a pytest file list inside a worktree, its own `tcip_mcp`
-  resolution proved first (the editable installs point at the main checkout, so a worktree needs its
-  own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves outside it; each
-  requested gate runs in the foreground, stopping at the first failure with its exit code.
-- `check_premise_cites.py` - checks the line cites of every premise block on an issue against
-  the commits its own header names.
 - `generate_frontend_routes.py` - generates the browser's route-path module, over FastAPI's
   effective route contexts whose names the frontend's non-test sources read as `ROUTES.<name>` (the
   reads `tests.READS_SCRIPT` finds through the TypeScript compiler, run under `node`

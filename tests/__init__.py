@@ -1,9 +1,9 @@
 """The test suite and the helpers its tests share.
 
 It carries the root of the repository its tests read files from, the launcher of a child test
-session, the browser's package, its sources, its formatter, the writer of its generated files and
-its Node scripts with their runner, the names the person rule is tested on, and the reader of the
-CSV files its tests deliver.
+session, the browser's package, its install, its sources, its formatter, the writer of its
+generated files and its Node scripts with their runner, the names the person rule is tested on,
+and the reader of the CSV files its tests deliver.
 """
 
 import csv
@@ -59,6 +59,8 @@ def child_basetemp(tmp_path: Path) -> Path:
 
 FRONTEND = REPO_ROOT / "packages" / "tcip-web" / "frontend"
 """The browser's package: its manifest, its configuration and its sources."""
+INSTALL = FRONTEND / "node_modules"
+"""The browser's installed packages, the folder `npm ci` in :data:`FRONTEND` writes."""
 FRONTEND_SRC = (
     FRONTEND
     / json.loads((FRONTEND / "tsconfig.json").read_text(encoding="utf-8"))[
@@ -89,14 +91,10 @@ def printed_json(script: Path, argument: Path) -> dict:
 def formatted(text: str, path: Path) -> str:
     """Return ``text`` as the frontend's installed Prettier formats a file at ``path``.
 
-    Prettier is the one under the fail-before tool's ``INSTALL``, read when this is called, and
-    reads the frontend's own configuration for ``path``.
+    Prettier is the one under :data:`INSTALL`, read when this is called, and reads the
+    frontend's own configuration for ``path``.
     """
-    from tools import prove_test_fails_before
-
-    prettier = (
-        prove_test_fails_before.INSTALL / "prettier" / "bin" / "prettier.cjs"
-    )
+    prettier = INSTALL / "prettier" / "bin" / "prettier.cjs"
     return subprocess.run(
         ["node", str(prettier), "--stdin-filepath", str(path)],
         input=text,
