@@ -150,7 +150,7 @@ jobs:
         env:
           TCIP_MIN_TESTS: "400"
           OMP_NUM_THREADS: "1"
-        run: pytest tests/ -n auto --timeout=300 -q
+        run: pytest -n auto --timeout=300 -q
 
       # Last, and whatever the gates above answered, so an advisory fails the job without
       # hiding their results.
