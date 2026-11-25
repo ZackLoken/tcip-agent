@@ -1,11 +1,9 @@
 # CLAUDE.md
 
-The developer's contract for Claude (and any Claude-driven agent) changing this repository. When
-this file or the operating contract and a knowledge document disagree on a domain fact, the
-document wins; on behavior, this file and the contract win. Machine and harness facts live in
-`CLAUDE.local.md` (not shipped); commit, push and prose rules that hold across projects live in the
-global `CLAUDE.md`; the rules every change meets live here, and `CONTRIBUTING.md` is the page for
-someone outside reporting a problem or asking for a feature.
+The platform's rules for anyone, a person or an agent, changing this repository. When this file or
+the operating contract and a knowledge document disagree on a domain fact, the document wins; on
+behavior, this file and the contract win. `CONTRIBUTING.md` is the page for someone outside
+reporting a problem or asking for a feature.
 
 ## The operating contract
 
@@ -23,16 +21,15 @@ one as a reason not to change it.
 ## What this is
 
 `README.md` has the pitch and the roadmap. Four packages under `packages/` share one `.tcip/`
-state directory, each with its own `CLAUDE.md` for layout. Domain knowledge lives in
-`packages/tcip-mcp/src/tcip_mcp/knowledge/` as repo files and reaches every harness as a skill
-naming the `serve_domain_knowledge` tool, which serves it; a document is read in full by every route.
+state directory, each with its own `CLAUDE.md` for its layout and conventions. Domain knowledge
+lives in `packages/tcip-mcp/src/tcip_mcp/knowledge/` as repo files and reaches every harness as a
+skill naming the `serve_domain_knowledge` tool, which serves it; a document is read in full by
+every route.
 
 ## Working on the platform
 
 - Platform work skips the operating contract's steps that act on a breeder's project:
   `inspect_project`, `load_project_memory`, `report_friction` and `write_retrospective`.
-- Orientation reads go by a code search (the semantic index where it is connected, otherwise
-  `git grep` or the Grep tool over a named subtree) and then the file itself, whole.
 
 ## Invariants for platform code
 
@@ -55,16 +52,10 @@ or schema currently serves one, that implementation is replaceable and the guara
   code with a caller. A sentence in a brief, a report, a recommendation or a review that names
   existing data as a reason to keep something is a defect in that sentence.
 
-## Working a change
+## Tests and gates
 
-- A test that guards a fix is observed failing without the fix, through
-  `tools/prove_test_fails_before.py`, and the verdict is named: `GUARDS` is the only evidence, and
-  `VACUOUS`, `INDETERMINATE` and `REFUSED` are reported as what they are, never as coverage. A
-  guard whose run comes out `REFUSED` because its own code raised against the baseline, as a call
-  across a signature the change alters does, is reported with that verdict and, beside it, a check
-  that reaches the behavior, named as not evidence. Every test constructs its input through the
-  platform's own producer (an MCP tool, a pipeline function, a route, the document writer), never
-  a hand-built fixture standing in for one.
+- Every test constructs its input through the platform's own producer (an MCP tool, a pipeline
+  function, a route, the document writer), never a hand-built fixture standing in for one.
 - A shared fact has one implementation (the operating contract's "call one from the other") and
   ships an agreement test: two routes' own records compared against each other, not each
   against a fixture. The test guards that the routes still agree, and never licenses a second
@@ -74,29 +65,13 @@ or schema currently serves one, that implementation is replaceable and the guara
   answer is known in advance for a training or freezing mechanism), since a suite that compares the
   platform only to itself proves nothing about the number. A change replacing a hand-written
   implementation with a library call lands with that test as its gate.
-- Gates before a pull request: the Commands block's lines for what the change touched (the ruff
-  and mypy lines for Python, the markdown line for a markdown file, the five frontend lines for a
-  frontend file), and the change's own test files, each run to its end and its output read before
-  the pull request opens. CI is the full gate. A test touching the filesystem outside `tmp_path` is
-  the first reread on a break that only shows in CI.
-- A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
-  as proof a change was safe, check that some fixture could have come out differently.
+- The gates for a change are the Commands block's lines for what it touched (the ruff and mypy
+  lines for Python, the markdown line for a markdown file, the five frontend lines for a frontend
+  file) and the change's own test files. CI is the full gate.
 - A guard test reads what the agent or the breeder receives through its producer (the hook's
-  orientation, a rendered instruction file, the settings, the argv, a route's answer); a behavior
-  no test can reach is named on the pull request with the one check that reaches it.
-- Every change leaves the mechanism it touched with less to maintain than it found. The line delta
-  by area (`python tools/line_delta.py <repo> main..`) is reported on every pull request as the
-  signal that prompts the code reviewer's look, never the test. The merge stops, on any issue, when
-  the code reviewer names in the touched mechanism a second implementation of a fact or machinery
-  kept beside its replacement: a vocabulary or key declared twice, a per-shape copy of a reader.
-- Before changing how a shared fact is spelled, produced or read, enumerate its producers and
-  readers in the touched mechanism and change them together; a convention changed at one site and
-  not its siblings leaves the fact spelled two ways.
-- A read by another model family is advisory on a design and binding on a change to a persisted
-  format: when two families agree against the author's position, the author conforms or brings
-  the split to the owner, and the outvoted side never lands on its own authority.
-- Commits: one concern each, in dependency order, each message stating the standing constraint the
-  change installs, never a narrative of the session that made it.
+  orientation, a rendered instruction file, the settings, the argv, a route's answer).
+- A shared fact's producers and readers in a mechanism change together; a convention changed at one
+  site and not its siblings leaves the fact spelled two ways.
 - One fact has one spelling. Whenever a change touches a fact, ask what else states it: a second
   key, field, flag or parameter that must agree with the first is a derived spelling, whether or not
   this change introduced it, and it is deleted rather than kept, reconciled or asked which one

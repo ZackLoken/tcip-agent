@@ -30,8 +30,6 @@ console script installed.
 The root `CLAUDE.md`'s Commands block spells it in CI's order; a partial run misses
 `format:check` or `lint`.
 
-Use the `frontend-design` skill for IA/visual work.
-
 ## The in-app agent terminal launches a provider row
 
 `terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch: its
