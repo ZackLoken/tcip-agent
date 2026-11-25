@@ -2223,6 +2223,32 @@ def test_a_run_given_no_out_from_a_worktree_of_a_bare_repository_is_refused(
     assert _entries(worktree) == worktree_before
 
 
+@pytest.mark.parametrize("placement", ["b.git", "i/b.git"])
+def test_a_run_given_no_out_from_a_worktree_of_a_bare_repository_inside_another_working_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, placement: str
+) -> None:
+    """The working tree around a bare repository is not its own; the exit is the tool's text."""
+    outer = scratch_repo(tmp_path)
+    commit_all(outer, "first")
+    bare = outer / placement
+    bare.parent.mkdir(exist_ok=True)
+    git(tmp_path, "clone", "-q", "--bare", str(outer), str(bare))
+    worktree = tmp_path / "bare-linked"
+    git(bare, "worktree", "add", "-q", "--detach", str(worktree))
+    seen = _prepare_default_out_run(tmp_path, monkeypatch, worktree)
+    outer_before, worktree_before = _entries(outer), _entries(worktree)
+
+    with pytest.raises(SystemExit) as raised:
+        cross_family_ask.main()
+
+    _assert_refused_before_any_run(raised, worktree, seen, tmp_path)
+    message = str(raised.value)
+    assert "does not lie in a working tree of its own" in message
+    assert "fatal:" not in message
+    assert _entries(outer) == outer_before
+    assert _entries(worktree) == worktree_before
+
+
 def test_a_run_given_no_out_from_a_folder_in_no_repository_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2261,10 +2287,7 @@ def test_a_run_given_no_out_where_git_cannot_be_run_is_refused(
 def test_a_run_given_out_from_a_folder_in_no_repository_writes_under_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A given ``--out`` never reaches the check for a main working tree.
-
-    This passes without the change as well, so it is no guard of the default.
-    """
+    """A given ``--out`` never reaches the check for a main working tree."""
     no_repository = tmp_path / "no-repository"
     no_repository.mkdir()
     given = tmp_path / "given"

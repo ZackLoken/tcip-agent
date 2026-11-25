@@ -507,7 +507,12 @@ STDIN_FAMILIES = {"claude", "codex"}
 
 
 class GitError(RuntimeError):
-    """A git command did not answer; the message is git's own or the operating system's."""
+    """A git query gave no answer the tool can use.
+
+    The message is git's own when git exited nonzero, the operating system's when git could not
+    be started, and the tool's own when git answered but the answer does not establish what was
+    asked, as when no working tree holds a repository's shared git directory.
+    """
 
 
 def run_git(directory: pathlib.Path, *args: str) -> str:
