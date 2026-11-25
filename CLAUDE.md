@@ -68,10 +68,8 @@ or schema currently serves one, that implementation is replaceable and the guara
 - The gates for a change are the Commands block's lines for what it touched (the ruff and mypy
   lines for Python, the markdown line for a markdown file, the five frontend lines for a frontend
   file) and the change's own test files. CI is the full gate.
-- A guard test reads what the agent or the breeder receives through its producer (the hook's
+- A test reads what the agent or the breeder receives through its producer (the hook's
   orientation, a rendered instruction file, the settings, the argv, a route's answer).
-- A shared fact's producers and readers in a mechanism change together; a convention changed at one
-  site and not its siblings leaves the fact spelled two ways.
 - One fact has one spelling. Whenever a change touches a fact, ask what else states it: a second
   key, field, flag or parameter that must agree with the first is a derived spelling, whether or not
   this change introduced it, and it is deleted rather than kept, reconciled or asked which one
