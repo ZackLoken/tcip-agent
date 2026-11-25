@@ -2071,80 +2071,206 @@ def test_a_directory_in_no_checkout_records_no_commit_and_runs_no_git(
     assert meta == _meta_on_disk(tmp_path / "out")
 
 
-def _argv_with_no_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set ``sys.argv`` to one codex run of the ``no-tools`` condition naming no ``--out``."""
-    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "cross_family_ask.py",
-            "--question-id",
-            "qid",
-            "--prompt-file",
-            str(tmp_path / "q.txt"),
-            "--condition",
-            "no-tools",
-            "--families",
-            "codex",
-            "--model",
-            "stub-model",
-            "--timeout",
-            "5",
-        ],
-    )
+def _prepare_default_out_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repo_root: Path,
+    out: Path | None = None,
+) -> list[dict]:
+    """Set up one codex run of the ``no-tools`` condition for ``main`` and return its launches.
 
-
-def test_a_run_given_no_out_from_a_worktree_writes_under_the_main_checkouts_records(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With no ``--out``, a run from a linked worktree lands in the main checkout's records."""
-    main_checkout = scratch_repo(tmp_path)
-    commit_all(main_checkout, "first")
-    worktree = tmp_path / "linked"
-    git(main_checkout, "worktree", "add", "-q", str(worktree), "-b", "other")
-    _stand_in_harness(monkeypatch, recording_launch([]))
-    monkeypatch.setattr(
-        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
-    )
-    monkeypatch.setattr(cross_family_ask, "REPO_ROOT", worktree)
-    _argv_with_no_out(tmp_path, monkeypatch)
-
-    assert cross_family_ask.main() == 0
-
-    run = (
-        main_checkout
-        / ".claude"
-        / "records"
-        / "cross-family"
-        / "qid"
-        / "no-tools"
-        / "codex"
-    )
-    assert (run / "meta.json").is_file()
-    assert not (worktree / ".claude" / "records").exists()
-
-
-def test_a_run_given_no_out_where_git_cannot_answer_stops_naming_the_folder_and_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With no ``--out`` and a folder in no checkout, the run stops before any launch or write."""
-    not_a_checkout = tmp_path / "not-a-checkout"
-    not_a_checkout.mkdir()
+    ``REPO_ROOT`` is ``repo_root``; ``--cwd`` and the process's current folder are two other
+    folders under ``tmp_path``, so a default found from either of them is not the one under test.
+    Git's variables that choose a repository are removed and its search ceiling is ``tmp_path``.
+    The harness is a stand-in that only answers, and the returned list records each launch.
+    """
+    for name in git(tmp_path, "rev-parse", "--local-env-vars").split():
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    harness_cwd = tmp_path / "harness-cwd"
+    harness_cwd.mkdir()
+    process_cwd = tmp_path / "process-cwd"
+    process_cwd.mkdir()
+    monkeypatch.chdir(process_cwd)
     seen: list[dict] = []
     _stand_in_harness(monkeypatch, recording_launch(seen))
     monkeypatch.setattr(
         cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
-    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
-    monkeypatch.setattr(cross_family_ask, "REPO_ROOT", not_a_checkout)
-    _argv_with_no_out(tmp_path, monkeypatch)
+    monkeypatch.setattr(cross_family_ask, "REPO_ROOT", repo_root)
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    argv = [
+        "cross_family_ask.py",
+        "--question-id",
+        "qid",
+        "--prompt-file",
+        str(tmp_path / "q.txt"),
+        "--condition",
+        "no-tools",
+        "--families",
+        "codex",
+        "--model",
+        "stub-model",
+        "--timeout",
+        "5",
+        "--cwd",
+        str(harness_cwd),
+    ]
+    if out is not None:
+        argv += ["--out", str(out)]
+    monkeypatch.setattr(sys, "argv", argv)
+    return seen
 
-    with pytest.raises(
-        SystemExit, match=re.escape(str(not_a_checkout))
-    ) as raised:
+
+def _entries(root: Path) -> list[str]:
+    """Return every path under ``root``, relative to it and sorted."""
+    return sorted(str(path.relative_to(root)) for path in root.rglob("*"))
+
+
+def _git_says_in(folder: Path) -> str:
+    """Return git's own message for ``git rev-parse --show-toplevel`` run in ``folder``."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=str(folder),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    return proc.stderr.strip()
+
+
+def _assert_refused_before_any_run(
+    raised: pytest.ExceptionInfo[SystemExit],
+    repo_root: Path,
+    seen: list[dict],
+    tmp_path: Path,
+) -> None:
+    """Assert the exit names ``repo_root`` and ``--out``, and no launch or run folder came first."""
+    message = str(raised.value)
+    assert str(repo_root) in message
+    assert "--out" in message
+    assert seen == []
+    assert not list(tmp_path.rglob("cross-family"))
+
+
+def test_a_run_given_no_out_from_a_linked_worktree_writes_in_the_main_working_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no ``--out``, a linked worktree's run lands in the main working tree's records."""
+    main_tree = scratch_repo(tmp_path)
+    commit_all(main_tree, "first")
+    worktree = tmp_path / "linked"
+    git(main_tree, "worktree", "add", "-q", str(worktree), "-b", "other")
+    _prepare_default_out_run(tmp_path, monkeypatch, worktree)
+
+    assert cross_family_ask.main() == 0
+
+    condition = (
+        main_tree / ".claude" / "records" / "cross-family" / "qid" / "no-tools"
+    )
+    assert (condition / "codex" / "meta.json").is_file()
+    assert (condition / "summary.json").is_file()
+    assert not (worktree / ".claude" / "records").exists()
+
+
+def test_a_run_given_no_out_from_a_main_working_tree_with_its_git_directory_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The records lie in the working tree, never inside or beside its separate git directory."""
+    work = tmp_path / "work"
+    git_dir = tmp_path / "git-dirs" / "work.git"
+    git_dir.parent.mkdir()
+    git(tmp_path, "init", "-q", "--separate-git-dir", str(git_dir), str(work))
+    git(work, "config", "user.email", "test@example.com")
+    git(work, "config", "user.name", "Test")
+    write(work / "notes.txt", "notes\n")
+    commit_all(work, "first")
+    _prepare_default_out_run(tmp_path, monkeypatch, work)
+
+    assert cross_family_ask.main() == 0
+
+    condition = (
+        work / ".claude" / "records" / "cross-family" / "qid" / "no-tools"
+    )
+    assert (condition / "codex" / "meta.json").is_file()
+    assert (condition / "summary.json").is_file()
+    assert [path.name for path in git_dir.parent.iterdir()] == ["work.git"]
+    assert not list(git_dir.rglob(".claude"))
+
+
+def test_a_run_given_no_out_from_a_worktree_of_a_bare_repository_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No working tree holds a bare repository, so none is picked and nothing is written."""
+    source = scratch_repo(tmp_path)
+    commit_all(source, "first")
+    repos = tmp_path / "repos"
+    repos.mkdir()
+    bare = repos / "bare.git"
+    git(tmp_path, "clone", "-q", "--bare", str(source), str(bare))
+    worktree = tmp_path / "bare-linked"
+    git(bare, "worktree", "add", "-q", "--detach", str(worktree))
+    seen = _prepare_default_out_run(tmp_path, monkeypatch, worktree)
+    bare_before, worktree_before = _entries(bare), _entries(worktree)
+
+    with pytest.raises(SystemExit) as raised:
         cross_family_ask.main()
 
-    assert "--out" in str(raised.value)
-    assert seen == []
-    assert not list(tmp_path.rglob(".claude"))
+    _assert_refused_before_any_run(raised, worktree, seen, tmp_path)
+    assert _git_says_in(repos) in str(raised.value)
+    assert _entries(bare) == bare_before
+    assert _entries(worktree) == worktree_before
+
+
+def test_a_run_given_no_out_from_a_folder_in_no_repository_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A folder in no repository names no main working tree; the exit carries git's message."""
+    no_repository = tmp_path / "no-repository"
+    no_repository.mkdir()
+    seen = _prepare_default_out_run(tmp_path, monkeypatch, no_repository)
+
+    with pytest.raises(SystemExit) as raised:
+        cross_family_ask.main()
+
+    _assert_refused_before_any_run(raised, no_repository, seen, tmp_path)
+    assert _git_says_in(no_repository) in str(raised.value)
+
+
+def test_a_run_given_no_out_where_git_cannot_be_run_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no git on the search path the exit carries the operating system's message."""
+    repo = scratch_repo(tmp_path)
+    commit_all(repo, "first")
+    seen = _prepare_default_out_run(tmp_path, monkeypatch, repo)
+    no_git = tmp_path / "no-git-here"
+    no_git.mkdir()
+    monkeypatch.setenv("PATH", str(no_git))
+    with pytest.raises(OSError) as probe:
+        subprocess.run(["git", "--version"], capture_output=True, check=False)
+
+    with pytest.raises(SystemExit) as raised:
+        cross_family_ask.main()
+
+    _assert_refused_before_any_run(raised, repo, seen, tmp_path)
+    assert str(probe.value) in str(raised.value)
+
+
+def test_a_run_given_out_from_a_folder_in_no_repository_writes_under_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A given ``--out`` never reaches the check for a main working tree.
+
+    This passes without the change as well, so it is no guard of the default.
+    """
+    no_repository = tmp_path / "no-repository"
+    no_repository.mkdir()
+    given = tmp_path / "given"
+    _prepare_default_out_run(tmp_path, monkeypatch, no_repository, out=given)
+
+    assert cross_family_ask.main() == 0
+
+    assert (given / "qid" / "no-tools" / "codex" / "meta.json").is_file()
+    assert (given / "qid" / "no-tools" / "summary.json").is_file()

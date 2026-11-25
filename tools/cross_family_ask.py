@@ -5,8 +5,9 @@ stdout and stderr, the extracted final response, and metadata describing what th
 harness was, how long it took, and the commit the working directory's checkout was at when the
 harness started and when it ended. The two commits are the ends of the run: they do not catch an
 uncommitted edit, a stash, or a checkout moved away and back between the reads. The directory
-lies under ``--out``; given none, under ``.claude/records/cross-family`` of the main checkout,
-which a linked worktree of the repository shares.
+lies under ``--out``; given none, under ``.claude/records/cross-family`` of the main working tree
+of the repository the tool lies in, which a linked worktree shares. A repository whose main
+working tree git cannot establish from there is refused, naming ``--out``.
 
 Conditions control what the harness could reach, not what it was asked. An attached image adds
 one family-specific preface line ahead of the question, since each harness takes an image
@@ -505,6 +506,69 @@ EXECUTABLES = {"claude": CLAUDE, "codex": CODEX, "antigravity": AGY}
 STDIN_FAMILIES = {"claude", "codex"}
 
 
+class GitError(RuntimeError):
+    """A git command did not answer; the message is git's own or the operating system's."""
+
+
+def run_git(directory: pathlib.Path, *args: str) -> str:
+    """Return the standard output of ``git <args>`` run in ``directory``, stripped.
+
+    Raises :class:`GitError` carrying git's standard error when git exits nonzero, and the
+    operating system's error when git could not be started.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=str(directory),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise GitError(str(exc)) from exc
+    if proc.returncode != 0:
+        raise GitError(proc.stderr.strip())
+    return proc.stdout.strip()
+
+
+def main_working_tree(directory: pathlib.Path) -> pathlib.Path:
+    """Return the main working tree of the repository ``directory`` lies in.
+
+    Two cases establish it. ``directory`` lies in the main working tree itself (its git directory
+    is the common one): the answer is the root git reports, wherever the git directory lies.
+    Or ``directory`` lies in a linked worktree and the folder holding the shared git directory is
+    a working tree whose git directory is that shared one. Every other case raises
+    :class:`GitError`: a bare repository, a git directory outside its working tree seen from a
+    linked worktree, a folder in no repository, git that cannot run.
+    """
+    git_dir = pathlib.Path(
+        run_git(directory, "rev-parse", "--absolute-git-dir")
+    )
+    common_dir = pathlib.Path(
+        run_git(
+            directory,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        )
+    )
+    if git_dir.resolve() == common_dir.resolve():
+        return pathlib.Path(run_git(directory, "rev-parse", "--show-toplevel"))
+    holder = common_dir.parent
+    holder_root = pathlib.Path(run_git(holder, "rev-parse", "--show-toplevel"))
+    holder_git_dir = pathlib.Path(
+        run_git(holder, "rev-parse", "--absolute-git-dir")
+    )
+    if (
+        holder_root.resolve() != holder.resolve()
+        or holder_git_dir.resolve() != common_dir.resolve()
+    ):
+        raise GitError(
+            f"the shared git directory {common_dir} does not lie in a working tree of its own"
+        )
+    return holder
+
+
 class CommitReadError(RuntimeError):
     """Git failed to name the commit of a directory that is inside a checkout."""
 
@@ -522,22 +586,11 @@ def checkout_commit(directory: pathlib.Path) -> str | None:
     if not any((d / ".git").exists() for d in (resolved, *resolved.parents)):
         return None
     try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(resolved),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
+        return run_git(resolved, "rev-parse", "HEAD")
+    except GitError as exc:
         raise CommitReadError(
             f"cannot read the commit {resolved} is at: {exc}"
         ) from exc
-    if out.returncode != 0:
-        raise CommitReadError(
-            f"cannot read the commit {resolved} is at: {out.stderr.strip()}"
-        )
-    return out.stdout.strip()
 
 
 def describe_fault(meta: dict) -> str:
@@ -899,27 +952,19 @@ def run_one(
 
 
 def default_out_root() -> pathlib.Path:
-    """Return ``<main checkout>/.claude/records/cross-family`` for the checkout ``REPO_ROOT`` names.
+    """Return the default run folder, ``.claude/records/cross-family`` of ``REPO_ROOT``'s main tree.
 
-    The main checkout is the parent of the common git directory, so a linked worktree answers
-    with the checkout it was made from. Raises ``SystemExit`` naming ``REPO_ROOT`` and ``--out``
-    when git cannot start or exits nonzero there.
+    Raises ``SystemExit`` naming ``REPO_ROOT``, carrying the message of :func:`main_working_tree`'s
+    error, and naming ``--out`` as what to pass, when the main working tree is not established.
     """
-    asked = f"cannot find the main checkout of {REPO_ROOT} to write the runs under; pass --out"
     try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        raise SystemExit(f"{asked}: {exc}") from exc
-    if proc.returncode != 0:
-        raise SystemExit(f"{asked}: {proc.stderr.strip()}")
-    common_dir = pathlib.Path(proc.stdout.strip())
-    return common_dir.parent / ".claude" / "records" / "cross-family"
+        tree = main_working_tree(REPO_ROOT)
+    except GitError as exc:
+        raise SystemExit(
+            f"cannot find the main working tree of {REPO_ROOT} to write the runs under: {exc}; "
+            "pass --out"
+        ) from exc
+    return tree / ".claude" / "records" / "cross-family"
 
 
 def main() -> int:
@@ -937,7 +982,7 @@ def main() -> int:
         type=pathlib.Path,
         help=(
             "Directory the runs are written under, as <out>/<question-id>/<condition>/. "
-            "Given none, the main checkout's .claude/records/cross-family."
+            "Given none, the main working tree's .claude/records/cross-family."
         ),
     )
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S)
