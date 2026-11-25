@@ -4,7 +4,9 @@ Each run writes a directory holding the exact prompt, the exact argv, the harnes
 stdout and stderr, the extracted final response, and metadata describing what the
 harness was, how long it took, and the commit the working directory's checkout was at when the
 harness started and when it ended. The two commits are the ends of the run: they do not catch an
-uncommitted edit, a stash, or a checkout moved away and back between the reads.
+uncommitted edit, a stash, or a checkout moved away and back between the reads. The directory
+lies under ``--out``; given none, under ``.claude/records/cross-family`` of the main checkout,
+which a linked worktree of the repository shares.
 
 Conditions control what the harness could reach, not what it was asked. An attached image adds
 one family-specific preface line ahead of the question, since each harness takes an image
@@ -896,6 +898,30 @@ def run_one(
     return meta
 
 
+def default_out_root() -> pathlib.Path:
+    """Return ``<main checkout>/.claude/records/cross-family`` for the checkout ``REPO_ROOT`` names.
+
+    The main checkout is the parent of the common git directory, so a linked worktree answers
+    with the checkout it was made from. Raises ``SystemExit`` naming ``REPO_ROOT`` and ``--out``
+    when git cannot start or exits nonzero there.
+    """
+    asked = f"cannot find the main checkout of {REPO_ROOT} to write the runs under; pass --out"
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise SystemExit(f"{asked}: {exc}") from exc
+    if proc.returncode != 0:
+        raise SystemExit(f"{asked}: {proc.stderr.strip()}")
+    common_dir = pathlib.Path(proc.stdout.strip())
+    return common_dir.parent / ".claude" / "records" / "cross-family"
+
+
 def main() -> int:
     """Run the families the command line names; return 0 when every one answered, else 1."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -909,8 +935,10 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=pathlib.Path,
-        required=True,
-        help="Directory the runs are written under, as <out>/<question-id>/<condition>/.",
+        help=(
+            "Directory the runs are written under, as <out>/<question-id>/<condition>/. "
+            "Given none, the main checkout's .claude/records/cross-family."
+        ),
     )
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S)
     parser.add_argument(
@@ -947,6 +975,7 @@ def main() -> int:
         "other family still gets --prompt-file.",
     )
     args = parser.parse_args()
+    out_root = args.out if args.out is not None else default_out_root()
 
     missing_images = [
         str(image) for image in args.image if not image.is_file()
@@ -1014,7 +1043,7 @@ def main() -> int:
     )
     print(f"families : {', '.join(families)}")
     print(f"cwd      : {args.cwd}")
-    print(f"out      : {args.out}")
+    print(f"out      : {out_root}")
     print()
 
     results = []
@@ -1027,7 +1056,7 @@ def main() -> int:
                     args.condition,
                     family_prompt,
                     args.cwd,
-                    args.out,
+                    out_root,
                     args.timeout,
                     launches[family],
                     images=args.image,
@@ -1048,7 +1077,7 @@ def main() -> int:
                         args.condition,
                         family_prompt,
                         args.cwd,
-                        args.out,
+                        out_root,
                         args.timeout,
                         launches[family],
                         images=args.image,
@@ -1091,7 +1120,7 @@ def main() -> int:
             "was only a pointer to it."
         )
 
-    summary = args.out / args.question_id / args.condition / "summary.json"
+    summary = out_root / args.question_id / args.condition / "summary.json"
     # A re-run naming a subset of families must not drop the rows of the families it did not
     # touch: merge onto whatever summary.json already holds, keyed by family.
     previous_rows: dict[str, dict] = {}

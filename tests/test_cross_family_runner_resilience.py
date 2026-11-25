@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, NoReturn
 import pytest
 
 from tcip_web import terminal
-from tests._scratch_repo_fixtures import commit_all, scratch_repo, write
+from tests._scratch_repo_fixtures import commit_all, git, scratch_repo, write
 from tests._scratch_server_fixtures import recording_launch
 from tests._web_fixtures import backend_session
 from tools import cross_family_ask
@@ -2069,3 +2069,82 @@ def test_a_directory_in_no_checkout_records_no_commit_and_runs_no_git(
     assert meta["fault"] == ""
     assert commands == []
     assert meta == _meta_on_disk(tmp_path / "out")
+
+
+def _argv_with_no_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set ``sys.argv`` to one codex run of the ``no-tools`` condition naming no ``--out``."""
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "cross_family_ask.py",
+            "--question-id",
+            "qid",
+            "--prompt-file",
+            str(tmp_path / "q.txt"),
+            "--condition",
+            "no-tools",
+            "--families",
+            "codex",
+            "--model",
+            "stub-model",
+            "--timeout",
+            "5",
+        ],
+    )
+
+
+def test_a_run_given_no_out_from_a_worktree_writes_under_the_main_checkouts_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no ``--out``, a run from a linked worktree lands in the main checkout's records."""
+    main_checkout = scratch_repo(tmp_path)
+    commit_all(main_checkout, "first")
+    worktree = tmp_path / "linked"
+    git(main_checkout, "worktree", "add", "-q", str(worktree), "-b", "other")
+    _stand_in_harness(monkeypatch, recording_launch([]))
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
+    )
+    monkeypatch.setattr(cross_family_ask, "REPO_ROOT", worktree)
+    _argv_with_no_out(tmp_path, monkeypatch)
+
+    assert cross_family_ask.main() == 0
+
+    run = (
+        main_checkout
+        / ".claude"
+        / "records"
+        / "cross-family"
+        / "qid"
+        / "no-tools"
+        / "codex"
+    )
+    assert (run / "meta.json").is_file()
+    assert not (worktree / ".claude" / "records").exists()
+
+
+def test_a_run_given_no_out_where_git_cannot_answer_stops_naming_the_folder_and_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no ``--out`` and a folder in no checkout, the run stops before any launch or write."""
+    not_a_checkout = tmp_path / "not-a-checkout"
+    not_a_checkout.mkdir()
+    seen: list[dict] = []
+    _stand_in_harness(monkeypatch, recording_launch(seen))
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
+    )
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.setattr(cross_family_ask, "REPO_ROOT", not_a_checkout)
+    _argv_with_no_out(tmp_path, monkeypatch)
+
+    with pytest.raises(
+        SystemExit, match=re.escape(str(not_a_checkout))
+    ) as raised:
+        cross_family_ask.main()
+
+    assert "--out" in str(raised.value)
+    assert seen == []
+    assert not list(tmp_path.rglob(".claude"))
