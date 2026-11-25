@@ -1,5 +1,4 @@
-`CLAUDE.md` at the repository root is the developer's contract for changing this repository; read
-it before changing anything here.
+Read `CLAUDE.md` at the repository root before changing anything here.
 
 <!-- tcip:operating-contract:start -->
 # The operating contract

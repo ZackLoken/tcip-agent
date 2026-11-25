@@ -1,8 +1,8 @@
 """The agent's operating contract, where every launch puts it and what binds the agent beside it.
 
-The contract is one knowledge document; the developer's root ``CLAUDE.md`` imports it and states
-none of its sentences, and Claude's row's deny list protects what a launch writes into the
-workspace and every project's store.
+The contract is one knowledge document; the root ``CLAUDE.md`` imports it and states none of its
+sentences, and Claude's row's deny list protects what a launch writes into the workspace and every
+project's store.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _sentences(markdown: str) -> set[str]:
 def test_the_root_claude_md_states_none_of_the_operating_contracts_sentences() -> (
     None
 ):
-    """The developer's ``CLAUDE.md`` imports the contract and restates none of its sentences."""
+    """The root ``CLAUDE.md`` imports the contract and restates none of its sentences."""
     contract = _sentences(read_document(CONTRACT))
     developer = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
 
