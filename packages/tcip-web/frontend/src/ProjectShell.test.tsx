@@ -15,7 +15,13 @@ import {
 } from "@/test/panelEvents";
 import { openedAs, PICKER } from "@/test/projectRecords";
 import { answeredWith, thrown } from "@/test/refusals";
-import { NAV_ANSWER, RAW_SELECTION, SELECTED_SUBJECT, TEST_PROJECT } from "@/test/store";
+import {
+  NAV_ANSWER,
+  RAW_SELECTION,
+  SELECTED_SUBJECT,
+  SUBJECT_SELECT_ANSWER,
+  TEST_PROJECT,
+} from "@/test/store";
 import { FakeWebSocket } from "@/test/webSocket";
 
 // The shell mounts the Annotate tab, which pulls in Konva, and jsdom has no canvas backend.
@@ -120,14 +126,15 @@ function reconnect(panel: string) {
 /** The notice entries the notifications area lists. */
 const notices = () => page.useStore.getState().notifications.filter((e) => e.kind === "notice");
 
-/** Mount the shell beside the open notifications area with `project` open on the produced
- *  capture, the Annotate tab active, and wait for its first image's labels to load. */
-async function mountOnCapture(project = TEST_PROJECT) {
+/** Mount the shell beside the open notifications area with `project` open on `selection`, the
+ *  produced capture by default, the Annotate tab active, and wait for the labels of the image in
+ *  view to load. */
+async function mountOnCapture(project = TEST_PROJECT, selection = RAW_SELECTION) {
   const { ProjectShell, NotificationsPane, useStore, load } = page;
   useStore.getState().setUser("grower");
   useStore.setState((s) => ({
     openProject: project,
-    gui: { ...s.gui, active_tab: "annotate", dataset: RAW_SELECTION },
+    gui: { ...s.gui, active_tab: "annotate", dataset: selection },
   }));
   render(
     <>
@@ -451,6 +458,12 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
   /** The line the canvas shows in place for the image in view. */
   const inPlace = () => screen.getByTestId("entry-in-place");
 
+  /** The image filter's choices, each with how many images it keeps. */
+  const filterChoices = () =>
+    within(screen.getByRole("combobox", { name: "Images" }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
   /** Mount on the capture with the page's saves answered by `answers`, add a box, then switch to
    *  the Meta tab and back; returns the save requests and how many loads the page sent before. */
   async function leaveAndReturn(...answers: (() => Promise<Response>)[]) {
@@ -532,6 +545,24 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
       image_path: first.path,
       base_mtime: saved.document.base_mtime,
     });
+  });
+
+  it("counts the image a leaving save landed on in the image filter, not the image the tab mounted on", async () => {
+    const onSecond = { ...SUBJECT_SELECT_ANSWER.selection, current_image_index: 1 };
+    const leaving = Promise.withResolvers<Response>();
+    answerSaves(() => leaving.promise);
+    await mountOnCapture(TEST_PROJECT, onSecond);
+    fireEvent.click(screen.getByRole("button", { name: "Previous image" }));
+    await waitFor(() => expect(page.load).toHaveBeenLastCalledWith(first.path));
+    await settle();
+    addBox();
+    await switchTo("meta");
+    await switchTo("annotate");
+    expect(filterChoices()).toEqual(expect.arrayContaining(["unannotated (4)", "in progress (1)"]));
+
+    await act(() => Promise.resolve(leaving.resolve(answeredWith(200, saved))));
+
+    expect(filterChoices()).toEqual(expect.arrayContaining(["unannotated (3)", "in progress (2)"]));
   });
 
   it("keeps the edits of a leaving save that got no answer, listing its failure once", async () => {

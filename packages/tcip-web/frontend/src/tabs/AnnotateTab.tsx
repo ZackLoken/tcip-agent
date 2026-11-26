@@ -813,6 +813,9 @@ export function AnnotateTab() {
     if (!loaded) return null; // no confirmed load → refuse to overwrite the stored labels
     // The canvas still holds the document this save was built from.
     const stillLoaded = () => useStore.getState().canvas.loaded === loaded;
+    // That document is also the image in view's.
+    const stillInView = () =>
+      stillLoaded() && loadedFor(useStore.getState().canvas, liveImage()?.path) !== null;
     if (useStore.getState().canvas.saving) return null;
     if (!useStore.getState().canvas.dirty && !gestures) return null;
     settleGestures({ path: loaded.image_path, name: loaded.name });
@@ -844,7 +847,6 @@ export function AnnotateTab() {
       // Only a failure of the document still loaded stands in place over the canvas; one for an
       // image since left or reloaded is listed in the notifications area alone, naming it.
       const inPlace = interactive && stillLoaded();
-      const stillInView = stillLoaded() && liveImage()?.path === loaded.image_path;
       const failed = (sentence: string, slot?: "document" | "reload") =>
         tell("failure", "error", sentence, loaded.name, slot && canvasKey(slot, loaded.image_path));
       if (hold.controller.signal.aborted) {
@@ -861,9 +863,9 @@ export function AnnotateTab() {
       }
       const conflict = refusalOf<VersionConflictRefusal>(e, VERSION_CONFLICT);
       if (conflict) {
-        // Someone else wrote this file since it loaded: never clobber their work, keep the canvas
-        // dirty, and offer the choice wherever the person meets the image again.
-        if (inPlace || stillInView) {
+        // Someone wrote this file since it loaded: keep the canvas dirty, and offer the choice on
+        // its reload line for a pressed save or the image in view; for an image left, list it.
+        if (inPlace || stillInView()) {
           failed(
             `${conflict.message}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
             "reload",
@@ -887,10 +889,9 @@ export function AnnotateTab() {
       releaseSave(hold);
     }
 
-    // Dropped: an answer without its hold (loaded over or canceled), or for an image no longer
-    // owning the canvas or selected; a held canvas took no edit, whichever editor is mounted.
-    if (!owned || !stillLoaded()) return null;
-    if (!loadedFor(useStore.getState().canvas, liveImage()?.path)) return null;
+    // Dropped: an answer without its hold (loaded over or canceled), or for a document no longer
+    // the image in view's; a held canvas took no edit, whichever editor is mounted.
+    if (!owned || !stillInView()) return null;
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
@@ -947,15 +948,12 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentActivity?.seq]);
 
-  /** Adopt a loaded or saved document of the image in view as the canvas, and record what it says
-   *  of the dataset subject on that image for the image filter. */
+  /** Adopt a loaded or saved document as the canvas, and record what it says of the dataset
+   *  subject on the image it names for the image filter. */
   function adoptLabels(labels: LoadedLabels) {
     loadLabels(labels);
-    const live = useStore.getState().gui.dataset;
-    const image = currentImage(live);
-    if (image && live?.subject) {
-      setImageState(image.name, labels.completion[live.subject]);
-    }
+    const subject = useStore.getState().gui.dataset?.subject;
+    if (subject) setImageState(labels.name, labels.completion[subject]);
   }
 
   // The states of every image of the selection, read once per selection for the image filter.

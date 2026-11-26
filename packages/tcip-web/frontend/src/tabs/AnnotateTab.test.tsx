@@ -544,29 +544,6 @@ describe("AnnotateTab save/load race", () => {
     });
   });
 
-  it("records the state a save from an unmounted editor adopts on the image it saved, not the one the editor mounted on", async () => {
-    const [first, second] = RAW_SELECTION.images.map((image) => image.name);
-    act(() => changeSelection({ current_image_index: 1 }));
-    const view = render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    act(() => changeSelection({ current_image_index: 0 }));
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
-    await flush();
-    const states = () => useStore.getState().annotateUi.imageStates;
-    const saved = LANDED.box.document.completion[SUBJECT];
-    expect(states()[first]).not.toBe(saved);
-    const secondBefore = states()[second];
-    act(addBox);
-    const pending = heldSaves();
-
-    view.unmount();
-    await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
-
-    expect(states()[first]).toBe(saved);
-    expect(states()[second]).toBe(secondBefore);
-  });
-
   it("canceling reports nothing over an image loaded after the save began", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
