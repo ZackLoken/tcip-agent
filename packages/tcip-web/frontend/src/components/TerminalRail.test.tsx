@@ -99,9 +99,11 @@ import {
   UNLAUNCHABLE,
 } from "@/api/types.generated";
 import { TerminalRail } from "@/components/TerminalRail";
+import { AGENT_NAME } from "@/lib/agentName";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
+import { entriesSaying } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { TERMINAL_ANSWERS } from "@/test/terminal";
 
@@ -160,6 +162,7 @@ beforeEach(() => {
     pendingTerminalMessages: [],
     terminalPhase: "live",
     terminalProvider: null,
+    notifications: [],
   });
   useStore.getState().setTerminalOpen(true);
   vi.mocked(terminalApi.status).mockResolvedValue(STATUS);
@@ -979,10 +982,10 @@ describe("TerminalRail", () => {
     const FAULT_SAID = "The last conversation could not be continued, so this is a new one.";
 
     const said = () => screen.queryByText(FAULT_SAID);
+    // The entry component's dismiss name: the sentence's first words, then the entry's time.
     const dismiss = () =>
-      screen.queryByRole("button", {
-        name: "Dismiss the note that the last conversation could not be continued",
-      });
+      screen.queryByRole("button", { name: /^Dismiss: The last conversation could not be…/ });
+    const faultEntries = () => entriesSaying(FAULT_SAID);
 
     it("states nothing for a row's first launch, nor why it resumed nothing", async () => {
       const { row_launch: first } = TERMINAL_ANSWERS;
@@ -1017,7 +1020,16 @@ describe("TerminalRail", () => {
       render(<TerminalRail />);
       await openSocket();
       expect(said()).toBeInTheDocument();
+      expect(dismiss()).toBeInTheDocument();
       expect(screen.queryByText(resumed.why)).not.toBeInTheDocument();
+      expect(faultEntries()).toEqual([
+        expect.objectContaining({
+          kind: "notice",
+          level: "warning",
+          context: { project: undefined, target: AGENT_NAME },
+          count: 1,
+        }),
+      ]);
     });
 
     it("states a resume fault until Dismiss removes it, across a reconnect and a reopen, and states the next launch's again", async () => {
@@ -1032,6 +1044,7 @@ describe("TerminalRail", () => {
         fireEvent.click(dismiss()!);
         expect(said()).not.toBeInTheDocument();
         expect(focus).toHaveBeenCalledTimes(focused + 1);
+        expect(faultEntries()).toEqual([]);
 
         act(() => ws.drop(1006));
         await act(async () => {
@@ -1043,11 +1056,13 @@ describe("TerminalRail", () => {
         await openSocket(2);
         expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
         expect(said()).not.toBeInTheDocument();
+        expect(faultEntries()).toEqual([]);
 
         exitAgent();
         fireEvent.click(await screen.findByText("Start"));
         expect(await screen.findByText(FAULT_SAID)).toBeInTheDocument();
         expect(terminalApi.createSession).toHaveBeenCalledTimes(2);
+        expect(faultEntries()).toEqual([expect.objectContaining({ count: 1 })]);
       } finally {
         vi.useRealTimers();
       }
@@ -1066,9 +1081,25 @@ describe("TerminalRail", () => {
       await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
       expect(said()).not.toBeInTheDocument();
       expect(dismiss()).not.toBeInTheDocument();
+      expect(faultEntries()).toEqual([expect.objectContaining({ key: undefined })]);
 
       await act(() => Promise.resolve(next.resolve(FAULT)));
       expect(await screen.findByText(FAULT_SAID)).toBeInTheDocument();
+      expect(faultEntries()).toEqual([expect.objectContaining({ count: 2 })]);
+    });
+
+    it("states nothing for a remounted rail's launch with no fault, the earlier fault kept listed", async () => {
+      vi.mocked(terminalApi.createSession).mockResolvedValueOnce(FAULT);
+      const first = render(<TerminalRail />);
+      await openSocket();
+      expect(said()).toBeInTheDocument();
+      first.unmount();
+
+      render(<TerminalRail />);
+      await openSocket(1);
+      await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
+      expect(said()).not.toBeInTheDocument();
+      expect(faultEntries()).toEqual([expect.objectContaining({ key: undefined })]);
     });
 
     it("states the requests the backend holds while its count is above zero", async () => {
