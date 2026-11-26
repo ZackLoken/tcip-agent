@@ -1,6 +1,5 @@
 import type { AgentActivitySlice } from "@/store/slices/agentActivity";
 import type { BandSelectionSlice } from "@/store/slices/bandSelection";
-import type { BannerSlice } from "@/store/slices/banners";
 import type { CanvasSlice } from "@/store/slices/canvas";
 import type { GuiSlice } from "@/store/slices/gui";
 import type { JobListingsSlice } from "@/store/slices/jobListings";
@@ -24,7 +23,6 @@ export interface AppState
     RegistryStatusSlice,
     AgentActivitySlice,
     NotificationsSlice,
-    BannerSlice,
     TerminalOpenSlice,
     PendingTerminalMessageSlice,
     UserSlice,

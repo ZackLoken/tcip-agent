@@ -3,7 +3,6 @@ import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { subjectsApi } from "@/api/subjects";
 import {
   PANEL_EVENT_ANNOTATE_FOCUS,
-  PANEL_EVENT_BANNER,
   PANEL_EVENT_CANVAS_STATE_REQUEST,
   TAB_NAMES,
   type PanelEnvelope,
@@ -13,12 +12,12 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { StatusBar } from "@/components/StatusBar";
-import { TabBanner } from "@/components/TabBanner";
 import { TerminalRail } from "@/components/TerminalRail";
 import { tabButtonId, tabPanelId } from "@/components/TopBar";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useJobListings } from "@/hooks/useJobListings";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
+import { takeBanner } from "@/lib/banners";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { adoptLoad } from "@/lib/registrySave";
 import { endRecordedSession } from "@/lib/sessionLifecycle";
@@ -45,13 +44,6 @@ const SetupTab = lazy(() => import("@/tabs/SetupTab").then((m) => ({ default: m.
 const TrainingTab = lazy(() =>
   import("@/tabs/TrainingTab").then((m) => ({ default: m.TrainingTab })),
 );
-
-/** Record a banner event as its tab's note; false for any other event. */
-function takeBanner({ panel, event, event_id }: PanelEnvelope): boolean {
-  if (event.event_type !== PANEL_EVENT_BANNER) return false;
-  useStore.getState().pushBanner(panel, event_id, event.text);
-  return true;
-}
 
 /** List the agent's activity on the Annotate panel an envelope tells, as a notice of the project
  *  it was posted for naming who acted, by the client name its sender declared, and what; a repeat
@@ -104,8 +96,8 @@ export function ProjectShell() {
 
   useJobListings();
 
-  // Every tab's agent panel, each event taken once: a banner becomes that tab's note, and any
-  // other Annotate event reaches the activity the tab reads, a live one also listed as a notice.
+  // Every tab's agent panel, each event taken once: a banner is listed as the agent's note, and
+  // any other Annotate event reaches the activity the tab reads, a live one also listed as a notice.
   useEffect(() => {
     const unsubscribes = TAB_PANELS.map((panel) =>
       stateSocket.subscribePanel(
@@ -120,8 +112,8 @@ export function ProjectShell() {
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, []);
 
-  // Agent → GUI steering on the "app" panel, each event taken once: banners, focus, and canvas
-  // refresh requests.
+  // Agent → GUI steering on the "app" panel, each event taken once: a banner listed as the agent's
+  // note, focus, and canvas refresh requests.
   useEffect(() => {
     const unsubscribe = stateSocket.subscribePanel(
       "app",
@@ -235,7 +227,6 @@ export function ProjectShell() {
           MCP panel channel. */}
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          <TabBanner />
           <div
             id={tabPanelId(activeTab)}
             role="tabpanel"

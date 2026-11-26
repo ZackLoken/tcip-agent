@@ -4,7 +4,6 @@ import { subjectColor } from "@/api/subjects";
 import type { AppState } from "@/store/appState";
 import { createAgentActivitySlice } from "@/store/slices/agentActivity";
 import { createBandSelectionSlice } from "@/store/slices/bandSelection";
-import { createBannerSlice } from "@/store/slices/banners";
 import { createCanvasSlice, focusContext } from "@/store/slices/canvas";
 import { createGuiSlice } from "@/store/slices/gui";
 import { createJobListingsSlice, NO_JOB_LISTINGS } from "@/store/slices/jobListings";
@@ -17,7 +16,6 @@ import { createUserSlice } from "@/store/slices/user";
 
 export type { AppState } from "@/store/appState";
 export type { AgentActivity } from "@/store/slices/agentActivity";
-export type { Banner } from "@/store/slices/banners";
 export type { CanvasState } from "@/store/slices/canvas";
 
 /** One slice file per labeled group of store state; each slice's own file is the full read of
@@ -31,7 +29,6 @@ export const useStore = create<AppState>()((...a) => ({
   ...createRegistryStatusSlice(...a),
   ...createAgentActivitySlice(...a),
   ...createNotificationsSlice(...a),
-  ...createBannerSlice(...a),
   ...createTerminalOpenSlice(...a),
   ...createPendingTerminalMessageSlice(...a),
   ...createUserSlice(...a),

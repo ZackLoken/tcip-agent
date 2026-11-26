@@ -46,6 +46,8 @@ export const ROUTES = {
   postDatasetNav: "/api/dataset/nav",
   postDatasetRegister: "/api/dataset/register",
   postDatasetSelect: "/api/dataset/select",
+  postEventsByPanelDismissals: (panel: Panel) =>
+    `/api/events/${encodeURIComponent(panel)}/dismissals`,
   postImagesOverviews: "/api/images/overviews",
   postInferenceJobsByJobIdCancel: (jobId: string) =>
     `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
