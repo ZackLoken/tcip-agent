@@ -1,14 +1,17 @@
+import type { InferenceJob } from "@/api/types.generated";
 import { useStore } from "@/store";
 import type { Raised } from "@/store/slices/notifications";
 
 /** Raise `sentence` as a `kind` of the open project about `target`, the thing within the project
- *  it concerns as the person reads it, standing on `key` when one is given. */
+ *  it concerns as the person reads it, standing on `key` when one is given and carrying the
+ *  record of the inference job it is about when one is given. */
 export function tell(
   kind: Exclude<Raised["kind"], "job">,
   level: Raised["level"],
   sentence: string,
   target: string,
   key?: string,
+  inferenceJob?: InferenceJob,
 ): void {
   const { raiseNotification, openProject } = useStore.getState();
   raiseNotification({
@@ -17,5 +20,6 @@ export function tell(
     text: { sentence },
     context: { project: openProject?.id, target },
     key,
+    inferenceJob,
   });
 }

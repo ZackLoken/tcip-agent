@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "@/store";
+import { INFERENCE_ANSWERS } from "@/test/inference";
 
 const initialStoreState = useStore.getState();
 
@@ -40,5 +41,25 @@ describe("an entry's dismissal", () => {
     expect(listedWhenRun).toEqual([1]);
     expect(kept).not.toHaveBeenCalled();
     expect(useStore.getState().notifications).toEqual([]);
+  });
+});
+
+describe("an entry about an inference job", () => {
+  it("keeps the job its raise stated once its key is released", () => {
+    const { launched } = INFERENCE_ANSWERS;
+    useStore.getState().raiseNotification({
+      kind: "failure",
+      level: "error",
+      text: { sentence: "A launch was refused." },
+      context: { project: "valley", target: "2026-02-11" },
+      key: "launch:2026-02-11",
+      inferenceJob: launched,
+    });
+
+    useStore.getState().releaseNotification("launch:2026-02-11");
+
+    expect(useStore.getState().notifications).toEqual([
+      expect.objectContaining({ key: undefined, inferenceJob: launched }),
+    ]);
   });
 });
