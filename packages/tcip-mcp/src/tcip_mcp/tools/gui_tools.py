@@ -42,9 +42,11 @@ def push_panel_event(
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like
             annotate_focus.
-        event: One of the four panel events, told apart by its ``event_type``: ``banner`` (its
-            ``text`` is listed in the GUI's notifications, naming the panel, until a person
-            dismisses it), ``labels_written`` (the image at ``image_path`` had its labels
+        event: One of the four panel events, told apart by its ``event_type``: ``banner`` (a GUI
+            page open at the push lists its ``text`` in its notifications, naming the panel,
+            until a person dismisses it there; a page opened later lists it only while the
+            backend still holds it, at the latest until the open project changes or the
+            backend restarts), ``labels_written`` (the image at ``image_path`` had its labels
             written), ``annotate_focus`` (a focus as ``focus_human_attention`` builds it) and
             ``canvas_state_request``.
 
