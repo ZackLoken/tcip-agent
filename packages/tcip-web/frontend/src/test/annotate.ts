@@ -1,4 +1,7 @@
-import { type LoadedLabels, loadedLabels, type LoadedSave, loadedSave } from "@/api/client";
+import { type MockInstance, vi } from "vitest";
+
+import { api, type LoadedLabels, loadedLabels, type LoadedSave, loadedSave } from "@/api/client";
+import { sessionsApi } from "@/api/sessions";
 import type {
   FindAnswer,
   ImageStagings,
@@ -15,8 +18,10 @@ import type {
 } from "@/api/types.generated";
 import type { DatasetSelection } from "@/store/types";
 import produced from "@/test/annotateAnswers.json";
+import { BAND_ANSWERS } from "@/test/bands";
 import { storedOf } from "@/test/labels";
 import type { Refusal } from "@/test/refusals";
+import { SESSION_ANSWERS } from "@/test/sessions";
 
 /** What `tools/generate_annotate_fixture.py` received from the annotate routes over the open
  *  fixture's photographs, each scene on the first after the loads:
@@ -135,6 +140,21 @@ function loadAnswerOf(imagePath: string): LabelDocumentAnswer {
 /** The produced load of the photograph at `imagePath`, as the client loads it. */
 export function loadOf(imagePath: string): LoadedLabels {
   return loadedLabels(loadAnswerOf(imagePath));
+}
+
+/** Answer what the Annotate tab reads as it mounts on a produced capture and the contribution it
+ *  posts on leaving an image, each with a produced answer: each photograph's load (`loadOf`), its
+ *  stagings before any propose, the capture's states, a plain three-band image, no reads of the
+ *  region in view, and the contribution landed. Returns the load's spy. */
+export function answerAnnotateMount(): MockInstance<typeof api.annotate.load> {
+  vi.spyOn(api.annotate, "stagings").mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
+  vi.spyOn(api.annotate, "states").mockResolvedValue(ANNOTATE_ANSWERS.states);
+  vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
+  vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
+  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
+  return vi
+    .spyOn(api.annotate, "load")
+    .mockImplementation((imagePath) => Promise.resolve(loadOf(imagePath)));
 }
 
 /** The produced load of the photograph at `imagePath` holding `annotations`, each placed by the

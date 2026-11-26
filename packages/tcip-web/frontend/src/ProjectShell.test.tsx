@@ -2,13 +2,10 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import type { PanelEnvelope } from "@/api/types.generated";
-import { loadOf } from "@/test/annotate";
-import { BAND_ANSWERS } from "@/test/bands";
 import { LABEL_ANSWERS } from "@/test/labels";
 import { PANEL_EVENTS, PANEL_EVENTS_AT_CONNECT } from "@/test/panelEvents";
 import { openedAs, PICKER } from "@/test/projectRecords";
-import { SESSION_ANSWERS } from "@/test/sessions";
-import { RAW_SELECTION, TEST_PROJECT } from "@/test/store";
+import { NAV_ANSWER, RAW_SELECTION, TEST_PROJECT } from "@/test/store";
 import { FakeWebSocket } from "@/test/webSocket";
 
 // The shell mounts the Annotate tab, which pulls in Konva, and jsdom has no canvas backend.
@@ -36,30 +33,30 @@ type Page = {
 /** The page each test runs in. */
 let page: Page;
 
-/** Load every module anew, as a reload of the page does, and answer what the shell reads on the
- *  produced capture's first image. */
+/** Load every module anew, as a reload of the page does, and answer what the shell and its
+ *  Annotate tab read on the produced capture's first image. */
 async function loadPage(): Promise<Page> {
   vi.resetModules();
-  const [{ ProjectShell }, { useStore }, { api }, sessions, subjects, training, inference] =
-    await Promise.all([
-      import("@/ProjectShell"),
-      import("@/store"),
-      import("@/api/client"),
-      import("@/api/sessions"),
-      import("@/api/subjects"),
-      import("@/api/training"),
-      import("@/api/inference"),
-    ]);
-  const load = vi
-    .spyOn(api.annotate, "load")
-    .mockImplementation((path) => Promise.resolve(loadOf(path)));
-  vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
-  vi.spyOn(api.annotate, "states").mockResolvedValue({ states: {} });
-  vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
-  vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
+  const [
+    { ProjectShell },
+    { useStore },
+    { api },
+    { answerAnnotateMount },
+    subjects,
+    training,
+    inference,
+  ] = await Promise.all([
+    import("@/ProjectShell"),
+    import("@/store"),
+    import("@/api/client"),
+    import("@/test/annotate"),
+    import("@/api/subjects"),
+    import("@/api/training"),
+    import("@/api/inference"),
+  ]);
+  const load = answerAnnotateMount();
   const select = vi.spyOn(api.dataset, "select").mockRejectedValue(new Error("selection refused"));
-  vi.spyOn(api.dataset, "nav").mockResolvedValue(undefined as never);
-  vi.spyOn(sessions.sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
+  vi.spyOn(api.dataset, "nav").mockResolvedValue(NAV_ANSWER);
   vi.spyOn(subjects.subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
   vi.spyOn(training.trainingApi, "listRuns").mockResolvedValue({ runs: [], sweeps: [] });
   vi.spyOn(inference.inferenceApi, "listJobs").mockResolvedValue({ jobs: [] });

@@ -31,6 +31,7 @@ import type { AnnotateView } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import {
   ANNOTATE_ANSWERS,
+  answerAnnotateMount,
   LANDED,
   LOADED,
   loadHolding,
@@ -285,20 +286,11 @@ beforeEach(() => {
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
   setupDataset();
-  loadSpy = vi
-    .spyOn(api.annotate, "load")
-    .mockImplementation((imagePath) => Promise.resolve(loadOf(imagePath)));
+  loadSpy = answerAnnotateMount();
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(LANDED.box);
-  vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
-  vi.spyOn(api.annotate, "states").mockResolvedValue({ states: {} });
-  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
-  // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
-  // per-case to exercise the >3-band path.
-  vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
   // jsdom lays nothing out, so the stand-in stage reports the host size the viewport math needs.
   stage.size = { w: 1000, h: 800 };
   stage.facts = null;
-  vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
   // One jsdom instance per file, not per test: a recolor left by an earlier test must not leak
   // into a later one's derived-color assertions.
   try {
@@ -2481,7 +2473,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       const stagings = vi
         .spyOn(api.annotate, "stagings")
         .mockImplementation((path) =>
-          path === IMG2 ? new Promise(() => {}) : Promise.resolve({ buckets: [] }),
+          path === IMG2 ? new Promise(() => {}) : Promise.resolve(ANNOTATE_ANSWERS.no_stagings),
         );
       act(() => changeSelection({ current_image_index: 1 }));
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
@@ -4189,7 +4181,7 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
     await mount();
     expect(standing()).toEqual([PROPOSALS]);
 
-    stagings.mockResolvedValue({ buckets: [] });
+    stagings.mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
     toggleProposalsView();
     toggleProposalsView();
     await flush();
@@ -4199,7 +4191,9 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
   });
 
   it("a resize undone by a save stays on the canvas once that save is adopted", async () => {
-    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
+    const stagings = vi
+      .spyOn(api.annotate, "stagings")
+      .mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
     await mount();
     await dragAddedCorner(11);
     pressSave();
@@ -4504,7 +4498,9 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
   });
 
   it("a refused gesture, prompt and find leave the canvas with their image, and stay listed on return", async () => {
-    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
+    const stagings = vi
+      .spyOn(api.annotate, "stagings")
+      .mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
     vi.spyOn(api.annotate, "propose").mockRejectedValue(new Error("network down"));
     vi.spyOn(api.annotate, "find").mockRejectedValue(new Error("network down"));
     await mount();
