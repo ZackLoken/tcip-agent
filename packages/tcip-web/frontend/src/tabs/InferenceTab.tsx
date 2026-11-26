@@ -490,21 +490,27 @@ export function InferenceTab() {
         </button>
 
         {datasetRoot && (
-          <div className="mt-3 flex flex-col gap-1 empty:hidden">
+          <div className="flex flex-col gap-1 has-[>:not(:empty)]:mt-3">
             {dates.map((date) => {
               const key = launchKey(projectId, datasetRoot, date);
               const job = refusedJobs[key];
               return (
-                <NotificationItem
+                <div
                   key={date}
-                  placement="in place"
-                  entryKey={key}
-                  afterDismiss={() => {
-                    dropRefusals([key]);
-                    launchButtonRef.current?.focus();
-                  }}
-                  action={job && { label: "Watch", run: () => watch(jobs[job.job_id] ?? job) }}
-                />
+                  role="group"
+                  aria-label={`Run for ${date}`}
+                  className="empty:hidden"
+                >
+                  <NotificationItem
+                    placement="in place"
+                    entryKey={key}
+                    afterDismiss={() => {
+                      dropRefusals([key]);
+                      launchButtonRef.current?.focus();
+                    }}
+                    action={job && { label: "Watch", run: () => watch(jobs[job.job_id] ?? job) }}
+                  />
+                </div>
               );
             })}
           </div>
