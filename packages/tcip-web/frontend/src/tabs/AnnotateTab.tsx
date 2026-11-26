@@ -213,7 +213,7 @@ export function AnnotateTab() {
   const mountedRef = useRef(true);
 
   // I/O safety: save() writes the store's loaded document, never the dataset's current image;
-  // the image the canvas answers for gates reloads, once this mount's first load has landed.
+  // the image the canvas answers for gates reloads once this mount came to it, loaded or kept.
   const landedRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
   const loadedTickRef = useRef(0);
@@ -221,7 +221,7 @@ export function AnnotateTab() {
   const leftForRef = useRef<string | null>(null);
   const canvasColumnRef = useRef<HTMLDivElement>(null);
   const agentActivity = useStore((s) => s.agentActivity);
-  // The activity already held when this mount began, which this mount's own load reads past.
+  // The activity already held when this mount began, read past whether the mount loads or keeps.
   const heldAtMountRef = useRef(agentActivity?.seq);
 
   const imageInView = currentImage(dataset);
@@ -813,6 +813,9 @@ export function AnnotateTab() {
     if (!loaded) return null; // no confirmed load → refuse to overwrite the stored labels
     // The canvas still holds the document this save was built from.
     const stillLoaded = () => useStore.getState().canvas.loaded === loaded;
+    // That document is also the image in view's.
+    const stillInView = () =>
+      stillLoaded() && loadedFor(useStore.getState().canvas, liveImage()?.path) !== null;
     if (useStore.getState().canvas.saving) return null;
     if (!useStore.getState().canvas.dirty && !gestures) return null;
     settleGestures({ path: loaded.image_path, name: loaded.name });
@@ -860,11 +863,11 @@ export function AnnotateTab() {
       }
       const conflict = refusalOf<VersionConflictRefusal>(e, VERSION_CONFLICT);
       if (conflict) {
-        // Someone else wrote this file since it loaded: never clobber their work, keep the canvas
-        // dirty.
-        if (inPlace) {
+        // Someone wrote this file since it loaded: keep the canvas dirty, and offer the choice on
+        // its reload line for a pressed save or the image in view; for an image left, list it.
+        if (inPlace || stillInView()) {
           failed(
-            `${conflict.message} Reload to load the latest (discards your unsaved edits), or keep editing.`,
+            `${conflict.message}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
             "reload",
           );
         } else {
@@ -886,10 +889,9 @@ export function AnnotateTab() {
       releaseSave(hold);
     }
 
-    // Dropped: an answer without its hold (loaded over or canceled), for an unmounted editor, or
-    // for an image no longer owning the canvas or selected.
-    if (!owned || !mountedRef.current || !stillLoaded()) return null;
-    if (!loadedFor(useStore.getState().canvas, liveImage()?.path)) return null;
+    // Dropped: an answer without its hold (loaded over or canceled), or for a document no longer
+    // the image in view's; a held canvas took no edit, whichever editor is mounted.
+    if (!owned || !stillInView()) return null;
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
@@ -947,13 +949,11 @@ export function AnnotateTab() {
   }, [agentActivity?.seq]);
 
   /** Adopt a loaded or saved document as the canvas, and record what it says of the dataset
-   *  subject on the image in view for the image filter. */
+   *  subject on the image it names for the image filter. */
   function adoptLabels(labels: LoadedLabels) {
     loadLabels(labels);
-    const subject = dataset?.subject;
-    if (currentImageName && subject) {
-      setImageState(currentImageName, labels.completion[subject]);
-    }
+    const subject = useStore.getState().gui.dataset?.subject;
+    if (subject) setImageState(labels.name, labels.completion[subject]);
   }
 
   // The states of every image of the selection, read once per selection for the image filter.
@@ -988,9 +988,26 @@ export function AnnotateTab() {
   // `loadAgain` asked for.
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
-    const reload = landedRef.current && canvasImage(useStore.getState().canvas) === imgPath;
+    const live = useStore.getState().canvas;
+    const reload = landedRef.current && canvasImage(live) === imgPath;
     const arriving = leftForRef.current !== imgPath;
+    // A mount coming to the image whose edits the store kept unsaved, or held by a save still in
+    // flight, keeps that canvas rather than saving it again and loading over it.
+    const keeping =
+      leftForRef.current === null &&
+      loadedFor(live, imgPath) !== null &&
+      (live.dirty || live.saving !== null);
     leftForRef.current = imgPath;
+    // This mount has come to its image: reloads are read as such from here, and its visit opens.
+    const cameToImage = () => {
+      landedRef.current = true;
+      startImageSessionTracking(currentImageName);
+    };
+    if (keeping) {
+      loadedTickRef.current = reloadTick;
+      cameToImage();
+      return;
+    }
 
     // Already displaying this image and no reload asked for: an unrelated store change (a WS
     // snapshot, a mode or subject toggle) must not re-read the labels and discard unsaved edits.
@@ -1007,10 +1024,9 @@ export function AnnotateTab() {
         const labels = await api.annotate.load(imgPath);
         if (canceled) return;
         adoptLabels(labels);
-        landedRef.current = true;
         documentLanded(imgPath);
         if (reload) refreshProposals();
-        else startImageSessionTracking(currentImageName);
+        else cameToImage();
       } catch (e) {
         if (canceled) return;
         const failed = (sentence: string) =>
@@ -1021,11 +1037,10 @@ export function AnnotateTab() {
         }
         // A blank canvas holding no document: a transient load failure never overwrites the labels.
         useStore.getState().clearCanvas(imgPath);
-        landedRef.current = true;
+        cameToImage();
         // Reload rereads a loaded document, and the canvas now holds none.
         useStore.getState().releaseNotification(canvasKey("reload", imgPath));
         failed(`Could not load this image's labels: ${messageOf(e)}. Saving is off.`);
-        startImageSessionTracking(currentImageName);
       }
     })();
     return () => {
@@ -1067,7 +1082,7 @@ export function AnnotateTab() {
     return () => {
       flushLeaving();
       postHeldContributions();
-      mountedRef.current = false; // the departing save may still land, but adopts nothing
+      mountedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

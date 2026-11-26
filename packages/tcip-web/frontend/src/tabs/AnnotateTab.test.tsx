@@ -346,6 +346,30 @@ describe("AnnotateTab session contributions", () => {
     expect(useStore.getState().heldContributions).toEqual([]);
   });
 
+  it("opens a visit of the image whose edits a remount keeps, and posts it when the tab unmounts again", async () => {
+    useStore.setState({ user: "jordan" });
+    const first = render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(await versionConflict());
+    first.unmount();
+    await flush();
+    const second = render(<AnnotateTab />);
+    await flush();
+    expect(loadSpy).toHaveBeenCalledTimes(1);
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
+
+    second.unmount();
+    await flush();
+
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[1][0]).toMatchObject({
+      image_name: IMG1_NAME,
+      user: "jordan",
+    });
+  });
+
   it("records the session an accepted visit landed in, by the project and the answered stamp", async () => {
     useStore.setState({ user: "jordan" });
     await leaveFirstImage();
@@ -497,7 +521,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
   });
 
-  describe("a save in flight when the editor unmounts and a new one is still loading", () => {
+  describe("a save in flight when the editor unmounts and a new one mounts", () => {
     async function departing() {
       const first = render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -512,27 +536,35 @@ describe("AnnotateTab save/load race", () => {
       pressSave();
       await flush();
       first.unmount();
-      loadSpy.mockImplementation(() => new Promise(() => {}));
       render(<AnnotateTab />);
-      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
       await flush();
       return { answer: save.resolve, signal };
     }
 
-    it("is canceled by the toolbar of the new editor", async () => {
+    it("is kept by the new editor, which sends no save and loads nothing over it", async () => {
+      await departing();
+      expect(loadSpy).toHaveBeenCalledTimes(1);
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(useStore.getState().canvas.saving).not.toBeNull();
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    });
+
+    it("is canceled by the toolbar of the new editor, which keeps the edits", async () => {
       const { signal } = await departing();
       expect(useStore.getState().canvas.saving).not.toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "toolbar-cancel-save" }));
       expect(signal.aborted).toBe(true);
       expect(useStore.getState().canvas.saving).toBeNull();
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      expect(useStore.getState().canvas.dirty).toBe(true);
     });
 
-    it("lands without adopting anything into the canvas the new editor is loading", async () => {
+    it("lands into the canvas the new editor kept, which adopts its answer", async () => {
       const { answer } = await departing();
-      const held = useStore.getState().canvas.boxes;
-      await act(() => Promise.resolve(answer(LANDED.cleared)));
-      expect(useStore.getState().canvas.boxes).toBe(held);
+      await act(() => Promise.resolve(answer(LANDED.box)));
       expect(useStore.getState().canvas.saving).toBeNull();
+      expect(useStore.getState().canvas.dirty).toBe(false);
+      expect(useStore.getState().canvas.loaded?.base_mtime).toBe(LANDED.box.document.base_mtime);
     });
   });
 
@@ -557,6 +589,7 @@ describe("AnnotateTab save/load race", () => {
   });
 
   describe("a save from an editor that has since unmounted", () => {
+    /** Unmount over a save held in flight, mount again, and try an edit there. */
     async function remountedWithEdit() {
       const first = render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -567,29 +600,32 @@ describe("AnnotateTab save/load race", () => {
       await flush();
       first.unmount();
       render(<AnnotateTab />);
-      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
       await flush();
       act(addBox);
       return pending;
     }
 
-    it("does not overwrite what the remounted editor has since changed", async () => {
+    it("leaves the remounted editor no edit while it holds the canvas, and one once it is adopted", async () => {
       const pending = await remountedWithEdit();
-      const edited = useStore.getState().canvas.boxes;
-      await act(() => Promise.resolve(pending[0].resolve(LANDED.cleared)));
-      expect(useStore.getState().canvas.boxes).toBe(edited);
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
+      expect(useStore.getState().canvas.dirty).toBe(false);
+      act(addBox);
+      expect(useStore.getState().canvas.boxes).toHaveLength(2);
       expect(useStore.getState().canvas.dirty).toBe(true);
     });
 
-    it("does not release the hold of the remounted editor's own save", async () => {
+    it("sends no save of the remounted editor while it holds the canvas, and the next save carries its answer's version", async () => {
       const pending = await remountedWithEdit();
       pressSave();
       await flush();
-      expect(pending).toHaveLength(2);
+      expect(pending).toHaveLength(1);
       await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
-      expect(useStore.getState().canvas.saving).not.toBeNull();
       act(addBox);
-      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      pressSave();
+      await flush();
+      expect(pending).toHaveLength(2);
+      expect(saveSpy.mock.calls[1][0].base_mtime).toBe(LANDED.box.document.base_mtime);
     });
   });
 
@@ -647,7 +683,8 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
 
-    // Both the interactive save and the navigation flush save 409 late.
+    // The interactive save 409s late; the navigation's flush sent none while it held the canvas.
+    expect(pending).toHaveLength(1);
     const conflict = await versionConflict();
     await act(() => {
       for (const save of pending) save.reject(conflict);
@@ -1349,7 +1386,7 @@ describe("AnnotateTab entries on the canvas", () => {
         name: (name) =>
           name.startsWith(
             dismissLabel(
-              `${CONFLICT_SENTENCE} Reload to load the latest (discards your unsaved edits), or keep editing.`,
+              `${CONFLICT_SENTENCE}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
             ),
           ),
       }),
@@ -1414,6 +1451,28 @@ describe("AnnotateTab entries on the canvas", () => {
     expect(failure).toHaveTextContent("Reload failed: network down");
     expect(conflict).toHaveTextContent(CONFLICT_SENTENCE);
     expect(within(conflict).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+  });
+
+  it("takes Reload over the edits a remount kept as a reload, keeping them when it fails", async () => {
+    const first = render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(await versionConflict());
+    first.unmount();
+    await flush();
+    render(<AnnotateTab />);
+    await flush();
+    loadSpy.mockRejectedValueOnce(await thrown(unreadable));
+    expect(onCanvas()).toHaveLength(1);
+
+    fireEvent.click(within(onCanvas()[0]).getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+
+    expect(onCanvas()[0]).toHaveTextContent(`Reload failed: ${unreadable.body.detail}`);
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    expect(useStore.getState().canvas.dirty).toBe(true);
   });
 
   it("puts a failed proposals read on the canvas", async () => {

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import type { LoadedLabels } from "@/api/client";
+import { ROUTES } from "@/api/routes";
 import type { PanelEnvelope } from "@/api/types.generated";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { ANNOTATE_ANSWERS, LANDED, loadOf } from "@/test/annotate";
@@ -14,7 +15,13 @@ import {
 } from "@/test/panelEvents";
 import { openedAs, PICKER } from "@/test/projectRecords";
 import { answeredWith, thrown } from "@/test/refusals";
-import { NAV_ANSWER, RAW_SELECTION, SELECTED_SUBJECT, TEST_PROJECT } from "@/test/store";
+import {
+  NAV_ANSWER,
+  RAW_SELECTION,
+  SELECTED_SUBJECT,
+  SUBJECT_SELECT_ANSWER,
+  TEST_PROJECT,
+} from "@/test/store";
 import { FakeWebSocket } from "@/test/webSocket";
 
 // The shell mounts the Annotate tab, which pulls in Konva, and jsdom has no canvas backend.
@@ -119,14 +126,15 @@ function reconnect(panel: string) {
 /** The notice entries the notifications area lists. */
 const notices = () => page.useStore.getState().notifications.filter((e) => e.kind === "notice");
 
-/** Mount the shell beside the open notifications area with `project` open on the produced
- *  capture, the Annotate tab active, and wait for its first image's labels to load. */
-async function mountOnCapture(project = TEST_PROJECT) {
+/** Mount the shell beside the open notifications area with `project` open on `selection`, the
+ *  produced capture by default, the Annotate tab active, and wait for the labels of the image in
+ *  view to load. */
+async function mountOnCapture(project = TEST_PROJECT, selection = RAW_SELECTION) {
   const { ProjectShell, NotificationsPane, useStore, load } = page;
   useStore.getState().setUser("grower");
   useStore.setState((s) => ({
     openProject: project,
-    gui: { ...s.gui, active_tab: "annotate", dataset: RAW_SELECTION },
+    gui: { ...s.gui, active_tab: "annotate", dataset: selection },
   }));
   render(
     <>
@@ -148,24 +156,36 @@ const listItems = () => area().queryAllByRole("listitem");
 /** Expect `item` to state no count of times raised. */
 const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
 
-/** A dismissal route's request as the page sent it: its path and its body. */
+/** A request as the page sent it: its path and its body. */
 type Sent = { path: string; body: unknown };
 
-/** Answer each request the page sends to a dismissal route with the next of `answers`, and
- *  every other request as the page's own fetch does; return the dismissal requests, in order. */
-function answerDismissals(...answers: (() => Promise<Response>)[]): Sent[] {
+/** Answer each POST the page sends to a path ending in `route` with the next of `answers`, and
+ *  every other request as the page's own fetch does; return those POSTs, in order. */
+function answerPosts(route: string, ...answers: (() => Promise<Response>)[]): Sent[] {
   const pageFetch = globalThis.fetch;
   const sent: Sent[] = [];
   vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
     const path = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (!path.endsWith("/dismissals")) return pageFetch(input, init);
-    const body = init?.body;
+    if (!path.endsWith(route) || init?.method !== "POST") return pageFetch(input, init);
+    const body = init.body;
     sent.push({ path, body: typeof body === "string" ? (JSON.parse(body) as unknown) : body });
     const answer = answers.shift();
     if (!answer) throw new Error(`no answer left for ${path}`);
     return answer();
   });
   return sent;
+}
+
+/** Answer each request the page sends to a dismissal route with the next of `answers`, and
+ *  every other request as the page's own fetch does; return the dismissal requests, in order. */
+const answerDismissals = (...answers: (() => Promise<Response>)[]) =>
+  answerPosts("/dismissals", ...answers);
+
+/** Send the page's label saves to the fetch layer, answering each with the next of `answers`;
+ *  return the save requests, in order. */
+function answerSaves(...answers: (() => Promise<Response>)[]): Sent[] {
+  page.save.mockRestore();
+  return answerPosts(ROUTES.postAnnotateLabels, ...answers);
 }
 
 /** An answer of `status` sending `body`. */
@@ -184,6 +204,27 @@ function dismissEntry(text: string) {
 
 /** Let every answer already given land. */
 const settle = () => act(async () => {});
+
+/** Make `active` the active tab, as the tab bar does, and let what it reads land. */
+async function switchTo(active: "meta" | "annotate") {
+  act(() => page.useStore.getState().setActiveTab(active));
+  await settle();
+}
+
+/** Add a box to the canvas, leaving it with unsaved edits. */
+function addBox() {
+  act(() =>
+    page.useStore.getState().add("boxes", {
+      x1: 10,
+      y1: 10,
+      x2: 50,
+      y2: 50,
+      subject: SELECTED_SUBJECT,
+      attributes: {},
+    }),
+  );
+  expect(page.useStore.getState().canvas.dirty).toBe(true);
+}
 
 beforeEach(async () => {
   FakeWebSocket.instances = [];
@@ -287,27 +328,6 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
   /** The status bar's readout of the size of the image whose document the canvas holds. */
   const sizeReadout = () => screen.queryByText(/^Image: /);
 
-  /** Make `active` the active tab, as the tab bar does, and let what it reads land. */
-  async function switchTo(active: "meta" | "annotate") {
-    act(() => page.useStore.getState().setActiveTab(active));
-    await settle();
-  }
-
-  /** Add a box to the canvas, leaving it with unsaved edits. */
-  function addBox() {
-    act(() =>
-      page.useStore.getState().add("boxes", {
-        x1: 10,
-        y1: 10,
-        x2: 50,
-        y2: 50,
-        subject: SELECTED_SUBJECT,
-        attributes: {},
-      }),
-    );
-    expect(page.useStore.getState().canvas.dirty).toBe(true);
-  }
-
   /** Hold the page's next load of an image unanswered; returns the answer to give it later. */
   function holdNextLoad(): (labels: LoadedLabels) => void {
     let answer: ((labels: LoadedLabels) => void) | undefined;
@@ -338,7 +358,9 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     expect(page.load).toHaveBeenLastCalledWith(first.path);
   });
 
-  it("raises the reload warning once, not again at a return to the tab, over unsaved edits", async () => {
+  it("raises the reload warning once, not again at a return to the tab, over unsaved edits it keeps", async () => {
+    const refused = LABEL_ANSWERS.version_conflict;
+    answerSaves(answering(refused.status, refused.body));
     await mountOnCapture();
     addBox();
     deliver(written);
@@ -350,6 +372,8 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
 
     expect(warnings()).toHaveLength(1);
     expectRaisedOnce(warnings()[0]);
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    expect(screen.getByText("1 box")).toBeInTheDocument();
   });
 
   it("lists a save delivered while another tab is active, and loads once at the return", async () => {
@@ -414,6 +438,151 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(2);
     expect(page.save).toHaveBeenCalledTimes(1);
     expect(warnings()).toEqual([]);
+  });
+});
+
+describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
+  const [first] = RAW_SELECTION.images;
+  const saved = ANNOTATE_ANSWERS.saves.box;
+  const refused = LABEL_ANSWERS.version_conflict;
+  /** The sentence the save route's refusal of a changed document states. */
+  const conflictSentence = refused.body.detail.message;
+
+  /** The status bar's mark of unsaved work on the canvas. */
+  const unsaved = () => screen.queryByText("Unsaved changes");
+
+  /** The entries the open area lists whose sentence holds `text`. */
+  const listing = (text: string) =>
+    listItems().filter((item) => within(item).queryByText(text, { exact: false }));
+
+  /** The entries the open area lists as failures, by the kind each names. */
+  const failureEntries = () =>
+    listItems().filter((item) => within(item).queryByText(/^\w+, failure, /));
+
+  /** The line the canvas shows in place for the image in view. */
+  const inPlace = () => screen.getByTestId("entry-in-place");
+
+  /** The image filter's choices, each with how many images it keeps. */
+  const filterChoices = () =>
+    within(screen.getByRole("combobox", { name: "Images" }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+  /** Mount on the capture with the page's saves answered by `answers`, add a box, then switch to
+   *  the Meta tab and back; returns the save requests and how many loads the page sent before. */
+  async function leaveAndReturn(...answers: (() => Promise<Response>)[]) {
+    const sent = answerSaves(...answers);
+    await mountOnCapture();
+    addBox();
+    const loadsBefore = page.load.mock.calls.length;
+    await switchTo("meta");
+    await switchTo("annotate");
+    return { sent, loadsBefore };
+  }
+
+  it("leaves the canvas saved after a leaving save that landed, sending it once and listing no failure", async () => {
+    const { sent } = await leaveAndReturn(answering(200, saved));
+
+    expect(sent).toHaveLength(1);
+    expect(failureEntries()).toEqual([]);
+    expect(unsaved()).toBeNull();
+  });
+
+  it("keeps the edits of a leaving save refused as changed, offering Reload in place and listing the refusal once", async () => {
+    const { sent, loadsBefore } = await leaveAndReturn(answering(refused.status, refused.body));
+
+    expect(unsaved()).toBeInTheDocument();
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(page.load).toHaveBeenCalledTimes(loadsBefore);
+    expect(sent).toHaveLength(1);
+    expect(
+      within(inPlace()).getByText(
+        `${conflictSentence}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(inPlace()).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+    const failures = listing(conflictSentence);
+    expect(failures).toHaveLength(1);
+    expect(failureEntries()).toEqual(failures);
+    expectRaisedOnce(failures[0]);
+  });
+
+  it("loads the latest over the kept edits once Reload is pressed after a refused leaving save", async () => {
+    const latest = LANDED.box.document;
+    expect(latest.image_path).toBe(first.path);
+    expect(latest.boxes).toHaveLength(1);
+    const sent = answerSaves(answering(refused.status, refused.body));
+    await mountOnCapture();
+    addBox();
+    addBox();
+    await switchTo("meta");
+    await switchTo("annotate");
+    const reload = within(inPlace()).getByRole("button", { name: "Reload" });
+    expect(screen.getByText("2 boxes")).toBeInTheDocument();
+    const loadsBefore = page.load.mock.calls.length;
+    page.load.mockResolvedValueOnce(latest);
+
+    fireEvent.click(reload);
+    await settle();
+
+    expect(page.load).toHaveBeenCalledTimes(loadsBefore + 1);
+    expect(page.load).toHaveBeenLastCalledWith(first.path);
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(unsaved()).toBeNull();
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(sent).toHaveLength(1);
+  });
+
+  it("keeps the canvas a leaving save still holds at the return, and adopts its answer when it lands", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    const { sent, loadsBefore } = await leaveAndReturn(
+      () => leaving.promise,
+      answering(200, saved),
+    );
+
+    expect(page.load).toHaveBeenCalledTimes(loadsBefore);
+    expect(sent).toHaveLength(1);
+    await act(() => Promise.resolve(leaving.resolve(answeredWith(200, saved))));
+    expect(unsaved()).toBeNull();
+
+    addBox();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+
+    expect(sent).toHaveLength(2);
+    expect(sent[1].body).toMatchObject({
+      image_path: first.path,
+      base_mtime: saved.document.base_mtime,
+    });
+  });
+
+  it("counts the image a leaving save landed on in the image filter, not the image the tab mounted on", async () => {
+    const onSecond = { ...SUBJECT_SELECT_ANSWER.selection, current_image_index: 1 };
+    const leaving = Promise.withResolvers<Response>();
+    answerSaves(() => leaving.promise);
+    await mountOnCapture(TEST_PROJECT, onSecond);
+    fireEvent.click(screen.getByRole("button", { name: "Previous image" }));
+    await waitFor(() => expect(page.load).toHaveBeenLastCalledWith(first.path));
+    await settle();
+    addBox();
+    await switchTo("meta");
+    await switchTo("annotate");
+    expect(filterChoices()).toEqual(expect.arrayContaining(["unannotated (4)", "in progress (1)"]));
+
+    await act(() => Promise.resolve(leaving.resolve(answeredWith(200, saved))));
+
+    expect(filterChoices()).toEqual(expect.arrayContaining(["unannotated (3)", "in progress (2)"]));
+  });
+
+  it("keeps the edits of a leaving save that got no answer, listing its failure once", async () => {
+    const { sent, loadsBefore } = await leaveAndReturn(unanswered);
+
+    expect(unsaved()).toBeInTheDocument();
+    expect(page.load).toHaveBeenCalledTimes(loadsBefore);
+    expect(sent).toHaveLength(1);
+    const failures = listing(`Save failed: ${first.name}'s edits were not written.`);
+    expect(failures).toHaveLength(1);
+    expectRaisedOnce(failures[0]);
   });
 });
 
