@@ -31,7 +31,12 @@ from tools.fixture_session import (
     socket_url,
     write_fixture,
 )
-from tools.generate_open_fixture import FOCUSED_SUBJECT, RAW_IMAGES, captures
+from tools.generate_open_fixture import (
+    FOCUSED_SUBJECT,
+    PROJECT_ID_STAND_IN,
+    RAW_IMAGES,
+    captures,
+)
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -141,7 +146,7 @@ def produce() -> dict[str, JsonValue]:
             {"live": live, "at_connect": at_connect},
             workspace,
             numbered=frozenset({"event_id"}),
-            minted={project.id: "<valley id>"},
+            minted={project.id: PROJECT_ID_STAND_IN},
         )
 
 

@@ -65,6 +65,9 @@ SUBJECT = "subject_a"
 FOCUSED_SUBJECT = "bud"
 """The subject an agent's focus names and the label scenes annotate, not :data:`SUBJECT`."""
 
+PROJECT_ID_STAND_IN = "<valley id>"
+"""What a fixture's normalizer writes for the open project's minted id, which differs per run."""
+
 
 def captures(project: Path) -> dict[str, tuple[Path, str]]:
     """Write the project's datasets; return each named capture's dataset root and date.
@@ -201,7 +204,7 @@ def produce() -> dict[str, JsonValue]:
     :func:`~tcip_mcp.web_client.selection_for`'s selection of the photographs' capture under its
     root spelled with a trailing separator (``separated``), which keeps that spelling while each
     image's place is the one its scan found. All are normalized by :data:`STAMPED`, the epoch
-    numbered and the project's minted id read as ``<valley id>``.
+    numbered and the project's minted id read as :data:`PROJECT_ID_STAND_IN`.
     """
     import os
 
@@ -279,7 +282,7 @@ def produce() -> dict[str, JsonValue]:
             workspace,
             stamped=STAMPED,
             numbered=frozenset({"epoch"}),
-            minted={valley.id: "<valley id>"},
+            minted={valley.id: PROJECT_ID_STAND_IN},
         )
 
 
