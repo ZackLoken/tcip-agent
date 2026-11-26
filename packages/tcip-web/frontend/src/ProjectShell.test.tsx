@@ -455,6 +455,10 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
   const listing = (text: string) =>
     listItems().filter((item) => within(item).queryByText(text, { exact: false }));
 
+  /** The entries the open area lists as failures, by the kind each names. */
+  const failureEntries = () =>
+    listItems().filter((item) => within(item).queryByText(/^\w+, failure, /));
+
   /** The line the canvas shows in place for the image in view. */
   const inPlace = () => screen.getByTestId("entry-in-place");
 
@@ -480,7 +484,7 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
     const { sent } = await leaveAndReturn(answering(200, saved));
 
     expect(sent).toHaveLength(1);
-    expect(listing("Save failed")).toEqual([]);
+    expect(failureEntries()).toEqual([]);
     expect(unsaved()).toBeNull();
   });
 
@@ -491,7 +495,11 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
     expect(screen.getByText("1 box")).toBeInTheDocument();
     expect(page.load).toHaveBeenCalledTimes(loadsBefore);
     expect(sent).toHaveLength(1);
-    expect(inPlace()).toHaveTextContent(conflictSentence);
+    expect(
+      within(inPlace()).getByText(
+        `${conflictSentence}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
+      ),
+    ).toBeInTheDocument();
     expect(within(inPlace()).getByRole("button", { name: "Reload" })).toBeInTheDocument();
     const failures = listing(conflictSentence);
     expect(failures).toHaveLength(1);
