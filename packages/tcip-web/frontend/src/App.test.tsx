@@ -137,16 +137,22 @@ describe("App tab/panel wiring", () => {
 });
 
 describe("App panel events", () => {
-  it("shows the banner its panel's socket delivers above that panel's tab", async () => {
+  it("shows the banner its panel's socket delivers once, in the opened notifications area and over no tab", async () => {
     const { banner } = PANEL_EVENTS;
     act(() => useStore.getState().setActiveTab("results"));
     render(<App />);
     await screen.findByRole("tabpanel", { name: /results/i });
+    fireEvent.click(screen.getByRole("button", { name: /^Notifications/ }));
+    const area = (await PANE_FOCUS.heading()).closest("section");
 
     const subscribed = stateSocket.subscribePanel.mock.calls.find(([p]) => p === banner.panel);
     act(() => subscribed?.[1](banner));
 
-    expect(screen.getByText(banner.event.text)).toBeInTheDocument();
+    const shown = screen
+      .getAllByText(banner.event.text)
+      .filter((element) => !element.closest("[aria-live]"));
+    expect(shown).toHaveLength(1);
+    expect(area).toContainElement(shown[0]);
   });
 });
 

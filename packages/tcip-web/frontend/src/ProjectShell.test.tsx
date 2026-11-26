@@ -1,10 +1,17 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import type { PanelEnvelope } from "@/api/types.generated";
+import { dismissLabel } from "@/lib/dismissLabel";
 import { LABEL_ANSWERS } from "@/test/labels";
-import { PANEL_EVENTS, PANEL_EVENTS_AT_CONNECT } from "@/test/panelEvents";
+import {
+  DISMISSALS,
+  PANEL_EVENTS,
+  PANEL_EVENTS_AFTER_DISMISSAL,
+  PANEL_EVENTS_AT_CONNECT,
+} from "@/test/panelEvents";
 import { openedAs, PICKER } from "@/test/projectRecords";
+import { answeredWith } from "@/test/refusals";
 import { NAV_ANSWER, RAW_SELECTION, TEST_PROJECT } from "@/test/store";
 import { FakeWebSocket } from "@/test/webSocket";
 
@@ -25,6 +32,7 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
 
 type Page = {
   ProjectShell: typeof import("@/ProjectShell").ProjectShell;
+  NotificationsPane: typeof import("@/components/Notifications").NotificationsPane;
   useStore: typeof import("@/store").useStore;
   load: MockInstance<typeof import("@/api/client").api.annotate.load>;
   select: MockInstance<typeof import("@/api/client").api.dataset.select>;
@@ -39,6 +47,7 @@ async function loadPage(): Promise<Page> {
   vi.resetModules();
   const [
     { ProjectShell },
+    { NotificationsPane },
     { useStore },
     { api },
     { answerAnnotateMount },
@@ -47,6 +56,7 @@ async function loadPage(): Promise<Page> {
     inference,
   ] = await Promise.all([
     import("@/ProjectShell"),
+    import("@/components/Notifications"),
     import("@/store"),
     import("@/api/client"),
     import("@/test/annotate"),
@@ -60,7 +70,7 @@ async function loadPage(): Promise<Page> {
   vi.spyOn(subjects.subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
   vi.spyOn(training.trainingApi, "listRuns").mockResolvedValue({ runs: [], sweeps: [] });
   vi.spyOn(inference.inferenceApi, "listJobs").mockResolvedValue({ jobs: [] });
-  return { ProjectShell, useStore, load, select };
+  return { ProjectShell, NotificationsPane, useStore, load, select };
 }
 
 /** The last socket the page opened for `panel`'s events. */
@@ -94,20 +104,65 @@ function reconnect(panel: string) {
 /** The notice entries the notifications area lists. */
 const notices = () => page.useStore.getState().notifications.filter((e) => e.kind === "notice");
 
-/** Mount the shell with `project` open on the produced capture, the Annotate tab active, and wait
- *  for its first image's labels to load. */
+/** Mount the shell beside the open notifications area with `project` open on the produced
+ *  capture, the Annotate tab active, and wait for its first image's labels to load. */
 async function mountOnCapture(project = TEST_PROJECT) {
-  const { ProjectShell, useStore, load } = page;
+  const { ProjectShell, NotificationsPane, useStore, load } = page;
   useStore.getState().setUser("grower");
   useStore.setState((s) => ({
     openProject: project,
     gui: { ...s.gui, active_tab: "annotate", dataset: RAW_SELECTION },
   }));
-  render(<ProjectShell />);
+  render(
+    <>
+      <ProjectShell />
+      <NotificationsPane />
+    </>,
+  );
   await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
   await act(async () => {});
-  for (const panel of ["annotate", "app"]) act(() => panelSocket(panel).open());
+  for (const panel of ["annotate", "results", "app"]) act(() => panelSocket(panel).open());
 }
+
+/** The open notifications area. */
+const area = () => within(screen.getByRole("region", { name: "Notifications" }));
+
+/** A dismissal route's request as the page sent it: its path and its body. */
+type Sent = { path: string; body: unknown };
+
+/** Answer each request the page sends to a dismissal route with the next of `answers`, and
+ *  every other request as the page's own fetch does; return the dismissal requests, in order. */
+function answerDismissals(...answers: (() => Promise<Response>)[]): Sent[] {
+  const pageFetch = globalThis.fetch;
+  const sent: Sent[] = [];
+  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!path.endsWith("/dismissals")) return pageFetch(input, init);
+    const body = init?.body;
+    sent.push({ path, body: typeof body === "string" ? (JSON.parse(body) as unknown) : body });
+    const answer = answers.shift();
+    if (!answer) throw new Error(`no answer left for ${path}`);
+    return answer();
+  });
+  return sent;
+}
+
+/** An answer of `status` sending `body`. */
+const answering = (status: number, body: unknown) => () =>
+  Promise.resolve(answeredWith(status, body));
+
+/** No answer at all, as a request the network drops rejects. */
+const unanswered = () => Promise.reject(new TypeError("Failed to fetch"));
+
+/** Press the dismiss control of the listed entry saying `text`. */
+function dismissEntry(text: string) {
+  fireEvent.click(
+    area().getByRole("button", { name: (name) => name.startsWith(dismissLabel(text)) }),
+  );
+}
+
+/** Let every answer already given land. */
+const settle = () => act(async () => {});
 
 beforeEach(async () => {
   FakeWebSocket.instances = [];
@@ -230,5 +285,202 @@ describe("ProjectShell agent focus", () => {
     await act(async () => {});
 
     expect(page.select).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ProjectShell agent notes", () => {
+  const { banner, banner_second: second, banner_blank: blank } = PANEL_EVENTS;
+  /** The request a dismissal of `envelope`'s banner sends: its panel's route, and the committed
+   *  person, the project the banner was posted for and its event. */
+  const dismissalOf = (envelope: PanelEnvelope): Sent => ({
+    path: `/api/events/${envelope.panel}/dismissals`,
+    body: { user: "grower", project_id: envelope.project_id, event_id: envelope.event_id },
+  });
+  /** The projects of the entries listed, which the area does not show. */
+  const listedProjects = () => page.useStore.getState().notifications.map((e) => e.context.project);
+  /** The entries the open area lists, newest first. */
+  const listItems = () => area().queryAllByRole("listitem");
+  /** The one entry the open area lists. */
+  function onlyItem(): HTMLElement {
+    const items = listItems();
+    expect(items).toHaveLength(1);
+    return items[0];
+  }
+  /** Expect `item`'s line to name its level's word, its kind and where the note was pushed. */
+  const expectLine = (item: HTMLElement, line: string) =>
+    expect(within(item).getByText(new RegExp(`^${line},`))).toBeInTheDocument();
+  /** Expect `item` to state no count of times raised. */
+  const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
+  /** Expect the open area to list nothing. */
+  function expectListsNothing() {
+    expect(listItems()).toEqual([]);
+    expect(area().getByText(/^Nothing to report\./)).toBeInTheDocument();
+  }
+
+  it("lists two banners one panel's socket delivers as two entries, each its whole text, naming the agent's note on that tab", async () => {
+    await mountOnCapture();
+
+    deliver(banner);
+    deliver(second);
+
+    const items = listItems();
+    expect(items).toHaveLength(2);
+    for (const { event } of [banner, second]) {
+      const showing = items.filter((item) => within(item).queryByText(event.text));
+      expect(showing).toHaveLength(1);
+      expectLine(showing[0], "Information, notice, Agent's note for Results");
+    }
+    expect(listedProjects()).toEqual([banner.project_id, banner.project_id]);
+  });
+
+  it("lists the application panel's banner sent at connect", async () => {
+    const appBanner = PANEL_EVENTS_AT_CONNECT.app_banner;
+    await mountOnCapture();
+
+    deliver(appBanner);
+
+    const item = onlyItem();
+    expect(within(item).getByText(appBanner.event.text)).toBeInTheDocument();
+    expectLine(item, "Information, notice, Agent's note for the app");
+    expect(listedProjects()).toEqual([appBanner.project_id]);
+  });
+
+  it("adds no entry and no count for a banner sent again at a reconnect", async () => {
+    await mountOnCapture();
+    deliver(banner);
+    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
+    expectRaisedOnce(onlyItem());
+
+    reconnect("results");
+    deliver(PANEL_EVENTS_AT_CONNECT.banner);
+
+    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
+    expectRaisedOnce(onlyItem());
+  });
+
+  it("lists nothing for a banner whose text is blank", async () => {
+    expect(blank.event.text.trim()).toBe("");
+    await mountOnCapture();
+
+    deliver(blank);
+    deliver(second);
+
+    expect(within(onlyItem()).getByText(second.event.text)).toBeInTheDocument();
+  });
+
+  it("sends a dismissed banner's dismissal to its panel's route by the person, for its project and event, leaving the other listed", async () => {
+    const sent = answerDismissals(answering(200, DISMISSALS.dismissed));
+    await mountOnCapture();
+    deliver(banner);
+    deliver(second);
+
+    dismissEntry(banner.event.text);
+    await settle();
+
+    expect(sent).toEqual([dismissalOf(banner)]);
+    expect(within(onlyItem()).getByText(second.event.text)).toBeInTheDocument();
+  });
+
+  it("lists, on a page loaded anew and sent what the backend holds after a dismissal, the banners not dismissed and not the dismissed one", async () => {
+    await mountOnCapture();
+
+    for (const envelope of Object.values(PANEL_EVENTS_AFTER_DISMISSAL)) deliver(envelope);
+    await settle();
+
+    const notes = listItems().filter((item) =>
+      within(item).queryByText(/^Information, notice, Agent's note for /),
+    );
+    expect(notes).toHaveLength(2);
+    expect(within(notes[0]).getByText(PANEL_EVENTS.app_banner.event.text)).toBeInTheDocument();
+    expect(within(notes[1]).getByText(second.event.text)).toBeInTheDocument();
+    expect(area().queryByText(banner.event.text)).not.toBeInTheDocument();
+  });
+
+  it("tells a dismissal whose line was not written as a warning carrying its sentence, offering no Retry", async () => {
+    const gap = DISMISSALS.audit_gap;
+    const sent = answerDismissals(answering(gap.status, gap.body));
+    await mountOnCapture();
+    deliver(second);
+
+    dismissEntry(second.event.text);
+    await settle();
+
+    expect(sent).toEqual([dismissalOf(second)]);
+    const item = onlyItem();
+    expect(within(item).getByText(gap.body.detail.message)).toBeInTheDocument();
+    expectLine(item, "Warning, notice, Agent's note for Results");
+    expect(listedProjects()).toEqual([second.project_id]);
+    expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["refused naming no person", answering(DISMISSALS.no_one.status, DISMISSALS.no_one.body)],
+    ["given no answer", unanswered],
+  ])(
+    "tells a dismissal %s as one failure whose Retry sends it again, leaving the failure without its Retry, or any word of one, once taken",
+    async (_case, failed) => {
+      const sent = answerDismissals(failed, answering(200, DISMISSALS.dismissed));
+      await mountOnCapture();
+      deliver(banner);
+
+      dismissEntry(banner.event.text);
+      await settle();
+      expectLine(onlyItem(), "Error, failure, Agent's note for Results");
+
+      fireEvent.click(area().getByRole("button", { name: "Retry" }));
+      await settle();
+
+      expect(sent).toEqual([dismissalOf(banner), dismissalOf(banner)]);
+      const item = onlyItem();
+      expectLine(item, "Error, failure, Agent's note for Results");
+      expectRaisedOnce(item);
+      expect(item).not.toHaveTextContent(/Retry/);
+    },
+  );
+
+  it("sends nothing for a banner dismissed once another project is open, and lists nothing", async () => {
+    const sent = answerDismissals();
+    await mountOnCapture();
+    deliver(banner);
+    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
+
+    act(() => page.useStore.setState({ openProject: openedAs(PICKER.ridge).project }));
+    dismissEntry(banner.event.text);
+    await settle();
+
+    expect(sent).toEqual([]);
+    expectListsNothing();
+  });
+
+  it("withdraws a failed dismissal's Retry, and any word of one, sending nothing, once it is pressed after another project opened", async () => {
+    const sent = answerDismissals(unanswered);
+    await mountOnCapture();
+    deliver(banner);
+    dismissEntry(banner.event.text);
+    await settle();
+    expect(area().getByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+    act(() => page.useStore.setState({ openProject: openedAs(PICKER.ridge).project }));
+    fireEvent.click(area().getByRole("button", { name: "Retry" }));
+    await settle();
+
+    expect(sent).toEqual([dismissalOf(banner)]);
+    const item = onlyItem();
+    expectLine(item, "Error, failure, Agent's note for Results");
+    expectRaisedOnce(item);
+    expect(item).not.toHaveTextContent(/Retry/);
+  });
+
+  it("lists nothing for a dismissal refused because the backend has another project open", async () => {
+    const refused = DISMISSALS.another_project;
+    const sent = answerDismissals(answering(refused.status, refused.body));
+    await mountOnCapture();
+    deliver(banner);
+
+    dismissEntry(banner.event.text);
+    await settle();
+
+    expect(sent).toEqual([dismissalOf(banner)]);
+    expectListsNothing();
   });
 });

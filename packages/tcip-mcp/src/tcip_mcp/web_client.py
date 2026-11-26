@@ -471,7 +471,12 @@ class CanvasStateRequest(BaseModel):
 
 
 class Banner(BaseModel):
-    """The ``banner`` panel event: a note ``text`` the GUI shows above the panel's tab."""
+    """The ``banner`` panel event: a note ``text`` listed in the GUI's notifications.
+
+    A GUI page open when it is pushed lists the note until a person dismisses it there; a page
+    opened later lists it only while the backend still holds it, at the latest until the open
+    project changes or the backend restarts.
+    """
 
     event_type: Literal["banner"] = "banner"
     text: str

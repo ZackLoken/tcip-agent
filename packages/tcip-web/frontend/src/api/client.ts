@@ -18,6 +18,9 @@ import {
   type OpenRequest,
   type OverviewBuildPayload,
   type OverviewJob,
+  type Panel,
+  type PanelDismissal,
+  type PanelDismissed,
   type ProjectRemoval,
   type ProjectsListing,
   type RecordCorrection,
@@ -120,6 +123,13 @@ export const api = {
     // Live canvas-state push (heartbeat or full geometry): fire-and-forget from the tabs. Another
     // project open refuses (a `ProjectNotOpenRefusal`), which the caller resolves by resync.
     pushState: (body: CanvasStateBody) => postJson<null>(ROUTES.postCanvasState, body),
+  },
+
+  events: {
+    /** Dismiss the banner `panel` holds under the body's event, by the body's person, for its
+     *  project; answers whether a banner was removed. */
+    dismiss: (panel: Panel, body: PanelDismissal) =>
+      postJson<PanelDismissed>(ROUTES.postEventsByPanelDismissals(panel), body),
   },
 
   images: {
