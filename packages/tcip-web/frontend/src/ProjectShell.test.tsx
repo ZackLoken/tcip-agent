@@ -435,6 +435,23 @@ describe("ProjectShell agent notes", () => {
     expect(listed()).toEqual([]);
   });
 
+  it("withdraws a failed dismissal's Retry, sending nothing, once it is pressed after another project opened", async () => {
+    const sent = answerDismissals(unanswered);
+    await mountOnCapture();
+    deliver(banner);
+    dismissEntry(banner.event.text);
+    await settle();
+    expect(area().getByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+    act(() => page.useStore.setState({ openProject: openedAs(PICKER.ridge).project }));
+    fireEvent.click(area().getByRole("button", { name: "Retry" }));
+    await settle();
+
+    expect(sent).toEqual([dismissalOf(banner)]);
+    expect(listed()).toEqual([expect.objectContaining({ kind: "failure", count: 1 })]);
+    expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   it("lists nothing for a dismissal refused because the backend has another project open", async () => {
     const refused = DISMISSALS.another_project;
     const sent = answerDismissals(answering(refused.status, refused.body));
