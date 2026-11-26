@@ -142,6 +142,12 @@ async function mountOnCapture(project = TEST_PROJECT) {
 /** The open notifications area. */
 const area = () => within(screen.getByRole("region", { name: "Notifications" }));
 
+/** The entries the open area lists, newest first. */
+const listItems = () => area().queryAllByRole("listitem");
+
+/** Expect `item` to state no count of times raised. */
+const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
+
 /** A dismissal route's request as the page sent it: its path and its body. */
 type Sent = { path: string; body: unknown };
 
@@ -275,9 +281,11 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
   const reloadWarning =
     "A process just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.";
 
-  /** The listed entries saying the reload warning. */
-  const warnings = () =>
-    page.useStore.getState().notifications.filter((e) => e.sentence === reloadWarning);
+  /** The entries the open area lists saying the reload warning. */
+  const warnings = () => listItems().filter((item) => within(item).queryByText(reloadWarning));
+
+  /** The status bar's readout of the size of the image whose document the canvas holds. */
+  const sizeReadout = () => screen.queryByText(/^Image: /);
 
   /** Make `active` the active tab, as the tab bar does, and let what it reads land. */
   async function switchTo(active: "meta" | "annotate") {
@@ -334,16 +342,14 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     await mountOnCapture();
     addBox();
     deliver(written);
-    expect(warnings()).toEqual([expect.objectContaining({ count: 1 })]);
+    expect(warnings()).toHaveLength(1);
+    expectRaisedOnce(warnings()[0]);
 
     await switchTo("meta");
     await switchTo("annotate");
 
-    const listing = area()
-      .getAllByRole("listitem")
-      .filter((item) => within(item).queryByText(reloadWarning));
-    expect(listing).toHaveLength(1);
-    expect(listing[0]).not.toHaveTextContent(/ times/);
+    expect(warnings()).toHaveLength(1);
+    expectRaisedOnce(warnings()[0]);
   });
 
   it("lists a save delivered while another tab is active, and loads once at the return", async () => {
@@ -358,33 +364,38 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
   });
 
   it("loads the image in view again for a save delivered before its first load lands, keeping the later answer", async () => {
+    const before = loadOf(first.path);
     const after = LANDED.box.document;
     expect(after.image_path).toBe(first.path);
+    expect([before.boxes.length, after.boxes.length]).toEqual([0, 1]);
+    expect([after.polygons, after.points]).toEqual([[], []]);
     const answerFirstLoad = holdNextLoad();
     page.load.mockResolvedValueOnce(after);
     await mountOnCapture();
+    expect(screen.queryByText("1 box")).toBeNull();
 
     deliver(written);
     await waitFor(() => expect(page.load).toHaveBeenCalledTimes(2));
     await settle();
-    answerFirstLoad(loadOf(first.path));
+    answerFirstLoad(before);
     await settle();
 
     expect(page.load).toHaveBeenLastCalledWith(first.path);
-    expect(page.useStore.getState().canvas.loaded).toBe(after);
+    expect(screen.getByText("1 box")).toBeInTheDocument();
   });
 
   it("loads the image in view again for a save delivered after its first load was refused", async () => {
     page.load.mockRejectedValueOnce(await thrown(ANNOTATE_ANSWERS.unreadable));
+    const { img_width: width, img_height: height } = loadOf(first.path);
     await mountOnCapture();
-    expect(page.useStore.getState().canvas.loaded).toBeNull();
+    expect(sizeReadout()).toBeNull();
 
     deliver(written);
     await waitFor(() => expect(page.load).toHaveBeenCalledTimes(2));
     await settle();
 
     expect(page.load).toHaveBeenLastCalledWith(first.path);
-    expect(page.useStore.getState().canvas.loaded?.image_path).toBe(first.path);
+    expect(sizeReadout()).toHaveTextContent(`Image: ${width}×${height}`);
   });
 
   it("loads the image just moved to again for a save of it delivered while it loads, leaving the previous image once", async () => {
@@ -449,8 +460,6 @@ describe("ProjectShell agent notes", () => {
   });
   /** The projects of the entries listed, which the area does not show. */
   const listedProjects = () => page.useStore.getState().notifications.map((e) => e.context.project);
-  /** The entries the open area lists, newest first. */
-  const listItems = () => area().queryAllByRole("listitem");
   /** The one entry the open area lists. */
   function onlyItem(): HTMLElement {
     const items = listItems();
@@ -460,8 +469,6 @@ describe("ProjectShell agent notes", () => {
   /** Expect `item`'s line to name its level's word, its kind and where the note was pushed. */
   const expectLine = (item: HTMLElement, line: string) =>
     expect(within(item).getByText(new RegExp(`^${line},`))).toBeInTheDocument();
-  /** Expect `item` to state no count of times raised. */
-  const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
   /** Expect the open area to list nothing. */
   function expectListsNothing() {
     expect(listItems()).toEqual([]);
