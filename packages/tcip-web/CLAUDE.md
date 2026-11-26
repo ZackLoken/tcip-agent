@@ -180,10 +180,11 @@ them.
   while none is open), and the Results doors also refuse evidence that does not belong to it. The
   project routes (open, remove, rename) name a workspace project by id. A request a page or an
   agent builds for a project (a session end, a contribution naming no session, a canvas push, a
-  panel event) carries that project's id, admitted against the open one (`StateStore.admit`, 409
-  naming it otherwise). A contribution naming a session is admitted by that session instead: it
-  lands in the workspace project its id names while the session is the person's and unended. A
-  job's cancel and status act on the job's own project, whichever is open.
+  panel event, a panel event's dismissal) carries that project's id, admitted against the open
+  one (`StateStore.admit`, 409 naming it otherwise). A contribution naming a session is admitted
+  by that session instead: it lands in the workspace project its id names while the session is
+  the person's and unended. A job's cancel and status act on the job's own project, whichever is
+  open.
 - A path a route reads out of the platform's own records (a selection directory a run's config
   names, say) is trusted for reading and never for writing; `assert_path_allowed` is for a
   client-supplied path, not this kind.
