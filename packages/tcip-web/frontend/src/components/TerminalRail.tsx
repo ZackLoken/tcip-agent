@@ -198,6 +198,9 @@ export function TerminalRail() {
     setHeld(0);
   }, []);
 
+  // An unmount forgets the session, so its resume fault stands no longer; a minimize does not.
+  useEffect(() => () => useStore.getState().releaseNotification(RESUME_FAULT_KEY), []);
+
   /** Show that the agent ended: detached, and only Start launches another. */
   const showEnded = useCallback(() => {
     detach();
@@ -410,8 +413,6 @@ export function TerminalRail() {
             sessionRef.current = created.session_id;
             if (created.resume_fault) {
               tell("notice", "warning", RESUME_FAULT_SAID, AGENT_NAME, RESUME_FAULT_KEY);
-            } else {
-              useStore.getState().releaseNotification(RESUME_FAULT_KEY);
             }
             submitStaged();
           }

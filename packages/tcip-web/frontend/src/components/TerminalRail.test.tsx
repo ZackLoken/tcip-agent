@@ -1088,16 +1088,23 @@ describe("TerminalRail", () => {
       expect(faultEntries()).toEqual([expect.objectContaining({ count: 2 })]);
     });
 
-    it("states nothing for a remounted rail's launch with no fault, the earlier fault kept listed", async () => {
-      vi.mocked(terminalApi.createSession).mockResolvedValueOnce(FAULT);
+    it("states nothing for a remounted rail, its create pending or answered with no fault, the earlier fault kept listed", async () => {
+      const next = Promise.withResolvers<typeof LAUNCH>();
+      vi.mocked(terminalApi.createSession)
+        .mockResolvedValueOnce(FAULT)
+        .mockReturnValueOnce(next.promise);
       const first = render(<TerminalRail />);
       await openSocket();
       expect(said()).toBeInTheDocument();
       first.unmount();
 
       render(<TerminalRail />);
-      await openSocket(1);
       await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
+      expect(said()).not.toBeInTheDocument();
+      expect(faultEntries()).toEqual([expect.objectContaining({ key: undefined })]);
+
+      await act(() => Promise.resolve(next.resolve(LAUNCH)));
+      await openSocket(1);
       expect(said()).not.toBeInTheDocument();
       expect(faultEntries()).toEqual([expect.objectContaining({ key: undefined })]);
     });
