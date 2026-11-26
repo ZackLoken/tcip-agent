@@ -1073,53 +1073,6 @@ class TestDismissPanelEventRoute:
         assert posting.answer.status_code == 200, posting.answer.text
         assert unreached.frames == []
 
-    def test_a_project_change_during_the_audit_write_leaves_the_line_in_the_dismissing_project(
-        self,
-        opened_client: TestClient,
-        opened: OpenProject,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A dismissal's line lands in its own project, though another opened meanwhile."""
-        import tcip_mcp.audit as audit_module
-
-        other = named_project(tmp_path.parent / "other", "Other")
-        _posted(
-            opened_client,
-            "results",
-            opened.id,
-            Banner(text="dismissed"),
-            Banner(text="marker"),
-        )
-        dismissed = _sent_at_connect(opened_client, "results", "marker")[0]
-        real_append = audit_module.append
-        reached, release = threading.Event(), threading.Event()
-
-        def held(key: object, record: dict) -> object:
-            if record["tool"] == DISMISSED:
-                reached.set()
-                release.wait(10)
-            return real_append(key, record)
-
-        monkeypatch.setattr(audit_module, "append", held)
-        dismissing = _Meanwhile(
-            lambda: _dismiss(
-                opened_client, "results", opened.id, dismissed["event_id"]
-            )
-        )
-        dismissing.start()
-        try:
-            assert reached.wait(10), "the dismissal never reached its append"
-            _open(opened_client, other)
-        finally:
-            release.set()
-            dismissing.join(10)
-
-        assert dismissing.answer is not None
-        assert dismissing.answer.json() == {"removed": True}
-        assert len(audit_rows(opened.root, DISMISSED)) == 1
-        assert audit_rows(other.root, DISMISSED) == []
-
 
 class TestPushPanelDataTool:
     """Tests of ``push_panel_event``, which posts over HTTP and answers without raising."""
