@@ -32,6 +32,40 @@
       }
     ]
   },
+  "failing_bucket_exists": {
+    "status": 409,
+    "body": {
+      "detail": {
+        "kind": "bucket_exists",
+        "message": "bucket 'broken/2026-02-11' under /scratch/workspace/inference is the bucket job <failed job> is still writing.",
+        "job": {
+          "job_id": "<failed job>",
+          "state": { "status": "running" },
+          "project": "/scratch/workspace/inference",
+          "checkpoint_path": "/scratch/workspace/inference/model.pt",
+          "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+          "bucket": "broken/2026-02-11",
+          "actor": "user:grower",
+          "stated": {
+            "tile": null,
+            "tile_size": null,
+            "overlap": null,
+            "postprocess": null,
+            "cross_tile_nms": null,
+            "conf": null,
+            "masks": null,
+            "mask_cut": null,
+            "rationale": null
+          },
+          "assessment_id": null,
+          "total": 0,
+          "done": 0,
+          "dataset_root": "/scratch/workspace/inference",
+          "capture": "2026-02-11"
+        }
+      }
+    }
+  },
   "failing_final": {
     "type": "final",
     "job": {

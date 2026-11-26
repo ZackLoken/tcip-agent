@@ -1,9 +1,10 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { inferenceApi, openInferenceStream, resultsApi } from "@/api/inference";
 import { type InferenceJob, type InferenceJobs, NOTHING_STATED } from "@/api/types.generated";
+import { NotificationsLiveRegion } from "@/components/Notifications";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";
 import { mockDatasetTree } from "@/test/datasetTree";
@@ -455,20 +456,46 @@ describe("InferenceTab bucket refusals", () => {
   });
 
   async function launchOneRefused() {
-    renderBesideListings(<InferenceTab />);
+    const rendered = renderBesideListings(<InferenceTab />);
     await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
     selectBaseline();
     fireEvent.click(screen.getByRole("checkbox", { name: DS_DATE }));
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    return rendered;
   }
 
-  it("renders the refusal's own sentence under its date, raising no entry", async () => {
+  /** The mount, under Run, of what the launch for `date` was answered. */
+  const mountOf = (date: string) => screen.getByRole("group", { name: `Run for ${date}` });
+
+  /** The entry shown in place in the mount of `date`'s launch, once it is shown. */
+  const lineOf = (date: string) =>
+    waitFor(() => within(mountOf(date)).getByTestId("entry-in-place"));
+
+  /** The Watch the refusal shown in place as `line` offers there. */
+  const watchIn = (line: HTMLElement) => within(line).getByRole("button", { name: "Watch" });
+
+  /** The dismiss control of the entry shown in place, `line`. */
+  const dismissIn = (line: HTMLElement) => within(line).getByRole("button", { name: /^Dismiss: / });
+
+  /** Every listed entry of the refusal, read off the store. */
+  const refusalEntries = () => entriesSaying(REFUSED.message);
+
+  it("raises the refusal as one entry about its date, shown in place in that date's mount with Watch there", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
 
-    const sentence = `${DS_DATE}: ${REFUSED.message}`;
-    expect(await screen.findByText(paragraphHolding(sentence))).toBeInTheDocument();
-    expect(useStore.getState().notifications).toEqual([]);
+    const line = await lineOf(DS_DATE);
+    expect(line).toHaveTextContent(REFUSED.message);
+    expect(watchIn(line)).toHaveAccessibleDescription(REFUSED.message);
+    expect(within(mountOf(DS_UNPUBLISHED_DATE)).queryByTestId("entry-in-place")).toBeNull();
+    expect(refusalEntries()).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        level: "error",
+        context: { project: TEST_PROJECT.id, target: DS_DATE },
+        action: undefined,
+      }),
+    ]);
   });
 
   it("names the job still writing the bucket and watches it", async () => {
@@ -476,11 +503,7 @@ describe("InferenceTab bucket refusals", () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
 
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: `Watch job ${REFUSED.job.job_id} for ${DS_DATE}`,
-      }),
-    );
+    fireEvent.click(watchIn(await screen.findByTestId("entry-in-place")));
     const watched = RUNNING.jobs.find((job) => job.job_id === REFUSED.job.job_id)!;
     expect(await screen.findByText(countsOf(watched))).toBeInTheDocument();
   });
@@ -489,18 +512,14 @@ describe("InferenceTab bucket refusals", () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
 
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: `Watch job ${REFUSED.job.job_id} for ${DS_DATE}`,
-      }),
-    );
+    fireEvent.click(watchIn(await screen.findByTestId("entry-in-place")));
 
     // The watched job's row names its bucket, beside the refused entry's own sentence.
     expect(await screen.findByText(REFUSED.job.bucket)).toBeInTheDocument();
     expect(screen.getByText(paragraphHolding(REFUSED.message))).toBeInTheDocument();
   });
 
-  it("keeps one refused entry and one job row when one of two dates launches and the other refuses", async () => {
+  it("keeps one refused line and one job row when one of two dates launches and the other refuses", async () => {
     mockTree();
     const refusal = await existsRefusal();
     vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
@@ -515,15 +534,26 @@ describe("InferenceTab bucket refusals", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     expect(await screen.findByText(HELD)).toBeInTheDocument();
-    expect(
-      await screen.findByRole("button", { name: `Dismiss refusal for ${DS_UNPUBLISHED_DATE}` }),
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(watchIn(await lineOf(DS_UNPUBLISHED_DATE))).toBeInTheDocument();
+    expect(within(mountOf(DS_DATE)).queryByTestId("entry-in-place")).toBeNull();
+    expect(screen.getAllByTestId("entry-in-place")).toHaveLength(1);
+    expect(refusalEntries()).toEqual([
+      expect.objectContaining({
+        context: { project: TEST_PROJECT.id, target: DS_UNPUBLISHED_DATE },
+      }),
+    ]);
   });
 
-  it("keeps two refused dates' controls distinguishable by accessible name", async () => {
+  it("keeps each of two refused dates its own line and dismiss name, one dismissed leaving the other with Watch", async () => {
     mockTree();
-    vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
+    const { bucket_exists: first, failing_bucket_exists: second } = INFERENCE_ANSWERS;
+    const refusals: Record<string, Error> = {
+      [DS_DATE]: await thrown(first),
+      [DS_UNPUBLISHED_DATE]: await thrown(second),
+    };
+    vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
+      Promise.reject(refusals[body.date]),
+    );
 
     renderBesideListings(<InferenceTab />);
     await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
@@ -532,23 +562,96 @@ describe("InferenceTab bucket refusals", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: DS_UNPUBLISHED_DATE }));
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(
-      await screen.findByRole("button", { name: `Dismiss refusal for ${DS_DATE}` }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: `Dismiss refusal for ${DS_UNPUBLISHED_DATE}` }),
-    ).toBeInTheDocument();
+    const dismissed = await lineOf(DS_DATE);
+    const kept = await lineOf(DS_UNPUBLISHED_DATE);
+    expect(dismissed).toHaveTextContent(first.body.detail.message);
+    expect(kept).toHaveTextContent(second.body.detail.message);
+    expect(dismissIn(dismissed).getAttribute("aria-label")).not.toBe(
+      dismissIn(kept).getAttribute("aria-label"),
+    );
+    fireEvent.click(dismissIn(dismissed));
+
+    expect(within(mountOf(DS_DATE)).queryByTestId("entry-in-place")).toBeNull();
+    expect(watchIn(await lineOf(DS_UNPUBLISHED_DATE))).toBeInTheDocument();
+    expect(entriesSaying(first.body.detail.message)).toEqual([]);
+    expect(entriesSaying(second.body.detail.message)).toEqual([
+      expect.objectContaining({
+        context: { project: TEST_PROJECT.id, target: DS_UNPUBLISHED_DATE },
+      }),
+    ]);
   });
 
-  it("removes the entry on Dismiss", async () => {
+  it("removes a dismissed refusal from the tab and the area, focus on Run", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
 
-    fireEvent.click(await screen.findByRole("button", { name: `Dismiss refusal for ${DS_DATE}` }));
-    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
+    const dismiss = dismissIn(await screen.findByTestId("entry-in-place"));
+    dismiss.focus();
+    fireEvent.click(dismiss);
+
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(refusalEntries()).toEqual([]);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run" }));
   });
 
-  it("shows a launch failure of another kind in place for its date, until that date launches again", async () => {
+  it("shows a launch refused again after a dismissal as a new entry, Watch offered again", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
+    await launchOneRefused();
+    fireEvent.click(dismissIn(await screen.findByTestId("entry-in-place")));
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    const line = await screen.findByTestId("entry-in-place");
+    expect(watchIn(line)).toBeInTheDocument();
+    expect(refusalEntries()).toEqual([expect.objectContaining({ count: 1 })]);
+  });
+
+  it("shows a launch refused again while its earlier entry is listed as that entry, counted", async () => {
+    const launch = vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
+    await launchOneRefused();
+    await screen.findByTestId("entry-in-place");
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(launch).toHaveBeenCalledTimes(2));
+
+    const line = await screen.findByTestId("entry-in-place");
+    expect(line).toHaveTextContent(`${REFUSED.message}, 2 times`);
+    expect(watchIn(line)).toBeInTheDocument();
+    expect(refusalEntries()).toEqual([expect.objectContaining({ count: 2 })]);
+  });
+
+  it("clears each selected date's refusal in place at a Run, its entry kept with no action", async () => {
+    mockTree();
+    const launch = vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
+    renderBesideListings(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_DATE }));
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_UNPUBLISHED_DATE }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(screen.getAllByTestId("entry-in-place")).toHaveLength(2));
+
+    launch.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(refusalEntries()).toEqual([
+      expect.objectContaining({ key: undefined, action: undefined }),
+      expect.objectContaining({ key: undefined, action: undefined }),
+    ]);
+  });
+
+  it("keeps a refusal listed, standing on no key, once the person leaves the tab", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
+    const { unmount } = await launchOneRefused();
+    await screen.findByTestId("entry-in-place");
+
+    unmount();
+
+    expect(refusalEntries()).toEqual([expect.objectContaining({ key: undefined })]);
+  });
+
+  it("shows a launch failure of another kind in place for its date with no Watch, until that date launches again", async () => {
     const missing = INFERENCE_ANSWERS.missing_checkpoint;
     vi.spyOn(inferenceApi, "launch")
       .mockRejectedValueOnce(await thrown(missing))
@@ -556,7 +659,9 @@ describe("InferenceTab bucket refusals", () => {
     const sentence = `Inference launch failed for ${DS_DATE}: ${missing.body.detail}`;
     await launchOneRefused();
 
-    expect(await screen.findByTestId("entry-in-place")).toHaveTextContent(sentence);
+    const line = await lineOf(DS_DATE);
+    expect(line).toHaveTextContent(sentence);
+    expect(within(line).queryByRole("button", { name: "Watch" })).toBeNull();
     expect(entriesSaying(sentence)).toEqual([
       expect.objectContaining({
         kind: "failure",
@@ -564,8 +669,6 @@ describe("InferenceTab bucket refusals", () => {
         context: { project: TEST_PROJECT.id, target: DS_DATE },
       }),
     ]);
-    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
@@ -574,24 +677,26 @@ describe("InferenceTab bucket refusals", () => {
     expect(entriesSaying(sentence)).toHaveLength(1);
   });
 
-  it("drops refused entries on a model change", async () => {
+  it("clears a refusal in place on a model change, its entry kept on no key", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
-    expect(await screen.findByText("Refused")).toBeInTheDocument();
+    await screen.findByTestId("entry-in-place");
 
     fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
       target: { value: OTHER_MODEL.entry.checkpoint_path },
     });
-    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(refusalEntries()).toEqual([expect.objectContaining({ key: undefined })]);
   });
 
-  it("drops refused entries on a dataset change", async () => {
+  it("clears a refusal in place on a dataset change, its entry kept on no key", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
-    expect(await screen.findByText("Refused")).toBeInTheDocument();
+    await screen.findByTestId("entry-in-place");
 
     act(() => openTestProject(GROUPED_SELECTION));
-    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    expect(refusalEntries()).toEqual([expect.objectContaining({ key: undefined })]);
   });
 
   it("disables the launch button while onLaunch's loop is in flight", async () => {
@@ -610,44 +715,15 @@ describe("InferenceTab bucket refusals", () => {
     await waitFor(() => expect(launchButton).not.toBeDisabled());
   });
 
-  it("announces the refused-launches list and labels it without a level-one heading", async () => {
+  it("keeps no live list of its own, the area's live region announcing a refusal as an alert", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
-    await launchOneRefused();
+    render(<NotificationsLiveRegion />);
+    const { container } = await launchOneRefused();
+    await screen.findByTestId("entry-in-place");
 
-    const list = await screen.findByRole("list");
-    expect(list).toHaveAttribute("aria-live", "polite");
-    expect(screen.getByText("Refused").tagName).not.toBe("H1");
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-  });
-
-  it("mounts the aria-live region before any refusal, with the entry appearing inside it once refused", async () => {
-    vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
-    renderBesideListings(<InferenceTab />);
-    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
-
-    const list = screen.getByRole("list");
-    expect(list).toHaveAttribute("aria-live", "polite");
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
-
-    selectBaseline();
-    fireEvent.click(screen.getByRole("checkbox", { name: DS_DATE }));
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
-    expect(screen.getByRole("list")).toHaveAttribute("aria-live", "polite");
-  });
-
-  it("moves focus to the launch button when Dismiss unmounts the entry that held it", async () => {
-    vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
-    await launchOneRefused();
-
-    const dismiss = await screen.findByRole("button", { name: `Dismiss refusal for ${DS_DATE}` });
-    dismiss.focus();
-    fireEvent.click(dismiss);
-
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run" })),
-    );
+    expect(within(container).queryByRole("list")).toBeNull();
+    expect(container.querySelector("[aria-live]")).toBeNull();
+    expect(within(screen.getByRole("alert")).getByText(REFUSED.message)).toBeInTheDocument();
   });
 });
 

@@ -13,8 +13,9 @@ launch under :data:`HELD` answers, whose engine reports one image done and ends 
 
 The job listing asked for before the project opens is refused (``unopened``). A pass over
 the copy, which its launch admits, is listed through ``GET /api/inference/jobs``
-running before its engine starts (``failing_started``); the copy is then overwritten by bytes no
-registry names, and the pass fails on the platform's own engine, its stream ending on the failure
+running before its engine starts (``failing_started``), when a second launch naming its bucket is
+refused (``failing_bucket_exists``); the copy is then overwritten by bytes no registry names,
+and the pass fails on the platform's own engine, its stream ending on the failure
 (``failing_final``). The held pass is launched (``launched``), listed running before its engine
 reports (``held_started``) and after (``running``) as its stream's first frame sends it
 (``progress``); a second launch naming its bucket is refused
@@ -147,6 +148,7 @@ def produce() -> dict[str, JsonValue]:
         ).job_id
         gate.reached()
         served["failing_started"] = answered(client, "list_jobs", 200)
+        served["failing_bucket_exists"] = launch(FAILING, 409, str(replaced))
         replaced.write_bytes(b"weights")
         gate.step()
         ended(inference._registry, failing)

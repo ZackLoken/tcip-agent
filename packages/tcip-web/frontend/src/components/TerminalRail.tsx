@@ -5,9 +5,9 @@
  * translation layer. The terminal is recolored to the field-station palette via the ANSI
  * theme; the harness's own layout is untouched. Staged requests are submitted to the session for
  * its agent, and choosing another harness while an agent runs waits for that agent's hand-off
- * before the chosen one starts. Under the header the rail states that the last conversation could
- * not be continued when a launch met a resume fault, until the person dismisses it, and, while any
- * are held, how many requests the backend holds for the agent.
+ * before the chosen one starts. Under the header the rail shows in place the notice a launch that
+ * met a resume fault raised, while that launch's agent runs, and, while any are held, how many
+ * requests the backend holds for the agent.
  */
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -29,13 +29,16 @@ import {
   type TerminalServedFrame,
   type TerminalStatus,
 } from "@/api/types.generated";
+import { NotificationItem } from "@/components/Notifications";
 import { AGENT_NAME } from "@/lib/agentName";
 import {
   createReconnectingSocket,
   jsonFrameHandlers,
   type ReconnectingSocket,
 } from "@/lib/reconnectingSocket";
+import { tell } from "@/lib/tell";
 import { useStore } from "@/store";
+import { selectStanding } from "@/store/slices/notifications";
 import type { TerminalPhase } from "@/store/slices/terminalOpen";
 
 const MIN_WIDTH = 320;
@@ -72,6 +75,9 @@ function running(phase: TerminalPhase): boolean {
 
 /** What the rail tells the person when a launch met a resume fault. */
 const RESUME_FAULT_SAID = "The last conversation could not be continued, so this is a new one.";
+
+/** The key the notice of the held launch's resume fault stands on until that launch ends. */
+const RESUME_FAULT_KEY = "terminal-resume-fault";
 
 /** The backend's count of the requests it holds, in words for the person. */
 function heldSaid(count: number): string {
@@ -149,9 +155,9 @@ export function TerminalRail() {
   const phase = useStore((s) => s.terminalPhase);
   const setPhase = useStore((s) => s.setTerminalPhase);
   const [confirmingExit, setConfirmingExit] = useState(false);
-  // The launch's resume fault until dismissed or the launch ends, and how many requests the backend
-  // holds for its agent, as the session's socket last said.
-  const [resumeFault, setResumeFault] = useState(false);
+  // Whether the held launch's resume fault stands, and how many requests the backend holds for its
+  // agent, as the session's socket last said.
+  const resumeFault = useStore((s) => selectStanding(RESUME_FAULT_KEY)(s) !== null);
   const [held, setHeld] = useState(0);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
@@ -183,14 +189,17 @@ export function TerminalRail() {
     });
   }, []);
 
-  /** Stop the socket and forget the session and what its launch answered, so the socket's next
-   *  start launches an agent. */
+  /** Stop the socket and forget the session and what its launch answered, its resume fault's
+   *  notice staying listed in the area, so the socket's next start launches an agent. */
   const detach = useCallback(() => {
     socketRef.current?.stop();
     sessionRef.current = null;
-    setResumeFault(false);
+    useStore.getState().releaseNotification(RESUME_FAULT_KEY);
     setHeld(0);
   }, []);
+
+  // An unmount forgets the session, so its resume fault stands no longer; a minimize does not.
+  useEffect(() => () => useStore.getState().releaseNotification(RESUME_FAULT_KEY), []);
 
   /** Show that the agent ended: detached, and only Start launches another. */
   const showEnded = useCallback(() => {
@@ -402,7 +411,9 @@ export function TerminalRail() {
             });
             if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
             sessionRef.current = created.session_id;
-            setResumeFault(created.resume_fault);
+            if (created.resume_fault) {
+              tell("notice", "warning", RESUME_FAULT_SAID, AGENT_NAME, RESUME_FAULT_KEY);
+            }
             submitStaged();
           }
         } catch (e) {
@@ -672,19 +683,12 @@ export function TerminalRail() {
         </div>
       </div>
       {running(phase) && resumeFault && (
-        <div className="shrink-0 flex items-baseline gap-3 border-b border-tcip-border px-3 py-1 text-[12px]">
-          <p className="flex-1 text-tcip-warn">{RESUME_FAULT_SAID}</p>
-          <button
-            type="button"
-            aria-label="Dismiss the note that the last conversation could not be continued"
-            onClick={() => {
-              setResumeFault(false);
-              termRef.current?.focus();
-            }}
-            className="shrink-0 rounded px-1 text-tcip-muted transition-colors hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
-          >
-            Dismiss
-          </button>
+        <div className="shrink-0 border-b border-tcip-border px-3 py-1">
+          <NotificationItem
+            placement="in place"
+            entryKey={RESUME_FAULT_KEY}
+            afterDismiss={() => termRef.current?.focus()}
+          />
         </div>
       )}
       {running(phase) && held > 0 && (
