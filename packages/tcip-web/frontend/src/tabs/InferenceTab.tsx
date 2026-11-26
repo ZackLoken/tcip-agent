@@ -86,6 +86,34 @@ function CancelFailureRow({
   );
 }
 
+/** The failed or refused launch for `date` standing on `entryKey`, in place under Run with its
+ *  date; a refusal naming the job still writing its bucket offers Watch, which hands that job's
+ *  record to `onWatch`. */
+function LaunchOutcome({
+  entryKey,
+  date,
+  onWatch,
+  afterDismiss,
+}: {
+  entryKey: string;
+  date: string;
+  onWatch: (job: InferenceJob) => void;
+  afterDismiss: () => void;
+}) {
+  const job = useStore((s) => selectStanding(entryKey)(s)?.inferenceJob);
+  return (
+    <NotificationItem
+      placement="in place"
+      entryKey={entryKey}
+      showTarget
+      afterDismiss={afterDismiss}
+      action={
+        job && { label: "Watch", actsOn: `job ${job.job_id} for ${date}`, run: () => onWatch(job) }
+      }
+    />
+  );
+}
+
 function statusBadgeClass(job: InferenceJob): string {
   if (unended(job.state)) return "bg-tcip-fn/20 text-tcip-fn";
   return job.state.status === "completed"
@@ -150,10 +178,9 @@ export function InferenceTab() {
     watched && (relisted && !delisted ? listed[watched.record.job_id] : watched.record);
   // Each job's one record by its id: the listed jobs', and the watched one's in its place.
   const jobs = activeJob ? { ...listed, [activeJob.job_id]: activeJob } : listed;
-  // The job still writing the bucket of each refused launch, by the key its entry stands on: what
-  // Watch, offered in place beside the entry, watches.
-  const [refusedJobs, setRefusedJobs] = useState<Record<string, InferenceJob>>({});
-  const refusedJobsRef = useRef(refusedJobs);
+  // The key each date's launch line stands on; the ref holds them as last committed.
+  const launchKeys = datasetRoot ? dates.map((d) => launchKey(projectId, datasetRoot, d)) : [];
+  const launchKeysRef = useRef(launchKeys);
   const [launching, setLaunching] = useState(false);
   const streamRef = useRef<(() => void) | null>(null);
   const launchButtonRef = useRef<HTMLButtonElement>(null);
@@ -161,16 +188,15 @@ export function InferenceTab() {
   const modelAssessments = assessmentsOf(assessed?.assessments ?? [], model);
 
   useEffect(() => {
-    refusedJobsRef.current = refusedJobs;
-  }, [refusedJobs]);
+    launchKeysRef.current = launchKeys;
+  });
 
-  // A refusal names a bucket of the model and dataset it was made under: neither their change nor
-  // the tab's leaving keeps it in place, and its entry stays listed in the area.
+  // A line answers a launch under the model and dataset root chosen then (a refusal names a job's
+  // bucket under that root); their change or the tab's leaving releases it, listed in the area.
   useEffect(
     () => () => {
       const { releaseNotification } = useStore.getState();
-      for (const key of Object.keys(refusedJobsRef.current)) releaseNotification(key);
-      setRefusedJobs({});
+      for (const key of launchKeysRef.current) releaseNotification(key);
     },
     [model, datasetRoot],
   );
@@ -249,15 +275,6 @@ export function InferenceTab() {
     );
   }
 
-  /** Forget the job each refused launch standing on one of `keys` named. */
-  function dropRefusals(keys: string[]) {
-    setRefusedJobs((prev) => {
-      const next = { ...prev };
-      for (const key of keys) delete next[key];
-      return next;
-    });
-  }
-
   const own = assessmentId === null;
   const filled = (field: StatedField) => {
     const value = statedInputs[field].trim();
@@ -303,11 +320,10 @@ export function InferenceTab() {
     } catch (e) {
       const refusal = refusalOf<BucketExistsRefusal>(e, BUCKET_EXISTS);
       if (refusal) {
-        setRefusedJobs((prev) => ({ ...prev, [key]: refusal.job }));
-        tell("failure", "error", refusal.message, date, key);
+        tell("failure", "error", refusal.message, date, key, refusal.job);
         return;
       }
-      tell("failure", "error", `Inference launch failed for ${date}: ${messageOf(e)}`, date, key);
+      tell("failure", "error", `Inference launch failed: ${messageOf(e)}`, date, key);
     }
   }
 
@@ -316,7 +332,6 @@ export function InferenceTab() {
     const keys = selectedDates.map((date) => launchKey(projectId, datasetRoot, date));
     const { releaseNotification } = useStore.getState();
     for (const key of keys) releaseNotification(key);
-    dropRefusals(keys);
     setLaunching(true);
     try {
       // One job per date: each date is its own prediction bucket, one job row per date.
@@ -491,28 +506,16 @@ export function InferenceTab() {
 
         {datasetRoot && (
           <div className="flex flex-col gap-1 has-[>:not(:empty)]:mt-3">
-            {dates.map((date) => {
-              const key = launchKey(projectId, datasetRoot, date);
-              const job = refusedJobs[key];
-              return (
-                <div
-                  key={date}
-                  role="group"
-                  aria-label={`Run for ${date}`}
-                  className="empty:hidden"
-                >
-                  <NotificationItem
-                    placement="in place"
-                    entryKey={key}
-                    afterDismiss={() => {
-                      dropRefusals([key]);
-                      launchButtonRef.current?.focus();
-                    }}
-                    action={job && { label: "Watch", run: () => watch(jobs[job.job_id] ?? job) }}
-                  />
-                </div>
-              );
-            })}
+            {dates.map((date, i) => (
+              <div key={date} role="group" aria-label={`Run for ${date}`} className="empty:hidden">
+                <LaunchOutcome
+                  entryKey={launchKeys[i]}
+                  date={date}
+                  onWatch={(job) => watch(jobs[job.job_id] ?? job)}
+                  afterDismiss={() => launchButtonRef.current?.focus()}
+                />
+              </div>
+            ))}
           </div>
         )}
       </div>
