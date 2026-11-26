@@ -10,9 +10,10 @@ Annotate panel (``labels_written``, ``labels_written_second``), and to the ``app
 (``annotate_focus``) and on the capture whose label document will not read
 (``annotate_focus_troubled``) and a canvas state request (``canvas_state_request``); last, the
 labels of the first photograph written to the Annotate panel again, posted with the identity
-headers of an agent declaring ``generate_training_fixture.DECLARED_CLIENT``
-(``labels_written_declared``). Each panel's socket is opened before the posts, which delivers each
-event live, and again after them, which sends each event at connect. The envelopes are written,
+headers of an agent declaring ``generate_training_fixture.DECLARED_CLIENT`` and no terminal
+session, whatever the calling shell's environment holds (``labels_written_declared``). Each
+panel's socket is opened before the posts, which delivers each event live, and again after them,
+which sends each event at connect. The envelopes are written,
 each event id and the declared agent's minted session numbered (``fixture_session.normalized``)
 so both deliveries of an event keep one id, and the open project's id named, to
 :data:`GENERATED_PATH`, as ``live`` and ``at_connect``, each keyed by scene.
@@ -57,6 +58,8 @@ def produce() -> dict[str, JsonValue]:
 
     A route refusing what it should admit raises.
     """
+    import pytest
+
     from tcip_mcp import agent_identity
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.web_client import (
@@ -157,7 +160,11 @@ def produce() -> dict[str, JsonValue]:
             for _, panel, event in posted:
                 post(panel, event, {})
             _, panel, event = declared
-            agent_identity.begin(*DECLARED_CLIENT)
+            with pytest.MonkeyPatch.context() as patch:
+                patch.delenv(
+                    agent_identity.TERMINAL_SESSION_ENV, raising=False
+                )
+                agent_identity.begin(*DECLARED_CLIENT)
             try:
                 post(panel, event, agent_identity.http_headers())
             finally:
