@@ -288,6 +288,29 @@ class TestPostPanelEventRoute:
         assert first["event"] == Banner(text="11 counted").model_dump()
         assert second["event"] == Banner(text="22 counted").model_dump()
 
+    def test_an_event_is_live_to_an_open_socket_and_sent_at_connect_to_a_later_one(
+        self, opened_client: TestClient, project_id: str
+    ) -> None:
+        """One post reaches an open socket as live and a later socket as a send at connect.
+
+        Both deliveries carry the event, its id, its project and its sender's identity alike.
+        """
+        panel = "results"
+        with opened_client.websocket_connect(
+            f"ws://127.0.0.1/ws/panel/{panel}"
+        ) as open_at_post:
+            _post(opened_client, panel, Banner(text="counted"), project_id)
+            live = open_at_post.receive_json()
+            with opened_client.websocket_connect(
+                f"ws://127.0.0.1/ws/panel/{panel}"
+            ) as connected_later:
+                at_connect = connected_later.receive_json()
+
+        assert live["sent_at_connect"] is False
+        assert live["project_id"] == project_id
+        assert at_connect["sent_at_connect"] is True
+        assert at_connect == {**live, "sent_at_connect": True}
+
     def test_an_event_retained_for_one_project_is_not_replayed_once_another_is_open(
         self,
         opened_client: TestClient,

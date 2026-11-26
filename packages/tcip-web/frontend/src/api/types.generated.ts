@@ -811,7 +811,9 @@ export interface PanelEnvelope {
   panel: Panel;
   event: PanelEvent;
   event_id: string;
+  project_id: string;
   identity: RecordedIdentity;
+  sent_at_connect: boolean;
 }
 
 export type CompositeStretch = "minmax" | "percent_clip";

@@ -333,8 +333,9 @@ async def post_panel_event(
     open one's ``open_project_id`` when another is open and the none-open message when none is,
     and is neither retained nor broadcast. A focus event is retained and broadcast only once its
     state change is held. The broadcast and replay payload, not this route's response, carries
-    the agent identity the sender declared in its headers (``agent_identity.HEADERS``, each field
-    ``None`` when not sent). Declared, not verified: any sender can set the headers.
+    the project the event was posted for and the agent identity the sender declared in its
+    headers (``agent_identity.HEADERS``, each field ``None`` when not sent). Declared, not
+    verified: any sender can set the headers.
     """
     from tcip_mcp import agent_identity
 
@@ -354,7 +355,9 @@ async def post_panel_event(
         panel=panel,
         event=posted.event,
         event_id=f"{now().isoformat()}#{next(_event_counter)}",
+        project_id=project.id,
         identity=agent_identity.identity_from_headers(request.headers),
+        sent_at_connect=False,
     )
     _gui_store.retain_event(envelope)
     await _send_to_each(envelope, _panel_subscribers[panel])
@@ -364,14 +367,19 @@ async def post_panel_event(
 async def panel_ws(websocket: WebSocket, panel: Panel) -> None:
     """Stream ``panel``'s events over the socket, the open project's retained events first.
 
-    A path naming no panel is closed with 1008 before it is accepted. An inbound frame is read
-    and discarded, only to detect disconnect.
+    Each retained event is sent as a copy of its envelope with ``sent_at_connect`` set, the
+    retained envelope itself unchanged. A path naming no panel is closed with 1008 before it is
+    accepted. An inbound frame is read and discarded, only to detect disconnect.
     """
     await websocket.accept()
     _panel_subscribers[panel].add(websocket)
     try:
         for event in _gui_store.retained_events(panel):
-            await websocket.send_text(event.model_dump_json())
+            await websocket.send_text(
+                event.model_copy(
+                    update={"sent_at_connect": True}
+                ).model_dump_json()
+            )
         async for _ in websocket.iter_text():
             pass
     except WebSocketDisconnect:
