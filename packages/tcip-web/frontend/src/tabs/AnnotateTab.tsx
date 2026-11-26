@@ -217,7 +217,7 @@ export function AnnotateTab() {
   const landedRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
   const loadedTickRef = useRef(0);
-  // The image in view at the load effect's last run, so the canvas is left once per image come to.
+  // The last image in view the load effect ran for, so the canvas is left once per image come to.
   const leftForRef = useRef<string | null>(null);
   const canvasColumnRef = useRef<HTMLDivElement>(null);
   const agentActivity = useStore((s) => s.agentActivity);
