@@ -58,10 +58,23 @@ type RaisedKind = "failure" | "notice" | "job";
 
 /** What an entry is: a condition's occurrence, naming its condition; or a failure, a notice or a
  *  job, standing on the key its producer gave until the key is released or a raise stating
- *  another text takes it, and offering its action only while it stands there. */
+ *  another text takes it, and offering its action, and running `onDismiss` when dismissed, only
+ *  while it stands there. */
 type EntryStanding =
-  | { kind: "condition"; condition: ConditionName; key?: never; action?: never }
-  | { kind: RaisedKind; key?: string; action?: EntryAction; condition?: never };
+  | {
+      kind: "condition";
+      condition: ConditionName;
+      key?: never;
+      action?: never;
+      onDismiss?: never;
+    }
+  | {
+      kind: RaisedKind;
+      key?: string;
+      action?: EntryAction;
+      onDismiss?: () => void;
+      condition?: never;
+    };
 
 /** One entry of the notifications area. */
 export type NotificationEntry = EntryText &
@@ -78,14 +91,16 @@ export type NotificationEntry = EntryText &
     announcement: { text: string; level: MessageLevel };
   };
 
-/** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal. A job
- *  states whether an entry already standing for it is told again (`retell`). */
+/** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal, and
+ *  what dismissing its entry does beside taking it off the list (`onDismiss`). A job states
+ *  whether an entry already standing for it is told again (`retell`). */
 export type Raised = {
   level: MessageLevel;
   text: { sentence: string } | { refusal: Refusal };
   context: EntryContext;
   key?: string;
   action?: EntryAction;
+  onDismiss?: () => void;
 } & ({ kind: Exclude<RaisedKind, "job">; retell?: never } | { kind: "job"; retell: boolean });
 
 export interface NotificationsSlice {
@@ -107,12 +122,14 @@ export interface NotificationsSlice {
    * another text is a new entry that takes the key, the earlier one staying listed. With no key,
    * or none standing on it, a listed entry standing on no key of the same kind, level, text and
    * context raises its count and takes the key. Anything else is a new entry, announced once. An
-   * entry raised again carries the latest raise's action.
+   * entry raised again carries the latest raise's action and `onDismiss`.
    */
   raiseNotification: (raised: Raised) => void;
-  /** End what stands on `key`: its entry stays listed until dismissed, standing on no key and
-   *  offering no action. */
+  /** End what stands on `key`: its entry stays listed until dismissed, standing on no key,
+   *  offering no action and running nothing when dismissed. */
   releaseNotification: (key: string) => void;
+  /** Take the entry `id` names off the list, then run its `onDismiss`; nothing for an id no
+   *  listed entry carries. */
   dismissNotification: (id: number) => void;
   /** Count every entry listed now as seen. */
   markNotificationsSeen: () => void;
@@ -143,14 +160,15 @@ export const selectStanding =
   (s: AppState): NotificationEntry | null =>
     s.notifications.find((e) => e.key === key) ?? null;
 
-/** `entry` standing on no key, so offering no action. */
+/** `entry` standing on no key, so offering no action and running nothing when dismissed. */
 const unkeyed = (entry: NotificationEntry): NotificationEntry =>
-  ({ ...entry, key: undefined, action: undefined }) as NotificationEntry;
+  ({ ...entry, key: undefined, action: undefined, onDismiss: undefined }) as NotificationEntry;
 
 let nextEntryId = 1;
 
 export const createNotificationsSlice: StateCreator<AppState, [], [], NotificationsSlice> = (
   set,
+  get,
 ) => ({
   notifications: [],
   holding: {},
@@ -190,7 +208,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
       };
     }),
 
-  raiseNotification: ({ kind, level, text, context, key, action, retell }) =>
+  raiseNotification: ({ kind, level, text, context, key, action, onDismiss, retell }) =>
     set((s) => {
       const said: EntryText =
         "refusal" in text ? { refusals: [text.refusal] } : { sentence: text.sentence };
@@ -206,7 +224,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         );
       const replaced = (next: Partial<NotificationEntry>) => ({
         notifications: s.notifications.map((e) =>
-          e === standing ? ({ ...e, key, action, ...next } as NotificationEntry) : e,
+          e === standing ? ({ ...e, key, action, onDismiss, ...next } as NotificationEntry) : e,
         ),
       });
       const standingJob = kind === "job" && !!standing;
@@ -228,6 +246,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         count: 1,
         context,
         action,
+        onDismiss,
         announcement: { text: textOf(said), level },
         ...said,
       } as NotificationEntry;
@@ -244,8 +263,12 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         : s,
     ),
 
-  dismissNotification: (id) =>
-    set((s) => ({ notifications: s.notifications.filter((e) => e.id !== id) })),
+  dismissNotification: (id) => {
+    const entry = get().notifications.find((e) => e.id === id);
+    if (!entry) return;
+    set((s) => ({ notifications: s.notifications.filter((e) => e !== entry) }));
+    entry.onDismiss?.();
+  },
 
   markNotificationsSeen: () =>
     set((s) => {
