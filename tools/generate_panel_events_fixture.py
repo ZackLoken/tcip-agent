@@ -4,7 +4,7 @@ In a scratch session (``tools/fixture_session.py``), the project ``tools.generat
 opens is laid down again by its own layout (``generate_open_fixture.captures``) and opened through
 the picker's route, and each panel event is posted through ``POST /api/events/{panel}`` as
 ``web_client.PanelPost``: two banners to the Results panel (``banner``, and ``banner_second``, a
-note of several sentences) and one whose text is blank (``banner_blank``), the labels of the
+note of two sentences) and one whose text is blank (``banner_blank``), the labels of the
 first and of the second photograph of its capture of photographs written to the Annotate panel
 (``labels_written``, ``labels_written_second``), and to the ``app`` panel a banner
 (``app_banner``), an annotate focus for ``generate_open_fixture.FOCUSED_SUBJECT`` on that
