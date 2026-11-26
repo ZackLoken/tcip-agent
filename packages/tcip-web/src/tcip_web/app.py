@@ -177,15 +177,15 @@ async def _send_to_each(message: BaseModel, sockets: set[WebSocket]) -> None:
     """Send ``message`` as JSON to every connected socket in ``sockets``.
 
     A socket that is disconnected, already or by this send, is removed; any other fault raises.
-    A panel event the store has withdrawn (``StateStore.withdrawn``) is sent to no further socket.
+    A panel event the store has withdrawn (``StateStore.withdrawn``) is sent to no socket from
+    then on.
     """
     text = message.model_dump_json()
     for ws in list(sockets):
-        if ws.application_state is WebSocketState.CONNECTED:
-            if isinstance(message, PanelEnvelope) and _gui_store.withdrawn(
-                message
-            ):
-                return
+        if ws.application_state is WebSocketState.CONNECTED and not (
+            isinstance(message, PanelEnvelope)
+            and _gui_store.withdrawn(message)
+        ):
             with suppress(WebSocketDisconnect):
                 await ws.send_text(text)
         if ws.application_state is WebSocketState.DISCONNECTED:
