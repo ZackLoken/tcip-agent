@@ -16,7 +16,6 @@ import {
   selected,
   SUBJECT_SELECT_ANSWER,
 } from "@/test/store";
-import { AGENT_CLIENT } from "@/test/training";
 
 /** The two buckets published over the selected capture's date. */
 const [BUCKET, OTHER_BUCKET] = DATASET_TREES.ds.buckets_by_date[DS_DATE];
@@ -629,18 +628,15 @@ describe("the hold on the canvas covers every content edit", () => {
 });
 
 describe("agent activity", () => {
-  it("pushAgentActivity records the event, its client, and increments seq", () => {
-    const { panel, event } = PANEL_EVENTS.labels_written;
-    s().pushAgentActivity(panel, event, AGENT_CLIENT);
+  it("pushAgentActivity holds the envelope, its project among it, and increments seq", () => {
+    const declared = PANEL_EVENTS.labels_written_declared;
+    s().pushAgentActivity(declared);
     const first = s().agentActivity;
-    expect(first?.panel).toBe(panel);
-    expect(first?.event).toBe(event);
-    expect(first?.client).toBe(AGENT_CLIENT);
+    expect(first?.envelope).toBe(declared);
 
-    const focus = PANEL_EVENTS.annotate_focus.event;
-    s().pushAgentActivity(panel, focus, null);
+    const second = PANEL_EVENTS.labels_written_second;
+    s().pushAgentActivity(second);
     expect(s().agentActivity?.seq).toBe((first?.seq ?? 0) + 1);
-    expect(s().agentActivity?.event).toBe(focus);
-    expect(s().agentActivity?.client).toBeNull();
+    expect(s().agentActivity?.envelope).toBe(second);
   });
 });

@@ -1,33 +1,41 @@
 import type { StateCreator } from "zustand";
 
-import type { Panel, PanelEvent, RecordedIdentity } from "@/api/types.generated";
+import type { PanelEnvelope, RecordedIdentity } from "@/api/types.generated";
 import type { AppState } from "@/store/appState";
 
 export interface AgentActivity {
   /** Increments per event so effects can react to the latest one. */
   seq: number;
-  panel: Panel;
-  event: PanelEvent;
-  /** The harness that declared itself on this push (``agent_client_name``, its version appended
-   * when declared), or null when the sender declared none: a plain process's own write. */
-  client: string | null;
+  /** The envelope the event arrived in: its panel, the event, the project it was posted for and
+   *  the identity its sender declared. */
+  envelope: PanelEnvelope;
 }
+
+/** Who acted, as a person reads it, for a push that declared no client: a plain process's own
+ *  write. */
+export const UNDECLARED_ACTOR = "A process";
 
 /** A declared client's name with its version appended when declared. */
 export function clientName(name: string, version: string | null): string {
   return version ? `${name} ${version}` : name;
 }
 
-/** The client a push declared (`clientName`), or null when it declared none. */
+/** The client name a push declared, or null when it declared none or an empty one. */
+export function declaredName(identity: RecordedIdentity): string | null {
+  return identity.agent_client_name || null;
+}
+
+/** The client a push declared (`declaredName`) with its version (`clientName`), or null when it
+ *  declared none. */
 export function declaredClient(identity: RecordedIdentity): string | null {
-  const name = identity.agent_client_name;
-  return name ? clientName(name, identity.agent_client_version) : null;
+  const name = declaredName(identity);
+  return name === null ? null : clientName(name, identity.agent_client_version);
 }
 
 export interface AgentActivitySlice {
-  /** The last panel event and the client it declared, or null when none has arrived. */
+  /** The last panel event pushed, or null when none has been. */
   agentActivity: AgentActivity | null;
-  pushAgentActivity: (panel: Panel, event: PanelEvent, client: string | null) => void;
+  pushAgentActivity: (envelope: PanelEnvelope) => void;
 }
 
 export const createAgentActivitySlice: StateCreator<AppState, [], [], AgentActivitySlice> = (
@@ -35,8 +43,6 @@ export const createAgentActivitySlice: StateCreator<AppState, [], [], AgentActiv
 ) => ({
   agentActivity: null,
 
-  pushAgentActivity: (panel, event, client) =>
-    set((s) => ({
-      agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, panel, event, client },
-    })),
+  pushAgentActivity: (envelope) =>
+    set((s) => ({ agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, envelope } })),
 });

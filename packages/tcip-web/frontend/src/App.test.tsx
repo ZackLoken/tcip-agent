@@ -194,26 +194,6 @@ describe("App shell failures", () => {
       ),
     );
   });
-
-  it("lists an agent focus that could not be applied as a failure of the open project", async () => {
-    vi.mocked(api.dataset.select).mockRejectedValue(new Error("selection refused"));
-    useStore.setState({ openProject: VALLEY_OPENED.project });
-    render(<App />);
-    await screen.findByRole("tablist");
-
-    const app = stateSocket.subscribePanel.mock.calls.find(([p]) => p === "app");
-    act(() => app?.[1](PANEL_EVENTS.annotate_focus));
-
-    await waitFor(() =>
-      expect(useStore.getState().notifications).toEqual([
-        expect.objectContaining({
-          kind: "failure",
-          sentence: "Agent tried to focus the Annotate tab, but it couldn't be applied.",
-          context: { project: VALLEY.record.id },
-        }),
-      ]),
-    );
-  });
 });
 
 describe("App annotator gate", () => {

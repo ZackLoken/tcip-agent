@@ -31,6 +31,7 @@ import type { AnnotateView } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import {
   ANNOTATE_ANSWERS,
+  answerAnnotateMount,
   LANDED,
   LOADED,
   loadHolding,
@@ -44,7 +45,7 @@ import { BAND_ANSWERS } from "@/test/bands";
 import { dockWithNotificationsOpen, measureWindow, PANE_FOCUS } from "@/test/dock";
 import { LABEL_ANSWERS, servedAnnotation, UNSTORED } from "@/test/labels";
 import { PANEL_EVENTS } from "@/test/panelEvents";
-import { PROJECT_FIXTURES } from "@/test/projectRecords";
+import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import {
@@ -57,7 +58,6 @@ import {
   TEST_PROJECT,
   testProject,
 } from "@/test/store";
-import { AGENT_CLIENT } from "@/test/training";
 
 // Konva needs a real 2D canvas; these tests exercise label I/O ordering and
 // store->canvas prop flow, not drawing. Render Konva shapes as inspectable divs
@@ -286,20 +286,11 @@ beforeEach(() => {
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
   setupDataset();
-  loadSpy = vi
-    .spyOn(api.annotate, "load")
-    .mockImplementation((imagePath) => Promise.resolve(loadOf(imagePath)));
+  loadSpy = answerAnnotateMount();
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(LANDED.box);
-  vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
-  vi.spyOn(api.annotate, "states").mockResolvedValue({ states: {} });
-  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
-  // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
-  // per-case to exercise the >3-band path.
-  vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
   // jsdom lays nothing out, so the stand-in stage reports the host size the viewport math needs.
   stage.size = { w: 1000, h: 800 };
   stage.facts = null;
-  vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
   // One jsdom instance per file, not per test: a recolor left by an earlier test must not leak
   // into a later one's derived-color assertions.
   try {
@@ -1598,37 +1589,52 @@ describe("AnnotateTab host size", () => {
   });
 });
 
-describe("AnnotateTab labels-written conflict sentence", () => {
-  // The produced event, naming the first photograph of the produced capture, the image in view.
-  const written = PANEL_EVENTS.labels_written.event;
+describe("AnnotateTab labels written by the agent", () => {
+  // The produced saves, each naming the first photograph of the produced capture, the image in
+  // view: one declaring no client, and one declaring the agent's.
+  const { labels_written: written, labels_written_declared: declared } = PANEL_EVENTS;
+  // Another project than the one each save was posted for.
+  const ridge = openedAs(PICKER.ridge).project;
 
-  it("names the declared harness that wrote the current image's labels", async () => {
-    expect(written.image_path).toBe(IMG1);
+  /** Render the tab with `ridge` open and wait for the image in view to load. */
+  async function renderOpenOnRidge() {
+    expect(ridge.id).not.toBe(written.project_id);
+    useStore.setState({ openProject: ridge });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
+  }
+
+  it("names the declared harness that wrote the current image's labels, under the save's project", async () => {
+    expect(declared.event.image_path).toBe(IMG1);
+    const { agent_client_name: name, agent_client_version: version } = declared.identity;
+    await renderOpenOnRidge();
 
     act(addBox);
     act(() => {
-      useStore.getState().pushAgentActivity("annotate", written, AGENT_CLIENT);
+      useStore.getState().pushAgentActivity(declared);
     });
 
     const [entry] = onCanvas();
     expect(entry).toHaveTextContent(
-      `${AGENT_CLIENT} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
+      `${name} ${version} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
     );
     expect(within(entry).getByRole("button", { name: "Reload" })).toBeInTheDocument();
-    expect(listed()).toEqual([expect.objectContaining({ kind: "notice", level: "warning" })]);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "warning",
+        context: { project: declared.project_id, target: IMG1_NAME },
+      }),
+    ]);
   });
 
-  it("names a process when the write declared no actor", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
+  it("names a process when the write declared no actor, under the save's project", async () => {
+    await renderOpenOnRidge();
 
     act(addBox);
     act(() => {
-      useStore.getState().pushAgentActivity("annotate", written, null);
+      useStore.getState().pushAgentActivity(written);
     });
 
     expect(
@@ -1636,6 +1642,24 @@ describe("AnnotateTab labels-written conflict sentence", () => {
         "A process just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.",
       ),
     ).toBeInTheDocument();
+    expect(listed()).toEqual([
+      expect.objectContaining({ context: { project: written.project_id, target: IMG1_NAME } }),
+    ]);
+  });
+
+  it("loads the image in view again over a clean canvas", async () => {
+    expect(written.event.image_path).toBe(IMG1);
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(() => {
+      useStore.getState().pushAgentActivity(written);
+    });
+
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    expect(loadSpy).toHaveBeenLastCalledWith(IMG1);
+    expect(listed()).toEqual([]);
   });
 });
 
@@ -2449,7 +2473,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       const stagings = vi
         .spyOn(api.annotate, "stagings")
         .mockImplementation((path) =>
-          path === IMG2 ? new Promise(() => {}) : Promise.resolve({ buckets: [] }),
+          path === IMG2 ? new Promise(() => {}) : Promise.resolve(ANNOTATE_ANSWERS.no_stagings),
         );
       act(() => changeSelection({ current_image_index: 1 }));
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
@@ -4157,7 +4181,7 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
     await mount();
     expect(standing()).toEqual([PROPOSALS]);
 
-    stagings.mockResolvedValue({ buckets: [] });
+    stagings.mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
     toggleProposalsView();
     toggleProposalsView();
     await flush();
@@ -4167,7 +4191,9 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
   });
 
   it("a resize undone by a save stays on the canvas once that save is adopted", async () => {
-    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
+    const stagings = vi
+      .spyOn(api.annotate, "stagings")
+      .mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
     await mount();
     await dragAddedCorner(11);
     pressSave();
@@ -4472,7 +4498,9 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
   });
 
   it("a refused gesture, prompt and find leave the canvas with their image, and stay listed on return", async () => {
-    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
+    const stagings = vi
+      .spyOn(api.annotate, "stagings")
+      .mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
     vi.spyOn(api.annotate, "propose").mockRejectedValue(new Error("network down"));
     vi.spyOn(api.annotate, "find").mockRejectedValue(new Error("network down"));
     await mount();

@@ -129,6 +129,23 @@
         "terminal_session": null
       },
       "sent_at_connect": false
+    },
+    "labels_written_declared": {
+      "panel": "annotate",
+      "event": {
+        "event_type": "labels_written",
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "name": "img1.jpg"
+      },
+      "event_id": "<event_id n8>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": "claude-code",
+        "agent_client_version": "2.1.238",
+        "agent_session": "<agent_session n9>",
+        "terminal_session": null
+      },
+      "sent_at_connect": false
     }
   },
   "at_connect": {
@@ -258,6 +275,23 @@
         "agent_client_name": null,
         "agent_client_version": null,
         "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "labels_written_declared": {
+      "panel": "annotate",
+      "event": {
+        "event_type": "labels_written",
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "name": "img1.jpg"
+      },
+      "event_id": "<event_id n8>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": "claude-code",
+        "agent_client_version": "2.1.238",
+        "agent_session": "<agent_session n9>",
         "terminal_session": null
       },
       "sent_at_connect": true

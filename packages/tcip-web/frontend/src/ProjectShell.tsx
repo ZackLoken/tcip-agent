@@ -22,8 +22,10 @@ import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { adoptLoad } from "@/lib/registrySave";
 import { endRecordedSession } from "@/lib/sessionLifecycle";
+import { TAB_LABELS } from "@/lib/tabLabels";
+import { takingOnce } from "@/lib/takenEvents";
 import { useStore } from "@/store";
-import { declaredClient } from "@/store/slices/agentActivity";
+import { declaredName, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import type { DatasetSelection, TabName } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -49,6 +51,19 @@ function takeBanner({ panel, event, event_id }: PanelEnvelope): boolean {
   if (event.event_type !== PANEL_EVENT_BANNER) return false;
   useStore.getState().pushBanner(panel, event_id, event.text);
   return true;
+}
+
+/** List the agent's activity on the Annotate panel an envelope tells, as a notice of the project
+ *  it was posted for naming who acted, by the client name its sender declared, and what; a repeat
+ *  counts the listed notice. */
+function noticeActivity({ event, identity, project_id }: PanelEnvelope) {
+  const actor = declaredName(identity) ?? UNDECLARED_ACTOR;
+  useStore.getState().raiseNotification({
+    kind: "notice",
+    level: "info",
+    text: { sentence: `${actor}: ${event.event_type.replaceAll("_", " ")}` },
+    context: { project: project_id, target: TAB_LABELS.annotate },
+  });
 }
 
 /** The capture whose subject registry the shell hydrates, as one comparable value: its root, date
@@ -89,48 +104,53 @@ export function ProjectShell() {
 
   useJobListings();
 
-  // Subscribe to agent panel pushes for every tab: a "banner" event becomes that tab's note,
-  // and the Annotate panel's pushes also drive the agent-activity indicator.
+  // Every tab's agent panel, each event taken once: a banner becomes that tab's note, and any
+  // other Annotate event reaches the activity the tab reads, a live one also listed as a notice.
   useEffect(() => {
     const unsubscribes = TAB_PANELS.map((panel) =>
-      stateSocket.subscribePanel(panel, (ev) => {
-        if (takeBanner(ev)) return;
-        if (ev.panel === "annotate") {
-          useStore.getState().pushAgentActivity(ev.panel, ev.event, declaredClient(ev.identity));
-        }
-      }),
+      stateSocket.subscribePanel(
+        panel,
+        takingOnce((ev) => {
+          if (takeBanner(ev) || ev.panel !== "annotate") return;
+          useStore.getState().pushAgentActivity(ev);
+          if (!ev.sent_at_connect) noticeActivity(ev);
+        }),
+      ),
     );
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, []);
 
-  // Agent → GUI steering on the "app" panel: banners, focus, and canvas refresh requests.
+  // Agent → GUI steering on the "app" panel, each event taken once: banners, focus, and canvas
+  // refresh requests.
   useEffect(() => {
-    const unsubscribe = stateSocket.subscribePanel("app", (ev) => {
-      if (takeBanner(ev)) return;
+    const unsubscribe = stateSocket.subscribePanel(
+      "app",
+      takingOnce((ev) => {
+        if (takeBanner(ev)) return;
 
-      const { event } = ev;
-      // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
-      if (event.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
-        const project = useStore.getState().openProject?.id;
-        void applyAnnotateFocus(event, () => true).catch(() => {
-          useStore.getState().raiseNotification({
-            kind: "failure",
-            level: "error",
-            text: {
-              sentence: "Agent tried to focus the Annotate tab, but it couldn't be applied.",
-            },
-            context: { project },
+        const { event } = ev;
+        // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
+        if (event.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
+          void applyAnnotateFocus(event, () => true).catch(() => {
+            useStore.getState().raiseNotification({
+              kind: "failure",
+              level: "error",
+              text: {
+                sentence: "Agent tried to focus the Annotate tab, but it couldn't be applied.",
+              },
+              context: { project: ev.project_id },
+            });
           });
-        });
-        return;
-      }
+          return;
+        }
 
-      // Agent → GUI "push your canvas now": the mounted tab answers with an immediate full push.
-      if (event.event_type === PANEL_EVENT_CANVAS_STATE_REQUEST) {
-        notifyCanvasStateRequest();
-        return;
-      }
-    });
+        // Agent → GUI "push your canvas now": the mounted tab answers with an immediate full push.
+        if (event.event_type === PANEL_EVENT_CANVAS_STATE_REQUEST) {
+          notifyCanvasStateRequest();
+          return;
+        }
+      }),
+    );
     return unsubscribe;
   }, []);
 

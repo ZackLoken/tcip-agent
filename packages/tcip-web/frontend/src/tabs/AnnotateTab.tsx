@@ -98,6 +98,7 @@ import { tell } from "@/lib/tell";
 import { nextMode } from "@/lib/toolMode";
 import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
+import { declaredClient, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
 import { canvasImage, holdsCanvas, imageSize } from "@/store/slices/canvas";
 import {
   isFinished,
@@ -908,25 +909,27 @@ export function AnnotateTab() {
     void save({ interactive: false });
   }
 
-  // React to a panel event writing labels: reload this image on a clean canvas, or offer a
-  // Reload conflict prompt when dirty; a different file leaves the StatusBar indicator alone.
+  // React to a panel event writing this image's labels: reload a clean canvas, or offer a Reload
+  // conflict prompt under the event's project when dirty; a write to another image changes nothing.
   useEffect(() => {
-    if (!agentActivity || agentActivity.panel !== "annotate") return;
-    const { event } = agentActivity;
+    if (!agentActivity) return;
+    const { event, identity, project_id } = agentActivity.envelope;
     if (event.event_type !== PANEL_EVENT_LABELS_WRITTEN) return;
     const { loaded } = useStore.getState().canvas;
     if (!loaded) return;
     const norm = (p: string) => p.replace(/\\/g, "/");
     if (norm(event.image_path) !== norm(loaded.image_path)) return;
     if (useStore.getState().canvas.dirty) {
-      const client = agentActivity.client ?? "A process";
-      tell(
-        "notice",
-        "warning",
-        `${client} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
-        loaded.name,
-        canvasKey("reload", loaded.image_path),
-      );
+      const client = declaredClient(identity) ?? UNDECLARED_ACTOR;
+      useStore.getState().raiseNotification({
+        kind: "notice",
+        level: "warning",
+        text: {
+          sentence: `${client} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
+        },
+        context: { project: project_id, target: loaded.name },
+        key: canvasKey("reload", loaded.image_path),
+      });
     } else {
       requestReload();
     }
