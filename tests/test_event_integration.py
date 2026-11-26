@@ -163,27 +163,6 @@ class TestPostPanelEventRoute:
         from tcip_web import app as web_app
         from tcip_web.state import store
 
-        class _Peer:
-            """A client whose sends raise ``fault`` once set; it hangs up when ``closed`` is set."""
-
-            def __init__(self, closed: anyio.Event) -> None:
-                self.closed = closed
-                self.connected = False
-                self.waiting = threading.Event()
-                self.fault: Exception | None = None
-
-            async def receive(self) -> Message:
-                if not self.connected:
-                    self.connected = True
-                    return {"type": "websocket.connect"}
-                self.waiting.set()
-                await self.closed.wait()
-                return {"type": "websocket.disconnect", "code": 1006}
-
-            async def send(self, _message: Message) -> None:
-                if self.fault is not None:
-                    raise self.fault
-
         with anyio.from_thread.start_blocking_portal() as portal:
             closed = portal.call(anyio.Event)
             peers = [_Peer(closed), _Peer(closed), _Peer(closed)]
@@ -199,7 +178,7 @@ class TestPostPanelEventRoute:
                 portal.start_task_soon(web_app.panel_ws, faulty, "meta"),
             ]
             try:
-                assert all(peer.waiting.wait(10) for peer in peers)
+                assert all(peer.reading.wait(10) for peer in peers)
                 peers[0].fault = peers[1].fault = OSError("the peer is gone")
                 peers[2].fault = RuntimeError(
                     "bound to a different event loop"
@@ -575,18 +554,20 @@ class _Hold:
 
 
 class _Peer:
-    """A client of the panel socket whose every frame passes through ``hold``.
+    """A client of a socket whose every frame passes through ``hold``, when it has one.
 
-    ``frames`` holds what it was sent, in order. ``reading`` is set once its handler reads
-    inbound frames, its sends at connect done; it hangs up once ``closed`` is set.
+    ``frames`` holds what it was sent, in order; once ``fault`` is set, each send raises it.
+    ``reading`` is set once its handler reads inbound frames, its sends at connect done; it
+    hangs up once ``closed`` is set.
     """
 
-    def __init__(self, hold: _Hold, closed: anyio.Event) -> None:
-        self.hold = hold
+    def __init__(self, closed: anyio.Event, hold: _Hold | None = None) -> None:
         self.closed = closed
+        self.hold = hold
         self.connected = False
         self.reading = threading.Event()
         self.frames: list[dict] = []
+        self.fault: Exception | None = None
 
     async def receive(self) -> Message:
         if not self.connected:
@@ -597,9 +578,12 @@ class _Peer:
         return {"type": "websocket.disconnect", "code": 1000}
 
     async def send(self, message: Message) -> None:
+        if self.fault is not None:
+            raise self.fault
         if message["type"] == "websocket.send":
             frame = json.loads(message["text"])
-            await self.hold.passing(self, frame)
+            if self.hold is not None:
+                await self.hold.passing(self, frame)
             self.frames.append(frame)
 
 
@@ -617,7 +601,7 @@ def _held_sockets(
     assert portal is not None, "the client is not entered"
     hold = _Hold(portal)
     closed = portal.call(anyio.Event)
-    peers = [_Peer(hold, closed) for _ in range(count)]
+    peers = [_Peer(closed, hold) for _ in range(count)]
     handlers = [
         portal.start_task_soon(
             web_app.panel_ws,
