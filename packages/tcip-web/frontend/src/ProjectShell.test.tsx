@@ -296,7 +296,26 @@ describe("ProjectShell agent notes", () => {
     path: `/api/events/${envelope.panel}/dismissals`,
     body: { user: "grower", project_id: envelope.project_id, event_id: envelope.event_id },
   });
-  const listed = () => page.useStore.getState().notifications;
+  /** The projects of the entries listed, which the area does not show. */
+  const listedProjects = () => page.useStore.getState().notifications.map((e) => e.context.project);
+  /** The entries the open area lists, newest first. */
+  const listItems = () => area().queryAllByRole("listitem");
+  /** The one entry the open area lists. */
+  function onlyItem(): HTMLElement {
+    const items = listItems();
+    expect(items).toHaveLength(1);
+    return items[0];
+  }
+  /** Expect `item`'s line to name its level's word, its kind and where the note was pushed. */
+  const expectLine = (item: HTMLElement, line: string) =>
+    expect(within(item).getByText(new RegExp(`^${line},`))).toBeInTheDocument();
+  /** Expect `item` to state no count of times raised. */
+  const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
+  /** Expect the open area to list nothing. */
+  function expectListsNothing() {
+    expect(listItems()).toEqual([]);
+    expect(area().getByText(/^Nothing to report\./)).toBeInTheDocument();
+  }
 
   it("lists two banners one panel's socket delivers as two entries, each its whole text, naming the agent's note on that tab", async () => {
     await mountOnCapture();
@@ -304,16 +323,14 @@ describe("ProjectShell agent notes", () => {
     deliver(banner);
     deliver(second);
 
-    const items = area().getAllByRole("listitem");
+    const items = listItems();
     expect(items).toHaveLength(2);
     for (const { event } of [banner, second]) {
-      expect(items.filter((item) => within(item).queryByText(event.text))).toHaveLength(1);
+      const showing = items.filter((item) => within(item).queryByText(event.text));
+      expect(showing).toHaveLength(1);
+      expectLine(showing[0], "Information, notice, Agent's note for Results");
     }
-    for (const { context } of listed()) {
-      expect(context.project).toBe(banner.project_id);
-      expect(context.target).toMatch(/Results/);
-      expect(context.target).not.toBe("Results");
-    }
+    expect(listedProjects()).toEqual([banner.project_id, banner.project_id]);
   });
 
   it("lists the application panel's banner sent at connect", async () => {
@@ -322,21 +339,23 @@ describe("ProjectShell agent notes", () => {
 
     deliver(appBanner);
 
-    expect(area().getByText(appBanner.event.text)).toBeInTheDocument();
-    expect(listed().map((e) => [e.kind, e.context.project])).toEqual([
-      ["notice", appBanner.project_id],
-    ]);
+    const item = onlyItem();
+    expect(within(item).getByText(appBanner.event.text)).toBeInTheDocument();
+    expectLine(item, "Information, notice, Agent's note for the app");
+    expect(listedProjects()).toEqual([appBanner.project_id]);
   });
 
   it("adds no entry and no count for a banner sent again at a reconnect", async () => {
     await mountOnCapture();
     deliver(banner);
-    expect(listed()).toEqual([expect.objectContaining({ sentence: banner.event.text, count: 1 })]);
+    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
+    expectRaisedOnce(onlyItem());
 
     reconnect("results");
     deliver(PANEL_EVENTS_AT_CONNECT.banner);
 
-    expect(listed()).toEqual([expect.objectContaining({ sentence: banner.event.text, count: 1 })]);
+    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
+    expectRaisedOnce(onlyItem());
   });
 
   it("lists nothing for a banner whose text is blank", async () => {
@@ -346,7 +365,7 @@ describe("ProjectShell agent notes", () => {
     deliver(blank);
     deliver(second);
 
-    expect(listed().map((e) => e.sentence)).toEqual([second.event.text]);
+    expect(within(onlyItem()).getByText(second.event.text)).toBeInTheDocument();
   });
 
   it("sends a dismissed banner's dismissal to its panel's route by the person, for its project and event, leaving the other listed", async () => {
@@ -359,8 +378,7 @@ describe("ProjectShell agent notes", () => {
     await settle();
 
     expect(sent).toEqual([dismissalOf(banner)]);
-    expect(listed().map((e) => e.sentence)).toEqual([second.event.text]);
-    expect(area().getAllByRole("listitem")).toHaveLength(1);
+    expect(within(onlyItem()).getByText(second.event.text)).toBeInTheDocument();
   });
 
   it("lists, on a page loaded anew and sent what the backend holds after a dismissal, the banners not dismissed and not the dismissed one", async () => {
@@ -369,11 +387,12 @@ describe("ProjectShell agent notes", () => {
     for (const envelope of Object.values(PANEL_EVENTS_AFTER_DISMISSAL)) deliver(envelope);
     await settle();
 
-    const notes = listed().filter((e) => e.kind === "notice");
-    expect(notes.map((e) => e.sentence)).toEqual([
-      second.event.text,
-      PANEL_EVENTS.app_banner.event.text,
-    ]);
+    const notes = listItems().filter((item) =>
+      within(item).queryByText(/^Information, notice, Agent's note for /),
+    );
+    expect(notes).toHaveLength(2);
+    expect(within(notes[0]).getByText(PANEL_EVENTS.app_banner.event.text)).toBeInTheDocument();
+    expect(within(notes[1]).getByText(second.event.text)).toBeInTheDocument();
     expect(area().queryByText(banner.event.text)).not.toBeInTheDocument();
   });
 
@@ -387,14 +406,10 @@ describe("ProjectShell agent notes", () => {
     await settle();
 
     expect(sent).toEqual([dismissalOf(second)]);
-    expect(listed()).toEqual([
-      expect.objectContaining({
-        kind: "notice",
-        level: "warning",
-        sentence: gap.body.detail.message,
-      }),
-    ]);
-    expect(listed()[0].context.project).toBe(second.project_id);
+    const item = onlyItem();
+    expect(within(item).getByText(gap.body.detail.message)).toBeInTheDocument();
+    expectLine(item, "Warning, notice, Agent's note for Results");
+    expect(listedProjects()).toEqual([second.project_id]);
     expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
@@ -402,7 +417,7 @@ describe("ProjectShell agent notes", () => {
     ["refused naming no person", answering(DISMISSALS.no_one.status, DISMISSALS.no_one.body)],
     ["given no answer", unanswered],
   ])(
-    "tells a dismissal %s as one failure whose Retry sends it again, leaving the failure without its Retry once taken",
+    "tells a dismissal %s as one failure whose Retry sends it again, leaving the failure without its Retry, or any word of one, once taken",
     async (_case, failed) => {
       const sent = answerDismissals(failed, answering(200, DISMISSALS.dismissed));
       await mountOnCapture();
@@ -410,14 +425,16 @@ describe("ProjectShell agent notes", () => {
 
       dismissEntry(banner.event.text);
       await settle();
-      expect(listed()).toEqual([expect.objectContaining({ kind: "failure", level: "error" })]);
+      expectLine(onlyItem(), "Error, failure, Agent's note for Results");
 
       fireEvent.click(area().getByRole("button", { name: "Retry" }));
       await settle();
 
       expect(sent).toEqual([dismissalOf(banner), dismissalOf(banner)]);
-      expect(listed()).toEqual([expect.objectContaining({ kind: "failure", count: 1 })]);
-      expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      const item = onlyItem();
+      expectLine(item, "Error, failure, Agent's note for Results");
+      expectRaisedOnce(item);
+      expect(item).not.toHaveTextContent(/Retry/);
     },
   );
 
@@ -425,17 +442,17 @@ describe("ProjectShell agent notes", () => {
     const sent = answerDismissals();
     await mountOnCapture();
     deliver(banner);
-    expect(listed()).toHaveLength(1);
+    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
 
     act(() => page.useStore.setState({ openProject: openedAs(PICKER.ridge).project }));
     dismissEntry(banner.event.text);
     await settle();
 
     expect(sent).toEqual([]);
-    expect(listed()).toEqual([]);
+    expectListsNothing();
   });
 
-  it("withdraws a failed dismissal's Retry, sending nothing, once it is pressed after another project opened", async () => {
+  it("withdraws a failed dismissal's Retry, and any word of one, sending nothing, once it is pressed after another project opened", async () => {
     const sent = answerDismissals(unanswered);
     await mountOnCapture();
     deliver(banner);
@@ -448,8 +465,10 @@ describe("ProjectShell agent notes", () => {
     await settle();
 
     expect(sent).toEqual([dismissalOf(banner)]);
-    expect(listed()).toEqual([expect.objectContaining({ kind: "failure", count: 1 })]);
-    expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    const item = onlyItem();
+    expectLine(item, "Error, failure, Agent's note for Results");
+    expectRaisedOnce(item);
+    expect(item).not.toHaveTextContent(/Retry/);
   });
 
   it("lists nothing for a dismissal refused because the backend has another project open", async () => {
@@ -462,6 +481,6 @@ describe("ProjectShell agent notes", () => {
     await settle();
 
     expect(sent).toEqual([dismissalOf(banner)]);
-    expect(listed()).toEqual([]);
+    expectListsNothing();
   });
 });

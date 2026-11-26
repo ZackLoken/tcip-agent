@@ -70,7 +70,7 @@ async function sendDismissal(note: Note, retry: () => void): Promise<void> {
         kind: "failure",
         level: "error",
         text: {
-          sentence: `Dismissing the agent's note "${text}" failed (${messageOf(e)}), so it may come back after a reload. Retry to dismiss it.`,
+          sentence: `Dismissing the agent's note "${text}" failed (${messageOf(e)}), so it may come back after a reload.`,
         },
         context,
         key,
