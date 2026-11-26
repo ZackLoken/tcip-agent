@@ -209,6 +209,8 @@ them.
     delivery.
   - A message is dismissable, and a message that tells the person nothing they would not assume is
     not shown.
+  - Where several controls with the same visible label are on the screen at once, each one's
+    accessible name says what it acts on and begins with that label.
   - A person can do everything in the application without the agent, and the agent can do
     everything a person can, except where the operating contract requires a person.
   - The application states its own state on the screen. The agent speaks when it is asked
