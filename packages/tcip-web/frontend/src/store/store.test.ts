@@ -634,9 +634,9 @@ describe("agent activity", () => {
     const first = s().agentActivity;
     expect(first?.envelope).toBe(declared);
 
-    const focus = PANEL_EVENTS.annotate_focus;
-    s().pushAgentActivity(focus);
+    const second = PANEL_EVENTS.labels_written_second;
+    s().pushAgentActivity(second);
     expect(s().agentActivity?.seq).toBe((first?.seq ?? 0) + 1);
-    expect(s().agentActivity?.envelope).toBe(focus);
+    expect(s().agentActivity?.envelope).toBe(second);
   });
 });

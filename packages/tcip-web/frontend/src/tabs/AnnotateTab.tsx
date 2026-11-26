@@ -913,8 +913,8 @@ export function AnnotateTab() {
   // conflict prompt under the event's project when dirty; a write to another image changes nothing.
   useEffect(() => {
     if (!agentActivity) return;
-    const { panel, event, identity, project_id } = agentActivity.envelope;
-    if (panel !== "annotate" || event.event_type !== PANEL_EVENT_LABELS_WRITTEN) return;
+    const { event, identity, project_id } = agentActivity.envelope;
+    if (event.event_type !== PANEL_EVENT_LABELS_WRITTEN) return;
     const { loaded } = useStore.getState().canvas;
     if (!loaded) return;
     const norm = (p: string) => p.replace(/\\/g, "/");
