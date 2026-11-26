@@ -37,46 +37,8 @@ const STATED_INPUTS: { field: StatedField; label: string }[] = [
   { field: "cross_tile_nms", label: "Merge threshold" },
 ];
 
-/** One date's refused launch: the facts the response carried, watching the job still writing the
- *  bucket, and a dismissal. Every accessible name below is date-qualified. */
-function RefusedLaunchEntry({
-  date,
-  refusal,
-  onWatch,
-  onDismiss,
-}: {
-  date: string;
-  refusal: BucketExistsRefusal;
-  onWatch: (refusal: BucketExistsRefusal) => void;
-  onDismiss: (date: string) => void;
-}) {
-  return (
-    <li className="border border-tcip-border rounded p-2 flex flex-col gap-1">
-      <p>
-        {date}: {refusal.message}
-      </p>
-      <div className="flex gap-1">
-        <button
-          className="tcip-btn"
-          aria-label={`Watch job ${refusal.job.job_id} for ${date}`}
-          onClick={() => onWatch(refusal)}
-        >
-          Watch
-        </button>
-        <button
-          className="tcip-btn"
-          aria-label={`Dismiss refusal for ${date}`}
-          onClick={() => onDismiss(date)}
-        >
-          Dismiss
-        </button>
-      </div>
-    </li>
-  );
-}
-
-/** The key a failed launch for `date` of the dataset at `datasetRoot` stands on in the project
- *  `projectId`. */
+/** The key a failed or refused launch for `date` of the dataset at `datasetRoot` stands on in the
+ *  project `projectId`. */
 const launchKey = (projectId: string | undefined, datasetRoot: string, date: string) =>
   `inference-launch:${projectId}:${datasetRoot}:${date}`;
 
@@ -188,31 +150,30 @@ export function InferenceTab() {
     watched && (relisted && !delisted ? listed[watched.record.job_id] : watched.record);
   // Each job's one record by its id: the listed jobs', and the watched one's in its place.
   const jobs = activeJob ? { ...listed, [activeJob.job_id]: activeJob } : listed;
-  // Each bucket_exists refusal, keyed by the date it was refused for.
-  const [refusedLaunches, setRefusedLaunches] = useState<Record<string, BucketExistsRefusal>>({});
+  // The job still writing the bucket of each refused launch, by the key its entry stands on: what
+  // Watch, offered in place beside the entry, watches.
+  const [refusedJobs, setRefusedJobs] = useState<Record<string, InferenceJob>>({});
+  const refusedJobsRef = useRef(refusedJobs);
   const [launching, setLaunching] = useState(false);
   const streamRef = useRef<(() => void) | null>(null);
   const launchButtonRef = useRef<HTMLButtonElement>(null);
-  const prevRefusedDatesRef = useRef<string[]>([]);
   const listedJobs = Object.values(jobs).filter((j) => j.job_id !== delisted);
   const modelAssessments = assessmentsOf(assessed?.assessments ?? [], model);
 
-  // A refused entry's control can unmount while focused (Dismiss, or its action succeeding),
-  // dropping focus to body; restore it to the launch button instead of stranding it there.
   useEffect(() => {
-    const dates = Object.keys(refusedLaunches);
-    const anyRemoved = prevRefusedDatesRef.current.some((d) => !dates.includes(d));
-    prevRefusedDatesRef.current = dates;
-    if (anyRemoved && document.activeElement === document.body) {
-      launchButtonRef.current?.focus();
-    }
-  }, [refusedLaunches]);
+    refusedJobsRef.current = refusedJobs;
+  }, [refusedJobs]);
 
-  // A refused entry names a bucket of the previous choice: neither survives a model or dataset
-  // change.
-  useEffect(() => {
-    setRefusedLaunches({});
-  }, [model, datasetRoot]);
+  // A refusal names a bucket of the model and dataset it was made under: neither their change nor
+  // the tab's leaving keeps it in place, and its entry stays listed in the area.
+  useEffect(
+    () => () => {
+      const { releaseNotification } = useStore.getState();
+      for (const key of Object.keys(refusedJobsRef.current)) releaseNotification(key);
+      setRefusedJobs({});
+    },
+    [model, datasetRoot],
+  );
 
   // The chosen model's first passed assessment answers for its run unless the person chooses
   // otherwise; a model with none states its own values.
@@ -288,10 +249,11 @@ export function InferenceTab() {
     );
   }
 
-  function dropRefusal(date: string) {
-    setRefusedLaunches((prev) => {
+  /** Forget the job each refused launch standing on one of `keys` named. */
+  function dropRefusals(keys: string[]) {
+    setRefusedJobs((prev) => {
       const next = { ...prev };
-      delete next[date];
+      for (const key of keys) delete next[key];
       return next;
     });
   }
@@ -327,7 +289,6 @@ export function InferenceTab() {
   async function launchOne(checkpointPath: string, date: string) {
     if (!datasetRoot) return;
     const key = launchKey(projectId, datasetRoot, date);
-    useStore.getState().releaseNotification(key);
     try {
       const launched = await inferenceApi.launch({
         checkpoint_path: checkpointPath,
@@ -339,25 +300,23 @@ export function InferenceTab() {
         user: useStore.getState().user,
       });
       watch(launched);
-      dropRefusal(date);
     } catch (e) {
       const refusal = refusalOf<BucketExistsRefusal>(e, BUCKET_EXISTS);
       if (refusal) {
-        setRefusedLaunches((prev) => ({ ...prev, [date]: refusal }));
+        setRefusedJobs((prev) => ({ ...prev, [key]: refusal.job }));
+        tell("failure", "error", refusal.message, date, key);
         return;
       }
-      dropRefusal(date);
       tell("failure", "error", `Inference launch failed for ${date}: ${messageOf(e)}`, date, key);
     }
   }
 
   async function onLaunch() {
     if (!model || !datasetRoot || !bucketName || selectedDates.length === 0) return;
-    setRefusedLaunches((prev) => {
-      const next = { ...prev };
-      for (const date of selectedDates) delete next[date];
-      return next;
-    });
+    const keys = selectedDates.map((date) => launchKey(projectId, datasetRoot, date));
+    const { releaseNotification } = useStore.getState();
+    for (const key of keys) releaseNotification(key);
+    dropRefusals(keys);
     setLaunching(true);
     try {
       // One job per date: each date is its own prediction bucket, one job row per date.
@@ -367,11 +326,6 @@ export function InferenceTab() {
     } finally {
       setLaunching(false);
     }
-  }
-
-  // The refusal's record is the job's until the tab holds one of its own.
-  function onWatchRefusedJob({ job }: BucketExistsRefusal) {
-    watch(jobs[job.job_id] ?? job);
   }
 
   // Jobs whose cancel was requested and not yet reported terminal by the backend; the row reads
@@ -535,34 +489,26 @@ export function InferenceTab() {
           Run
         </button>
 
-        <div className="mt-3">
-          {Object.keys(refusedLaunches).length > 0 && (
-            <div className="tcip-heading mb-1">Refused</div>
-          )}
-          <ul aria-live="polite" className="flex flex-col gap-1">
-            {Object.entries(refusedLaunches).map(([date, refusal]) => (
-              <RefusedLaunchEntry
-                key={date}
-                date={date}
-                refusal={refusal}
-                onWatch={onWatchRefusedJob}
-                onDismiss={dropRefusal}
-              />
-            ))}
-          </ul>
-          {datasetRoot && (
-            <div className="mt-1 flex flex-col gap-1 empty:hidden">
-              {dates.map((date) => (
+        {datasetRoot && (
+          <div className="mt-3 flex flex-col gap-1 empty:hidden">
+            {dates.map((date) => {
+              const key = launchKey(projectId, datasetRoot, date);
+              const job = refusedJobs[key];
+              return (
                 <NotificationItem
                   key={date}
                   placement="in place"
-                  entryKey={launchKey(projectId, datasetRoot, date)}
-                  afterDismiss={() => launchButtonRef.current?.focus()}
+                  entryKey={key}
+                  afterDismiss={() => {
+                    dropRefusals([key]);
+                    launchButtonRef.current?.focus();
+                  }}
+                  action={job && { label: "Watch", run: () => watch(jobs[job.job_id] ?? job) }}
                 />
-              ))}
-            </div>
-          )}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="p-4 overflow-auto">
