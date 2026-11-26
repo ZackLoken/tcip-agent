@@ -503,6 +503,7 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
     expect(within(inPlace()).getByRole("button", { name: "Reload" })).toBeInTheDocument();
     const failures = listing(conflictSentence);
     expect(failures).toHaveLength(1);
+    expect(failureEntries()).toEqual(failures);
     expectRaisedOnce(failures[0]);
   });
 
