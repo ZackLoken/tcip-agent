@@ -19,6 +19,7 @@ from pathlib import Path
 
 from fastapi import (
     FastAPI,
+    HTTPException,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -27,13 +28,18 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocketState
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from tcip_mcp.audit import now
+from tcip_mcp.audit import (
+    AuditEntryNotWrittenError,
+    now,
+    record_event_or_raise,
+)
 from tcip_mcp.buckets import NotABucketError
-from tcip_mcp.identity import NoActorError
+from tcip_mcp.identity import NoActorError, actor
 from tcip_mcp.web_client import (
     ActiveTab,
+    Banner,
     GuiState,
     Panel,
     PanelPost,
@@ -41,6 +47,7 @@ from tcip_mcp.web_client import (
 )
 from tcip_store import StoreBusyError, VersionConflictError, bind
 from tcip_web.routes import register_all as _register_routes
+from tcip_web.routes.audit_gap import audit_gap_409
 from tcip_web.state import (
     NoProjectOpenError,
     NoSelectionError,
@@ -170,10 +177,15 @@ async def _send_to_each(message: BaseModel, sockets: set[WebSocket]) -> None:
     """Send ``message`` as JSON to every connected socket in ``sockets``.
 
     A socket that is disconnected, already or by this send, is removed; any other fault raises.
+    A panel event the store has withdrawn (``StateStore.withdrawn``) is sent to no further socket.
     """
     text = message.model_dump_json()
     for ws in list(sockets):
         if ws.application_state is WebSocketState.CONNECTED:
+            if isinstance(message, PanelEnvelope) and _gui_store.withdrawn(
+                message
+            ):
+                return
             with suppress(WebSocketDisconnect):
                 await ws.send_text(text)
         if ws.application_state is WebSocketState.DISCONNECTED:
@@ -363,18 +375,89 @@ async def post_panel_event(
     await _send_to_each(envelope, _panel_subscribers[panel])
 
 
+class PanelDismissal(BaseModel):
+    """A dismissal of one panel event by the person ``user`` names, for the project it names."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user: str
+    project_id: str
+    event_id: str
+
+
+class PanelDismissed(BaseModel):
+    """What a dismissal did: ``removed`` is whether it took a banner out of the retained events."""
+
+    removed: bool
+
+
+@app.post("/api/events/{panel}/dismissals")
+async def dismiss_panel_event(
+    panel: Panel, dismissal: PanelDismissal
+) -> PanelDismissed:
+    """Remove the banner ``panel`` retains under ``event_id`` and leave one line by the person.
+
+    Once removed, the banner is withdrawn (``StateStore.withdrawn``) and sent to no socket. The
+    line, ``panel_event_dismissed``, goes to the log of the project the dismissal was admitted
+    for and holds the panel, the event's id and the banner's text. An id ``panel`` retains no
+    event under answers ``removed`` false, changes nothing and leaves no line. Answers 400 for a
+    ``user`` naming no one and for an id ``panel`` retains an event under that is no banner; 409
+    as ``StateStore.admit`` answers for a project that is not the open one, removing nothing; and
+    409 stating the removal committed, with its answer, when the line cannot be written
+    (:class:`~tcip_web.routes.audit_gap.AuditGapRefusal`).
+    """
+    person = actor(dismissal.user)
+    project = _gui_store.admit(dismissal.project_id)
+    held = next(
+        (
+            event
+            for event in _gui_store.retained_events(panel)
+            if event.event_id == dismissal.event_id
+        ),
+        None,
+    )
+    if held is None:
+        return PanelDismissed(removed=False)
+    if not isinstance(held.event, Banner):
+        raise HTTPException(
+            400,
+            f"the {panel} panel's event {dismissal.event_id} is a "
+            f"{held.event.event_type} event; only a banner is dismissed",
+        )
+    _gui_store.forget_event(held)
+    answer = PanelDismissed(removed=True)
+    try:
+        await asyncio.to_thread(
+            record_event_or_raise,
+            "panel_event_dismissed",
+            {
+                "panel": panel,
+                "event_id": held.event_id,
+                "text": held.event.text,
+            },
+            actor=person,
+            scope=project.root,
+        )
+    except AuditEntryNotWrittenError as exc:
+        raise audit_gap_409(exc, committed=True, what=answer) from exc
+    return answer
+
+
 @app.websocket("/ws/panel/{panel}")
 async def panel_ws(websocket: WebSocket, panel: Panel) -> None:
     """Stream ``panel``'s events over the socket, the open project's retained events first.
 
     Each retained event is sent as a copy of its envelope with ``sent_at_connect`` set, the
-    retained envelope itself unchanged. A path naming no panel is closed with 1008 before it is
-    accepted. An inbound frame is read and discarded, only to detect disconnect.
+    retained envelope itself unchanged, unless the store has withdrawn it
+    (``StateStore.withdrawn``) by its turn. A path naming no panel is closed with 1008 before it
+    is accepted. An inbound frame is read and discarded, only to detect disconnect.
     """
     await websocket.accept()
     _panel_subscribers[panel].add(websocket)
     try:
         for event in _gui_store.retained_events(panel):
+            if _gui_store.withdrawn(event):
+                continue
             await websocket.send_text(
                 event.model_copy(
                     update={"sent_at_connect": True}

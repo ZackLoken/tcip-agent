@@ -118,6 +118,7 @@ DOORS = [
             "shapes": None,
         },
     ),
+    ("/api/events/results/dismissals", {"project_id": "p", "event_id": "e"}),
     ("/api/projects/open", {"id": NO_PROJECT}),
     ("/api/projects/remove", {"id": NO_PROJECT, "confirm_name": "p"}),
     ("/api/projects/rename", {"id": NO_PROJECT, "display_name": "p"}),
