@@ -357,7 +357,8 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     await switchTo("meta");
 
     deliver(written);
-    expect(notices().map((e) => e.sentence)).toEqual(["A process: labels written"]);
+    expect(listItems()).toHaveLength(1);
+    expect(listItems()[0]).toHaveTextContent("A process: labels written");
     await switchTo("annotate");
 
     expect(page.load).toHaveBeenCalledTimes(2);
