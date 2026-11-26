@@ -3,17 +3,18 @@
 In a scratch session (``tools/fixture_session.py``), the project ``tools.generate_open_fixture``
 opens is laid down again by its own layout (``generate_open_fixture.captures``) and opened through
 the picker's route, and each panel event is posted through ``POST /api/events/{panel}`` as
-``web_client.PanelPost``: two banners to the Results panel (``banner``, ``banner_second``) and one
-whose text is blank (``banner_blank``), the labels of the first and of the second photograph of
-its capture of photographs written to the Annotate panel (``labels_written``,
-``labels_written_second``), and to the ``app`` panel a banner (``app_banner``), an annotate focus
-for ``generate_open_fixture.FOCUSED_SUBJECT`` on that capture (``annotate_focus``) and on the
-capture whose label document will not read (``annotate_focus_troubled``) and a canvas state
-request (``canvas_state_request``); last, the labels of the first photograph written to the
-Annotate panel again, posted with the identity headers of an agent declaring
-``generate_training_fixture.DECLARED_CLIENT`` and no terminal session, whatever the calling
-shell's environment holds (``labels_written_declared``). Each panel's socket is opened before the
-posts, which delivers each event live, and again after them, which sends each event at connect.
+``web_client.PanelPost``: two banners to the Results panel (``banner``, and ``banner_second``, a
+note of several sentences) and one whose text is blank (``banner_blank``), the labels of the
+first and of the second photograph of its capture of photographs written to the Annotate panel
+(``labels_written``, ``labels_written_second``), and to the ``app`` panel a banner
+(``app_banner``), an annotate focus for ``generate_open_fixture.FOCUSED_SUBJECT`` on that
+capture (``annotate_focus``) and on the capture whose label document will not read
+(``annotate_focus_troubled``) and a canvas state request (``canvas_state_request``); last, the
+labels of the first photograph written to the Annotate panel again, posted with the identity
+headers of an agent declaring ``generate_training_fixture.DECLARED_CLIENT`` and no terminal
+session, whatever the calling shell's environment holds (``labels_written_declared``). Each
+panel's socket is opened before the posts, which delivers each event live, and again after them,
+which sends each event at connect.
 
 The first Results banner is then dismissed through ``POST /api/events/{panel}/dismissals``: by
 :data:`~tools.fixture_session.ACTOR` for a project made beside the open one
@@ -120,7 +121,16 @@ def produce() -> dict[str, JsonValue]:
             (
                 "banner_second",
                 "results",
-                Banner(text="The counts are written to the results table."),
+                Banner(
+                    text=(
+                        "The counts are written to the results table, one row"
+                        " for each image of the capture. The images whose"
+                        " labels are not finished are listed under the table,"
+                        " each with the subject it lacks, so they can be"
+                        " labeled and counted again before the table is"
+                        " exported."
+                    )
+                ),
             ),
             ("banner_blank", "results", Banner(text=" ")),
             ("labels_written", "annotate", labels_of(RAW_IMAGES[0])),

@@ -15,7 +15,10 @@
     },
     "banner_second": {
       "panel": "results",
-      "event": { "event_type": "banner", "text": "The counts are written to the results table." },
+      "event": {
+        "event_type": "banner",
+        "text": "The counts are written to the results table, one row for each image of the capture. The images whose labels are not finished are listed under the table, each with the subject it lacks, so they can be labeled and counted again before the table is exported."
+      },
       "event_id": "<event_id n1>",
       "project_id": "<valley id>",
       "identity": {
@@ -177,7 +180,10 @@
     },
     "banner_second": {
       "panel": "results",
-      "event": { "event_type": "banner", "text": "The counts are written to the results table." },
+      "event": {
+        "event_type": "banner",
+        "text": "The counts are written to the results table, one row for each image of the capture. The images whose labels are not finished are listed under the table, each with the subject it lacks, so they can be labeled and counted again before the table is exported."
+      },
       "event_id": "<event_id n1>",
       "project_id": "<valley id>",
       "identity": {
@@ -326,7 +332,10 @@
   "after_dismissal": {
     "banner_second": {
       "panel": "results",
-      "event": { "event_type": "banner", "text": "The counts are written to the results table." },
+      "event": {
+        "event_type": "banner",
+        "text": "The counts are written to the results table, one row for each image of the capture. The images whose labels are not finished are listed under the table, each with the subject it lacks, so they can be labeled and counted again before the table is exported."
+      },
       "event_id": "<event_id n1>",
       "project_id": "<valley id>",
       "identity": {
