@@ -86,21 +86,21 @@ function CancelFailureRow({
   );
 }
 
-/** The failed or refused launch for `date` standing on `entryKey`, in place under Run with its
- *  date; a refusal naming the job still writing its bucket offers Watch, which hands that job's
- *  record to `onWatch`. */
+/** The failed or refused launch standing on `entryKey`, in place under Run with the date it
+ *  names as its target; a refusal naming the job still writing its bucket offers Watch, named
+ *  for that job and date, which hands that job's record to `onWatch`. */
 function LaunchOutcome({
   entryKey,
-  date,
   onWatch,
   afterDismiss,
 }: {
   entryKey: string;
-  date: string;
   onWatch: (job: InferenceJob) => void;
   afterDismiss: () => void;
 }) {
-  const job = useStore((s) => selectStanding(entryKey)(s)?.inferenceJob);
+  const entry = useStore(selectStanding(entryKey));
+  if (!entry) return null;
+  const job = entry.inferenceJob;
   return (
     <NotificationItem
       placement="in place"
@@ -108,7 +108,11 @@ function LaunchOutcome({
       showTarget
       afterDismiss={afterDismiss}
       action={
-        job && { label: "Watch", actsOn: `job ${job.job_id} for ${date}`, run: () => onWatch(job) }
+        job && {
+          label: "Watch",
+          actsOn: `job ${job.job_id} for ${entry.context.target}`,
+          run: () => onWatch(job),
+        }
       }
     />
   );
@@ -510,7 +514,6 @@ export function InferenceTab() {
               <div key={date} role="group" aria-label={`Run for ${date}`} className="empty:hidden">
                 <LaunchOutcome
                   entryKey={launchKeys[i]}
-                  date={date}
                   onWatch={(job) => watch(jobs[job.job_id] ?? job)}
                   afterDismiss={() => launchButtonRef.current?.focus()}
                 />
