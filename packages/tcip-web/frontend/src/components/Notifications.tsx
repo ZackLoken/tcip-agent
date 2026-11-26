@@ -87,7 +87,8 @@ type Placement =
  * entry standing on its key, while one is listed, with its target when the placement asks for
  * it, its text, count, action, the placing control's action and dismiss control, and nothing
  * when none stands. An action's button shows its label and is named by its label followed by
- * what it acts on, when stated.
+ * what it acts on, when stated. The dismiss control is named by the text's first words, then
+ * the target the entry shows, if it shows one, and the time.
  */
 export function NotificationItem(props: Placement) {
   const standing = useStore((s) =>
@@ -104,6 +105,7 @@ export function NotificationItem(props: Placement) {
   const at = new Date(entry.time);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const count = entry.count > 1 ? `, ${entry.count} times` : "";
+  const target = props.placement === "area" || props.showTarget ? entry.context.target : undefined;
   const offer = ({ label, actsOn, run }: EntryAction) => (
     <button
       type="button"
@@ -125,7 +127,7 @@ export function NotificationItem(props: Placement) {
         if (props.placement === "area") document.getElementById(NOTIFICATIONS_HEADING_ID)?.focus();
         else props.afterDismiss();
       }}
-      aria-label={`${dismissLabel(text)} (${time})`}
+      aria-label={`${dismissLabel(text)} (${[target, time].filter(Boolean).join(", ")})`}
     >
       ×
     </button>
@@ -134,10 +136,8 @@ export function NotificationItem(props: Placement) {
   if (props.placement === "in place") {
     return (
       <div data-testid="entry-in-place" className="flex items-start gap-2 text-[13px]">
-        {props.showTarget && entry.context.target && (
-          <span className="shrink-0 font-medium leading-6 tabular-nums text-tcip-fg">
-            {entry.context.target}
-          </span>
+        {target && (
+          <span className="shrink-0 font-medium leading-6 tabular-nums text-tcip-fg">{target}</span>
         )}
         <p id={textId} className={`min-w-0 flex-1 break-words leading-6 ${tone}`}>
           {text}
@@ -149,7 +149,7 @@ export function NotificationItem(props: Placement) {
       </div>
     );
   }
-  const meta = [word, entry.kind, entry.context.target].filter(Boolean).join(", ");
+  const meta = [word, entry.kind, target].filter(Boolean).join(", ");
   return (
     <li className="flex items-start gap-2 py-2.5 pr-2">
       <span aria-hidden="true" className={`w-0.5 self-stretch rounded-full ${mark}`} />

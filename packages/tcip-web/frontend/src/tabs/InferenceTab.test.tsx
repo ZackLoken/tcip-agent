@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api/client";
 import { inferenceApi, openInferenceStream, resultsApi } from "@/api/inference";
 import { type InferenceJob, type InferenceJobs, NOTHING_STATED } from "@/api/types.generated";
-import { NotificationsLiveRegion } from "@/components/Notifications";
+import { NotificationsLiveRegion, NotificationsPane } from "@/components/Notifications";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";
 import { mockDatasetTree } from "@/test/datasetTree";
@@ -768,6 +768,45 @@ describe("InferenceTab bucket refusals", () => {
     act(() => openTestProject(GROUPED_SELECTION));
     expect(screen.queryByTestId("entry-in-place")).toBeNull();
     expect(refusalEntries()).toEqual([expect.objectContaining({ key: undefined })]);
+  });
+
+  it("names each of two dates' launch failures of one reason by its date, under Run and in the area, the names apart", async () => {
+    mockTree();
+    const missing = INFERENCE_ANSWERS.missing_checkpoint;
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(await thrown(missing));
+    const sentence = `Inference launch failed: ${missing.body.detail}`;
+    renderBesideListings(<InferenceTab />);
+    render(<NotificationsPane />);
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_DATE }));
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_UNPUBLISHED_DATE }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    const dates = [DS_DATE, DS_UNPUBLISHED_DATE];
+    const lines = await Promise.all(dates.map(lineOf));
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({ context: { project: TEST_PROJECT.id, target: DS_DATE } }),
+      expect.objectContaining({
+        context: { project: TEST_PROJECT.id, target: DS_UNPUBLISHED_DATE },
+      }),
+    ]);
+    const area = within(screen.getByRole("region", { name: "Notifications" }));
+    const areaNames = area
+      .getAllByRole("button", { name: /^Dismiss: / })
+      .map((b) => b.getAttribute("aria-label"));
+    for (const [names, where] of [
+      [lines.map((line) => dismissIn(line).getAttribute("aria-label")), "under Run"],
+      [areaNames, "in the area"],
+    ] as const) {
+      expect(new Set(names).size, where).toBe(2);
+      for (const date of dates) {
+        expect(
+          names.filter((name) => name?.includes(date)),
+          where,
+        ).toHaveLength(1);
+      }
+    }
   });
 
   it("disables the launch button while onLaunch's loop is in flight", async () => {
