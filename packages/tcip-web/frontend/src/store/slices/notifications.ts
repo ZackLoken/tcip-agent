@@ -57,9 +57,9 @@ type EntryText = { sentence: string; refusals?: never } | { refusals: Refusal[];
 type RaisedKind = "failure" | "notice" | "job";
 
 /** What an entry is: a condition's occurrence, naming its condition; or a failure, a notice or a
- *  job, standing on the key its producer gave until the key is released or a raise stating
- *  another text takes it, and offering its action, and running `onDismiss` when dismissed, only
- *  while it stands there. */
+ *  job, standing on the key its producer gave, if any, until the key is released or a raise
+ *  stating another text takes it. It offers its action and runs `onDismiss` when dismissed until
+ *  it is taken off a key. */
 type EntryStanding =
   | {
       kind: "condition";
@@ -160,7 +160,7 @@ export const selectStanding =
   (s: AppState): NotificationEntry | null =>
     s.notifications.find((e) => e.key === key) ?? null;
 
-/** `entry` standing on no key, so offering no action and running nothing when dismissed. */
+/** `entry` standing on no key, offering no action and running nothing when dismissed. */
 const unkeyed = (entry: NotificationEntry): NotificationEntry =>
   ({ ...entry, key: undefined, action: undefined, onDismiss: undefined }) as NotificationEntry;
 

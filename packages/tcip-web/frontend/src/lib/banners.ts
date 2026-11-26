@@ -1,7 +1,7 @@
 /**
  * The agent's banners as entries of the notifications area: each banner a panel delivers is one
- * notice until a person dismisses it there, and that dismissal is sent to the backend, which then
- * sends the banner to no page again.
+ * notice until a person dismisses it there, and that dismissal is sent to the backend while the
+ * banner's project is the open one, the backend then sending the banner to no page again.
  */
 
 import { api } from "@/api/client";
@@ -83,8 +83,9 @@ async function sendDismissal(note: Note, retry: () => void): Promise<void> {
 }
 
 /** List the banner `envelope` carries as a notice of the project it was posted for, naming where
- *  it was pushed, standing on its event until a person dismisses it, which sends its dismissal;
- *  a banner whose text is blank lists nothing. False for any other event. */
+ *  it was pushed, standing on its event until a person dismisses it, which sends its dismissal
+ *  while its project is the open one; a banner whose text is blank lists nothing. False for any
+ *  other event. */
 export function takeBanner({ panel, event, event_id, project_id }: PanelEnvelope): boolean {
   if (event.event_type !== PANEL_EVENT_BANNER) return false;
   if (!event.text.trim()) return true;
