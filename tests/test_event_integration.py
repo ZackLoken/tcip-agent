@@ -605,7 +605,7 @@ class _Peer:
 
 @contextmanager
 def _held_sockets(
-    client: TestClient, panel: str, count: int
+    client: TestClient, panel: Panel, count: int
 ) -> Iterator[tuple[_Hold, list[_Peer]]]:
     """Run ``count`` sockets of ``panel`` on the entered ``client``'s loop, under one hold.
 
