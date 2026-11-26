@@ -809,6 +809,43 @@ describe("InferenceTab bucket refusals", () => {
     }
   });
 
+  it.each([
+    [
+      "a change of model",
+      () =>
+        fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
+          target: { value: OTHER_MODEL.entry.checkpoint_path },
+        }),
+    ],
+    [
+      "leaving the tab and returning",
+      (unmount: () => void) => {
+        unmount();
+        render(<InferenceTab />);
+      },
+    ],
+  ])(
+    "takes a launch failure of another kind off its place under Run at %s, its entry kept on no key",
+    async (_event, happen) => {
+      const missing = INFERENCE_ANSWERS.missing_checkpoint;
+      vi.spyOn(inferenceApi, "launch").mockRejectedValue(await thrown(missing));
+      const { unmount } = await launchOneRefused();
+      await lineOf(DS_DATE);
+
+      happen(unmount);
+
+      expect(await screen.findByRole("checkbox", { name: DS_DATE })).toBeInTheDocument();
+      expect(screen.queryByTestId("entry-in-place")).toBeNull();
+      expect(useStore.getState().notifications).toEqual([
+        expect.objectContaining({
+          kind: "failure",
+          key: undefined,
+          context: { project: TEST_PROJECT.id, target: DS_DATE },
+        }),
+      ]);
+    },
+  );
+
   it("disables the launch button while onLaunch's loop is in flight", async () => {
     const launch = Promise.withResolvers<InferenceJob>();
     vi.spyOn(inferenceApi, "launch").mockReturnValue(launch.promise);
