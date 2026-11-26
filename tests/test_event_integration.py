@@ -6,29 +6,41 @@ The output shapes of the tools that push are part of the subject.
 
 from __future__ import annotations
 
+import json
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import anyio
 import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 from typing_inspection.introspection import get_literal_values
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tcip_mcp.identity import actor
 from tcip_mcp.web_client import (
     AnnotateFocus,
     AnnotateMode,
     Banner,
+    LabelsWritten,
     Panel,
     PanelEvent,
     PanelPost,
 )
+from tests import REFUSED_NAMES
+from tests._audit_fixtures import audit_rows, refuse_audit_appends
+from tests._web_fixtures import named_project
 
 PANELS = tuple(get_literal_values(Panel.__value__))
 """Every GUI panel, as the vocabulary states them."""
 
 if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
     from starlette.testclient import httpx
+    from starlette.types import Message
 
     from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
@@ -146,35 +158,10 @@ class TestPostPanelEventRoute:
         A state mutation and a panel event each reach their open socket and remove a socket whose
         transport is gone; a send failing for another reason raises and its socket stays.
         """
-        import threading
-
-        import anyio
         import anyio.from_thread
-        from starlette.types import Message
 
         from tcip_web import app as web_app
         from tcip_web.state import store
-
-        class _Peer:
-            """A client whose sends raise ``fault`` once set; it hangs up when ``closed`` is set."""
-
-            def __init__(self, closed: anyio.Event) -> None:
-                self.closed = closed
-                self.connected = False
-                self.waiting = threading.Event()
-                self.fault: Exception | None = None
-
-            async def receive(self) -> Message:
-                if not self.connected:
-                    self.connected = True
-                    return {"type": "websocket.connect"}
-                self.waiting.set()
-                await self.closed.wait()
-                return {"type": "websocket.disconnect", "code": 1006}
-
-            async def send(self, _message: Message) -> None:
-                if self.fault is not None:
-                    raise self.fault
 
         with anyio.from_thread.start_blocking_portal() as portal:
             closed = portal.call(anyio.Event)
@@ -191,7 +178,7 @@ class TestPostPanelEventRoute:
                 portal.start_task_soon(web_app.panel_ws, faulty, "meta"),
             ]
             try:
-                assert all(peer.waiting.wait(10) for peer in peers)
+                assert all(peer.reading.wait(10) for peer in peers)
                 peers[0].fault = peers[1].fault = OSError("the peer is gone")
                 peers[2].fault = RuntimeError(
                     "bound to a different event loop"
@@ -242,9 +229,6 @@ class TestPostPanelEventRoute:
         self, opened_client: TestClient, route: str
     ) -> None:
         """A socket registered while it reads frames is unregistered once its peer disconnects."""
-        import anyio
-        from starlette.types import Message
-
         from tcip_web import app as web_app
 
         inbound: list[Message] = [
@@ -473,6 +457,621 @@ class TestPostPanelEventRoute:
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "point"
         assert state["active_subject"] == "bud"
+
+
+# ── Dismissing a banner ──────────────────────────────────────────────────
+
+DISMISSED = "panel_event_dismissed"
+"""The kind of audit line a dismissal leaves."""
+
+
+def _labels(image: str) -> LabelsWritten:
+    """Return the labels-written event of the image named ``image``."""
+    return LabelsWritten(image_path=f"/data/{image}.jpg")
+
+
+def _posted(
+    client: TestClient, panel: str, project_id: str, *events: PanelEvent
+) -> None:
+    """Post each of ``events`` to ``panel`` for ``project_id``, each asserted taken."""
+    for event in events:
+        resp = _post(client, panel, event, project_id)
+        assert resp.status_code == 200, resp.text
+
+
+def _dismiss(
+    client: TestClient,
+    panel: str,
+    project_id: str,
+    event_id: str,
+    user: str = "breeder",
+) -> httpx.Response:
+    """Dismiss the event ``event_id`` names on ``panel``, for ``project_id``, as ``user``."""
+    return client.post(
+        f"/api/events/{panel}/dismissals",
+        json={"user": user, "project_id": project_id, "event_id": event_id},
+    )
+
+
+def _open(client: TestClient, project: OpenProject) -> None:
+    """Open ``project`` through the backend's open route, asserted to answer 200."""
+    resp = client.post(
+        "/api/projects/open", json={"id": project.id, "user": "breeder"}
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def _sent_at_connect(
+    client: TestClient, panel: str, marker: str
+) -> list[dict]:
+    """Return the frames a socket connecting to ``panel`` now receives, through ``marker``.
+
+    ``marker`` is the text of the banner the frames end with.
+    """
+    frames: list[dict] = []
+    with client.websocket_connect(f"ws://127.0.0.1/ws/panel/{panel}") as ws:
+        while (
+            not frames
+            or frames[-1]["event"] != Banner(text=marker).model_dump()
+        ):
+            frames.append(ws.receive_json())
+    return frames
+
+
+def _without(body: dict, key: str) -> dict:
+    """Return ``body`` less ``key``."""
+    return {k: v for k, v in body.items() if k != key}
+
+
+def _ids(frames: list[dict]) -> list[str]:
+    """Return the event id of each of ``frames``, in order."""
+    return [frame["event_id"] for frame in frames]
+
+
+class _Hold:
+    """Holds the first frame any of its peers is sent, until :meth:`let_go`.
+
+    Once ``holding`` is set, ``frame`` is the held frame and ``peer`` the peer it is for.
+    """
+
+    def __init__(self, portal: BlockingPortal) -> None:
+        self.portal = portal
+        self.released = portal.call(anyio.Event)
+        self.holding = threading.Event()
+        self.frame: dict | None = None
+        self.peer: _Peer | None = None
+
+    async def passing(self, peer: _Peer, frame: dict) -> None:
+        """Return once ``frame`` may reach ``peer``: at once, but for the first frame."""
+        if self.peer is None:
+            self.peer, self.frame = peer, frame
+            self.holding.set()
+            await self.released.wait()
+
+    def let_go(self) -> None:
+        """Let the held frame through."""
+        self.portal.call(self.released.set)
+
+
+class _Peer:
+    """A client of a socket whose every frame passes through ``hold``, when it has one.
+
+    ``frames`` holds what it was sent, in order; once ``fault`` is set, each send raises it.
+    ``reading`` is set once its handler reads inbound frames, its sends at connect done; it
+    hangs up once ``closed`` is set.
+    """
+
+    def __init__(self, closed: anyio.Event, hold: _Hold | None = None) -> None:
+        self.closed = closed
+        self.hold = hold
+        self.connected = False
+        self.reading = threading.Event()
+        self.frames: list[dict] = []
+        self.fault: Exception | None = None
+
+    async def receive(self) -> Message:
+        if not self.connected:
+            self.connected = True
+            return {"type": "websocket.connect"}
+        self.reading.set()
+        await self.closed.wait()
+        return {"type": "websocket.disconnect", "code": 1000}
+
+    async def send(self, message: Message) -> None:
+        if self.fault is not None:
+            raise self.fault
+        if message["type"] == "websocket.send":
+            frame = json.loads(message["text"])
+            if self.hold is not None:
+                await self.hold.passing(self, frame)
+            self.frames.append(frame)
+
+
+@contextmanager
+def _held_sockets(
+    client: TestClient, panel: Panel, count: int
+) -> Iterator[tuple[_Hold, list[_Peer]]]:
+    """Run ``count`` sockets of ``panel`` on the entered ``client``'s loop, under one hold.
+
+    On exit the hold lets its frame go, every peer hangs up and every handler is awaited.
+    """
+    from tcip_web import app as web_app
+
+    portal = client.portal
+    assert portal is not None, "the client is not entered"
+    hold = _Hold(portal)
+    closed = portal.call(anyio.Event)
+    peers = [_Peer(closed, hold) for _ in range(count)]
+    handlers = [
+        portal.start_task_soon(
+            web_app.panel_ws,
+            WebSocket({"type": "websocket"}, peer.receive, peer.send),
+            panel,
+        )
+        for peer in peers
+    ]
+    try:
+        yield hold, peers
+    finally:
+        hold.let_go()
+        portal.call(closed.set)
+        for handler in handlers:
+            handler.result(10)
+
+
+class _Meanwhile(threading.Thread):
+    """Runs ``call`` on a thread of its own; ``answer`` is what it returned, once joined."""
+
+    def __init__(self, call: Callable[[], httpx.Response]) -> None:
+        super().__init__(daemon=True)
+        self.call = call
+        self.answer: httpx.Response | None = None
+
+    def run(self) -> None:
+        self.answer = self.call()
+
+
+class TestDismissPanelEventRoute:
+    """A person's dismissal of a banner, through its route and the panel socket."""
+
+    def test_a_dismissed_banner_is_sent_to_no_later_socket_and_leaves_a_line(
+        self, opened_client: TestClient, opened: OpenProject
+    ) -> None:
+        """A dismissed banner is sent to no later socket, and its line is by the person.
+
+        The other events on its panel and another panel's events are sent as before, and the
+        line names the panel, the event and the banner's text.
+        """
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            Banner(text="dismissed"),
+            _labels("a"),
+            Banner(text="kept"),
+            Banner(text="marker"),
+        )
+        _posted(
+            opened_client,
+            "training",
+            opened.id,
+            Banner(text="elsewhere"),
+            Banner(text="marker"),
+        )
+        results = _sent_at_connect(opened_client, "results", "marker")
+        training = _sent_at_connect(opened_client, "training", "marker")
+        dismissed = results[0]
+
+        resp = _dismiss(
+            opened_client, "results", opened.id, dismissed["event_id"]
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"removed": True}
+        assert (
+            _sent_at_connect(opened_client, "results", "marker") == results[1:]
+        )
+        assert (
+            _sent_at_connect(opened_client, "training", "marker") == training
+        )
+        assert [
+            (line["actor"], line["arguments"])
+            for line in audit_rows(opened.root, DISMISSED)
+        ] == [
+            (
+                actor("breeder"),
+                {
+                    "panel": "results",
+                    "event_id": dismissed["event_id"],
+                    "text": "dismissed",
+                },
+            )
+        ]
+
+    def test_a_banner_dismissed_during_a_send_at_connect_is_not_sent_to_that_socket(
+        self, opened_client: TestClient, opened: OpenProject
+    ) -> None:
+        """A banner dismissed while a socket's first frame at connect is held is not sent to it.
+
+        The events behind the held frame that are no dismissed banner are sent as before.
+        """
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            Banner(text="first"),
+            Banner(text="dismissed"),
+            _labels("a"),
+            Banner(text="marker"),
+        )
+        with opened_client as client:
+            first, dismissed, *rest = _sent_at_connect(
+                client, "results", "marker"
+            )
+            with _held_sockets(client, "results", 1) as (hold, (peer,)):
+                assert hold.holding.wait(10)
+                answer = _dismiss(
+                    client, "results", opened.id, dismissed["event_id"]
+                )
+                hold.let_go()
+                assert peer.reading.wait(10)
+
+        assert answer.json() == {"removed": True}
+        assert _ids(peer.frames) == _ids([first, *rest])
+
+    def test_a_banner_dismissed_during_a_broadcast_is_not_sent_to_a_subscriber_it_has_not_reached(
+        self, opened_client: TestClient, opened: OpenProject
+    ) -> None:
+        """A banner dismissed while its broadcast's first send is held reaches no other subscriber.
+
+        Both subscribers joined before the post; whichever the broadcast reaches first has the
+        frame held.
+        """
+        with (
+            opened_client as client,
+            _held_sockets(client, "results", 2) as (hold, peers),
+        ):
+            assert all(peer.reading.wait(10) for peer in peers)
+            posting = _Meanwhile(
+                lambda: _post(
+                    client, "results", Banner(text="dismissed"), opened.id
+                )
+            )
+            posting.start()
+            assert hold.holding.wait(10)
+            assert hold.frame is not None
+            answer = _dismiss(
+                client, "results", opened.id, hold.frame["event_id"]
+            )
+            hold.let_go()
+            posting.join(10)
+            (unreached,) = [peer for peer in peers if peer is not hold.peer]
+
+        assert answer.json() == {"removed": True}
+        assert posting.answer is not None
+        assert posting.answer.status_code == 200, posting.answer.text
+        assert unreached.frames == []
+
+    def test_a_dismissal_for_another_project_is_refused_and_removes_nothing(
+        self, opened_client: TestClient, opened: OpenProject, tmp_path: Path
+    ) -> None:
+        """A dismissal for a project that is not the open one answers 409 naming the open one.
+
+        The banner is still sent to a later socket, and no line is written.
+        """
+        other = named_project(tmp_path.parent / "other", "Other")
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            Banner(text="kept"),
+            Banner(text="marker"),
+        )
+        before = _sent_at_connect(opened_client, "results", "marker")
+
+        resp = _dismiss(
+            opened_client, "results", other.id, before[0]["event_id"]
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["open_project_id"] == opened.id
+        assert _sent_at_connect(opened_client, "results", "marker") == before
+        assert audit_rows(opened.root, DISMISSED) == []
+
+    def test_a_dismissal_while_no_project_is_open_is_refused(
+        self, client: TestClient
+    ) -> None:
+        resp = _dismiss(client, "results", "0" * 12, "an event")
+
+        assert resp.status_code == 409, resp.text
+        assert "no project is open" in resp.json()["detail"]
+
+    def test_a_dismissal_of_an_id_its_panel_does_not_hold_removes_nothing_and_writes_no_line(
+        self, opened_client: TestClient, opened: OpenProject
+    ) -> None:
+        """An id never posted, a banner dismissed already and another panel's banner remove nothing.
+
+        Each answers ``removed`` false, each panel sends a later socket what it would have, and
+        only the first dismissal's line is written.
+        """
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            Banner(text="dismissed"),
+            Banner(text="marker"),
+        )
+        _posted(
+            opened_client,
+            "training",
+            opened.id,
+            Banner(text="elsewhere"),
+            Banner(text="marker"),
+        )
+        results = _sent_at_connect(opened_client, "results", "marker")
+        training = _sent_at_connect(opened_client, "training", "marker")
+        first = _dismiss(
+            opened_client, "results", opened.id, results[0]["event_id"]
+        )
+        assert first.json() == {"removed": True}, first.text
+        lines = audit_rows(opened.root, DISMISSED)
+
+        answers = [
+            _dismiss(opened_client, "results", opened.id, event_id)
+            for event_id in (
+                "never posted",
+                results[0]["event_id"],
+                training[0]["event_id"],
+            )
+        ]
+
+        assert [(a.status_code, a.json()) for a in answers] == [
+            (200, {"removed": False})
+        ] * 3
+        assert (
+            _sent_at_connect(opened_client, "results", "marker") == results[1:]
+        )
+        assert (
+            _sent_at_connect(opened_client, "training", "marker") == training
+        )
+        assert audit_rows(opened.root, DISMISSED) == lines
+
+    def test_a_dismissal_of_an_event_that_is_no_banner_is_refused_naming_its_type(
+        self, opened_client: TestClient, opened: OpenProject
+    ) -> None:
+        """A dismissal of a labels-written event answers 400 naming its type and removes nothing."""
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            _labels("a"),
+            Banner(text="marker"),
+        )
+        before = _sent_at_connect(opened_client, "results", "marker")
+
+        resp = _dismiss(
+            opened_client, "results", opened.id, before[0]["event_id"]
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert "labels_written" in resp.json()["detail"]
+        assert _sent_at_connect(opened_client, "results", "marker") == before
+        assert audit_rows(opened.root, DISMISSED) == []
+
+    def test_a_dismissal_whose_line_cannot_be_written_answers_it_committed(
+        self,
+        opened_client: TestClient,
+        opened: OpenProject,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A dismissal whose line fails answers 409 stating it committed, with its answer.
+
+        The banner is gone from a later socket, and a second dismissal removes nothing and
+        writes no line.
+        """
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            Banner(text="dismissed"),
+            Banner(text="marker"),
+        )
+        before = _sent_at_connect(opened_client, "results", "marker")
+        refuse_audit_appends(monkeypatch)
+
+        resp = _dismiss(
+            opened_client, "results", opened.id, before[0]["event_id"]
+        )
+        monkeypatch.undo()
+
+        assert resp.status_code == 409, resp.text
+        detail = resp.json()["detail"]
+        assert (detail["kind"], detail["committed"], detail["what"]) == (
+            "audit_entry_not_written",
+            True,
+            {"removed": True},
+        )
+        assert (
+            _sent_at_connect(opened_client, "results", "marker") == before[1:]
+        )
+        again = _dismiss(
+            opened_client, "results", opened.id, before[0]["event_id"]
+        )
+        assert again.json() == {"removed": False}, again.text
+        assert audit_rows(opened.root, DISMISSED) == []
+
+    @pytest.mark.parametrize(
+        ("panel", "malformed"),
+        [
+            ("results", lambda body: _without(body, "project_id")),
+            ("results", lambda body: _without(body, "event_id")),
+            ("results", lambda body: {**body, "event_id": 5}),
+            ("results", lambda body: {**body, "panel": "results"}),
+            ("results", lambda body: [body]),
+            ("bogus", lambda body: body),
+        ],
+        ids=[
+            "no project id",
+            "no event id",
+            "an event id that is no string",
+            "an extra field",
+            "no object",
+            "a path naming no panel",
+        ],
+    )
+    def test_a_dismissal_that_does_not_validate_answers_422(
+        self,
+        opened_client: TestClient,
+        opened: OpenProject,
+        panel: str,
+        malformed: Callable[[dict], object],
+    ) -> None:
+        _posted(opened_client, "results", opened.id, Banner(text="kept"))
+        (kept,) = _sent_at_connect(opened_client, "results", "kept")
+        body = {
+            "user": "breeder",
+            "project_id": opened.id,
+            "event_id": kept["event_id"],
+        }
+
+        resp = opened_client.post(
+            f"/api/events/{panel}/dismissals", json=malformed(body)
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert _sent_at_connect(opened_client, "results", "kept") == [kept]
+
+    def test_a_dismissal_naming_no_one_is_refused_and_removes_nothing(
+        self, opened_client: TestClient, opened: OpenProject
+    ) -> None:
+        """A dismissal by a name naming no one answers 400 and leaves the banner retained."""
+        _posted(opened_client, "results", opened.id, Banner(text="kept"))
+        (kept,) = _sent_at_connect(opened_client, "results", "kept")
+
+        answers = [
+            _dismiss(
+                opened_client,
+                "results",
+                opened.id,
+                kept["event_id"],
+                user=name,
+            )
+            for name in REFUSED_NAMES
+        ]
+
+        assert {a.status_code for a in answers} == {400}
+        assert all("names no one" in a.json()["detail"] for a in answers)
+        assert _sent_at_connect(opened_client, "results", "kept") == [kept]
+        assert audit_rows(opened.root, DISMISSED) == []
+
+    @pytest.mark.parametrize(
+        "reopened", [False, True], ids=["another opened", "the first reopened"]
+    )
+    def test_a_project_change_during_a_send_at_connect_withholds_the_banners_behind_it(
+        self,
+        opened_client: TestClient,
+        opened: OpenProject,
+        tmp_path: Path,
+        reopened: bool,
+    ) -> None:
+        """A project change while a socket's first frame at connect is held withholds its banners.
+
+        Whether another project is opened, or opened and the first reopened, the banners behind
+        the held frame are not sent, and the labels-written event behind it is.
+        """
+        other = named_project(tmp_path.parent / "other", "Other")
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            Banner(text="first"),
+            Banner(text="behind"),
+            _labels("a"),
+            Banner(text="marker"),
+        )
+        with opened_client as client:
+            first, _behind, labels, _marker = _sent_at_connect(
+                client, "results", "marker"
+            )
+            with _held_sockets(client, "results", 1) as (hold, (peer,)):
+                assert hold.holding.wait(10)
+                _open(client, other)
+                if reopened:
+                    _open(client, opened)
+                hold.let_go()
+                assert peer.reading.wait(10)
+
+        assert _ids(peer.frames) == _ids([first, labels])
+
+    def test_a_banner_pushed_out_at_the_bound_during_a_send_at_connect_is_not_sent(
+        self, opened_client: TestClient, opened: OpenProject
+    ) -> None:
+        """A banner pushed out of its panel's ring while a send at connect is held is not sent.
+
+        Its dismissal then removes nothing. A labels-written event pushed out the same way is
+        still sent, as it is to a socket whatever the ring holds.
+        """
+        from tcip_web.state import RETAINED_EVENTS_PER_PANEL
+
+        _posted(
+            opened_client,
+            "results",
+            opened.id,
+            Banner(text="first"),
+            Banner(text="pushed out"),
+            _labels("a"),
+            Banner(text="marker"),
+        )
+        with opened_client as client:
+            _first, pushed, labels, _marker = _sent_at_connect(
+                client, "results", "marker"
+            )
+            with _held_sockets(client, "results", 1) as (hold, (peer,)):
+                assert hold.holding.wait(10)
+                _posted(
+                    client,
+                    "results",
+                    opened.id,
+                    *(
+                        _labels(f"later {n}")
+                        for n in range(RETAINED_EVENTS_PER_PANEL)
+                    ),
+                )
+                answer = _dismiss(
+                    client, "results", opened.id, pushed["event_id"]
+                )
+                hold.let_go()
+                assert peer.reading.wait(10)
+
+        assert answer.json() == {"removed": False}, answer.text
+        assert pushed["event_id"] not in _ids(peer.frames)
+        assert labels["event_id"] in _ids(peer.frames)
+
+    def test_a_project_change_during_a_broadcast_withholds_the_banner_from_a_subscriber_not_reached(
+        self, opened_client: TestClient, opened: OpenProject, tmp_path: Path
+    ) -> None:
+        """A project change while a banner's broadcast is held reaches no other subscriber."""
+        other = named_project(tmp_path.parent / "other", "Other")
+        with (
+            opened_client as client,
+            _held_sockets(client, "results", 2) as (hold, peers),
+        ):
+            assert all(peer.reading.wait(10) for peer in peers)
+            posting = _Meanwhile(
+                lambda: _post(
+                    client, "results", Banner(text="note"), opened.id
+                )
+            )
+            posting.start()
+            assert hold.holding.wait(10)
+            _open(client, other)
+            hold.let_go()
+            posting.join(10)
+            (unreached,) = [peer for peer in peers if peer is not hold.peer]
+
+        assert posting.answer is not None
+        assert posting.answer.status_code == 200, posting.answer.text
+        assert unreached.frames == []
 
 
 class TestPushPanelDataTool:

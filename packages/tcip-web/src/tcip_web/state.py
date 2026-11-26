@@ -20,6 +20,7 @@ import tcip_store
 from tcip_mcp.agent_identity import RecordedIdentity
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
+    Banner,
     DatasetSelection,
     GuiState,
     Panel,
@@ -288,6 +289,20 @@ class StateStore:
     def retained_events(self, panel: Panel) -> list[PanelEnvelope]:
         """Return the open project's latest events on ``panel``, oldest first."""
         return list(self._retained.get(panel, ()))
+
+    def forget_event(self, event: PanelEnvelope) -> None:
+        """Remove ``event``, one its panel retains, from its panel's retained events."""
+        self._retained[event.panel].remove(event)
+
+    def withdrawn(self, event: PanelEnvelope) -> bool:
+        """Return whether ``event`` is a banner its panel no longer retains.
+
+        The envelope itself is looked for, not an equal one. An event that is no banner is never
+        withdrawn.
+        """
+        return isinstance(event.event, Banner) and not any(
+            held is event for held in self._retained.get(event.panel, ())
+        )
 
     async def _hold(
         self, project: OpenProject | None, state: GuiState

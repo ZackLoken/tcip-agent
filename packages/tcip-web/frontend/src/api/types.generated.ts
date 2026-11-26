@@ -740,6 +740,16 @@ export interface PanelPost {
   project_id: string;
 }
 
+export interface PanelDismissed {
+  removed: boolean;
+}
+
+export interface PanelDismissal {
+  user: string;
+  project_id: string;
+  event_id: string;
+}
+
 export interface VersionConflictRefusal {
   kind: "version_conflict";
   message: string;
