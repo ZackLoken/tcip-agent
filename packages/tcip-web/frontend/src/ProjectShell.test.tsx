@@ -75,13 +75,19 @@ function deliver(envelope: PanelEnvelope) {
   act(() => panelSocket(envelope.panel).message(JSON.stringify(envelope)));
 }
 
-/** Drop `panel`'s socket and let the page connect it again. */
-async function reconnect(panel: string) {
+/** Drop `panel`'s socket and let the page connect it again once its backoff has run. */
+function reconnect(panel: string) {
   const before = FakeWebSocket.instances.length;
-  act(() => panelSocket(panel).drop());
-  await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(before), {
-    timeout: 2000,
-  });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    act(() => panelSocket(panel).drop());
+    act(() => {
+      vi.advanceTimersToNextTimer();
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(FakeWebSocket.instances).toHaveLength(before + 1);
   act(() => panelSocket(panel).open());
 }
 
@@ -151,7 +157,7 @@ describe("ProjectShell agent activity", () => {
     expect(page.load).toHaveBeenLastCalledWith(atConnect.event.image_path);
     expect(notices()).toEqual([]);
 
-    await reconnect("annotate");
+    reconnect("annotate");
     deliver(atConnect);
     await act(async () => {});
 
@@ -163,7 +169,7 @@ describe("ProjectShell agent activity", () => {
     await mountOnCapture();
 
     deliver(written);
-    await reconnect("annotate");
+    reconnect("annotate");
     deliver(PANEL_EVENTS_AT_CONNECT.labels_written);
 
     expect(notices()).toEqual([expect.objectContaining({ count: 1 })]);
@@ -217,7 +223,7 @@ describe("ProjectShell agent focus", () => {
 
     deliver(focus);
     await waitFor(() => expect(page.select).toHaveBeenCalledTimes(1));
-    await reconnect("app");
+    reconnect("app");
     deliver(PANEL_EVENTS_AT_CONNECT.annotate_focus);
     await act(async () => {});
 
