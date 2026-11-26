@@ -773,6 +773,13 @@ def refuse_unsupported(
         )
 
 
+def condition_dir(
+    out_root: pathlib.Path, question_id: str, condition_name: str
+) -> pathlib.Path:
+    """Return the folder holding the family runs and the summary of a question id and condition."""
+    return out_root / question_id / condition_name
+
+
 def family_run_dir(
     out_root: pathlib.Path,
     question_id: str,
@@ -780,7 +787,7 @@ def family_run_dir(
     family: str,
 ) -> pathlib.Path:
     """Return the folder a family's run under a question id and condition is written to."""
-    return out_root / question_id / condition_name / family
+    return condition_dir(out_root, question_id, condition_name) / family
 
 
 def existing_run_refusal(run_dir: pathlib.Path) -> SystemExit:
@@ -848,7 +855,9 @@ def run_one(
     commit_at_start = checkout_commit(cwd)
     condition = CONDITIONS[condition_name]
     run_dir = family_run_dir(out_root, question_id, condition_name, family)
-    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    condition_dir(out_root, question_id, condition_name).mkdir(
+        parents=True, exist_ok=True
+    )
     try:
         run_dir.mkdir()
     except FileExistsError as exc:
@@ -1209,7 +1218,10 @@ def main() -> int:
             "was only a pointer to it."
         )
 
-    summary = out_root / args.question_id / args.condition / "summary.json"
+    summary = (
+        condition_dir(out_root, args.question_id, args.condition)
+        / "summary.json"
+    )
     # A later run under this question id and condition adds families: merge its rows onto
     # whatever summary.json already holds, keyed by family.
     previous_rows: dict[str, dict] = {}

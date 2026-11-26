@@ -1511,7 +1511,7 @@ def test_run_one_into_a_family_folder_that_exists_is_refused_and_leaves_it_as_it
 ) -> None:
     """A direct call into an existing family folder, a run's or an empty one, launches nothing.
 
-    The empty folder is the one input no run produces.
+    The empty folder is what a run leaves when a step after the making of its folder raises.
     """
     seen: list[dict] = []
     _stand_in_harness(monkeypatch, recording_launch(seen))
@@ -1521,7 +1521,16 @@ def test_run_one_into_a_family_folder_that_exists_is_refused_and_leaves_it_as_it
         _run_codex_in(tmp_path, out)
         seen.clear()
     else:
-        folder.mkdir(parents=True)
+
+        def raising_preface(*_args: object, **_kwargs: object) -> NoReturn:
+            raise RuntimeError("a failure after the run folder was made")
+
+        with monkeypatch.context() as raising:
+            raising.setattr(cross_family_ask, "image_preface", raising_preface)
+            with pytest.raises(RuntimeError, match="after the run folder"):
+                _run_codex_in(tmp_path, out)
+        assert folder.is_dir()
+        assert not list(folder.iterdir())
     first = _snapshot(out)
 
     with pytest.raises(SystemExit) as refused:
