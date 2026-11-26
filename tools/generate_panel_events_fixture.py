@@ -8,11 +8,14 @@ labels of the first and of the second photograph of its capture of photographs w
 Annotate panel (``labels_written``, ``labels_written_second``), and to the ``app`` panel a banner
 (``app_banner``), an annotate focus for ``generate_open_fixture.FOCUSED_SUBJECT`` on that capture
 (``annotate_focus``) and on the capture whose label document will not read
-(``annotate_focus_troubled``) and a canvas state request (``canvas_state_request``). Each panel's
-socket is opened before the posts, which delivers each event live, and again after them, which
-sends each event at connect. The envelopes are written, each event id an arrival stamped numbered
-(``fixture_session.normalized``) so both deliveries of an event keep one id and the open
-project's id named, to :data:`GENERATED_PATH`, as ``live`` and ``at_connect``, each keyed by scene.
+(``annotate_focus_troubled``) and a canvas state request (``canvas_state_request``); last, the
+labels of the first photograph written to the Annotate panel again, posted with the identity
+headers of an agent declaring ``generate_training_fixture.DECLARED_CLIENT``
+(``labels_written_declared``). Each panel's socket is opened before the posts, which delivers each
+event live, and again after them, which sends each event at connect. The envelopes are written,
+each event id and the declared agent's minted session numbered (``fixture_session.normalized``)
+so both deliveries of an event keep one id, and the open project's id named, to
+:data:`GENERATED_PATH`, as ``live`` and ``at_connect``, each keyed by scene.
 
     python -m tools.generate_panel_events_fixture
 """
@@ -37,6 +40,7 @@ from tools.generate_open_fixture import (
     RAW_IMAGES,
     captures,
 )
+from tools.generate_training_fixture import DECLARED_CLIENT
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -53,6 +57,7 @@ def produce() -> dict[str, JsonValue]:
 
     A route refusing what it should admit raises.
     """
+    from tcip_mcp import agent_identity
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.web_client import (
         AnnotateFocus,
@@ -107,14 +112,32 @@ def produce() -> dict[str, JsonValue]:
             ("annotate_focus_troubled", "app", focus("troubled")),
             ("canvas_state_request", "app", CanvasStateRequest()),
         ]
-        panels = list(dict.fromkeys(panel for _, panel, _ in posted))
+        declared: tuple[str, Panel, PanelEvent] = (
+            "labels_written_declared",
+            "annotate",
+            labels_of(RAW_IMAGES[0]),
+        )
+        scenes = [*posted, declared]
+        panels = list(dict.fromkeys(panel for _, panel, _ in scenes))
+
+        def post(
+            panel: Panel, event: PanelEvent, headers: dict[str, str]
+        ) -> None:
+            answered(
+                client,
+                "post_panel_event",
+                200,
+                PanelPost(event=event, project_id=project.id),
+                path={"panel": panel},
+                headers=headers,
+            )
 
         def received(
             sockets: dict[Panel, WebSocketTestSession],
         ) -> dict[str, JsonValue]:
             return {
                 name: sockets[panel].receive_json()
-                for name, panel, _ in posted
+                for name, panel, _ in scenes
             }
 
         def connect_each(
@@ -132,20 +155,20 @@ def produce() -> dict[str, JsonValue]:
         with ExitStack() as stack:
             open_at_posts = connect_each(stack)
             for _, panel, event in posted:
-                answered(
-                    client,
-                    "post_panel_event",
-                    200,
-                    PanelPost(event=event, project_id=project.id),
-                    path={"panel": panel},
-                )
+                post(panel, event, {})
+            _, panel, event = declared
+            agent_identity.begin(*DECLARED_CLIENT)
+            try:
+                post(panel, event, agent_identity.http_headers())
+            finally:
+                agent_identity.end()
             live = received(open_at_posts)
         with ExitStack() as stack:
             at_connect = received(connect_each(stack))
         return normalized(
             {"live": live, "at_connect": at_connect},
             workspace,
-            numbered=frozenset({"event_id"}),
+            numbered=frozenset({"event_id", "agent_session"}),
             minted={project.id: PROJECT_ID_STAND_IN},
         )
 

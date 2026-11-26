@@ -20,15 +20,17 @@ interface Deliveries {
   annotate_focus: Carrying<AnnotateFocus>;
   annotate_focus_troubled: Carrying<AnnotateFocus>;
   canvas_state_request: Carrying<CanvasStateRequest>;
+  labels_written_declared: Carrying<LabelsWritten>;
 }
 
 /** The envelopes `tools/generate_panel_events_fixture.py` received from each panel's socket once
  *  the panel events were posted through the events route: two banners on the Results panel, the
- *  labels of two images written on the Annotate panel, and on the `app` panel a banner, an
- *  annotate focus on the open fixture's photographs, one on its capture whose label document will
- *  not read, and a canvas state request, keyed by scene. `live` is what a socket open at the posts
- *  received and `at_connect` what a socket connecting after them received, one event carrying one
- *  id in both. */
+ *  labels of two images written on the Annotate panel, on the `app` panel a banner, an annotate
+ *  focus on the open fixture's photographs, one on its capture whose label document will not
+ *  read, and a canvas state request, and last the first image's labels written on the Annotate
+ *  panel again by a sender declaring an agent client, keyed by scene. `live` is what a socket
+ *  open at the posts received and `at_connect` what a socket connecting after them received, one
+ *  event carrying one id in both. */
 // A JSON import reads each literal as a string, which the literal unions admit only through
 // `unknown`.
 const DELIVERIES = produced as unknown as {
