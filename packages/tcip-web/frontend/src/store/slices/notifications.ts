@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 
+import type { InferenceJob } from "@/api/types.generated";
 import type { AppState } from "@/store/appState";
 
 /** How loud a message to the person is. */
@@ -43,9 +44,11 @@ export interface EntryContext {
   target?: string;
 }
 
-/** An action an entry offers: its label and what it runs. */
+/** An action an entry offers: its label, the visible text of its button; what it acts on, when
+ *  stated, said after the label in the button's accessible name; and what it runs. */
 export interface EntryAction {
   label: string;
+  actsOn?: string;
   run: () => void;
 }
 
@@ -59,7 +62,8 @@ type RaisedKind = "failure" | "notice" | "job";
 /** What an entry is: a condition's occurrence, naming its condition; or a failure, a notice or a
  *  job, standing on the key its producer gave, if any, until the key is released or a raise
  *  stating another text takes it. It offers its action and runs `onDismiss` when dismissed until
- *  it is taken off a key. */
+ *  it is taken off a key, and keeps the inference job it is about, if any, as long as it is
+ *  listed. */
 type EntryStanding =
   | {
       kind: "condition";
@@ -67,12 +71,14 @@ type EntryStanding =
       key?: never;
       action?: never;
       onDismiss?: never;
+      inferenceJob?: never;
     }
   | {
       kind: RaisedKind;
       key?: string;
       action?: EntryAction;
       onDismiss?: () => void;
+      inferenceJob?: InferenceJob;
       condition?: never;
     };
 
@@ -91,9 +97,10 @@ export type NotificationEntry = EntryText &
     announcement: { text: string; level: MessageLevel };
   };
 
-/** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal, and
- *  what dismissing its entry does beside taking it off the list (`onDismiss`). A job states
- *  whether an entry already standing for it is told again (`retell`). */
+/** What a producer raises: a failure, a notice or a job, stating a sentence or one refusal, what
+ *  dismissing its entry does beside taking it off the list (`onDismiss`), and the record of the
+ *  inference job it is about, when it is about one (`inferenceJob`). A job states whether an
+ *  entry already standing for it is told again (`retell`). */
 export type Raised = {
   level: MessageLevel;
   text: { sentence: string } | { refusal: Refusal };
@@ -101,6 +108,7 @@ export type Raised = {
   key?: string;
   action?: EntryAction;
   onDismiss?: () => void;
+  inferenceJob?: InferenceJob;
 } & ({ kind: Exclude<RaisedKind, "job">; retell?: never } | { kind: "job"; retell: boolean });
 
 export interface NotificationsSlice {
@@ -122,11 +130,11 @@ export interface NotificationsSlice {
    * another text is a new entry that takes the key, the earlier one staying listed. With no key,
    * or none standing on it, a listed entry standing on no key of the same kind, level, text and
    * context raises its count and takes the key. Anything else is a new entry, announced once. An
-   * entry raised again carries the latest raise's action and `onDismiss`.
+   * entry raised again carries the latest raise's action, `onDismiss` and inference job.
    */
   raiseNotification: (raised: Raised) => void;
   /** End what stands on `key`: its entry stays listed until dismissed, standing on no key,
-   *  offering no action and running nothing when dismissed. */
+   *  offering no action and running nothing when dismissed, and keeping its inference job. */
   releaseNotification: (key: string) => void;
   /** Take the entry `id` names off the list, then run its `onDismiss`; nothing for an id no
    *  listed entry carries. */
@@ -208,7 +216,17 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
       };
     }),
 
-  raiseNotification: ({ kind, level, text, context, key, action, onDismiss, retell }) =>
+  raiseNotification: ({
+    kind,
+    level,
+    text,
+    context,
+    key,
+    action,
+    onDismiss,
+    inferenceJob,
+    retell,
+  }) =>
     set((s) => {
       const said: EntryText =
         "refusal" in text ? { refusals: [text.refusal] } : { sentence: text.sentence };
@@ -224,7 +242,9 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         );
       const replaced = (next: Partial<NotificationEntry>) => ({
         notifications: s.notifications.map((e) =>
-          e === standing ? ({ ...e, key, action, onDismiss, ...next } as NotificationEntry) : e,
+          e === standing
+            ? ({ ...e, key, action, onDismiss, inferenceJob, ...next } as NotificationEntry)
+            : e,
         ),
       });
       const standingJob = kind === "job" && !!standing;
@@ -247,6 +267,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         context,
         action,
         onDismiss,
+        inferenceJob,
         announcement: { text: textOf(said), level },
         ...said,
       } as NotificationEntry;

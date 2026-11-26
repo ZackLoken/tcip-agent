@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api/client";
 import { inferenceApi, openInferenceStream, resultsApi } from "@/api/inference";
 import { type InferenceJob, type InferenceJobs, NOTHING_STATED } from "@/api/types.generated";
-import { NotificationsLiveRegion } from "@/components/Notifications";
+import { NotificationsLiveRegion, NotificationsPane } from "@/components/Notifications";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";
 import { mockDatasetTree } from "@/test/datasetTree";
@@ -472,7 +472,7 @@ describe("InferenceTab bucket refusals", () => {
     waitFor(() => within(mountOf(date)).getByTestId("entry-in-place"));
 
   /** The Watch the refusal shown in place as `line` offers there. */
-  const watchIn = (line: HTMLElement) => within(line).getByRole("button", { name: "Watch" });
+  const watchIn = (line: HTMLElement) => within(line).getByRole("button", { name: /^Watch\b/ });
 
   /** The dismiss control of the entry shown in place, `line`. */
   const dismissIn = (line: HTMLElement) => within(line).getByRole("button", { name: /^Dismiss: / });
@@ -581,6 +581,75 @@ describe("InferenceTab bucket refusals", () => {
     ]);
   });
 
+  /** Render the tab, select both dates and Run, each date's launch refused naming another job;
+   *  answer each date's refused job by that date. */
+  async function refuseBothDates(): Promise<Record<string, string>> {
+    mockTree();
+    const { bucket_exists: first, failing_bucket_exists: second } = INFERENCE_ANSWERS;
+    const refusals: Record<string, Error> = {
+      [DS_DATE]: await thrown(first),
+      [DS_UNPUBLISHED_DATE]: await thrown(second),
+    };
+    vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
+      Promise.reject(refusals[body.date]),
+    );
+
+    renderBesideListings(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_DATE }));
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_UNPUBLISHED_DATE }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    return {
+      [DS_DATE]: first.body.detail.job.job_id,
+      [DS_UNPUBLISHED_DATE]: second.body.detail.job.job_id,
+    };
+  }
+
+  it("names each of two refused dates' Watch by its label, its job and its date, the two names apart", async () => {
+    const jobOf = await refuseBothDates();
+    const [first, second] = [DS_DATE, DS_UNPUBLISHED_DATE];
+    expect(jobOf[first]).not.toBe(jobOf[second]);
+
+    for (const [date, other] of [
+      [first, second],
+      [second, first],
+    ]) {
+      const watch = watchIn(await lineOf(date));
+      expect(watch).toHaveTextContent(/^Watch$/);
+      expect(watch).toHaveAccessibleName(expect.stringMatching(/^Watch /));
+      expect(watch).toHaveAccessibleName(expect.stringContaining(jobOf[date]));
+      expect(watch).toHaveAccessibleName(expect.stringContaining(date));
+      expect(watch).not.toHaveAccessibleName(expect.stringContaining(jobOf[other]));
+    }
+  });
+
+  it("shows on each of two refused dates' lines the date it is for, in words on the screen", async () => {
+    await refuseBothDates();
+
+    for (const date of [DS_DATE, DS_UNPUBLISHED_DATE]) {
+      expect(within(await lineOf(date)).getByText(date)).toBeVisible();
+    }
+  });
+
+  it("offers Watch on a refusal that landed while the tab was away, once the person returns", async () => {
+    const launch = Promise.withResolvers<InferenceJob>();
+    vi.spyOn(inferenceApi, "launch").mockReturnValue(launch.promise);
+    const refusal = await existsRefusal();
+    const { unmount } = await launchOneRefused();
+    await waitFor(() => expect(inferenceApi.launch).toHaveBeenCalledTimes(1));
+
+    unmount();
+    await act(() => Promise.resolve(launch.reject(refusal)));
+    const { unmount: leaveAgain } = render(<InferenceTab />);
+
+    fireEvent.click(watchIn(await lineOf(DS_DATE)));
+    expect(await screen.findByText(REFUSED.job.bucket)).toBeInTheDocument();
+
+    leaveAgain();
+    expect(refusalEntries()).toEqual([expect.objectContaining({ key: undefined })]);
+  });
+
   it("removes a dismissed refusal from the tab and the area, focus on Run", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(await existsRefusal());
     await launchOneRefused();
@@ -651,17 +720,19 @@ describe("InferenceTab bucket refusals", () => {
     expect(refusalEntries()).toEqual([expect.objectContaining({ key: undefined })]);
   });
 
-  it("shows a launch failure of another kind in place for its date with no Watch, until that date launches again", async () => {
+  it("shows a launch failure of another kind in place under its date, said once, with no Watch, until that date launches again", async () => {
     const missing = INFERENCE_ANSWERS.missing_checkpoint;
     vi.spyOn(inferenceApi, "launch")
       .mockRejectedValueOnce(await thrown(missing))
       .mockResolvedValue(LAUNCHED);
-    const sentence = `Inference launch failed for ${DS_DATE}: ${missing.body.detail}`;
+    const sentence = `Inference launch failed: ${missing.body.detail}`;
     await launchOneRefused();
 
     const line = await lineOf(DS_DATE);
+    expect(within(line).getByText(DS_DATE)).toBeVisible();
+    expect(line.textContent?.split(DS_DATE)).toHaveLength(2);
     expect(line).toHaveTextContent(sentence);
-    expect(within(line).queryByRole("button", { name: "Watch" })).toBeNull();
+    expect(within(line).queryByRole("button", { name: /^Watch\b/ })).toBeNull();
     expect(entriesSaying(sentence)).toEqual([
       expect.objectContaining({
         kind: "failure",
@@ -698,6 +769,82 @@ describe("InferenceTab bucket refusals", () => {
     expect(screen.queryByTestId("entry-in-place")).toBeNull();
     expect(refusalEntries()).toEqual([expect.objectContaining({ key: undefined })]);
   });
+
+  it("names each of two dates' launch failures of one reason by its date, under Run and in the area, the names apart", async () => {
+    mockTree();
+    const missing = INFERENCE_ANSWERS.missing_checkpoint;
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(await thrown(missing));
+    const sentence = `Inference launch failed: ${missing.body.detail}`;
+    renderBesideListings(<InferenceTab />);
+    render(<NotificationsPane />);
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_DATE }));
+    fireEvent.click(screen.getByRole("checkbox", { name: DS_UNPUBLISHED_DATE }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    const dates = [DS_DATE, DS_UNPUBLISHED_DATE];
+    const lines = await Promise.all(dates.map(lineOf));
+    expect(entriesSaying(sentence)).toEqual([
+      expect.objectContaining({ context: { project: TEST_PROJECT.id, target: DS_DATE } }),
+      expect.objectContaining({
+        context: { project: TEST_PROJECT.id, target: DS_UNPUBLISHED_DATE },
+      }),
+    ]);
+    const area = within(screen.getByRole("region", { name: "Notifications" }));
+    const areaNames = area
+      .getAllByRole("button", { name: /^Dismiss: / })
+      .map((b) => b.getAttribute("aria-label"));
+    for (const [names, where] of [
+      [lines.map((line) => dismissIn(line).getAttribute("aria-label")), "under Run"],
+      [areaNames, "in the area"],
+    ] as const) {
+      expect(new Set(names).size, where).toBe(2);
+      for (const date of dates) {
+        expect(
+          names.filter((name) => name?.includes(date)),
+          where,
+        ).toHaveLength(1);
+      }
+    }
+  });
+
+  it.each([
+    [
+      "a change of model",
+      () =>
+        fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
+          target: { value: OTHER_MODEL.entry.checkpoint_path },
+        }),
+    ],
+    [
+      "leaving the tab and returning",
+      (unmount: () => void) => {
+        unmount();
+        render(<InferenceTab />);
+      },
+    ],
+  ])(
+    "takes a launch failure of another kind off its place under Run at %s, its entry kept on no key",
+    async (_event, happen) => {
+      const missing = INFERENCE_ANSWERS.missing_checkpoint;
+      vi.spyOn(inferenceApi, "launch").mockRejectedValue(await thrown(missing));
+      const { unmount } = await launchOneRefused();
+      await lineOf(DS_DATE);
+
+      happen(unmount);
+
+      expect(await screen.findByRole("checkbox", { name: DS_DATE })).toBeInTheDocument();
+      expect(screen.queryByTestId("entry-in-place")).toBeNull();
+      expect(useStore.getState().notifications).toEqual([
+        expect.objectContaining({
+          kind: "failure",
+          key: undefined,
+          context: { project: TEST_PROJECT.id, target: DS_DATE },
+        }),
+      ]);
+    },
+  );
 
   it("disables the launch button while onLaunch's loop is in flight", async () => {
     const launch = Promise.withResolvers<InferenceJob>();

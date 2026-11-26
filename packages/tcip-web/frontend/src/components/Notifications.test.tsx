@@ -13,6 +13,7 @@ import {
 import { dismissLabel } from "@/lib/dismissLabel";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
+import type { EntryAction } from "@/store/slices/notifications";
 import { announcements } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS } from "@/test/sessions";
@@ -234,11 +235,7 @@ describe("the notifications button's glyph", () => {
 });
 
 /** Raise a failure stating `sentence` for the project `project`, standing on no key. */
-function raiseFailure(
-  sentence: string,
-  project: string,
-  action?: { label: string; run: () => void },
-) {
+function raiseFailure(sentence: string, project: string, action?: EntryAction) {
   act(() =>
     useStore.getState().raiseNotification({
       kind: "failure",
@@ -335,6 +332,23 @@ describe("a failure", () => {
 
     act(() => useStore.getState().holdCondition("connection", CONNECTION_LOST));
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent(/Error, condition, .*, ongoing/);
+  });
+
+  it("offers an action stating what it acts on under its label and that, its label alone shown", () => {
+    const run = vi.fn();
+    renderOpenHost();
+    raiseFailure("Could not open the project.", "valley", {
+      label: "Retry",
+      actsOn: "opening Valley farm",
+      run,
+    });
+
+    const retry = within(screen.getByRole("listitem")).getByRole("button", {
+      name: "Retry opening Valley farm",
+    });
+    expect(retry).toHaveTextContent(/^Retry$/);
+    fireEvent.click(retry);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
 
