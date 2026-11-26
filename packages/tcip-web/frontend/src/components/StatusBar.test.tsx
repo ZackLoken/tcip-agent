@@ -4,9 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { StatusBar } from "@/components/StatusBar";
 import { useStore } from "@/store";
 import { LANDED, loadOf } from "@/test/annotate";
-import { PANEL_EVENTS } from "@/test/panelEvents";
 import { GROUPED_SELECTION, RAW_SELECTION } from "@/test/store";
-import { AGENT_CLIENT } from "@/test/training";
 
 const initialStoreState = useStore.getState();
 
@@ -16,26 +14,6 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
-
-describe("StatusBar agent activity footer", () => {
-  const { panel, event } = PANEL_EVENTS.labels_written;
-
-  it("names the declared harness and the written image, not a generic Agent label", async () => {
-    useStore.getState().pushAgentActivity(panel, event, AGENT_CLIENT);
-    render(<StatusBar />);
-
-    expect(
-      await screen.findByText(`${AGENT_CLIENT}: labels written on ${event.name}`),
-    ).toBeInTheDocument();
-  });
-
-  it("reads Process for a write the sender declared no harness on", async () => {
-    useStore.getState().pushAgentActivity(panel, event, null);
-    render(<StatusBar />);
-
-    expect(await screen.findByText(`Process: labels written on ${event.name}`)).toBeInTheDocument();
-  });
-});
 
 const SELECTED_CAPTURE = RAW_SELECTION;
 const IN_VIEW = RAW_SELECTION.images[0].path;

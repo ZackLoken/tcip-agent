@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-import { PANEL_EVENT_LABELS_WRITTEN } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { useStore } from "@/store";
 import { selectCanvasMatchesDataset } from "@/store/slices/canvas";
@@ -27,7 +26,6 @@ export function StatusBar() {
   const pointCount = useStore((s) => s.canvas.points.length);
   const activeTab = useStore((s) => s.gui.active_tab);
   const sessionTracking = useStore((s) => s.sessionTracking);
-  const agentActivity = useStore((s) => s.agentActivity);
 
   // Per-image timer. Compute the elapsed seconds inside the interval (not in the
   // render body) so there's no Date.now()-during-render hack.
@@ -43,16 +41,6 @@ export function StatusBar() {
     const id = window.setInterval(compute, 1000);
     return () => window.clearInterval(id);
   }, [activeTab, sessionTracking.imageEnterTimeMs]);
-
-  // Briefly surface the latest agent panel push (e.g. the agent writing labels).
-  const [showAgent, setShowAgent] = useState(false);
-  useEffect(() => {
-    if (!agentActivity) return;
-    // agentActivity is a fresh object per push, so depending on it fires once per event.
-    setShowAgent(true);
-    const id = window.setTimeout(() => setShowAgent(false), 8000);
-    return () => window.clearTimeout(id);
-  }, [agentActivity]);
 
   return (
     <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[12px] text-tcip-muted shrink-0">
@@ -81,13 +69,6 @@ export function StatusBar() {
       )}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       <div className="flex-1" />
-      {showAgent && agentActivity && (
-        <span className="text-tcip-accent">
-          {`${agentActivity.client ?? "Process"}: ${agentActivity.event.event_type.replaceAll("_", " ")}`}
-          {agentActivity.event.event_type === PANEL_EVENT_LABELS_WRITTEN &&
-            ` on ${agentActivity.event.name}`}
-        </span>
-      )}
       {/* Project breadcrumb, lower-right: project (recent) · date (switch) · Switch Project (all). */}
       <ProjectBreadcrumb />
     </div>

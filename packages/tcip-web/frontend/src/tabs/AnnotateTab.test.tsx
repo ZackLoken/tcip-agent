@@ -44,7 +44,7 @@ import { BAND_ANSWERS } from "@/test/bands";
 import { dockWithNotificationsOpen, measureWindow, PANE_FOCUS } from "@/test/dock";
 import { LABEL_ANSWERS, servedAnnotation, UNSTORED } from "@/test/labels";
 import { PANEL_EVENTS } from "@/test/panelEvents";
-import { PROJECT_FIXTURES } from "@/test/projectRecords";
+import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import {
@@ -57,7 +57,6 @@ import {
   TEST_PROJECT,
   testProject,
 } from "@/test/store";
-import { AGENT_CLIENT } from "@/test/training";
 
 // Konva needs a real 2D canvas; these tests exercise label I/O ordering and
 // store->canvas prop flow, not drawing. Render Konva shapes as inspectable divs
@@ -1598,37 +1597,52 @@ describe("AnnotateTab host size", () => {
   });
 });
 
-describe("AnnotateTab labels-written conflict sentence", () => {
-  // The produced event, naming the first photograph of the produced capture, the image in view.
-  const written = PANEL_EVENTS.labels_written.event;
+describe("AnnotateTab labels written by the agent", () => {
+  // The produced saves, each naming the first photograph of the produced capture, the image in
+  // view: one declaring no client, and one declaring the agent's.
+  const { labels_written: written, labels_written_declared: declared } = PANEL_EVENTS;
+  // Another project than the one each save was posted for.
+  const ridge = openedAs(PICKER.ridge).project;
 
-  it("names the declared harness that wrote the current image's labels", async () => {
-    expect(written.image_path).toBe(IMG1);
+  /** Render the tab with `ridge` open and wait for the image in view to load. */
+  async function renderOpenOnRidge() {
+    expect(ridge.id).not.toBe(written.project_id);
+    useStore.setState({ openProject: ridge });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
+  }
+
+  it("names the declared harness that wrote the current image's labels, under the save's project", async () => {
+    expect(declared.event.image_path).toBe(IMG1);
+    const { agent_client_name: name, agent_client_version: version } = declared.identity;
+    await renderOpenOnRidge();
 
     act(addBox);
     act(() => {
-      useStore.getState().pushAgentActivity("annotate", written, AGENT_CLIENT);
+      useStore.getState().pushAgentActivity(declared);
     });
 
     const [entry] = onCanvas();
     expect(entry).toHaveTextContent(
-      `${AGENT_CLIENT} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
+      `${name} ${version} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
     );
     expect(within(entry).getByRole("button", { name: "Reload" })).toBeInTheDocument();
-    expect(listed()).toEqual([expect.objectContaining({ kind: "notice", level: "warning" })]);
+    expect(listed()).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        level: "warning",
+        context: { project: declared.project_id, target: IMG1_NAME },
+      }),
+    ]);
   });
 
-  it("names a process when the write declared no actor", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
+  it("names a process when the write declared no actor, under the save's project", async () => {
+    await renderOpenOnRidge();
 
     act(addBox);
     act(() => {
-      useStore.getState().pushAgentActivity("annotate", written, null);
+      useStore.getState().pushAgentActivity(written);
     });
 
     expect(
@@ -1636,6 +1650,24 @@ describe("AnnotateTab labels-written conflict sentence", () => {
         "A process just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.",
       ),
     ).toBeInTheDocument();
+    expect(listed()).toEqual([
+      expect.objectContaining({ context: { project: written.project_id, target: IMG1_NAME } }),
+    ]);
+  });
+
+  it("loads the image in view again over a clean canvas", async () => {
+    expect(written.event.image_path).toBe(IMG1);
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(() => {
+      useStore.getState().pushAgentActivity(written);
+    });
+
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    expect(loadSpy).toHaveBeenLastCalledWith(IMG1);
+    expect(listed()).toEqual([]);
   });
 });
 
