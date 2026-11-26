@@ -471,7 +471,10 @@ class CanvasStateRequest(BaseModel):
 
 
 class Banner(BaseModel):
-    """The ``banner`` panel event: a note ``text`` the GUI shows above the panel's tab."""
+    """The ``banner`` panel event: a note ``text`` listed in the GUI's notifications.
+
+    The note stays listed until a person dismisses it.
+    """
 
     event_type: Literal["banner"] = "banner"
     text: str

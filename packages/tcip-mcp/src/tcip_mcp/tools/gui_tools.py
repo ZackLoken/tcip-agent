@@ -43,9 +43,10 @@ def push_panel_event(
         panel: Target panel: one per GUI tab, or 'app' for app-level events like
             annotate_focus.
         event: One of the four panel events, told apart by its ``event_type``: ``banner`` (its
-            ``text`` shows as a quiet note above that panel's tab), ``labels_written`` (the image
-            at ``image_path`` had its labels written), ``annotate_focus`` (a focus as
-            ``focus_human_attention`` builds it) and ``canvas_state_request``.
+            ``text`` is listed in the GUI's notifications, naming the panel, until a person
+            dismisses it), ``labels_written`` (the image at ``image_path`` had its labels
+            written), ``annotate_focus`` (a focus as ``focus_human_attention`` builds it) and
+            ``canvas_state_request``.
 
     """
     from tcip_mcp.web_client import post_panel_event

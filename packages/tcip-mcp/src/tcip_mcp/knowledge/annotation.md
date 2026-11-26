@@ -123,7 +123,7 @@ bearing (denormalizing, cropping, drawing); read the frame and the pixels throug
 | `export_labels` | Write a dataset's label documents and flags, as stored, into a new labels zip |
 | `import_labels` | Write a labels zip `export_labels` wrote into a dataset holding the same images |
 | `propose_annotations` | Run a named proposal engine over an image, whole-frame or over named grid cells |
-| `push_panel_event` | Push one of the four panel events (`banner`, a note shown above a tab; `labels_written`; `annotate_focus`; `canvas_state_request`) to a GUI panel over the tcip-web backend for this server's project; delivered only while the GUI has that project open |
+| `push_panel_event` | Push one of the four panel events (`banner`, a note listed in the GUI's notifications until a person dismisses it; `labels_written`; `annotate_focus`; `canvas_state_request`) to a GUI panel over the tcip-web backend for this server's project; delivered only while the GUI has that project open |
 | `prioritize_review_queue` | Rank images by an active-learning scorer `scorer_catalog` lists for the next review batch, skipping those marked finished for a subject |
 | `scorer_catalog` | List each scorer a review queue may name, with the values its block states |
 | `triage_predictions` | Sort a registered checkpoint's own predictions into a needs-review queue by a stated confidence band and its rationale, beside the images whose predictions carry no confidence at all; writes nothing |
