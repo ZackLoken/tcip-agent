@@ -865,7 +865,7 @@ export function AnnotateTab() {
         // dirty, and offer the choice wherever the person meets the image again.
         if (inPlace || stillInView) {
           failed(
-            `${conflict.message} Reload to load the latest (discards your unsaved edits), or keep editing.`,
+            `${conflict.message}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
             "reload",
           );
         } else {

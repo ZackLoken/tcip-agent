@@ -1385,7 +1385,7 @@ describe("AnnotateTab entries on the canvas", () => {
         name: (name) =>
           name.startsWith(
             dismissLabel(
-              `${CONFLICT_SENTENCE} Reload to load the latest (discards your unsaved edits), or keep editing.`,
+              `${CONFLICT_SENTENCE}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
             ),
           ),
       }),
