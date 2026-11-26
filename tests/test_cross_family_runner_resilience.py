@@ -1439,6 +1439,12 @@ def test_a_second_run_under_the_same_question_and_family_is_refused_and_changes_
     seen.clear()
     out = tmp_path / "out"
     first = _snapshot(out)
+    codex_meta = json.loads(
+        (out / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert codex_meta["rerun"] is False
 
     _name_run(tmp_path, monkeypatch, "codex")
     with pytest.raises(SystemExit) as refused:
@@ -1499,18 +1505,23 @@ def test_a_run_over_the_files_of_a_launch_that_raised_is_refused(
     assert _snapshot(out) == first
 
 
-@pytest.mark.parametrize("holds_a_file", [True, False], ids=["file", "empty"])
+@pytest.mark.parametrize("after_a_run", [True, False], ids=["run", "empty"])
 def test_run_one_into_a_family_folder_that_exists_is_refused_and_leaves_it_as_it_was(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, holds_a_file: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_a_run: bool
 ) -> None:
-    """A direct call into an existing family folder, empty or not, launches nothing."""
+    """A direct call into an existing family folder, a run's or an empty one, launches nothing.
+
+    The empty folder is the one input no run produces.
+    """
     seen: list[dict] = []
     _stand_in_harness(monkeypatch, recording_launch(seen))
     out = tmp_path / "out"
     folder = out / "qid" / "as-shipped" / "codex"
-    folder.mkdir(parents=True)
-    if holds_a_file:
-        (folder / "kept.txt").write_text("kept", encoding="utf-8")
+    if after_a_run:
+        _run_codex_in(tmp_path, out)
+        seen.clear()
+    else:
+        folder.mkdir(parents=True)
     first = _snapshot(out)
 
     with pytest.raises(SystemExit) as refused:
@@ -1528,7 +1539,7 @@ def test_a_family_named_twice_is_refused_before_anything_is_made(
     seen = _set_up_runs(tmp_path, monkeypatch)
     _name_run(tmp_path, monkeypatch, "codex,antigravity,codex")
 
-    with pytest.raises(SystemExit, match="codex"):
+    with pytest.raises(SystemExit, match="named twice"):
         cross_family_ask.main()
 
     assert seen == []

@@ -848,8 +848,9 @@ def run_one(
     commit_at_start = checkout_commit(cwd)
     condition = CONDITIONS[condition_name]
     run_dir = family_run_dir(out_root, question_id, condition_name, family)
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
     try:
-        run_dir.mkdir(parents=True)
+        run_dir.mkdir()
     except FileExistsError as exc:
         raise existing_run_refusal(run_dir) from exc
 
