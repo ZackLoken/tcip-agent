@@ -221,7 +221,7 @@ export function AnnotateTab() {
   const leftForRef = useRef<string | null>(null);
   const canvasColumnRef = useRef<HTMLDivElement>(null);
   const agentActivity = useStore((s) => s.agentActivity);
-  // The activity already held when this mount began, which this mount's own load reads past.
+  // The activity already held when this mount began, read past whether the mount loads or keeps.
   const heldAtMountRef = useRef(agentActivity?.seq);
 
   const imageInView = currentImage(dataset);
@@ -844,6 +844,7 @@ export function AnnotateTab() {
       // Only a failure of the document still loaded stands in place over the canvas; one for an
       // image since left or reloaded is listed in the notifications area alone, naming it.
       const inPlace = interactive && stillLoaded();
+      const stillInView = stillLoaded() && liveImage()?.path === loaded.image_path;
       const failed = (sentence: string, slot?: "document" | "reload") =>
         tell("failure", "error", sentence, loaded.name, slot && canvasKey(slot, loaded.image_path));
       if (hold.controller.signal.aborted) {
@@ -861,8 +862,8 @@ export function AnnotateTab() {
       const conflict = refusalOf<VersionConflictRefusal>(e, VERSION_CONFLICT);
       if (conflict) {
         // Someone else wrote this file since it loaded: never clobber their work, keep the canvas
-        // dirty.
-        if (inPlace) {
+        // dirty, and offer the choice wherever the person meets the image again.
+        if (inPlace || stillInView) {
           failed(
             `${conflict.message} Reload to load the latest (discards your unsaved edits), or keep editing.`,
             "reload",
@@ -886,9 +887,9 @@ export function AnnotateTab() {
       releaseSave(hold);
     }
 
-    // Dropped: an answer without its hold (loaded over or canceled), for an unmounted editor, or
-    // for an image no longer owning the canvas or selected.
-    if (!owned || !mountedRef.current || !stillLoaded()) return null;
+    // Dropped: an answer without its hold (loaded over or canceled), or for an image no longer
+    // owning the canvas or selected; a held canvas took no edit, whichever editor is mounted.
+    if (!owned || !stillLoaded()) return null;
     if (!loadedFor(useStore.getState().canvas, liveImage()?.path)) return null;
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
@@ -946,13 +947,14 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentActivity?.seq]);
 
-  /** Adopt a loaded or saved document as the canvas, and record what it says of the dataset
-   *  subject on the image in view for the image filter. */
+  /** Adopt a loaded or saved document of the image in view as the canvas, and record what it says
+   *  of the dataset subject on that image for the image filter. */
   function adoptLabels(labels: LoadedLabels) {
     loadLabels(labels);
-    const subject = dataset?.subject;
-    if (currentImageName && subject) {
-      setImageState(currentImageName, labels.completion[subject]);
+    const live = useStore.getState().gui.dataset;
+    const image = currentImage(live);
+    if (image && live?.subject) {
+      setImageState(image.name, labels.completion[live.subject]);
     }
   }
 
@@ -988,9 +990,22 @@ export function AnnotateTab() {
   // `loadAgain` asked for.
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
-    const reload = landedRef.current && canvasImage(useStore.getState().canvas) === imgPath;
+    const live = useStore.getState().canvas;
+    const reload = landedRef.current && canvasImage(live) === imgPath;
     const arriving = leftForRef.current !== imgPath;
+    // A mount coming to the image whose edits the store kept unsaved, or held by a save still in
+    // flight, keeps that canvas rather than saving it again and loading over it.
+    const keeping =
+      leftForRef.current === null &&
+      loadedFor(live, imgPath) !== null &&
+      (live.dirty || live.saving !== null);
     leftForRef.current = imgPath;
+    if (keeping) {
+      loadedTickRef.current = reloadTick;
+      landedRef.current = true;
+      startImageSessionTracking(currentImageName);
+      return;
+    }
 
     // Already displaying this image and no reload asked for: an unrelated store change (a WS
     // snapshot, a mode or subject toggle) must not re-read the labels and discard unsaved edits.
@@ -1067,7 +1082,7 @@ export function AnnotateTab() {
     return () => {
       flushLeaving();
       postHeldContributions();
-      mountedRef.current = false; // the departing save may still land, but adopts nothing
+      mountedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

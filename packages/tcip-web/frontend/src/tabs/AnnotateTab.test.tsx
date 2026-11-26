@@ -497,7 +497,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
   });
 
-  describe("a save in flight when the editor unmounts and a new one is still loading", () => {
+  describe("a save in flight when the editor unmounts and a new one mounts", () => {
     async function departing() {
       const first = render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -512,28 +512,59 @@ describe("AnnotateTab save/load race", () => {
       pressSave();
       await flush();
       first.unmount();
-      loadSpy.mockImplementation(() => new Promise(() => {}));
       render(<AnnotateTab />);
-      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
       await flush();
       return { answer: save.resolve, signal };
     }
 
-    it("is canceled by the toolbar of the new editor", async () => {
+    it("is kept by the new editor, which sends no save and loads nothing over it", async () => {
+      await departing();
+      expect(loadSpy).toHaveBeenCalledTimes(1);
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(useStore.getState().canvas.saving).not.toBeNull();
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    });
+
+    it("is canceled by the toolbar of the new editor, which keeps the edits", async () => {
       const { signal } = await departing();
       expect(useStore.getState().canvas.saving).not.toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "toolbar-cancel-save" }));
       expect(signal.aborted).toBe(true);
       expect(useStore.getState().canvas.saving).toBeNull();
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      expect(useStore.getState().canvas.dirty).toBe(true);
     });
 
-    it("lands without adopting anything into the canvas the new editor is loading", async () => {
+    it("lands into the canvas the new editor kept, which adopts its answer", async () => {
       const { answer } = await departing();
-      const held = useStore.getState().canvas.boxes;
-      await act(() => Promise.resolve(answer(LANDED.cleared)));
-      expect(useStore.getState().canvas.boxes).toBe(held);
+      await act(() => Promise.resolve(answer(LANDED.box)));
       expect(useStore.getState().canvas.saving).toBeNull();
+      expect(useStore.getState().canvas.dirty).toBe(false);
+      expect(useStore.getState().canvas.loaded?.base_mtime).toBe(LANDED.box.document.base_mtime);
     });
+  });
+
+  it("records the state a save from an unmounted editor adopts on the image it saved, not the one the editor mounted on", async () => {
+    const [first, second] = RAW_SELECTION.images.map((image) => image.name);
+    act(() => changeSelection({ current_image_index: 1 }));
+    const view = render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(() => changeSelection({ current_image_index: 0 }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    const states = () => useStore.getState().annotateUi.imageStates;
+    const saved = LANDED.box.document.completion[SUBJECT];
+    expect(states()[first]).not.toBe(saved);
+    const secondBefore = states()[second];
+    act(addBox);
+    const pending = heldSaves();
+
+    view.unmount();
+    await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
+
+    expect(states()[first]).toBe(saved);
+    expect(states()[second]).toBe(secondBefore);
   });
 
   it("canceling reports nothing over an image loaded after the save began", async () => {
@@ -557,6 +588,7 @@ describe("AnnotateTab save/load race", () => {
   });
 
   describe("a save from an editor that has since unmounted", () => {
+    /** Unmount over a save held in flight, mount again, and try an edit there. */
     async function remountedWithEdit() {
       const first = render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -567,29 +599,32 @@ describe("AnnotateTab save/load race", () => {
       await flush();
       first.unmount();
       render(<AnnotateTab />);
-      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
       await flush();
       act(addBox);
       return pending;
     }
 
-    it("does not overwrite what the remounted editor has since changed", async () => {
+    it("leaves the remounted editor no edit while it holds the canvas, and one once it is adopted", async () => {
       const pending = await remountedWithEdit();
-      const edited = useStore.getState().canvas.boxes;
-      await act(() => Promise.resolve(pending[0].resolve(LANDED.cleared)));
-      expect(useStore.getState().canvas.boxes).toBe(edited);
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
+      expect(useStore.getState().canvas.dirty).toBe(false);
+      act(addBox);
+      expect(useStore.getState().canvas.boxes).toHaveLength(2);
       expect(useStore.getState().canvas.dirty).toBe(true);
     });
 
-    it("does not release the hold of the remounted editor's own save", async () => {
+    it("sends no save of the remounted editor while it holds the canvas, and the next save carries its answer's version", async () => {
       const pending = await remountedWithEdit();
       pressSave();
       await flush();
-      expect(pending).toHaveLength(2);
+      expect(pending).toHaveLength(1);
       await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
-      expect(useStore.getState().canvas.saving).not.toBeNull();
       act(addBox);
-      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      pressSave();
+      await flush();
+      expect(pending).toHaveLength(2);
+      expect(saveSpy.mock.calls[1][0].base_mtime).toBe(LANDED.box.document.base_mtime);
     });
   });
 
@@ -647,7 +682,8 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
 
-    // Both the interactive save and the navigation flush save 409 late.
+    // The interactive save 409s late; the navigation's flush sent none while it held the canvas.
+    expect(pending).toHaveLength(1);
     const conflict = await versionConflict();
     await act(() => {
       for (const save of pending) save.reject(conflict);
