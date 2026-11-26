@@ -165,14 +165,16 @@ describe("ProjectShell agent activity", () => {
     expect(notices()).toEqual([]);
   });
 
-  it("counts a live save sent again at connect once", async () => {
+  it("does not push a live save to the activity again when it is sent at connect", async () => {
     await mountOnCapture();
-
     deliver(written);
+    const taken = page.useStore.getState().agentActivity;
+    expect(taken?.envelope).toEqual(written);
+
     reconnect("annotate");
     deliver(PANEL_EVENTS_AT_CONNECT.labels_written);
 
-    expect(notices()).toEqual([expect.objectContaining({ count: 1 })]);
+    expect(page.useStore.getState().agentActivity).toBe(taken);
   });
 
   it("lists a save under the project it was posted for, not the one open", async () => {
