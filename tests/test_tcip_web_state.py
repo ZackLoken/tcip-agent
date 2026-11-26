@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, NoReturn
 import pytest
 
 import tcip_store
-from tcip_mcp.agent_identity import RecordedIdentity
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
@@ -27,7 +26,6 @@ from tcip_web.state import (
     Held,
     NoProjectOpenError,
     OpenProject,
-    PanelEnvelope,
     ProjectNotOpenError,
     StateStore,
 )
@@ -35,6 +33,8 @@ from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from fastapi.testclient import TestClient
 
     from tcip_store import Key, Txn
 
@@ -394,25 +394,24 @@ def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
 
 
 def test_retained_events_are_the_open_projects_and_go_when_another_opens(
-    tmp_path: Path,
+    opened_client: TestClient, opened: OpenProject, tmp_path: Path
 ) -> None:
-    store = StateStore()
-    proj_a = named_project(tmp_path / "A", "A")
-    proj_b = named_project(tmp_path / "B", "B")
-    asyncio.run(store.open_project(proj_a))
-    store.retain_event(
-        PanelEnvelope(
-            panel="meta",
-            event=Banner(text="for a"),
-            event_id="for_a#1",
-            identity=RecordedIdentity(),
-        )
-    )
-    assert [e.event_id for e in store.retained_events("meta")] == ["for_a#1"]
+    from tcip_mcp.web_client import PanelPost
+    from tcip_web.state import store
 
-    asyncio.run(store.open_project(proj_b))
+    posted = opened_client.post(
+        "/api/events/meta",
+        json=PanelPost(
+            event=Banner(text="for a"), project_id=opened.id
+        ).model_dump(mode="json"),
+    )
+    assert posted.status_code == 200, posted.text
+    retained = store.retained_events("meta")
+    assert [e.event for e in retained] == [Banner(text="for a")]
+
+    asyncio.run(store.open_project(named_project(tmp_path.parent / "B", "B")))
     assert store.retained_events("meta") == []
-    asyncio.run(store.open_project(proj_a))
+    asyncio.run(store.open_project(opened))
     assert store.retained_events("meta") == []
 
 

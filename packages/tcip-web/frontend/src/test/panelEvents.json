@@ -1,79 +1,266 @@
 {
-  "banner": {
-    "panel": "results",
-    "event": { "event_type": "banner", "text": "The agent is computing the counts." },
-    "event_id": "<event_id n0>",
-    "identity": {
-      "agent_client_name": null,
-      "agent_client_version": null,
-      "agent_session": null,
-      "terminal_session": null
-    }
-  },
-  "labels_written": {
-    "panel": "annotate",
-    "event": {
-      "event_type": "labels_written",
-      "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
-      "name": "img1.jpg"
+  "live": {
+    "banner": {
+      "panel": "results",
+      "event": { "event_type": "banner", "text": "The agent is computing the counts." },
+      "event_id": "<event_id n0>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
     },
-    "event_id": "<event_id n1>",
-    "identity": {
-      "agent_client_name": null,
-      "agent_client_version": null,
-      "agent_session": null,
-      "terminal_session": null
-    }
-  },
-  "annotate_focus": {
-    "panel": "app",
-    "event": {
-      "dataset_root": "/scratch/workspace/valley/ds",
-      "subject": "bud",
-      "date": "2026-01-01",
-      "bucket": null,
-      "event_type": "annotate_focus",
-      "image_index": 0,
-      "mode": "box",
-      "proposal": null
+    "banner_second": {
+      "panel": "results",
+      "event": { "event_type": "banner", "text": "The counts are written to the results table." },
+      "event_id": "<event_id n1>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
     },
-    "event_id": "<event_id n2>",
-    "identity": {
-      "agent_client_name": null,
-      "agent_client_version": null,
-      "agent_session": null,
-      "terminal_session": null
-    }
-  },
-  "annotate_focus_troubled": {
-    "panel": "app",
-    "event": {
-      "dataset_root": "/scratch/workspace/valley/troubled",
-      "subject": "bud",
-      "date": "2026-01-03",
-      "bucket": null,
-      "event_type": "annotate_focus",
-      "image_index": 0,
-      "mode": "box",
-      "proposal": null
+    "labels_written": {
+      "panel": "annotate",
+      "event": {
+        "event_type": "labels_written",
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "name": "img1.jpg"
+      },
+      "event_id": "<event_id n2>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
     },
-    "event_id": "<event_id n3>",
-    "identity": {
-      "agent_client_name": null,
-      "agent_client_version": null,
-      "agent_session": null,
-      "terminal_session": null
+    "labels_written_second": {
+      "panel": "annotate",
+      "event": {
+        "event_type": "labels_written",
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg",
+        "name": "img2.jpg"
+      },
+      "event_id": "<event_id n3>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
+    },
+    "app_banner": {
+      "panel": "app",
+      "event": { "event_type": "banner", "text": "The agent moved the canvas to another capture." },
+      "event_id": "<event_id n4>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
+    },
+    "annotate_focus": {
+      "panel": "app",
+      "event": {
+        "dataset_root": "/scratch/workspace/valley/ds",
+        "subject": "bud",
+        "date": "2026-01-01",
+        "bucket": null,
+        "event_type": "annotate_focus",
+        "image_index": 0,
+        "mode": "box",
+        "proposal": null
+      },
+      "event_id": "<event_id n5>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
+    },
+    "annotate_focus_troubled": {
+      "panel": "app",
+      "event": {
+        "dataset_root": "/scratch/workspace/valley/troubled",
+        "subject": "bud",
+        "date": "2026-01-03",
+        "bucket": null,
+        "event_type": "annotate_focus",
+        "image_index": 0,
+        "mode": "box",
+        "proposal": null
+      },
+      "event_id": "<event_id n6>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
+    },
+    "canvas_state_request": {
+      "panel": "app",
+      "event": { "event_type": "canvas_state_request" },
+      "event_id": "<event_id n7>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": false
     }
   },
-  "canvas_state_request": {
-    "panel": "app",
-    "event": { "event_type": "canvas_state_request" },
-    "event_id": "<event_id n4>",
-    "identity": {
-      "agent_client_name": null,
-      "agent_client_version": null,
-      "agent_session": null,
-      "terminal_session": null
+  "at_connect": {
+    "banner": {
+      "panel": "results",
+      "event": { "event_type": "banner", "text": "The agent is computing the counts." },
+      "event_id": "<event_id n0>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "banner_second": {
+      "panel": "results",
+      "event": { "event_type": "banner", "text": "The counts are written to the results table." },
+      "event_id": "<event_id n1>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "labels_written": {
+      "panel": "annotate",
+      "event": {
+        "event_type": "labels_written",
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "name": "img1.jpg"
+      },
+      "event_id": "<event_id n2>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "labels_written_second": {
+      "panel": "annotate",
+      "event": {
+        "event_type": "labels_written",
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg",
+        "name": "img2.jpg"
+      },
+      "event_id": "<event_id n3>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "app_banner": {
+      "panel": "app",
+      "event": { "event_type": "banner", "text": "The agent moved the canvas to another capture." },
+      "event_id": "<event_id n4>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "annotate_focus": {
+      "panel": "app",
+      "event": {
+        "dataset_root": "/scratch/workspace/valley/ds",
+        "subject": "bud",
+        "date": "2026-01-01",
+        "bucket": null,
+        "event_type": "annotate_focus",
+        "image_index": 0,
+        "mode": "box",
+        "proposal": null
+      },
+      "event_id": "<event_id n5>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "annotate_focus_troubled": {
+      "panel": "app",
+      "event": {
+        "dataset_root": "/scratch/workspace/valley/troubled",
+        "subject": "bud",
+        "date": "2026-01-03",
+        "bucket": null,
+        "event_type": "annotate_focus",
+        "image_index": 0,
+        "mode": "box",
+        "proposal": null
+      },
+      "event_id": "<event_id n6>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
+    },
+    "canvas_state_request": {
+      "panel": "app",
+      "event": { "event_type": "canvas_state_request" },
+      "event_id": "<event_id n7>",
+      "project_id": "<valley id>",
+      "identity": {
+        "agent_client_name": null,
+        "agent_client_version": null,
+        "agent_session": null,
+        "terminal_session": null
+      },
+      "sent_at_connect": true
     }
   }
 }

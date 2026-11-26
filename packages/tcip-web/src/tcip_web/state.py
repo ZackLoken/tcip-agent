@@ -75,17 +75,21 @@ type Subscriber = Callable[[StateNotification], Awaitable[None]]
 
 
 class PanelEnvelope(BaseModel):
-    """A panel event as retained and broadcast: its panel, the event, its id and its sender.
+    """A panel event as retained and sent: its panel, the event, its id, its project and its sender.
 
-    ``identity`` is the agent identity its sender declared
-    (:func:`tcip_mcp.agent_identity.identity_from_headers`), each field ``None`` where nothing
-    declared it.
+    ``project_id`` is the project the event was posted for. ``identity`` is the agent identity
+    its sender declared (:func:`tcip_mcp.agent_identity.identity_from_headers`), each field
+    ``None`` where nothing declared it. ``sent_at_connect`` says whether this delivery is a
+    retained event sent to a socket as it connects, ``False`` for the delivery made when the
+    event was posted.
     """
 
     panel: Panel
     event: PanelEvent
     event_id: str
+    project_id: str
     identity: RecordedIdentity
+    sent_at_connect: bool
 
 
 class NoSelectionError(ValueError):
