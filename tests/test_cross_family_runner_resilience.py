@@ -40,8 +40,9 @@ def test_an_antigravity_launch_passes_no_effort_flag_and_records_the_ids_own(
     )
 
     for effort in (None, "low"):
+        question_id = f"qid-{effort}"
         meta = cross_family_ask.run_one(
-            "qid",
+            question_id,
             "as-shipped",
             "question",
             tmp_path,
@@ -52,7 +53,7 @@ def test_an_antigravity_launch_passes_no_effort_flag_and_records_the_ids_own(
             ),
         )
 
-        run_dir = tmp_path / "out" / "qid" / "as-shipped" / "antigravity"
+        run_dir = tmp_path / "out" / question_id / "as-shipped" / "antigravity"
         argv = (run_dir / "argv.txt").read_text(encoding="utf-8").splitlines()
         assert "--effort" not in argv
         assert argv[argv.index("--model") + 1] == "gemini-4-argon-low"
@@ -1353,21 +1354,15 @@ def test_a_launch_a_family_refuses_is_refused_at_the_flag_before_any_family_laun
     assert launched == []
 
 
-def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_intact(
+def _set_up_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A single-family rerun marks itself a rerun and keeps both families' summary rows.
+) -> list[dict]:
+    """Stand the harnesses in for ``main`` and return the list each launch is recorded in.
 
-    Re-running codex under a question id that holds both families' results leaves antigravity's
-    meta.json unchanged when read as UTF-8 text and both families in the summary, and the rerun's
-    meta says it is a rerun where the first run's did not.
+    Codex and Antigravity build a fixed argv and answer at once; the question is in ``q.txt``.
     """
-    monkeypatch.setattr(
-        cross_family_ask.subprocess, "run", _stub_run("an answer")
-    )
-    monkeypatch.setattr(
-        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
-    )
+    seen: list[dict] = []
+    _stand_in_harness(monkeypatch, recording_launch(seen))
     monkeypatch.setattr(
         cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
@@ -1378,38 +1373,16 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
             lambda *a, **k: (["stub", "argv"], None),
         )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    return seen
 
-    first_argv = [
-        "cross_family_ask.py",
-        "--question-id",
-        "qid",
-        "--prompt-file",
-        str(tmp_path / "q.txt"),
-        "--families",
-        "codex,antigravity",
-        "--model",
-        "stub-model",
-        "--cwd",
-        str(tmp_path),
-        "--out",
-        str(tmp_path / "out"),
-        "--timeout",
-        "5",
-    ]
-    monkeypatch.setattr(sys, "argv", first_argv)
-    assert cross_family_ask.main() == 0
 
-    antigravity_meta_path = (
-        tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json"
-    )
-    antigravity_meta_before = antigravity_meta_path.read_text(encoding="utf-8")
-    codex_meta_before = json.loads(
-        (
-            tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert codex_meta_before["rerun"] is False
-
+def _name_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    families: str,
+    *flags: str,
+) -> None:
+    """Set the command line of a ``main`` run of ``families`` under question id ``qid``."""
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1420,7 +1393,7 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
             "--prompt-file",
             str(tmp_path / "q.txt"),
             "--families",
-            "codex",
+            families,
             "--model",
             "stub-model",
             "--cwd",
@@ -1429,29 +1402,181 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
             str(tmp_path / "out"),
             "--timeout",
             "5",
+            *flags,
         ],
     )
+
+
+def _snapshot(root: Path) -> dict[str, bytes | None]:
+    """Return every path under ``root`` with its bytes, a folder's being ``None``."""
+    return {
+        entry: (root / entry).read_bytes()
+        if (root / entry).is_file()
+        else None
+        for entry in _entries(root)
+    }
+
+
+def _assert_refused_as_a_rerun(
+    raised: pytest.ExceptionInfo[SystemExit], folder: Path
+) -> None:
+    """Assert the refusal names ``folder`` and a new question id."""
+    assert str(folder) in str(raised.value)
+    assert "new question id" in str(raised.value)
+
+
+def test_a_second_run_under_the_same_question_and_family_is_refused_and_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A family's second run under one question id and condition is refused whole.
+
+    Nothing launches, and every file under the out folder, the summary among them, keeps its name
+    and its bytes, the other family's record included.
+    """
+    seen = _set_up_runs(tmp_path, monkeypatch)
+    _name_run(tmp_path, monkeypatch, "codex,antigravity")
     assert cross_family_ask.main() == 0
-
-    assert (
-        antigravity_meta_path.read_text(encoding="utf-8")
-        == antigravity_meta_before
-    )
-
-    codex_meta_after = json.loads(
-        (
-            tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert codex_meta_after["rerun"] is True
-
-    summary = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "summary.json").read_text(
+    seen.clear()
+    out = tmp_path / "out"
+    first = _snapshot(out)
+    codex_meta = json.loads(
+        (out / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
             encoding="utf-8"
         )
     )
-    families_in_summary = {row["family"] for row in summary}
-    assert families_in_summary == {"codex", "antigravity"}
+    assert codex_meta["rerun"] is False
+
+    _name_run(tmp_path, monkeypatch, "codex")
+    with pytest.raises(SystemExit) as refused:
+        cross_family_ask.main()
+
+    _assert_refused_as_a_rerun(refused, out / "qid" / "as-shipped" / "codex")
+    assert seen == []
+    assert _snapshot(out) == first
+
+
+@pytest.mark.parametrize("flags", [(), ("--serial",)], ids=["pool", "serial"])
+def test_a_run_naming_a_family_with_a_folder_and_one_without_is_refused_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...]
+) -> None:
+    """A refused family refuses the family named before it too: no folder, no launch."""
+    seen = _set_up_runs(tmp_path, monkeypatch)
+    _name_run(tmp_path, monkeypatch, "codex")
+    assert cross_family_ask.main() == 0
+    seen.clear()
+    out = tmp_path / "out"
+    first = _snapshot(out)
+
+    _name_run(tmp_path, monkeypatch, "antigravity,codex", *flags)
+    with pytest.raises(SystemExit) as refused:
+        cross_family_ask.main()
+
+    _assert_refused_as_a_rerun(refused, out / "qid" / "as-shipped" / "codex")
+    assert not (out / "qid" / "as-shipped" / "antigravity").exists()
+    assert seen == []
+    assert _snapshot(out) == first
+
+
+def test_a_run_over_the_files_of_a_launch_that_raised_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A folder a raised launch left, files and no record, is refused like a whole record."""
+    _set_up_runs(tmp_path, monkeypatch)
+
+    def raising_launch(*_args: object, **_kwargs: object) -> NoReturn:
+        raise RuntimeError("a launch failure the runner does not catch")
+
+    _stand_in_harness(monkeypatch, raising_launch)
+    _name_run(tmp_path, monkeypatch, "codex")
+    out = tmp_path / "out"
+    cross_family_ask.main()
+    folder = out / "qid" / "as-shipped" / "codex"
+    assert (folder / "prompt.txt").is_file()
+    assert not (folder / "meta.json").exists()
+
+    seen: list[dict] = []
+    _stand_in_harness(monkeypatch, recording_launch(seen))
+    first = _snapshot(out)
+    with pytest.raises(SystemExit) as refused:
+        cross_family_ask.main()
+
+    _assert_refused_as_a_rerun(refused, folder)
+    assert seen == []
+    assert _snapshot(out) == first
+
+
+@pytest.mark.parametrize("after_a_run", [True, False], ids=["run", "empty"])
+def test_run_one_into_a_family_folder_that_exists_is_refused_and_leaves_it_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_a_run: bool
+) -> None:
+    """A direct call into an existing family folder, a run's or an empty one, launches nothing.
+
+    The empty folder is what a run leaves when a step after the making of its folder raises.
+    """
+    seen: list[dict] = []
+    _stand_in_harness(monkeypatch, recording_launch(seen))
+    out = tmp_path / "out"
+    folder = out / "qid" / "as-shipped" / "codex"
+    if after_a_run:
+        _run_codex_in(tmp_path, out)
+        seen.clear()
+    else:
+
+        def raising_preface(*_args: object, **_kwargs: object) -> NoReturn:
+            raise RuntimeError("a failure after the run folder was made")
+
+        with monkeypatch.context() as raising:
+            raising.setattr(cross_family_ask, "image_preface", raising_preface)
+            with pytest.raises(RuntimeError, match="after the run folder"):
+                _run_codex_in(tmp_path, out)
+        assert folder.is_dir()
+        assert not list(folder.iterdir())
+    first = _snapshot(out)
+
+    with pytest.raises(SystemExit) as refused:
+        _run_codex_in(tmp_path, out)
+
+    _assert_refused_as_a_rerun(refused, folder)
+    assert seen == []
+    assert _snapshot(out) == first
+
+
+def test_a_family_named_twice_is_refused_before_anything_is_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A family named twice on one command line is refused, and no folder or launch results."""
+    seen = _set_up_runs(tmp_path, monkeypatch)
+    _name_run(tmp_path, monkeypatch, "codex,antigravity,codex")
+
+    with pytest.raises(SystemExit, match="named twice"):
+        cross_family_ask.main()
+
+    assert seen == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_later_run_naming_a_family_with_no_folder_joins_the_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A later run of another family under the same question id succeeds beside the first.
+
+    The summary holds both rows, and the earlier family's row and record are what they were.
+    """
+    _set_up_runs(tmp_path, monkeypatch)
+    _name_run(tmp_path, monkeypatch, "codex")
+    assert cross_family_ask.main() == 0
+    out = tmp_path / "out"
+    summary_path = out / "qid" / "as-shipped" / "summary.json"
+    (codex_row,) = json.loads(summary_path.read_text(encoding="utf-8"))
+    codex_folder = _snapshot(out / "qid" / "as-shipped" / "codex")
+
+    _name_run(tmp_path, monkeypatch, "antigravity")
+    assert cross_family_ask.main() == 0
+
+    rows = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert {row["family"]: row for row in rows}["codex"] == codex_row
+    assert {row["family"] for row in rows} == {"codex", "antigravity"}
+    assert _snapshot(out / "qid" / "as-shipped" / "codex") == codex_folder
 
 
 def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(

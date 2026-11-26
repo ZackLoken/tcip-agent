@@ -773,6 +773,33 @@ def refuse_unsupported(
         )
 
 
+def condition_dir(
+    out_root: pathlib.Path, question_id: str, condition_name: str
+) -> pathlib.Path:
+    """Return the folder holding the family runs and the summary of a question id and condition."""
+    return out_root / question_id / condition_name
+
+
+def family_run_dir(
+    out_root: pathlib.Path,
+    question_id: str,
+    condition_name: str,
+    family: str,
+) -> pathlib.Path:
+    """Return the folder a family's run under a question id and condition is written to."""
+    return condition_dir(out_root, question_id, condition_name) / family
+
+
+def existing_run_refusal(run_dir: pathlib.Path) -> SystemExit:
+    """Return the ``SystemExit`` that refuses a run into ``run_dir``, a folder that exists.
+
+    Its message names the folder and says a new question id is what to pass.
+    """
+    return SystemExit(
+        f"{run_dir} exists; a run is never written over, so name a new question id"
+    )
+
+
 def launch_harness(
     argv: list[str],
     stdin: str | None,
@@ -819,16 +846,22 @@ def run_one(
     the commit is read next, and a failed read raises :class:`CommitReadError` with nothing
     written and no harness started; the record's ``commit_at_start`` and ``commit_at_end`` are
     None for a directory in no checkout, and a failed read after the launch is kept in
-    ``commit_read_error``.
+    ``commit_read_error``. A run folder that already exists, whatever it holds, is refused
+    (``SystemExit``, :func:`existing_run_refusal`) at the making of it, with nothing written or
+    launched.
     """
     family = launch.family
     refuse_unsupported(condition_name, family, cwd)
     commit_at_start = checkout_commit(cwd)
     condition = CONDITIONS[condition_name]
-    run_dir = out_root / question_id / condition_name / family
-    # A prior meta.json here is this family's own earlier run under the same question and condition.
-    rerun = (run_dir / "meta.json").is_file()
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = family_run_dir(out_root, question_id, condition_name, family)
+    condition_dir(out_root, question_id, condition_name).mkdir(
+        parents=True, exist_ok=True
+    )
+    try:
+        run_dir.mkdir()
+    except FileExistsError as exc:
+        raise existing_run_refusal(run_dir) from exc
 
     resolved_images = tuple(image.resolve() for image in images or [])
     body = image_preface(family, resolved_images) + (
@@ -935,7 +968,7 @@ def run_one(
         "prompt_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         "prompt_chars": len(body),
         "prompt_source": prompt_source,
-        "rerun": rerun,
+        "rerun": False,
         "images": [str(image) for image in resolved_images],
         "started": started,
         "commit_at_start": commit_at_start,
@@ -973,7 +1006,11 @@ def default_out_root() -> pathlib.Path:
 
 
 def main() -> int:
-    """Run the families the command line names; return 0 when every one answered, else 1."""
+    """Run the families the command line names; return 0 when every one answered, else 1.
+
+    Refuses (``SystemExit``) before any launch a family named twice, and a family whose run folder
+    already exists (:func:`existing_run_refusal`).
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--question-id", required=True)
     parser.add_argument("--prompt-file", type=pathlib.Path, required=True)
@@ -1039,6 +1076,17 @@ def main() -> int:
         parser.error(f"unknown families: {unknown}. Known: {sorted(BUILDERS)}")
     for family in families:
         refuse_unsupported(args.condition, family, args.cwd)
+    twice = sorted({f for f in families if families.count(f) > 1})
+    if twice:
+        raise SystemExit(
+            f"{', '.join(twice)} named twice in --families; a family runs once per run"
+        )
+    for family in families:
+        run_dir = family_run_dir(
+            out_root, args.question_id, args.condition, family
+        )
+        if run_dir.exists():
+            raise existing_run_refusal(run_dir)
 
     family_prompt_files: dict[str, pathlib.Path] = {}
     for item in args.family_prompt:
@@ -1170,9 +1218,12 @@ def main() -> int:
             "was only a pointer to it."
         )
 
-    summary = out_root / args.question_id / args.condition / "summary.json"
-    # A re-run naming a subset of families must not drop the rows of the families it did not
-    # touch: merge onto whatever summary.json already holds, keyed by family.
+    summary = (
+        condition_dir(out_root, args.question_id, args.condition)
+        / "summary.json"
+    )
+    # A later run under this question id and condition adds families: merge its rows onto
+    # whatever summary.json already holds, keyed by family.
     previous_rows: dict[str, dict] = {}
     if summary.is_file():
         try:
