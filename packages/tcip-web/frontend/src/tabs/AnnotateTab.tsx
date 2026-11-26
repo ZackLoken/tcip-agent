@@ -99,7 +99,7 @@ import { nextMode } from "@/lib/toolMode";
 import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import { declaredClient, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
-import { canvasImage, holdsCanvas, imageSize } from "@/store/slices/canvas";
+import { canvasImage, holdsCanvas, imageSize, loadedFor } from "@/store/slices/canvas";
 import {
   isFinished,
   TOOL_ARRAY,
@@ -217,8 +217,12 @@ export function AnnotateTab() {
   const landedRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
   const loadedTickRef = useRef(0);
+  // The last image in view the load effect ran for, so the canvas is left once per image come to.
+  const leftForRef = useRef<string | null>(null);
   const canvasColumnRef = useRef<HTMLDivElement>(null);
   const agentActivity = useStore((s) => s.agentActivity);
+  // The activity already held when this mount began, which this mount's own load reads past.
+  const heldAtMountRef = useRef(agentActivity?.seq);
 
   const imageInView = currentImage(dataset);
   const imgPath = imageInView?.path ?? null;
@@ -673,7 +677,7 @@ export function AnnotateTab() {
     if (!imageInView || !project) return null;
     // Never push mid-transition: attaching the previous image's still-live shapes to the new
     // image_path would show the agent a false canvas; wait until the loaded identity matches.
-    if (canvas.loaded?.image_path !== imageInView.path) return null;
+    if (!loadedFor(canvas, imageInView.path)) return null;
     return canvasStateBody({
       projectId: project.id,
       image: imageInView,
@@ -885,7 +889,7 @@ export function AnnotateTab() {
     // Dropped: an answer without its hold (loaded over or canceled), for an unmounted editor, or
     // for an image no longer owning the canvas or selected.
     if (!owned || !mountedRef.current || !stillLoaded()) return null;
-    if (currentImage(useStore.getState().gui.dataset)?.path !== loaded.image_path) return null;
+    if (!loadedFor(useStore.getState().canvas, liveImage()?.path)) return null;
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
@@ -896,10 +900,16 @@ export function AnnotateTab() {
     return result;
   }
 
-  /** Re-read the current image's labels, discarding local edits, through the one load effect,
-   *  which a navigation cancels. */
+  /** Read the image in view's labels again through the one load effect, canceling a load of it
+   *  in flight, whatever the canvas holds; a navigation cancels it. */
+  function loadAgain() {
+    setReloadTick((t) => t + 1);
+  }
+
+  /** Re-read the current image's labels, discarding local edits, while the canvas holds a
+   *  document. */
   function requestReload() {
-    if (useStore.getState().canvas.loaded) setReloadTick((t) => t + 1);
+    if (useStore.getState().canvas.loaded) loadAgain();
   }
 
   // Flush telemetry + any unsaved edits for the image being left, using the path
@@ -909,30 +919,30 @@ export function AnnotateTab() {
     void save({ interactive: false });
   }
 
-  // React to a panel event writing this image's labels: reload a clean canvas, or offer a Reload
-  // conflict prompt under the event's project when dirty; a write to another image changes nothing.
+  // Once per write of the image in view's labels, as it arrives: warn under the event's project
+  // over unsaved edits to that image's document, and otherwise load the image again.
   useEffect(() => {
-    if (!agentActivity) return;
+    if (!agentActivity || agentActivity.seq === heldAtMountRef.current) return;
     const { event, identity, project_id } = agentActivity.envelope;
-    if (event.event_type !== PANEL_EVENT_LABELS_WRITTEN) return;
-    const { loaded } = useStore.getState().canvas;
-    if (!loaded) return;
+    if (event.event_type !== PANEL_EVENT_LABELS_WRITTEN || !imgPath) return;
     const norm = (p: string) => p.replace(/\\/g, "/");
-    if (norm(event.image_path) !== norm(loaded.image_path)) return;
-    if (useStore.getState().canvas.dirty) {
-      const client = declaredClient(identity) ?? UNDECLARED_ACTOR;
-      useStore.getState().raiseNotification({
-        kind: "notice",
-        level: "warning",
-        text: {
-          sentence: `${client} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
-        },
-        context: { project: project_id, target: loaded.name },
-        key: canvasKey("reload", loaded.image_path),
-      });
-    } else {
-      requestReload();
+    if (norm(event.image_path) !== norm(imgPath)) return;
+    const live = useStore.getState().canvas;
+    const loaded = loadedFor(live, imgPath);
+    if (!loaded || !live.dirty) {
+      loadAgain();
+      return;
     }
+    const client = declaredClient(identity) ?? UNDECLARED_ACTOR;
+    useStore.getState().raiseNotification({
+      kind: "notice",
+      level: "warning",
+      text: {
+        sentence: `${client} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
+      },
+      context: { project: project_id, target: loaded.name },
+      key: canvasKey("reload", loaded.image_path),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentActivity?.seq]);
 
@@ -975,19 +985,21 @@ export function AnnotateTab() {
   }, [dataset?.dataset_root, dataset?.date, dataset?.subject, dataset?.images]);
 
   // The one load: an image the canvas does not hold yet, or a reload of the one it holds that
-  // `requestReload` asked for.
+  // `loadAgain` asked for.
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
     const reload = landedRef.current && canvasImage(useStore.getState().canvas) === imgPath;
+    const arriving = leftForRef.current !== imgPath;
+    leftForRef.current = imgPath;
 
     // Already displaying this image and no reload asked for: an unrelated store change (a WS
     // snapshot, a mode or subject toggle) must not re-read the labels and discard unsaved edits.
     if (reload && reloadTick === loadedTickRef.current) return;
     loadedTickRef.current = reloadTick;
 
-    // Switching images: flush the previous image's work first (to the path it
-    // belongs to), then load the new one.
-    if (!reload) flushLeaving();
+    // Switching images: flush the previous image's work first (to the path it belongs to), once
+    // per image come to, then load the new one.
+    if (!reload && arriving) flushLeaving();
 
     let canceled = false;
     void (async () => {

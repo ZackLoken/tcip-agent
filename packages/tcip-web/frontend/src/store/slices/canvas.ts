@@ -125,6 +125,13 @@ export function imageSize({ loaded }: Pick<CanvasState, "loaded">): {
 export const canvasImage = ({ loaded, failedLoad }: Pick<CanvasState, "loaded" | "failedLoad">) =>
   loaded?.image_path ?? failedLoad;
 
+/** The canvas's loaded document when it is the document of the image at `imagePath`; null when no
+ *  document is loaded, when it is another image's, or when no image is named. */
+export const loadedFor = (
+  { loaded }: Pick<CanvasState, "loaded">,
+  imagePath: string | null | undefined,
+): LoadedLabels | null => (loaded && loaded.image_path === imagePath ? loaded : null);
+
 /** Whether the loaded canvas is one of the selected capture's own images; false with no
  *  selection. */
 export const selectCanvasMatchesDataset = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">) =>

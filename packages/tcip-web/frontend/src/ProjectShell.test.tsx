@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
+import type { LoadedLabels } from "@/api/client";
 import type { PanelEnvelope } from "@/api/types.generated";
 import { dismissLabel } from "@/lib/dismissLabel";
+import { ANNOTATE_ANSWERS, LANDED, loadOf } from "@/test/annotate";
 import { LABEL_ANSWERS } from "@/test/labels";
 import {
   DISMISSALS,
@@ -11,8 +13,8 @@ import {
   PANEL_EVENTS_AT_CONNECT,
 } from "@/test/panelEvents";
 import { openedAs, PICKER } from "@/test/projectRecords";
-import { answeredWith } from "@/test/refusals";
-import { NAV_ANSWER, RAW_SELECTION, TEST_PROJECT } from "@/test/store";
+import { answeredWith, thrown } from "@/test/refusals";
+import { NAV_ANSWER, RAW_SELECTION, SELECTED_SUBJECT, TEST_PROJECT } from "@/test/store";
 import { FakeWebSocket } from "@/test/webSocket";
 
 // The shell mounts the Annotate tab, which pulls in Konva, and jsdom has no canvas backend.
@@ -35,14 +37,19 @@ type Page = {
   NotificationsPane: typeof import("@/components/Notifications").NotificationsPane;
   useStore: typeof import("@/store").useStore;
   load: MockInstance<typeof import("@/api/client").api.annotate.load>;
+  save: MockInstance<typeof import("@/api/client").api.annotate.save>;
   select: MockInstance<typeof import("@/api/client").api.dataset.select>;
 };
 
 /** The page each test runs in. */
 let page: Page;
 
+/** A request the backend never answers. */
+const pending = () => new Promise<never>(() => {});
+
 /** Load every module anew, as a reload of the page does, and answer what the shell and its
- *  Annotate tab read on the produced capture's first image. */
+ *  Annotate tab read on the produced capture's first image, and a save with the produced save of a
+ *  box on it; the Meta tab's reads are left unanswered. */
 async function loadPage(): Promise<Page> {
   vi.resetModules();
   const [
@@ -50,10 +57,12 @@ async function loadPage(): Promise<Page> {
     { NotificationsPane },
     { useStore },
     { api },
-    { answerAnnotateMount },
+    { answerAnnotateMount, LANDED: landed },
     subjects,
     training,
     inference,
+    { metaApi },
+    { sessionsApi },
   ] = await Promise.all([
     import("@/ProjectShell"),
     import("@/components/Notifications"),
@@ -63,14 +72,20 @@ async function loadPage(): Promise<Page> {
     import("@/api/subjects"),
     import("@/api/training"),
     import("@/api/inference"),
+    import("@/api/meta"),
+    import("@/api/sessions"),
   ]);
   const load = answerAnnotateMount();
+  const save = vi.spyOn(api.annotate, "save").mockResolvedValue(landed.box);
   const select = vi.spyOn(api.dataset, "select").mockRejectedValue(new Error("selection refused"));
   vi.spyOn(api.dataset, "nav").mockResolvedValue(NAV_ANSWER);
   vi.spyOn(subjects.subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
   vi.spyOn(training.trainingApi, "listRuns").mockResolvedValue({ runs: [], sweeps: [] });
   vi.spyOn(inference.inferenceApi, "listJobs").mockResolvedValue({ jobs: [] });
-  return { ProjectShell, NotificationsPane, useStore, load, select };
+  vi.spyOn(metaApi, "reports").mockImplementation(pending);
+  vi.spyOn(metaApi, "retrospectives").mockImplementation(pending);
+  vi.spyOn(sessionsApi, "load").mockImplementation(pending);
+  return { ProjectShell, NotificationsPane, useStore, load, save, select };
 }
 
 /** The last socket the page opened for `panel`'s events. */
@@ -126,6 +141,12 @@ async function mountOnCapture(project = TEST_PROJECT) {
 
 /** The open notifications area. */
 const area = () => within(screen.getByRole("region", { name: "Notifications" }));
+
+/** The entries the open area lists, newest first. */
+const listItems = () => area().queryAllByRole("listitem");
+
+/** Expect `item` to state no count of times raised. */
+const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
 
 /** A dismissal route's request as the page sent it: its path and its body. */
 type Sent = { path: string; body: unknown };
@@ -254,6 +275,148 @@ describe("ProjectShell agent activity", () => {
   });
 });
 
+describe("ProjectShell agent saves on the Annotate tab", () => {
+  const { labels_written: written, labels_written_second: second } = PANEL_EVENTS;
+  const [first, next] = RAW_SELECTION.images;
+  const reloadWarning =
+    "A process just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.";
+
+  /** The entries the open area lists saying the reload warning. */
+  const warnings = () => listItems().filter((item) => within(item).queryByText(reloadWarning));
+
+  /** The status bar's readout of the size of the image whose document the canvas holds. */
+  const sizeReadout = () => screen.queryByText(/^Image: /);
+
+  /** Make `active` the active tab, as the tab bar does, and let what it reads land. */
+  async function switchTo(active: "meta" | "annotate") {
+    act(() => page.useStore.getState().setActiveTab(active));
+    await settle();
+  }
+
+  /** Add a box to the canvas, leaving it with unsaved edits. */
+  function addBox() {
+    act(() =>
+      page.useStore.getState().add("boxes", {
+        x1: 10,
+        y1: 10,
+        x2: 50,
+        y2: 50,
+        subject: SELECTED_SUBJECT,
+        attributes: {},
+      }),
+    );
+    expect(page.useStore.getState().canvas.dirty).toBe(true);
+  }
+
+  /** Hold the page's next load of an image unanswered; returns the answer to give it later. */
+  function holdNextLoad(): (labels: LoadedLabels) => void {
+    let answer: ((labels: LoadedLabels) => void) | undefined;
+    page.load.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    return (labels) => {
+      if (!answer) throw new Error("the page sent no load the test held");
+      const given = answer;
+      act(() => given(labels));
+    };
+  }
+
+  it("loads the image in view once at a return to the tab after a save over a clean canvas", async () => {
+    expect(written.event.image_path).toBe(first.path);
+    await mountOnCapture();
+    deliver(written);
+    await waitFor(() => expect(page.load).toHaveBeenCalledTimes(2));
+    await settle();
+
+    await switchTo("meta");
+    await switchTo("annotate");
+
+    expect(page.load).toHaveBeenCalledTimes(3);
+    expect(page.load).toHaveBeenLastCalledWith(first.path);
+  });
+
+  it("raises the reload warning once, not again at a return to the tab, over unsaved edits", async () => {
+    await mountOnCapture();
+    addBox();
+    deliver(written);
+    expect(warnings()).toHaveLength(1);
+    expectRaisedOnce(warnings()[0]);
+
+    await switchTo("meta");
+    await switchTo("annotate");
+
+    expect(warnings()).toHaveLength(1);
+    expectRaisedOnce(warnings()[0]);
+  });
+
+  it("lists a save delivered while another tab is active, and loads once at the return", async () => {
+    await mountOnCapture();
+    await switchTo("meta");
+
+    deliver(written);
+    expect(listItems()).toHaveLength(1);
+    expect(listItems()[0]).toHaveTextContent("A process: labels written");
+    await switchTo("annotate");
+
+    expect(page.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("loads the image in view again for a save delivered before its first load lands, keeping the later answer", async () => {
+    const before = loadOf(first.path);
+    const after = LANDED.box.document;
+    expect(after.image_path).toBe(first.path);
+    expect([before.boxes.length, after.boxes.length]).toEqual([0, 1]);
+    expect([after.polygons, after.points]).toEqual([[], []]);
+    const answerFirstLoad = holdNextLoad();
+    page.load.mockResolvedValueOnce(after);
+    await mountOnCapture();
+    expect(screen.queryByText("1 box")).toBeNull();
+
+    deliver(written);
+    await waitFor(() => expect(page.load).toHaveBeenCalledTimes(2));
+    await settle();
+    answerFirstLoad(before);
+    await settle();
+
+    expect(page.load).toHaveBeenLastCalledWith(first.path);
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+  });
+
+  it("loads the image in view again for a save delivered after its first load was refused", async () => {
+    page.load.mockRejectedValueOnce(await thrown(ANNOTATE_ANSWERS.unreadable));
+    const { img_width: width, img_height: height } = loadOf(first.path);
+    await mountOnCapture();
+    expect(sizeReadout()).toBeNull();
+
+    deliver(written);
+    await waitFor(() => expect(page.load).toHaveBeenCalledTimes(2));
+    await settle();
+
+    expect(page.load).toHaveBeenLastCalledWith(first.path);
+    expect(sizeReadout()).toHaveTextContent(`Image: ${width}×${height}`);
+  });
+
+  it("loads the image just moved to again for a save of it delivered while it loads, leaving the previous image once", async () => {
+    expect(second.event.image_path).toBe(next.path);
+    await mountOnCapture();
+    addBox();
+    holdNextLoad();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await settle();
+    expect(page.save).toHaveBeenCalledTimes(1);
+    deliver(second);
+    await settle();
+
+    expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(2);
+    expect(page.save).toHaveBeenCalledTimes(1);
+    expect(warnings()).toEqual([]);
+  });
+});
+
 describe("ProjectShell agent focus", () => {
   const focus = PANEL_EVENTS.annotate_focus;
 
@@ -298,8 +461,6 @@ describe("ProjectShell agent notes", () => {
   });
   /** The projects of the entries listed, which the area does not show. */
   const listedProjects = () => page.useStore.getState().notifications.map((e) => e.context.project);
-  /** The entries the open area lists, newest first. */
-  const listItems = () => area().queryAllByRole("listitem");
   /** The one entry the open area lists. */
   function onlyItem(): HTMLElement {
     const items = listItems();
@@ -309,8 +470,6 @@ describe("ProjectShell agent notes", () => {
   /** Expect `item`'s line to name its level's word, its kind and where the note was pushed. */
   const expectLine = (item: HTMLElement, line: string) =>
     expect(within(item).getByText(new RegExp(`^${line},`))).toBeInTheDocument();
-  /** Expect `item` to state no count of times raised. */
-  const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
   /** Expect the open area to list nothing. */
   function expectListsNothing() {
     expect(listItems()).toEqual([]);
