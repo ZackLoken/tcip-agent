@@ -20,10 +20,16 @@ export function clientName(name: string, version: string | null): string {
   return version ? `${name} ${version}` : name;
 }
 
-/** The client a push declared (`clientName`), or null when it declared none. */
+/** The client name a push declared, or null when it declared none or an empty one. */
+export function declaredName(identity: RecordedIdentity): string | null {
+  return identity.agent_client_name || null;
+}
+
+/** The client a push declared (`declaredName`) with its version (`clientName`), or null when it
+ *  declared none. */
 export function declaredClient(identity: RecordedIdentity): string | null {
-  const name = identity.agent_client_name;
-  return name ? clientName(name, identity.agent_client_version) : null;
+  const name = declaredName(identity);
+  return name === null ? null : clientName(name, identity.agent_client_version);
 }
 
 export interface AgentActivitySlice {

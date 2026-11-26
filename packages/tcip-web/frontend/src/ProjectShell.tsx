@@ -25,7 +25,7 @@ import { endRecordedSession } from "@/lib/sessionLifecycle";
 import { TAB_LABELS } from "@/lib/tabLabels";
 import { takingOnce } from "@/lib/takenEvents";
 import { useStore } from "@/store";
-import { UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
+import { declaredName, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import type { DatasetSelection, TabName } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -57,7 +57,7 @@ function takeBanner({ panel, event, event_id }: PanelEnvelope): boolean {
  *  it was posted for naming who acted, by the client name its sender declared, and what; a repeat
  *  counts the listed notice. */
 function noticeActivity({ event, identity, project_id }: PanelEnvelope) {
-  const actor = identity.agent_client_name ?? UNDECLARED_ACTOR;
+  const actor = declaredName(identity) ?? UNDECLARED_ACTOR;
   useStore.getState().raiseNotification({
     kind: "notice",
     level: "info",
