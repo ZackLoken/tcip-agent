@@ -99,7 +99,7 @@ import { nextMode } from "@/lib/toolMode";
 import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import { declaredClient, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
-import { canvasImage, holdsCanvas, imageSize } from "@/store/slices/canvas";
+import { canvasImage, holdsCanvas, imageSize, loadedFor } from "@/store/slices/canvas";
 import {
   isFinished,
   TOOL_ARRAY,
@@ -677,7 +677,7 @@ export function AnnotateTab() {
     if (!imageInView || !project) return null;
     // Never push mid-transition: attaching the previous image's still-live shapes to the new
     // image_path would show the agent a false canvas; wait until the loaded identity matches.
-    if (canvas.loaded?.image_path !== imageInView.path) return null;
+    if (!loadedFor(canvas, imageInView.path)) return null;
     return canvasStateBody({
       projectId: project.id,
       image: imageInView,
@@ -889,7 +889,7 @@ export function AnnotateTab() {
     // Dropped: an answer without its hold (loaded over or canceled), for an unmounted editor, or
     // for an image no longer owning the canvas or selected.
     if (!owned || !mountedRef.current || !stillLoaded()) return null;
-    if (currentImage(useStore.getState().gui.dataset)?.path !== loaded.image_path) return null;
+    if (!loadedFor(useStore.getState().canvas, liveImage()?.path)) return null;
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
@@ -927,8 +927,9 @@ export function AnnotateTab() {
     if (event.event_type !== PANEL_EVENT_LABELS_WRITTEN || !imgPath) return;
     const norm = (p: string) => p.replace(/\\/g, "/");
     if (norm(event.image_path) !== norm(imgPath)) return;
-    const { loaded, dirty } = useStore.getState().canvas;
-    if (loaded?.image_path !== imgPath || !dirty) {
+    const live = useStore.getState().canvas;
+    const loaded = loadedFor(live, imgPath);
+    if (!loaded || !live.dirty) {
       loadAgain();
       return;
     }
