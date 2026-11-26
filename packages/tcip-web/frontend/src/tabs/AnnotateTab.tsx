@@ -213,7 +213,7 @@ export function AnnotateTab() {
   const mountedRef = useRef(true);
 
   // I/O safety: save() writes the store's loaded document, never the dataset's current image;
-  // the image the canvas answers for gates reloads, once this mount's first load has landed.
+  // the image the canvas answers for gates reloads once this mount came to it, loaded or kept.
   const landedRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
   const loadedTickRef = useRef(0);
@@ -998,10 +998,14 @@ export function AnnotateTab() {
       loadedFor(live, imgPath) !== null &&
       (live.dirty || live.saving !== null);
     leftForRef.current = imgPath;
-    if (keeping) {
-      loadedTickRef.current = reloadTick;
+    // This mount has come to its image: reloads are read as such from here, and its visit opens.
+    const cameToImage = () => {
       landedRef.current = true;
       startImageSessionTracking(currentImageName);
+    };
+    if (keeping) {
+      loadedTickRef.current = reloadTick;
+      cameToImage();
       return;
     }
 
@@ -1020,10 +1024,9 @@ export function AnnotateTab() {
         const labels = await api.annotate.load(imgPath);
         if (canceled) return;
         adoptLabels(labels);
-        landedRef.current = true;
         documentLanded(imgPath);
         if (reload) refreshProposals();
-        else startImageSessionTracking(currentImageName);
+        else cameToImage();
       } catch (e) {
         if (canceled) return;
         const failed = (sentence: string) =>
@@ -1034,11 +1037,10 @@ export function AnnotateTab() {
         }
         // A blank canvas holding no document: a transient load failure never overwrites the labels.
         useStore.getState().clearCanvas(imgPath);
-        landedRef.current = true;
+        cameToImage();
         // Reload rereads a loaded document, and the canvas now holds none.
         useStore.getState().releaseNotification(canvasKey("reload", imgPath));
         failed(`Could not load this image's labels: ${messageOf(e)}. Saving is off.`);
-        startImageSessionTracking(currentImageName);
       }
     })();
     return () => {

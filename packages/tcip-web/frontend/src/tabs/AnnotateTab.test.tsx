@@ -346,6 +346,30 @@ describe("AnnotateTab session contributions", () => {
     expect(useStore.getState().heldContributions).toEqual([]);
   });
 
+  it("opens a visit of the image whose edits a remount keeps, and posts it when the tab unmounts again", async () => {
+    useStore.setState({ user: "jordan" });
+    const first = render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(await versionConflict());
+    first.unmount();
+    await flush();
+    const second = render(<AnnotateTab />);
+    await flush();
+    expect(loadSpy).toHaveBeenCalledTimes(1);
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
+
+    second.unmount();
+    await flush();
+
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[1][0]).toMatchObject({
+      image_name: IMG1_NAME,
+      user: "jordan",
+    });
+  });
+
   it("records the session an accepted visit landed in, by the project and the answered stamp", async () => {
     useStore.setState({ user: "jordan" });
     await leaveFirstImage();
@@ -1427,6 +1451,28 @@ describe("AnnotateTab entries on the canvas", () => {
     expect(failure).toHaveTextContent("Reload failed: network down");
     expect(conflict).toHaveTextContent(CONFLICT_SENTENCE);
     expect(within(conflict).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+  });
+
+  it("takes Reload over the edits a remount kept as a reload, keeping them when it fails", async () => {
+    const first = render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(await versionConflict());
+    first.unmount();
+    await flush();
+    render(<AnnotateTab />);
+    await flush();
+    loadSpy.mockRejectedValueOnce(await thrown(unreadable));
+    expect(onCanvas()).toHaveLength(1);
+
+    fireEvent.click(within(onCanvas()[0]).getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+
+    expect(onCanvas()[0]).toHaveTextContent(`Reload failed: ${unreadable.body.detail}`);
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    expect(useStore.getState().canvas.dirty).toBe(true);
   });
 
   it("puts a failed proposals read on the canvas", async () => {
