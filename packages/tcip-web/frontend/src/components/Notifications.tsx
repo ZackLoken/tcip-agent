@@ -67,8 +67,9 @@ export const NotificationsButton = forwardRef<
 
 /** Where an entry is shown: in the notifications area, or in place beside the control it stands
  *  for, where it is the entry standing on `entryKey`, `afterDismiss` puts focus back, `action`,
- *  when given, is the placing control's own, offered beside the entry's, and `textId`, when
- *  given, is the id its text takes so that control can be described by it. */
+ *  when given, is the placing control's own, offered beside the entry's, `textId`, when given,
+ *  is the id its text takes so that control can be described by it, and `showTarget` shows the
+ *  target of its context ahead of its text. */
 type Placement =
   | { placement: "area"; entry: NotificationEntry }
   | {
@@ -77,13 +78,16 @@ type Placement =
       afterDismiss: () => void;
       action?: EntryAction;
       textId?: string;
+      showTarget?: boolean;
     };
 
 /**
  * The one entry component. In the area it shows the entry's text, level, kind, target, time,
  * count, action and dismiss control, and whether a condition still holds; in place it shows the
- * entry standing on its key, while one is listed, with its text, count, action, the placing
- * control's action and dismiss control, and nothing when none stands.
+ * entry standing on its key, while one is listed, with its target when the placement asks for
+ * it, its text, count, action, the placing control's action and dismiss control, and nothing
+ * when none stands. An action's button shows its label and is named by its label followed by
+ * what it acts on, when stated.
  */
 export function NotificationItem(props: Placement) {
   const standing = useStore((s) =>
@@ -100,10 +104,11 @@ export function NotificationItem(props: Placement) {
   const at = new Date(entry.time);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const count = entry.count > 1 ? `, ${entry.count} times` : "";
-  const offer = ({ label, run }: EntryAction) => (
+  const offer = ({ label, actsOn, run }: EntryAction) => (
     <button
       type="button"
       className="tcip-btn h-6 shrink-0 px-2 text-[12px]"
+      aria-label={actsOn && `${label} ${actsOn}`}
       aria-describedby={textId}
       onClick={run}
     >
@@ -129,6 +134,11 @@ export function NotificationItem(props: Placement) {
   if (props.placement === "in place") {
     return (
       <div data-testid="entry-in-place" className="flex items-start gap-2 text-[13px]">
+        {props.showTarget && entry.context.target && (
+          <span className="shrink-0 font-medium leading-6 tabular-nums text-tcip-fg">
+            {entry.context.target}
+          </span>
+        )}
         <p id={textId} className={`min-w-0 flex-1 break-words leading-6 ${tone}`}>
           {text}
           {count && <span className="text-tcip-muted">{count}</span>}
