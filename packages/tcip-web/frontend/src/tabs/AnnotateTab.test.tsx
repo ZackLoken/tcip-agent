@@ -489,6 +489,7 @@ describe("AnnotateTab save/load race", () => {
 
     // While the img1 save is in flight img2 is in view under img1's box, which takes no edit.
     expect(imageInView()).toBe(IMG2);
+    expect(drawnBoxes()).toHaveLength(1);
     act(addBox);
     expect(drawnBoxes()).toHaveLength(1);
     expect(loadOf(IMG2).boxes).toEqual([]);
@@ -715,7 +716,9 @@ describe("AnnotateTab save/load race", () => {
     );
     expect(entries).toHaveLength(1);
     expect(entries[0]).toHaveTextContent(choice);
-    expect(entries[0]).toHaveTextContent(IMG1_NAME);
+    expect(entries[0]).toHaveTextContent(`failure, ${IMG1_NAME}`);
+    // The area shows no entry's project.
+    expect(listed().map((entry) => entry.context.project)).toEqual([TEST_PROJECT.id]);
   });
 
   it.each([
