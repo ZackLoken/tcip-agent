@@ -4926,6 +4926,20 @@ describe("AnnotateTab while the canvas holds no document of the image in view", 
     expect(drawnBoxes()).toHaveLength(1);
   });
 
+  it("pushes no canvas to the agent before the next image's labels land, then that image's", async () => {
+    const answerNext = await moveWithNextLoadHeld();
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
+
+    act(() => notifyCanvasStateRequest());
+    await flush();
+    expect(pushSpy).not.toHaveBeenCalled();
+
+    await answerNext();
+    act(() => notifyCanvasStateRequest());
+    await flush();
+    expect(pushSpy.mock.calls.at(-1)?.[0].image_path).toBe(IMG2);
+  });
+
   it("adds no box drawn on the stage before the next image's labels land", async () => {
     await moveWithNextLoadHeld();
 
