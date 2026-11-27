@@ -40,8 +40,9 @@ function radiusPhrase(radius: MatchRadius): string {
 const mappingLoadKey = (projectId: string, name: string) =>
   `setup-mapping-load:${projectId}:${name}`;
 
-/** The key a failed build of a mapping stands on in the project `projectId`. */
-const mappingBuildKey = (projectId: string) => `setup-mapping-build:${projectId}`;
+/** The key a failed build of the mapping `name` stands on in the project `projectId`. */
+const mappingBuildKey = (projectId: string, name: string) =>
+  `setup-mapping-build:${projectId}:${name}`;
 
 /** The key a failed identity `kind`, a read or a registration, of the dataset at `datasetRoot`
  *  stands on in the project `projectId`. */
@@ -58,7 +59,6 @@ function PlantMappingPanel({
   projectId: string;
   datasetRoot: string | null;
 }) {
-  const buildKey = mappingBuildKey(projectId);
   const buildButton = useRef<HTMLButtonElement>(null);
   const [mappingName, setMappingName] = useState("");
   // Every mapping name already persisted under the open project, for the picker below; a name
@@ -101,13 +101,15 @@ function PlantMappingPanel({
       setBuildMsg("Name the plant registry.");
       return;
     }
+    const name = mappingName;
+    const key = mappingBuildKey(projectId, name);
     setBuilding(true);
     setBuildMsg(null);
     setMapping(null);
-    useStore.getState().releaseNotification(buildKey);
+    useStore.getState().setAsideNotification(key);
     try {
       const built = await resultsApi.buildPlantMapping({
-        name: mappingName,
+        name,
         dataset_root: datasetRoot,
         plant_registry: plantRegistry,
         dates: null,
@@ -119,20 +121,16 @@ function PlantMappingPanel({
         user: useStore.getState().user,
       });
       setMapping(built);
-      setBuildMsg(`Built ${mappingName}.`);
+      setBuildMsg(`Built ${name}.`);
+      useStore.getState().resolveNotification(key);
       refreshMappingNames();
     } catch (e) {
       // A build whose receipt could not be written committed, so its message is no failure.
       const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
-      if (gap) tell("notice", "warning", gap.message, mappingName, buildKey);
-      else
-        tell(
-          "failure",
-          "error",
-          `Could not build the mapping: ${messageOf(e)}`,
-          mappingName,
-          buildKey,
-        );
+      if (gap) {
+        useStore.getState().resolveNotification(key);
+        tell("notice", "warning", gap.message, name, key);
+      } else tell("failure", "error", `Could not build the mapping: ${messageOf(e)}`, name, key);
     } finally {
       setBuilding(false);
     }
@@ -235,7 +233,7 @@ function PlantMappingPanel({
         <div className="min-w-0 flex-1 empty:hidden">
           <NotificationItem
             placement="in place"
-            entryKey={buildKey}
+            entryKey={mappingBuildKey(projectId, mappingName)}
             afterDismiss={() => buildButton.current?.focus()}
           />
         </div>

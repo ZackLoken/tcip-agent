@@ -288,6 +288,8 @@ describe("SetupTab plant-mapping build: match radius", () => {
     mapping_stated: STATED,
     mapping_unpositioned: UNPOSITIONED,
     mapping_left_out: LEFT_OUT,
+    mapping_superseded: SUPERSEDED,
+    mapping_cited: CITED,
   } = RESULTS_ANSWERS;
   const LOADED = RESULTS_ANSWERS.mapping_loaded[SECOND_MAPPING];
 
@@ -386,12 +388,13 @@ describe("SetupTab plant-mapping build: match radius", () => {
     await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
   });
 
-  it("lists a refused build of one mapping saying nothing of being resolved once a build of another lands", async () => {
-    const cited = RESULTS_ANSWERS.mapping_cited;
-    vi.spyOn(resultsApi, "buildPlantMapping")
-      .mockRejectedValueOnce(await thrown(cited))
-      .mockResolvedValue(BUILT);
-    const sentence = `Could not build the mapping: ${cited.body.detail}`;
+  /** The mapping `CITED` refuses, which `SUPERSEDED` then builds. */
+  const REFUSED_MAPPING = SUPERSEDED.name;
+  const REFUSED_SENTENCE = `Could not build the mapping: ${CITED.body.detail}`;
+
+  /** Render the tab beside the notifications area, with its plant registry typed. */
+  async function renderBuildingWithArea() {
+    expect(CITED.body.detail).toContain(`'${REFUSED_MAPPING}'`);
     render(
       <>
         <SetupTab />
@@ -399,20 +402,78 @@ describe("SetupTab plant-mapping build: match radius", () => {
       </>,
     );
     await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    // The refusal names the mapping its build was of.
-    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: "valley" } });
     fireEvent.change(screen.getByLabelText("Plant registry"), {
       target: { value: "valley-plants" },
     });
+  }
+
+  /** Type the mapping `name` and press Build. */
+  function buildNamed(name: string) {
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: name } });
     fireEvent.click(screen.getByRole("button", { name: "Build" }));
+  }
+
+  it("lists a refused build of one mapping saying nothing of being resolved once a build of another lands, and resolved once its own mapping builds", async () => {
+    vi.spyOn(resultsApi, "buildPlantMapping")
+      .mockRejectedValueOnce(await thrown(CITED))
+      .mockResolvedValueOnce(BUILT)
+      .mockResolvedValueOnce(SUPERSEDED);
+    await renderBuildingWithArea();
+    buildNamed(REFUSED_MAPPING);
+    await within(mappingPanel()).findByTestId("entry-in-place");
+
+    buildNamed(BUILT.name);
+
+    expect(await screen.findByText(`Built ${BUILT.name}.`)).toBeInTheDocument();
+    expect(metaLine(areaEntrySaying(REFUSED_SENTENCE))).toMatch(
+      new RegExp(`^Error, failure, ${REFUSED_MAPPING}, `),
+    );
+    expect(metaLine(areaEntrySaying(REFUSED_SENTENCE))).not.toMatch(/resolved/);
+
+    buildNamed(REFUSED_MAPPING);
+
+    expect(await screen.findByText(`Built ${REFUSED_MAPPING}.`)).toBeInTheDocument();
+    expect(metaLine(areaEntrySaying(REFUSED_SENTENCE))).toMatch(/, resolved$/);
+  });
+
+  it("lists a refused build resolved once its mapping's next build commits without its receipt, and the gap's notice saying nothing of being resolved", async () => {
+    const gap = RESULTS_ANSWERS.mapping_audit_gap;
+    vi.spyOn(resultsApi, "buildPlantMapping")
+      .mockRejectedValueOnce(await thrown(CITED))
+      .mockRejectedValueOnce(await thrown(gap));
+    await renderBuildingWithArea();
+    buildNamed(REFUSED_MAPPING);
+    await within(mappingPanel()).findByTestId("entry-in-place");
+
+    buildNamed(REFUSED_MAPPING);
+
+    await waitFor(() =>
+      expect(within(mappingPanel()).getByTestId("entry-in-place")).toHaveTextContent(
+        gap.body.detail.message,
+      ),
+    );
+    expect(metaLine(areaEntrySaying(REFUSED_SENTENCE))).toMatch(/, resolved$/);
+    expect(metaLine(areaEntrySaying(gap.body.detail.message))).toMatch(
+      new RegExp(`^Warning, notice, ${REFUSED_MAPPING}, `),
+    );
+    expect(metaLine(areaEntrySaying(gap.body.detail.message))).not.toMatch(/resolved/);
+  });
+
+  it("shows beside Build the failure of the mapping typed and no other's", async () => {
+    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValueOnce(await thrown(CITED));
+    await renderBuildingWithArea();
+    buildNamed(REFUSED_MAPPING);
     await within(mappingPanel()).findByTestId("entry-in-place");
 
     fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: BUILT.name } });
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
 
-    expect(await screen.findByText(`Built ${BUILT.name}.`)).toBeInTheDocument();
-    expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, valley, /);
-    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+    expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: REFUSED_MAPPING } });
+
+    expect(within(mappingPanel()).getByTestId("entry-in-place")).toHaveTextContent(
+      REFUSED_SENTENCE,
+    );
   });
 
   it("adopts nothing and shows a build committed without its receipt as a warning in place", async () => {
