@@ -99,7 +99,13 @@ import { nextMode } from "@/lib/toolMode";
 import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import { declaredClient, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
-import { canvasImage, holdsCanvas, imageSize, loadedFor } from "@/store/slices/canvas";
+import {
+  canvasImage,
+  canvasImageIndex,
+  holdsCanvas,
+  imageSize,
+  loadedFor,
+} from "@/store/slices/canvas";
 import {
   isFinished,
   TOOL_ARRAY,
@@ -935,8 +941,7 @@ export function AnnotateTab() {
   /** Put the image whose document the canvas holds back in view; false when the selection holds
    *  no such image. */
   function returnToCanvasImage(): boolean {
-    const { canvas: held, gui } = useStore.getState();
-    const index = gui.dataset?.images.findIndex((i) => i.path === held.loaded?.image_path) ?? -1;
+    const index = canvasImageIndex(useStore.getState());
     if (index === -1) return false;
     moveToImage(index);
     return true;

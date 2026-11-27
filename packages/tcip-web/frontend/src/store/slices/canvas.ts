@@ -134,11 +134,15 @@ export const loadedFor = (
   imagePath: string | null | undefined,
 ): LoadedLabels | null => (loaded && loaded.image_path === imagePath ? loaded : null);
 
+/** The selection's index of the image whose document the canvas holds; -1 with no selection, no
+ *  document loaded, or a document of an image the selection does not hold. */
+export const canvasImageIndex = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): number =>
+  gui.dataset?.images.findIndex((image) => image.path === canvas.loaded?.image_path) ?? -1;
+
 /** Whether the loaded canvas is one of the selected capture's own images; false with no
  *  selection. */
-export const selectCanvasMatchesDataset = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">) =>
-  gui.dataset !== null &&
-  gui.dataset.images.some((image) => image.path === canvas.loaded?.image_path);
+export const selectCanvasMatchesDataset = (s: Pick<AppState, "gui" | "canvas">) =>
+  canvasImageIndex(s) !== -1;
 
 function snapshot(s: AppState): CanvasSnapshot {
   const c = s.canvas;
