@@ -1520,7 +1520,7 @@ export function AnnotateTab() {
   }, []);
 
   const onUp = (ix: number, iy: number) => {
-    if (stageInert()) return;
+    if (useStore.getState().canvas.saving) return;
     if (pointDragRef.current !== null) {
       pointDragRef.current = null;
       // didDragRef stays set: the trailing click of this release must not place a second point
@@ -1708,7 +1708,7 @@ export function AnnotateTab() {
   };
 
   const onDoubleClick = (ix: number, iy: number) => {
-    if (stageInert() || outsideImage(ix, iy)) return;
+    if (canvas.saving || outsideImage(ix, iy)) return;
     if (mode !== "polygon") return;
     streamingRef.current = false; // a double-click ends laying even when too short to close
     if (canvas.currentPolygon.length >= 3) {
@@ -1718,7 +1718,7 @@ export function AnnotateTab() {
 
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
-    if (stageInert() || outsideImage(ix, iy)) return;
+    if (canvas.saving || outsideImage(ix, iy)) return;
     // Armed, a right-click drops the held prompt under the cursor: a point within its grab
     // radius, else the smallest box holding the cursor.
     if (annotateUi.prompt) {
