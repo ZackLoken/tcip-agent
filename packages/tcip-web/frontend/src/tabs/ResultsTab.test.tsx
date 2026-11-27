@@ -127,10 +127,10 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     render(<ResultsTab />);
 
     const block = await screen.findByText(message);
-    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Retry this dataset's dates" })).toHaveLength(1);
     expect(screen.queryByText("No dates with images.")).not.toBeInTheDocument();
 
-    fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(block).getByRole("button", { name: "Retry this dataset's dates" }));
 
     expect(await screen.findByText(DS_DATE)).toBeInTheDocument();
     expect(tree).toHaveBeenCalledTimes(2);

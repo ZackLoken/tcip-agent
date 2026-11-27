@@ -41,6 +41,7 @@ const [PASSED, FAILED] = PRODUCED_ASSESSMENTS.assessments;
 const {
   launched: LAUNCHED,
   failing_started: FAILING_STARTED,
+  both_started: BOTH_STARTED,
   failing_final: FAILING_FINAL,
   held_started: HELD_STARTED,
   running: RUNNING,
@@ -94,7 +95,7 @@ function selectBaseline() {
 function watch(jobId: string) {
   const row = screen.getByText(jobId).closest("tr");
   if (!row) throw new Error(`no row lists ${jobId}`);
-  fireEvent.click(within(row).getByRole("button", { name: "Watch" }));
+  fireEvent.click(within(row).getByRole("button", { name: `Watch ${jobId}` }));
 }
 
 // The refusal's bucket renders in its own <span>, so the sentence's default per-node text (which
@@ -310,6 +311,24 @@ describe("InferenceTab job table", () => {
     mockModels();
   });
 
+  it("names each row's Watch and Cancel for its job, so no two rows' controls share a name", async () => {
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue(BOTH_STARTED);
+
+    renderBesideListings(<InferenceTab />);
+    expect(await screen.findByText(HELD)).toBeInTheDocument();
+
+    expect(BOTH_STARTED.jobs).toHaveLength(2);
+    for (const { job_id } of BOTH_STARTED.jobs) {
+      const row = screen.getByText(job_id).closest("tr") as HTMLElement;
+      expect(within(row).getByRole("button", { name: `Watch ${job_id}` })).toHaveTextContent(
+        /^Watch$/,
+      );
+      expect(within(row).getByRole("button", { name: `Cancel ${job_id}` })).toHaveTextContent(
+        /^Cancel$/,
+      );
+    }
+  });
+
   it("offers a stop control only for a job still in flight, and cancels that job by id", async () => {
     vi.mocked(inferenceApi.listJobs).mockResolvedValue(RUNNING);
     const cancelSpy = vi.spyOn(inferenceApi, "cancel").mockResolvedValue(CANCEL);
@@ -319,9 +338,8 @@ describe("InferenceTab job table", () => {
     expect(await screen.findByText(HELD)).toBeInTheDocument();
     expect(screen.getByText(FAILED_JOB.job_id)).toBeInTheDocument();
 
-    const stops = screen.getAllByRole("button", { name: "Cancel" });
-    expect(stops).toHaveLength(1);
-    fireEvent.click(stops[0]);
+    expect(screen.queryByRole("button", { name: `Cancel ${FAILED_JOB.job_id}` })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(HELD, { user: "jordan" }));
   });
 
@@ -335,7 +353,7 @@ describe("InferenceTab job table", () => {
 
     renderBesideListings(<InferenceTab />);
     expect(await screen.findByText(HELD)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
 
     const line = await screen.findByTestId("entry-in-place");
     expect(line).toHaveTextContent(sentence);
@@ -348,7 +366,7 @@ describe("InferenceTab job table", () => {
       }),
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
 
     await waitFor(() => expect(screen.queryByTestId("entry-in-place")).toBeNull());
   });
@@ -361,10 +379,10 @@ describe("InferenceTab job table", () => {
 
       renderBesideListings(<InferenceTab />);
       await vi.waitFor(() => expect(screen.getByText(HELD)).toBeInTheDocument());
-      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
 
       await vi.waitFor(() => expect(screen.getByText("canceling")).toBeInTheDocument());
-      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: `Cancel ${HELD}` })).not.toBeInTheDocument();
 
       // The next poll still reports running: the row keeps canceling rather than flipping back.
       await act(async () => {
@@ -907,17 +925,39 @@ describe("InferenceTab load errors", () => {
     renderBesideListings(<InferenceTab />);
 
     const reads = [
-      { message: "Could not load this dataset's dates: dates down", read: tree },
-      { message: "Could not load assessments: assessments down", read: assessments },
-      { message: "Could not load inference jobs: jobs down", read: listJobs },
-      { message: "Could not load registered models: models down", read: models },
+      {
+        message: "Could not load this dataset's dates: dates down",
+        retry: "Retry this dataset's dates",
+        read: tree,
+      },
+      {
+        message: "Could not load assessments: assessments down",
+        retry: "Retry assessments",
+        read: assessments,
+      },
+      {
+        message: "Could not load inference jobs: jobs down",
+        retry: "Retry inference jobs",
+        read: listJobs,
+      },
+      {
+        message: "Could not load registered models: models down",
+        retry: "Retry registered models",
+        read: models,
+      },
     ];
-    for (const { message, read } of reads) {
+    for (const { message } of reads) await screen.findByText(message);
+    for (const { message, retry } of reads) {
+      expect(
+        within(screen.getByText(message)).getByRole("button", { name: retry }),
+      ).toHaveTextContent(/^Retry$/);
+    }
+    for (const { message, retry, read } of reads) {
       const block = await screen.findByText(message);
       expect(screen.getAllByText(message)).toHaveLength(1);
       expect(read).toHaveBeenCalledTimes(1);
 
-      fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
+      fireEvent.click(within(block).getByRole("button", { name: retry }));
 
       await waitFor(() => expect(screen.queryByText(message)).not.toBeInTheDocument());
       expect(read).toHaveBeenCalledTimes(2);

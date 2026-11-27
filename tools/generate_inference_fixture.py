@@ -7,18 +7,19 @@ dataset (``tests._producer_fixtures.register_dataset_at``), a registered checkpo
 (``tests._verified_checkpoint_fixtures.project_checkpoint``) and a copy of its bytes at another
 path. Each pass is launched through ``POST /api/inference/launch``, built through the route's
 request model, and runs on the route's own worker, which holds at each pause of a
-``fixture_session.Gate`` until the scene steps it on; the pass's engine
-(``inference_tools.infer``) is the platform's own for every pass but the one whose bucket the
-launch under :data:`HELD` answers, whose engine reports one image done and ends once canceled.
+``fixture_session.Gate`` of its own until the scene steps it on; the pass's engine
+(``inference_tools.infer``) is the platform's own for every pass but the one published
+beneath the bucket :data:`HELD` names, whose engine reports one image done and ends once canceled.
 
 The job listing asked for before the project opens is refused (``unopened``). A pass over
 the copy, which its launch admits, is listed through ``GET /api/inference/jobs``
 running before its engine starts (``failing_started``), when a second launch naming its bucket is
-refused (``failing_bucket_exists``); the copy is then overwritten by bytes no registry names,
-and the pass fails on the platform's own engine, its stream ending on the failure
-(``failing_final``). The held pass is launched (``launched``), listed running before its engine
-reports (``held_started``) and after (``running``) as its stream's first frame sends it
-(``progress``); a second launch naming its bucket is refused
+refused (``failing_bucket_exists``). The held pass is launched while that one is still held
+(``launched``) and both are listed running before either engine starts (``both_started``); the
+copy is then overwritten by bytes no registry names, and the failing pass fails on the platform's
+own engine, its stream ending on the failure (``failing_final``). The held pass is listed
+running before its engine reports (``held_started``) and after (``running``) as its stream's first
+frame sends it (``progress``); a second launch naming its bucket is refused
 (``bucket_exists``); it is canceled through ``POST .../cancel`` while it still runs (``cancel``)
 and, once it ends, listed (``canceled``) and streamed to its final frame (``final``). A launch
 naming a checkpoint that does not exist is refused (``missing_checkpoint``), and a stream to a job
@@ -93,21 +94,18 @@ def produce() -> dict[str, JsonValue]:
     from tests._web_fixtures import named_project
 
     engine = inference_tools.infer
-    gate = Gate()
+    failing_gate, held_gate = Gate(), Gate()
     served: dict[str, JsonValue] = {}
 
     def staged(project: Path, **run: object) -> dict:
-        gate.pause()
-        launched = served.get("launched")
-        if (
-            not isinstance(launched, dict)
-            or run["bucket"] != launched["bucket"]
-        ):
+        if run["bucket"] != held_bucket:
+            failing_gate.pause()
             return engine(project, **run)  # type: ignore[arg-type]
+        held_gate.pause()
         progress, canceled = run["progress"], run["canceled"]
         assert callable(progress) and callable(canceled), run
         progress(1, IMAGES)
-        gate.pause()
+        held_gate.pause()
         assert canceled(), "the held pass was stepped on uncanceled"
         return {}
 
@@ -128,37 +126,42 @@ def produce() -> dict[str, JsonValue]:
         replaced.write_bytes(Path(checkpoint).read_bytes())
         patch.setattr(inference_tools, "infer", staged)
 
+        def request(
+            bucket_name: str, path: str
+        ) -> inference.LaunchInferencePayload:
+            return inference.LaunchInferencePayload(
+                checkpoint_path=path,
+                dataset_root=str(root),
+                date=CAPTURE,
+                bucket_name=bucket_name,
+                stated=Stated(),
+                user=ACTOR,
+            )
+
         def launch(bucket_name: str, status: int, path: str) -> JsonValue:
             return answered(
-                client,
-                "launch_inference",
-                status,
-                inference.LaunchInferencePayload(
-                    checkpoint_path=path,
-                    dataset_root=str(root),
-                    date=CAPTURE,
-                    bucket_name=bucket_name,
-                    stated=Stated(),
-                    user=ACTOR,
-                ),
+                client, "launch_inference", status, request(bucket_name, path)
             )
+
+        held_bucket = request(HELD, checkpoint).bucket
 
         failing = inference.InferenceJob.model_validate(
             launch(FAILING, 200, str(replaced))
         ).job_id
-        gate.reached()
+        failing_gate.reached()
         served["failing_started"] = answered(client, "list_jobs", 200)
         served["failing_bucket_exists"] = launch(FAILING, 409, str(replaced))
-        replaced.write_bytes(b"weights")
-        gate.step()
-        ended(inference._registry, failing)
-        _, served["failing_final"] = _frames(client, failing, 2)
         served["launched"] = launch(HELD, 200, checkpoint)
         held = inference.InferenceJob.model_validate(served["launched"]).job_id
-        gate.reached()
+        held_gate.reached()
+        served["both_started"] = answered(client, "list_jobs", 200)
+        replaced.write_bytes(b"weights")
+        failing_gate.step()
+        ended(inference._registry, failing)
+        _, served["failing_final"] = _frames(client, failing, 2)
         served["held_started"] = answered(client, "list_jobs", 200)
-        gate.step()
-        gate.reached()
+        held_gate.step()
+        held_gate.reached()
         served["running"] = answered(client, "list_jobs", 200)
         (served["progress"],) = _frames(client, held, 1)
         served["bucket_exists"] = launch(HELD, 409, checkpoint)
@@ -169,7 +172,7 @@ def produce() -> dict[str, JsonValue]:
             PersonPayload(user=ACTOR),
             path={"job_id": held},
         )
-        gate.step()
+        held_gate.step()
         ended(inference._registry, held)
         served["canceled"] = answered(client, "list_jobs", 200)
         _, served["final"] = _frames(client, held, 2)

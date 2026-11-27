@@ -671,16 +671,18 @@ describe("App job listings", () => {
       read: () => vi.mocked(trainingApi.listRuns),
       refusal: TRAINING_REFUSALS.unopened,
       failed: "Could not load training runs",
+      retry: "Retry training runs",
     },
     {
       tab: "inference",
       read: () => vi.mocked(inferenceApi.listJobs),
       refusal: INFERENCE_ANSWERS.unopened,
       failed: "Could not load inference jobs",
+      retry: "Retry inference jobs",
     },
   ] as const)(
     "with no project open reads the $tab listing once across a minute, and once more on its Retry",
-    async ({ tab, read, refusal, failed }) => {
+    async ({ tab, read, refusal, failed, retry }) => {
       const refused = await thrown(refusal);
       read().mockRejectedValue(refused);
       const message = `${failed}: ${refusal.body.detail}`;
@@ -694,7 +696,7 @@ describe("App job listings", () => {
       });
       expect(read()).toHaveBeenCalledTimes(1);
 
-      fireEvent.click(within(screen.getByText(message)).getByRole("button", { name: "Retry" }));
+      fireEvent.click(within(screen.getByText(message)).getByRole("button", { name: retry }));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(60_000);
       });

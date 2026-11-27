@@ -53,6 +53,7 @@ describe("LaunchPicker", () => {
           emptyMessage: "No config exists in this project yet.",
           rows: [],
           onRetry: vi.fn(),
+          actsOn: "configs",
         }}
       />,
     );
@@ -79,6 +80,7 @@ describe("LaunchPicker", () => {
           emptyMessage: "none",
           rows: [row(overrides)],
           onRetry: vi.fn(),
+          actsOn: "configs",
         }}
       />,
     );
@@ -93,6 +95,7 @@ describe("LaunchPicker", () => {
           emptyMessage: "none",
           rows: [row()],
           onRetry: vi.fn(),
+          actsOn: "configs",
         }}
       />,
     );
@@ -218,12 +221,13 @@ describe("LaunchPicker", () => {
           rows: [],
           error: "Could not load configs: network error",
           onRetry,
+          actsOn: "configs",
         }}
       />,
     );
     expect(screen.getByText("Could not load configs: network error")).toBeInTheDocument();
     expect(screen.queryByText("No config exists in this project yet.")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry configs" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
@@ -235,6 +239,7 @@ describe("LaunchPicker", () => {
           emptyMessage: "none",
           rows: [row()],
           onRetry: vi.fn(),
+          actsOn: "configs",
         }}
       />,
     );
@@ -279,6 +284,7 @@ describe("LaunchPicker", () => {
           emptyMessage: "none",
           rows: [row(), row({ key: "exp-2", content: <span>exp-2</span> })],
           onRetry: vi.fn(),
+          actsOn: "configs",
         }}
         onSelect={onSelect}
       />,
