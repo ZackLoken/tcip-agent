@@ -104,6 +104,7 @@ import {
   canvasImage,
   canvasImageIndex,
   canvasInView,
+  canvasTakesEdits,
   holdsCanvas,
   imageSize,
   loadedFor,
@@ -164,12 +165,8 @@ function documentLanded(imagePath: string): void {
 const heldSaveLanded = (): Promise<boolean> =>
   useStore.getState().canvas.saving?.landed.promise ?? Promise.resolve(true);
 
-/** Whether the stage takes no gesture now: a save holds the canvas, or the canvas holds no
- *  document of the image in view. */
-function stageInert(): boolean {
-  const state = useStore.getState();
-  return state.canvas.saving !== null || !canvasInView(state);
-}
+/** Whether the stage takes no gesture now, the canvas taking no edit. */
+const stageInert = (): boolean => !canvasTakesEdits(useStore.getState());
 
 /** What the page draws and states of a canvas holding no document of the image in view. */
 const NOTHING_HELD = {
@@ -840,6 +837,8 @@ export function AnnotateTab() {
   /** Save the current canvas, with any gestures it adjudicates, to the path it was loaded from,
    *  reading the live store and refs so a call mid-transition writes the right image. The
    *  items of `confirm` are named by their position in the very list this save serializes.
+   *  An `interactive` save, the default, is refused (null, nothing sent) while the canvas holds
+   *  no document of the image in view.
    *  The canvas adopts the answer while the save still holds it and its document is still
    *  loaded; resolves that answer when its image is the one in view, else null. */
   async function save(opts?: {

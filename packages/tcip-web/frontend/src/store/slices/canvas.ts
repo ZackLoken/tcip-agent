@@ -144,6 +144,11 @@ export const canvasImageIndex = ({ gui, canvas }: Pick<AppState, "gui" | "canvas
 export const canvasInView = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): boolean =>
   loadedFor(canvas, currentImage(gui.dataset)?.path) !== null;
 
+/** Whether the canvas takes an edit now: no save holds it and it holds the document of the image
+ *  in view. */
+export const canvasTakesEdits = (state: Pick<AppState, "gui" | "canvas">): boolean =>
+  state.canvas.saving === null && canvasInView(state);
+
 function snapshot(s: AppState): CanvasSnapshot {
   const c = s.canvas;
   return {
@@ -439,7 +444,7 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
   for (const name of CONTENT_EDITS) {
     const action = slice[name] as (...args: never[]) => unknown;
     const inert = () =>
-      get().canvas.saving !== null || (name !== "rollbackLast" && !canvasInView(get()));
+      name === "rollbackLast" ? get().canvas.saving !== null : !canvasTakesEdits(get());
     slice[name] = ((...args: never[]) => (inert() ? undefined : action(...args))) as never;
   }
   return slice;
