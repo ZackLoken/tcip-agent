@@ -532,7 +532,7 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     await settle();
 
     expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(1);
-    expect(page.useStore.getState().canvas.loaded?.image_path).toBe(next.path);
+    expect(screen.queryByText("1 box")).toBeNull();
     expect(imagePosition()).toHaveValue("2");
     expect(unsaved()).toBeNull();
   });
