@@ -59,6 +59,9 @@ function auditGapExportMessage(savedPath: string, detail: string): string {
   );
 }
 
+/** What a failed read of the dataset's dates names, and what its Retry reads again. */
+const DATES_READ = "this dataset's dates";
+
 /** The key what the last export of `kind` told stands on in the project `projectId`. */
 const exportKey = (kind: "phenology" | "count", projectId: string | undefined) =>
   `results-export-${kind}:${projectId}`;
@@ -200,7 +203,7 @@ export function ResultsTab() {
         setDatesError(null);
       })
       .catch((e) => {
-        setDatesError(`Could not load this dataset's dates: ${messageOf(e)}`);
+        setDatesError(`Could not load ${DATES_READ}: ${messageOf(e)}`);
       });
   }, [datasetRoot]);
 
@@ -660,7 +663,7 @@ export function ResultsTab() {
                   <ErrorRetry
                     message={datesError}
                     onRetry={refreshDatasetTree}
-                    actsOn="dataset dates"
+                    actsOn={DATES_READ}
                     className="mb-1"
                   />
                 )}

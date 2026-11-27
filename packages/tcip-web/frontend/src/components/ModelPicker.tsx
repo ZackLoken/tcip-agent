@@ -9,6 +9,9 @@ import { ErrorRetry } from "@/components/ErrorRetry";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
 
+/** What a failed read of the models names, and what its Retry reads again. */
+const MODELS_READ = "registered models";
+
 /**
  * A labeled select over the open project's registered models, read once per project with a
  * retry on a failed read. `value` is the chosen model, `onChange` hands on the one the person
@@ -38,7 +41,7 @@ export function ModelPicker({
       })
       .catch((e) => {
         setRegistered(null);
-        setError(`Could not load registered models: ${messageOf(e)}`);
+        setError(`Could not load ${MODELS_READ}: ${messageOf(e)}`);
       });
   }, [projectRoot]);
 
@@ -50,7 +53,7 @@ export function ModelPicker({
         Model
       </label>
       {error && (
-        <ErrorRetry message={error} onRetry={refresh} actsOn="registered models" className="mb-1" />
+        <ErrorRetry message={error} onRetry={refresh} actsOn={MODELS_READ} className="mb-1" />
       )}
       {models.length > 0 ? (
         <select

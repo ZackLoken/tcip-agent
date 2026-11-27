@@ -927,7 +927,7 @@ describe("InferenceTab load errors", () => {
     const reads = [
       {
         message: "Could not load this dataset's dates: dates down",
-        retry: "Retry dataset dates",
+        retry: "Retry this dataset's dates",
         read: tree,
       },
       {

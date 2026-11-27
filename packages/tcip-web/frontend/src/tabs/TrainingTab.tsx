@@ -42,6 +42,9 @@ import {
   unionMetricKeys,
 } from "@/tabs/trainingMetrics";
 
+/** What a failed listing of the runs names, and what its Retry reads again. */
+const RUNS_READ = "training runs";
+
 /** Ask the shell's reader to list the runs again now. */
 const listRunsNow = () => useStore.getState().askListing("training");
 
@@ -299,7 +302,7 @@ export function TrainingTab() {
   const [splitChoiceErrors, setSplitChoiceErrors] = useState<Record<string, string>>({});
   const listing = useStore((s) => s.jobListings.training.answer);
   const listFailure = useStore((s) => s.jobListings.training.failure);
-  const runsError = listFailure && `Could not load training runs: ${listFailure}`;
+  const runsError = listFailure && `Could not load ${RUNS_READ}: ${listFailure}`;
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [latestBatch, setLatestBatch] = useState<MetricsRow | null>(null);
@@ -674,7 +677,7 @@ export function TrainingTab() {
                 emptyMessage: "No runs.",
                 error: runsError ?? undefined,
                 onRetry: listRunsNow,
-                actsOn: "training runs",
+                actsOn: RUNS_READ,
                 rows: launchRows,
               }}
               onSelect={(key) => void loadSplitChoices(key)}
@@ -686,7 +689,7 @@ export function TrainingTab() {
           <ErrorRetry
             message={runsError}
             onRetry={listRunsNow}
-            actsOn="training runs"
+            actsOn={RUNS_READ}
             className="text-[13px] mb-2"
           />
         )}

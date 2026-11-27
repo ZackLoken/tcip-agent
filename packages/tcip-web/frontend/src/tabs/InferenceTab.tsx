@@ -46,6 +46,15 @@ const launchKey = (projectId: string | undefined, datasetRoot: string, date: str
 const cancelKey = (projectId: string | undefined, jobId: string) =>
   `inference-cancel:${projectId}:${jobId}`;
 
+/** What each failed read of the tab names, and what its Retry reads again. */
+const DATES_READ = "this dataset's dates";
+const ASSESSMENTS_READ = "assessments";
+const JOBS_READ = "inference jobs";
+
+/** The visible labels of a Jobs row's controls, each followed by the job's id in its name. */
+const ROW_WATCH = "Watch";
+const ROW_CANCEL = "Cancel";
+
 /** The id of the Watch control of the job `jobId`, where focus returns once its cancel's failure
  *  is dismissed. */
 const watchControlId = (jobId: string) => `watch-${jobId}`;
@@ -167,7 +176,7 @@ export function InferenceTab() {
   const [rationale, setRationale] = useState("");
   const listed = useStore((s) => s.jobListings.inference.answer);
   const listFailure = useStore((s) => s.jobListings.inference.failure);
-  const jobsError = listFailure && `Could not load inference jobs: ${listFailure}`;
+  const jobsError = listFailure && `Could not load ${JOBS_READ}: ${listFailure}`;
   const [watched, setWatched] = useState<Watched | null>(null);
   const activeJobId = watched?.record.job_id ?? null;
   // What each watched job's stream said once the backend held no record of it, by its id.
@@ -222,7 +231,7 @@ export function InferenceTab() {
       })
       .catch((e) => {
         setAssessed(null);
-        setAssessmentsError(`Could not load assessments: ${messageOf(e)}`);
+        setAssessmentsError(`Could not load ${ASSESSMENTS_READ}: ${messageOf(e)}`);
       });
   }, [projectRoot]);
 
@@ -241,7 +250,7 @@ export function InferenceTab() {
       })
       .catch((e) => {
         setTree(null);
-        setDatesError(`Could not load this dataset's dates: ${messageOf(e)}`);
+        setDatesError(`Could not load ${DATES_READ}: ${messageOf(e)}`);
       });
   }, [datasetRoot]);
 
@@ -384,7 +393,7 @@ export function InferenceTab() {
           <ErrorRetry
             message={datesError}
             onRetry={refreshDates}
-            actsOn="dataset dates"
+            actsOn={DATES_READ}
             className="mb-1"
           />
         )}
@@ -424,7 +433,7 @@ export function InferenceTab() {
           <ErrorRetry
             message={assessmentsError}
             onRetry={refreshAssessments}
-            actsOn="assessments"
+            actsOn={ASSESSMENTS_READ}
             className="mb-1"
           />
         )}
@@ -541,7 +550,7 @@ export function InferenceTab() {
           <ErrorRetry
             message={jobsError}
             onRetry={listJobsNow}
-            actsOn="inference jobs"
+            actsOn={JOBS_READ}
             className="mb-2"
           />
         )}
@@ -580,19 +589,19 @@ export function InferenceTab() {
                       <div className="flex gap-1">
                         <button
                           id={watchControlId(j.job_id)}
-                          aria-label={`Watch ${j.job_id}`}
+                          aria-label={`${ROW_WATCH} ${j.job_id}`}
                           className="tcip-btn"
                           onClick={() => watch(j)}
                         >
-                          Watch
+                          {ROW_WATCH}
                         </button>
                         {unended(j.state) && !cancelRequested.has(j.job_id) && (
                           <button
                             className="tcip-btn"
-                            aria-label={`Cancel ${j.job_id}`}
+                            aria-label={`${ROW_CANCEL} ${j.job_id}`}
                             onClick={() => void onCancel(j.job_id)}
                           >
-                            Cancel
+                            {ROW_CANCEL}
                           </button>
                         )}
                       </div>
