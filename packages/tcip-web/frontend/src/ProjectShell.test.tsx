@@ -7,6 +7,7 @@ import type { PanelEnvelope } from "@/api/types.generated";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { ANNOTATE_ANSWERS, LANDED, loadOf } from "@/test/annotate";
 import { LABEL_ANSWERS } from "@/test/labels";
+import { metaLine } from "@/test/notifications";
 import {
   DISMISSALS,
   PANEL_EVENTS,
@@ -544,6 +545,25 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("lists a leaving save's refusal as resolved once the Reload after it lands", async () => {
+    answerSaves(refusedAsChanged);
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+    const [refusal] = listing(CONFLICT_SENTENCE);
+    expect(metaLine(refusal)).not.toMatch(/resolved/);
+    page.load.mockResolvedValueOnce(LANDED.box.document);
+
+    fireEvent.click(within(inPlace()).getByRole("button", { name: "Reload" }));
+    await settle();
+
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    const failures = listing(CONFLICT_SENTENCE);
+    expect(failures).toHaveLength(1);
+    expect(metaLine(failures[0])).toMatch(/, resolved$/);
+  });
+
   it("returns to the image left with its edits when the leaving save got no answer, and moves once a pressed Save lands", async () => {
     const sent = answerSaves(unanswered, answering(200, saved));
     await mountOnCapture();
@@ -1012,7 +1032,7 @@ describe("ProjectShell agent notes", () => {
     ["refused naming no person", answering(DISMISSALS.no_one.status, DISMISSALS.no_one.body)],
     ["given no answer", unanswered],
   ])(
-    "tells a dismissal %s as one failure whose Retry sends it again, leaving the failure without its Retry, or any word of one, once taken",
+    "tells a dismissal %s as one failure whose Retry sends it again, leaving the failure resolved, without its Retry or any word of one, once taken",
     async (_case, failed) => {
       const sent = answerDismissals(failed, answering(200, DISMISSALS.dismissed));
       await mountOnCapture();
@@ -1021,6 +1041,7 @@ describe("ProjectShell agent notes", () => {
       dismissEntry(banner.event.text);
       await settle();
       expectLine(onlyItem(), "Error, failure, Agent's note for Results");
+      expect(metaLine(onlyItem())).not.toMatch(/resolved/);
 
       fireEvent.click(area().getByRole("button", { name: "Retry" }));
       await settle();
@@ -1030,6 +1051,7 @@ describe("ProjectShell agent notes", () => {
       expectLine(item, "Error, failure, Agent's note for Results");
       expectRaisedOnce(item);
       expect(item).not.toHaveTextContent(/Retry/);
+      expect(metaLine(item)).toMatch(/, resolved$/);
     },
   );
 
@@ -1047,7 +1069,7 @@ describe("ProjectShell agent notes", () => {
     expectListsNothing();
   });
 
-  it("withdraws a failed dismissal's Retry, and any word of one, sending nothing, once it is pressed after another project opened", async () => {
+  it("withdraws a failed dismissal's Retry, and any word of one, sending nothing and leaving the failure resolved, once it is pressed after another project opened", async () => {
     const sent = answerDismissals(unanswered);
     await mountOnCapture();
     deliver(banner);
@@ -1064,6 +1086,7 @@ describe("ProjectShell agent notes", () => {
     expectLine(item, "Error, failure, Agent's note for Results");
     expectRaisedOnce(item);
     expect(item).not.toHaveTextContent(/Retry/);
+    expect(metaLine(item)).toMatch(/, resolved$/);
   });
 
   it("lists nothing for a dismissal refused because the backend has another project open", async () => {

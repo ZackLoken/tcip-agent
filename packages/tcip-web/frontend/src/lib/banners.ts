@@ -40,15 +40,15 @@ const dismissalKey = (eventId: string): string => `agent-note-dismissal:${eventI
 
 /** Send the dismissal of `note`, as the committed person, while its project is the open one;
  *  `retry` sends it again. A dismissal not sent, answered, refused because another project is
- *  open, or committed without its line ends the failure standing on its key, the last raising the
- *  refusal's sentence as a warning; any other refusal or no answer raises a failure on that key
- *  offering `retry`. */
+ *  open, or committed without its line resolves the failure standing on its key, the last raising
+ *  the refusal's sentence as a warning; any other refusal or no answer raises a failure on that
+ *  key offering `retry`. */
 async function sendDismissal(note: Note, retry: () => void): Promise<void> {
   const { panel, eventId, text, context } = note;
-  const { openProject, user, releaseNotification } = useStore.getState();
+  const { openProject, user, resolveNotification } = useStore.getState();
   const key = dismissalKey(eventId);
   if (openProject?.id !== context.project) {
-    releaseNotification(key);
+    resolveNotification(key);
     return;
   }
   try {
@@ -56,7 +56,7 @@ async function sendDismissal(note: Note, retry: () => void): Promise<void> {
   } catch (e) {
     const { raiseNotification } = useStore.getState();
     if (committedOf(e) !== null) {
-      releaseNotification(key);
+      resolveNotification(key);
       raiseNotification({
         kind: "notice",
         level: "warning",
@@ -64,7 +64,7 @@ async function sendDismissal(note: Note, retry: () => void): Promise<void> {
         context,
       });
     } else if (refusalOf<ProjectNotOpenRefusal>(e, PROJECT_NOT_OPEN)) {
-      releaseNotification(key);
+      resolveNotification(key);
     } else {
       raiseNotification({
         kind: "failure",
@@ -79,7 +79,7 @@ async function sendDismissal(note: Note, retry: () => void): Promise<void> {
     }
     return;
   }
-  releaseNotification(key);
+  resolveNotification(key);
 }
 
 /** List the banner `envelope` carries as a notice of the project it was posted for, naming where

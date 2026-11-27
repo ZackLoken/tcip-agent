@@ -82,7 +82,7 @@ function PlantMappingPanel({
   async function loadMapping(name: string) {
     try {
       setMapping(await resultsApi.loadPlantMapping({ name }));
-      useStore.getState().releaseNotification(loadKey);
+      useStore.getState().resolveNotification(loadKey);
     } catch (e) {
       tell("failure", "error", `Could not load the mapping: ${messageOf(e)}`, name, loadKey);
     }
@@ -289,7 +289,7 @@ function DatasetIdentityPanel({
       void api.dataset
         .identity(datasetRoot)
         .then((answer) => {
-          useStore.getState().releaseNotification(readKey);
+          useStore.getState().resolveNotification(readKey);
           setReadRefused(false);
           setRead(answer);
           adopt(answer);

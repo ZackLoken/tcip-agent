@@ -346,14 +346,13 @@ export function TrainingTab() {
     });
   }
 
-  // The cap's refusal stands while the marked set is full, and ends once it is not or the tab
-  // leaves, which empties the set.
+  // The cap's refusal stands while the marked set is full and is resolved once it is not; the tab
+  // leaving, which empties the set, only frees its key.
   const markedCount = markedExperimentIds.size;
   useEffect(() => {
-    const release = () => useStore.getState().releaseNotification(capKey);
-    if (markedCount < MAX_MARKED_RUNS) release();
-    return release;
+    if (markedCount < MAX_MARKED_RUNS) useStore.getState().resolveNotification(capKey);
   }, [markedCount, capKey]);
+  useEffect(() => () => useStore.getState().releaseNotification(capKey), [capKey]);
 
   // Once the marked set settles at exactly one run, that run becomes the one the detail region
   // shows.
@@ -433,10 +432,9 @@ export function TrainingTab() {
     setMetrics([]);
     setLatestBatch(null);
     streamRef.current?.();
-    // The stream's error stands on its key until the stream delivers anything else or closes; the
-    // backend's frames name the stream's own run.
+    // The stream's error stands on its key until the stream delivers anything else, which
+    // resolves it, or closes; the backend's frames name the stream's own run.
     const errorKey = trainingKey("stream", projectId, selectedRun);
-    const release = () => useStore.getState().releaseNotification(errorKey);
     const stop = openTrainingStream(selectedRun, (msg) => {
       if (msg.type === "error") {
         // A run selected at its launch can be unknown to the backend for a few reconnects, each
@@ -444,7 +442,7 @@ export function TrainingTab() {
         tell("failure", "error", `Training stream error: ${msg.error}`, selectedRun, errorKey);
         return;
       }
-      release();
+      useStore.getState().resolveNotification(errorKey);
       if (msg.type === "metric") {
         setMetrics((prev) => mergeMetric(prev, msg.row));
       } else if (msg.type === "batch") {
@@ -456,7 +454,7 @@ export function TrainingTab() {
     });
     streamRef.current = () => {
       stop();
-      release();
+      useStore.getState().releaseNotification(errorKey);
     };
     return () => streamRef.current?.();
   }, [selectedRun, streaming, projectRoot, projectId, comparing]);

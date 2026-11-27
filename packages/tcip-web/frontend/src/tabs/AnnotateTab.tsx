@@ -144,17 +144,17 @@ function refuseAct(kind: ActKind, sentence: string, image: CaptureImage | null):
   tell("failure", "error", sentence, image.name, inView ? canvasKey(kind, image.path) : undefined);
 }
 
-/** End the refusal standing on `image`'s `kind` key, once a `kind` act on it succeeds. */
+/** Resolve the refusal standing on `image`'s `kind` key, once a `kind` act on it succeeds. */
 function actSucceeded(kind: ActKind, image: CaptureImage | null): void {
-  if (image) useStore.getState().releaseNotification(canvasKey(kind, image.path));
+  if (image) useStore.getState().resolveNotification(canvasKey(kind, image.path));
 }
 
-/** End what stands on the document and reload keys of the image at `imagePath`, once a load or
- *  save of it lands. */
+/** Resolve what stands on the document and reload keys of the image at `imagePath`, once a load
+ *  or save of it lands. */
 function documentLanded(imagePath: string): void {
-  const { releaseNotification } = useStore.getState();
-  releaseNotification(canvasKey("document", imagePath));
-  releaseNotification(canvasKey("reload", imagePath));
+  const { resolveNotification } = useStore.getState();
+  resolveNotification(canvasKey("document", imagePath));
+  resolveNotification(canvasKey("reload", imagePath));
 }
 
 /** Whether the save holding the canvas landed, once it answers; true at once when none holds it. */
@@ -640,7 +640,10 @@ export function AnnotateTab() {
     const { canvasShownImage: left, setCanvasShownImage } = useStore.getState();
     if ((left?.path ?? null) !== imgPath) {
       if (left) {
-        for (const kind of ["gesture", "prompt", "find"] as const) actSucceeded(kind, left);
+        const { releaseNotification } = useStore.getState();
+        for (const kind of ["gesture", "prompt", "find"] as const) {
+          releaseNotification(canvasKey(kind, left.path));
+        }
       }
       setCanvasShownImage(imageInView);
     }

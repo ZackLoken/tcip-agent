@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { subjectsApi } from "@/api/subjects";
 import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
+import { NotificationsPane } from "@/components/Notifications";
 import { adoptLoad } from "@/lib/registrySave";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
@@ -16,6 +17,7 @@ import {
   tokenOf,
   UNSTORED,
 } from "@/test/labels";
+import { areaEntrySaying, metaLine } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { openTestProject, selected } from "@/test/store";
 import { TERMINAL_ANSWERS } from "@/test/terminal";
@@ -273,6 +275,28 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     expect(useStore.getState().notifications).toEqual([
       expect.objectContaining({ sentence, key: undefined }),
     ]);
+  });
+
+  it("lists a refused save as resolved in the area once the next save lands", async () => {
+    const stale = LABEL_ANSWERS.registry_stale;
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockRejectedValueOnce(await thrown(stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
+    render(
+      <>
+        <AttributePanel focused={null} />
+        <NotificationsPane />
+      </>,
+    );
+    fillAttributeDraft("opening", ["closed", "open"]);
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+    const sentence = `Could not update the attributes: ${stale.body.detail}`;
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+
+    saveSpy.mockResolvedValue(landed);
+    fireEvent.click(screen.getByRole("button", { name: ADD_A_VALUE }));
+    await act(() => Promise.resolve(enter(`new ${DECLARED} value`, "half")));
+
+    expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, .+, resolved$/);
   });
 
   it("takes a refused save from the panel once the next save commits without its audit line", async () => {

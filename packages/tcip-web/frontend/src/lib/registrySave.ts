@@ -33,8 +33,8 @@ export function adoptLoad(loaded: SubjectsLoad): void {
 /** Grow the open dataset's subject registry to `next`: adopted locally at once, saved against the
  *  version this browser holds, and reloaded from the server when the save is refused. Answers
  *  whether the save landed. A refusal is a failure stating `failure` with the server's reason,
- *  standing on `key` until a later save through the same key lands; a save that landed without
- *  its audit line is a warning notice. */
+ *  standing on `key` until a later save through the same key lands, which resolves it; a save
+ *  that landed without its audit line is a warning notice. */
 export async function saveRegistry(
   next: RegistrySubjects,
   failure: string,
@@ -45,7 +45,7 @@ export async function saveRegistry(
   if (!selectProjectRoot(useStore.getState()) || !gui.dataset) return false;
   const { dataset_root: root, date } = gui.dataset;
   const context = { project: openProject?.id, target: date };
-  const { raiseNotification, releaseNotification } = useStore.getState();
+  const { raiseNotification, resolveNotification } = useStore.getState();
   try {
     const saved = await subjectsApi.save({
       subjects: next,
@@ -54,14 +54,14 @@ export async function saveRegistry(
       user,
     });
     setRegistry(next, { kind: STORED, version: saved.version }, registry.discovered);
-    releaseNotification(key);
+    resolveNotification(key);
     return true;
   } catch (e) {
     const message = messageOf(e);
     const saved = committedOf<RegistrySave>(e);
     if (saved) {
       setRegistry(next, { kind: STORED, version: saved.version }, registry.discovered);
-      releaseNotification(key);
+      resolveNotification(key);
       raiseNotification({ kind: "notice", level: "warning", text: { sentence: message }, context });
       return true;
     }

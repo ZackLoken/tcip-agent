@@ -44,6 +44,7 @@ import {
 import { BAND_ANSWERS } from "@/test/bands";
 import { dockWithNotificationsOpen, measureWindow, PANE_FOCUS } from "@/test/dock";
 import { LABEL_ANSWERS, servedAnnotation, UNSTORED } from "@/test/labels";
+import { areaEntrySaying, metaLine } from "@/test/notifications";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
@@ -1735,6 +1736,30 @@ describe("AnnotateTab labels written by the agent", () => {
     ]);
   });
 
+  it("lists its warning over unsaved edits as resolved once the Reload it offers lands", async () => {
+    render(
+      <>
+        <AnnotateTab />
+        <NotificationsPane />
+      </>,
+    );
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    act(() => {
+      useStore.getState().pushAgentActivity(written);
+    });
+    const warning = "A process just updated this image's labels.";
+    expect(metaLine(areaEntrySaying(warning))).not.toMatch(/resolved/);
+
+    fireEvent.click(within(onCanvas()[0]).getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+
+    expect(onCanvas()).toHaveLength(0);
+    expect(metaLine(areaEntrySaying(warning))).toMatch(/^Warning, notice, .+, resolved$/);
+  });
+
   it("loads the image in view again over a clean canvas", async () => {
     expect(written.event.image_path).toBe(IMG1);
     render(<AnnotateTab />);
@@ -2503,10 +2528,16 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   describe("a freshly drawn box smaller than the minimum", () => {
     const TOO_SMALL = "Box too small to keep. Drag out a bigger area.";
 
-    /** Mount over the first image and drag a box from (100, 100) by `side` on each axis. */
+    /** Mount over the first image beside the notifications area and drag a box from (100, 100)
+     *  by `side` on each axis. */
     async function mountAndDraw(side: number) {
       useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
-      render(<AnnotateTab />);
+      render(
+        <>
+          <AnnotateTab />
+          <NotificationsPane />
+        </>,
+      );
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
       await flush();
       await drawBox(side);
@@ -2570,6 +2601,26 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       expect(stagings).toHaveBeenCalledWith(IMG2);
       expect(onCanvas()).toHaveLength(0);
       expect(listed()).toEqual([expect.objectContaining({ sentence: TOO_SMALL })]);
+    });
+
+    it("is listed as resolved once the next box is kept", async () => {
+      await mountAndDraw(2);
+      expect(metaLine(areaEntrySaying(TOO_SMALL))).not.toMatch(/resolved/);
+
+      await drawBox(60);
+
+      expect(metaLine(areaEntrySaying(TOO_SMALL))).toMatch(/^Error, failure, .+, resolved$/);
+    });
+
+    it("is listed saying nothing of being resolved once the image changes", async () => {
+      await mountAndDraw(2);
+
+      act(() => changeSelection({ current_image_index: 1 }));
+      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+      await flush();
+
+      expect(onCanvas()).toHaveLength(0);
+      expect(metaLine(areaEntrySaying(TOO_SMALL))).not.toMatch(/resolved/);
     });
   });
 
