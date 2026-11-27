@@ -51,6 +51,7 @@ import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import {
   changeSelection,
   LATER_SELECTION,
+  NAV_ANSWER,
   openTestProject,
   RAW_SELECTION,
   SELECTED_SUBJECT as SUBJECT,
@@ -265,6 +266,18 @@ const pressSave = () => fireEvent.keyDown(window, { key: "s", ctrlKey: true });
 /** The entries the canvas shows in place, for the image in view. */
 const onCanvas = () => screen.queryAllByTestId("entry-in-place");
 
+/** The path of the image the canvas stage shows. */
+const imageInView = () =>
+  new URLSearchParams(
+    screen.getByTestId("canvas-stage").getAttribute("data-image-url")?.split("?")[1],
+  ).get("path");
+
+/** The boxes the canvas draws. */
+const drawnBoxes = () => screen.queryAllByTestId("k-rect");
+
+/** Step to the next image by its key, as a person does. */
+const pressNext = () => fireEvent.keyDown(window, { key: "ArrowRight" });
+
 /** The entries the notifications area lists. */
 const listed = () => useStore.getState().notifications;
 
@@ -288,6 +301,7 @@ beforeEach(() => {
   setupDataset();
   loadSpy = answerAnnotateMount();
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(LANDED.box);
+  vi.spyOn(api.dataset, "nav").mockResolvedValue(NAV_ANSWER);
   // jsdom lays nothing out, so the stand-in stage reports the host size the viewport math needs.
   stage.size = { w: 1000, h: 800 };
   stage.facts = null;
@@ -466,22 +480,20 @@ describe("AnnotateTab save/load race", () => {
     act(addBox);
     const flushSave = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(flushSave.promise);
-    act(() => {
-      changeSelection({ current_image_index: 1 });
-    });
+    pressNext();
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
     expect(saveSpy.mock.calls[0][0].base_mtime).toBe(loadOf(IMG1).base_mtime);
 
-    // While the img1 save is in flight the canvas is still img1's, and takes no edit.
-    expect(useStore.getState().canvas.loaded?.image_path).toBe(IMG1);
+    // While the img1 save is in flight img2 is in view under img1's box, which takes no edit.
+    expect(imageInView()).toBe(IMG2);
     act(addBox);
-    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    expect(drawnBoxes()).toHaveLength(1);
+    expect(loadOf(IMG2).boxes).toEqual([]);
     await act(() => Promise.resolve(flushSave.resolve(LANDED.box)));
-    expect(useStore.getState().canvas.loaded?.image_path).toBe(IMG2);
-    expect(useStore.getState().canvas.dirty).toBe(false);
+    expect(drawnBoxes()).toHaveLength(0);
 
     // The next save targets img2 with img2's loaded mtime, not img1's file with the earlier
     // save's echoed mtime.
@@ -508,17 +520,17 @@ describe("AnnotateTab save/load race", () => {
     pressSave();
     await flush();
     expect(pending).toHaveLength(2);
-    const later = useStore.getState().canvas.saving;
-    expect(later).not.toBeNull();
 
+    // The late answer adopts nothing, and the later save still holds the canvas against an edit.
     await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
-    expect(useStore.getState().canvas.saving).toBe(later);
+    expect(drawnBoxes()).toHaveLength(2);
     act(addBox);
-    expect(useStore.getState().canvas.boxes).toHaveLength(2);
+    expect(drawnBoxes()).toHaveLength(2);
 
     await act(() => Promise.resolve(pending[1].resolve(LANDED.cleared)));
-    expect(useStore.getState().canvas.saving).toBeNull();
-    expect(useStore.getState().canvas.boxes).toHaveLength(0);
+    expect(drawnBoxes()).toHaveLength(0);
+    act(addBox);
+    expect(drawnBoxes()).toHaveLength(1);
   });
 
   describe("a save in flight when the editor unmounts and a new one mounts", () => {
@@ -669,7 +681,12 @@ describe("AnnotateTab save/load race", () => {
   });
 
   it("a pressed save refused as changed after a move puts its image back in view with its edits and the choice on its line", async () => {
-    render(<AnnotateTab />);
+    render(
+      <>
+        <AnnotateTab />
+        <NotificationsPane />
+      </>,
+    );
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
@@ -677,9 +694,7 @@ describe("AnnotateTab save/load race", () => {
     act(addBox);
     const pending = heldSaves();
     pressSave();
-    act(() => {
-      changeSelection({ current_image_index: 1 });
-    });
+    pressNext();
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
 
@@ -691,19 +706,16 @@ describe("AnnotateTab save/load race", () => {
       return Promise.resolve();
     });
     const choice = `${CONFLICT_SENTENCE}. Reload to load the latest (discards your unsaved edits), or keep editing.`;
-    expect(useStore.getState().gui.dataset?.current_image_index).toBe(0);
-    expect(useStore.getState().canvas.loaded?.image_path).toBe(IMG1);
-    expect(useStore.getState().canvas.boxes).toHaveLength(1);
-    expect(useStore.getState().canvas.dirty).toBe(true);
+    expect(imageInView()).toBe(IMG1);
+    expect(drawnBoxes()).toHaveLength(1);
     expect(onCanvas()).toHaveLength(1);
     expect(onCanvas()[0]).toHaveTextContent(choice);
-    expect(listed()).toEqual([
-      expect.objectContaining({
-        kind: "failure",
-        sentence: choice,
-        context: { project: TEST_PROJECT.id, target: IMG1_NAME },
-      }),
-    ]);
+    const entries = within(screen.getByRole("region", { name: "Notifications" })).getAllByRole(
+      "listitem",
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toHaveTextContent(choice);
+    expect(entries[0]).toHaveTextContent(IMG1_NAME);
   });
 
   it.each([
