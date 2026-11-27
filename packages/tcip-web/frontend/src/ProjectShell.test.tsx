@@ -472,6 +472,25 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     expect(sizeReadout()).toHaveTextContent(`Image: ${width}×${height}`);
   });
 
+  it("says the labels could not be loaded and saving is off when the load a save asks for is refused too, listing the failure once", async () => {
+    page.load.mockRejectedValueOnce(await thrown(ANNOTATE_ANSWERS.unreadable));
+    page.load.mockRejectedValueOnce(await thrown(ANNOTATE_ANSWERS.unreadable));
+    const neverLoaded = /^Could not load this image's labels: .+\. Saving is off\./;
+    await mountOnCapture();
+    expect(inPlace()).toHaveTextContent(neverLoaded);
+
+    deliver(written);
+    await waitFor(() => expect(page.load).toHaveBeenCalledTimes(2));
+    await settle();
+
+    expect(page.load).toHaveBeenLastCalledWith(first.path);
+    expect(inPlace()).toHaveTextContent(neverLoaded);
+    expect(failureEntries()).toHaveLength(1);
+    expect(metaLine(failureEntries()[0])).toMatch(/, 2 times/);
+    expect(sizeReadout()).toBeNull();
+    expect(screen.getByTitle("Save (Ctrl+S)")).toBeDisabled();
+  });
+
   it("loads the image just moved to again for a save of it delivered while it loads, leaving the previous image once", async () => {
     expect(second.event.image_path).toBe(next.path);
     await mountOnCapture();
