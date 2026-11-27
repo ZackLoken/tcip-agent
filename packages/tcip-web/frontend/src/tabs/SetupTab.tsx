@@ -373,8 +373,10 @@ function DatasetIdentityPanel({
     } catch (e) {
       // A registration whose audit line was lost still committed, so its message is no failure.
       const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
-      if (gap) tell("notice", "warning", gap.message, datasetRoot);
-      else
+      if (gap) {
+        useStore.getState().resolveNotification(registerKey);
+        tell("notice", "warning", gap.message, datasetRoot);
+      } else {
         tell(
           "failure",
           "error",
@@ -382,6 +384,7 @@ function DatasetIdentityPanel({
           datasetRoot,
           registerKey,
         );
+      }
     } finally {
       setSubmitting(false);
       setConfirming(false);

@@ -910,6 +910,25 @@ describe("SetupTab dataset identity", () => {
       await waitFor(() => expect(metaLine(areaEntrySaying(UNREACHED))).toMatch(/, resolved$/));
       expect(metaLine(areaEntrySaying(refusedSaying(refusal)))).not.toMatch(/resolved/);
     });
+
+    it("lists a refused registration as resolved once the next one commits without its audit line", async () => {
+      const refusal = IDENTITY_ANSWERS.unknown_crop;
+      const gap = IDENTITY_ANSWERS.unrecorded;
+      vi.spyOn(api.dataset, "register")
+        .mockRejectedValueOnce(await thrown(refusal))
+        .mockRejectedValue(await thrown(gap));
+
+      await registerAfterRead(1);
+      await within(identityPanel()).findByTestId("entry-in-place");
+      await registerAfterRead(2);
+
+      await waitFor(() =>
+        expect(metaLine(areaEntrySaying(gap.body.detail.message))).toMatch(/^Warning, notice, /),
+      );
+      expect(metaLine(areaEntrySaying(refusedSaying(refusal)))).toMatch(
+        /^Error, failure, .+, resolved$/,
+      );
+    });
   });
 
   it("shows a committed registration's lost audit line as a warning, not a failure", async () => {
