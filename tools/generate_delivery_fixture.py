@@ -391,16 +391,13 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         )
     )
     out["acknowledged_mapping"] = served(project, "acknowledged_mapping")
-    answers["mapping_cited"] = browsed(
-        "build_plant_mapping",
-        BuildMappingPayload(
-            name="valley",
-            dataset_root=str(dataset_root),
-            plant_registry=registry,
-            user=ACTOR,
-        ),
-        409,
+    cited_build = BuildMappingPayload(
+        name="valley",
+        dataset_root=str(dataset_root),
+        plant_registry=registry,
+        user=ACTOR,
     )
+    answers["mapping_cited"] = browsed("build_plant_mapping", cited_build, 409)
     delivered(
         build_plant_mapping(
             root,
@@ -546,13 +543,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     )
     answers["mapping_superseded"] = browsed(
         "build_plant_mapping",
-        BuildMappingPayload(
-            name="valley",
-            dataset_root=str(dataset_root),
-            plant_registry=registry,
-            supersede=True,
-            user=ACTOR,
-        ),
+        cited_build.model_copy(update={"supersede": True}),
         200,
     )
 
