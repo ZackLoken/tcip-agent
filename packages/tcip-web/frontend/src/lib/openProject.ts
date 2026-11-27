@@ -29,14 +29,14 @@ export function heldOpen(requestId: number | null): OpenHold | null {
 /** The key a failed open of ``projectId`` stands on, which that project's card shows in place. */
 export const openKey = (projectId: string): string => `open:${projectId}`;
 
-/** Take the one open hold for ``projectId`` before any step of the open that waits, releasing
- *  that project's failed open; null when an open already holds it. */
+/** Take the one open hold for ``projectId`` before any step of the open that waits, setting that
+ *  project's failed open aside for this attempt; null when an open already holds it. */
 export function takeOpenHold(projectId: string): number | null {
   const state = useStore.getState();
   if (state.opening !== null) return null;
   const requestId = ++lastRequestId;
   state.patchOpenStatus({ opening: { requestId, projectId } });
-  state.releaseNotification(openKey(projectId));
+  state.setAsideNotification(openKey(projectId));
   return requestId;
 }
 
@@ -48,7 +48,8 @@ export function releaseOpenHold(requestId: number): void {
 /** The open itself, as the committed person, once this page's visits are settled
  *  (:func:`settleVisits`, whose rejection leaves the open unsent). It stops, with nothing sent
  *  or applied after that point, as soon as its request is no longer the held one: before asking
- *  the backend to open, before selecting a dataset and again before adopting. */
+ *  the backend to open, before selecting a dataset and again before adopting. An open it adopts
+ *  resolves the project's ``openKey``. */
 async function performOpen(
   requestId: number,
   p: ReadProject,
@@ -82,6 +83,7 @@ async function performOpen(
     });
   }
   useStore.getState().applyRestoredDataset(res.selection, project);
+  useStore.getState().resolveNotification(openKey(p.record.id));
   raiseLabelProblem(res.label_problem, project.id);
 }
 

@@ -269,6 +269,33 @@ describe("TrainingTab run list", () => {
     await waitFor(() => expect(within(rowFor(id)).queryByTestId("entry-in-place")).toBeNull());
     expect(entriesSaying(sentence)).toHaveLength(1);
   });
+
+  it("lists a failed Cancel as resolved once the next Cancel lands", async () => {
+    openTestProject();
+    listing();
+    const id = unlaunched.experiment_id;
+    // What fetch rejects with when the backend cannot be reached.
+    const cancel = vi
+      .spyOn(trainingApi, "cancel")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(CANCEL);
+    const sentence = "Cancel failed: Failed to fetch";
+
+    renderBesideListings(<TrainingTab />);
+    render(<NotificationsPane />);
+    fireEvent.click(await screen.findByRole("button", cancelOf(id)));
+    await within(rowFor(id)).findByTestId("entry-in-place");
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+
+    fireEvent.click(screen.getByRole("button", cancelOf(id)));
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(metaLine(areaEntrySaying(sentence))).toMatch(
+        new RegExp(`^Error, failure, ${id}, .+, resolved$`),
+      ),
+    );
+  });
 });
 
 describe("TrainingTab sweeps", () => {

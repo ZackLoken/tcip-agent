@@ -509,9 +509,10 @@ export function TrainingTab() {
   async function onCancel(id: string) {
     const key = trainingKey("cancel", projectId, id);
     setPendingCancel((prev) => new Set(prev).add(id));
-    useStore.getState().releaseNotification(key);
+    useStore.getState().setAsideNotification(key);
     try {
       await trainingApi.cancel(id, { user: useStore.getState().user });
+      useStore.getState().resolveNotification(key);
       listRunsNow();
     } catch (e) {
       tell("failure", "error", `Cancel failed: ${messageOf(e)}`, id, key);

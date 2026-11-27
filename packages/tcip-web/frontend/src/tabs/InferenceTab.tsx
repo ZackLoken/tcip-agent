@@ -330,6 +330,7 @@ export function InferenceTab() {
         user: useStore.getState().user,
       });
       watch(launched);
+      useStore.getState().resolveNotification(key);
     } catch (e) {
       const refusal = refusalOf<BucketExistsRefusal>(e, BUCKET_EXISTS);
       if (refusal) {
@@ -343,8 +344,8 @@ export function InferenceTab() {
   async function onLaunch() {
     if (!model || !datasetRoot || !bucketName || selectedDates.length === 0) return;
     const keys = selectedDates.map((date) => launchKey(projectId, datasetRoot, date));
-    const { releaseNotification } = useStore.getState();
-    for (const key of keys) releaseNotification(key);
+    const { setAsideNotification } = useStore.getState();
+    for (const key of keys) setAsideNotification(key);
     setLaunching(true);
     try {
       // One job per date: each date is its own prediction bucket, one job row per date.
@@ -363,9 +364,10 @@ export function InferenceTab() {
   async function onCancel(jobId: string) {
     const key = cancelKey(projectId, jobId);
     setCancelRequested((prev) => new Set(prev).add(jobId));
-    useStore.getState().releaseNotification(key);
+    useStore.getState().setAsideNotification(key);
     try {
       await inferenceApi.cancel(jobId, { user: useStore.getState().user });
+      useStore.getState().resolveNotification(key);
     } catch (e) {
       setCancelRequested((prev) => {
         const next = new Set(prev);

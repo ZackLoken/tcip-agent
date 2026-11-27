@@ -104,7 +104,7 @@ function PlantMappingPanel({
     setBuilding(true);
     setBuildMsg(null);
     setMapping(null);
-    useStore.getState().releaseNotification(buildKey);
+    useStore.getState().setAsideNotification(buildKey);
     try {
       const built = await resultsApi.buildPlantMapping({
         name: mappingName,
@@ -120,6 +120,7 @@ function PlantMappingPanel({
       });
       setMapping(built);
       setBuildMsg(`Built ${mappingName}.`);
+      useStore.getState().resolveNotification(buildKey);
       refreshMappingNames();
     } catch (e) {
       // A build whose receipt could not be written committed, so its message is no failure.
@@ -360,7 +361,7 @@ function DatasetIdentityPanel({
   async function register(confirmedCrop: string | null) {
     setSubmitting(true);
     setRepaired(null);
-    useStore.getState().releaseNotification(registerKey);
+    useStore.getState().setAsideNotification(registerKey);
     try {
       const answer = await api.dataset.register({
         dataset_root: datasetRoot,
@@ -369,6 +370,7 @@ function DatasetIdentityPanel({
         confirmed_crop: confirmedCrop,
       });
       setRepaired(answer.repaired);
+      useStore.getState().resolveNotification(registerKey);
     } catch (e) {
       // A registration whose audit line was lost still committed, so its message is no failure.
       const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
