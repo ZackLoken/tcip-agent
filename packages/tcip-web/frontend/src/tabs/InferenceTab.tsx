@@ -567,7 +567,11 @@ export function InferenceTab() {
                           Watch
                         </button>
                         {unended(j.state) && !cancelRequested.has(j.job_id) && (
-                          <button className="tcip-btn" onClick={() => void onCancel(j.job_id)}>
+                          <button
+                            className="tcip-btn"
+                            aria-label={`Cancel ${j.job_id}`}
+                            onClick={() => void onCancel(j.job_id)}
+                          >
                             Cancel
                           </button>
                         )}
@@ -580,6 +584,7 @@ export function InferenceTab() {
                     columns={4}
                   />
                 </Fragment>
+                          aria-label={`Watch ${j.job_id}`}
               ))}
             </tbody>
           </table>

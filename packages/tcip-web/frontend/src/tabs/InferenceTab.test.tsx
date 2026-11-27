@@ -48,7 +48,8 @@ const {
   canceled: CANCELED,
 } = INFERENCE_ANSWERS;
 const HELD = LAUNCHED.job_id;
-const [FAILED_JOB] = RUNNING.jobs;
+const [FAILED_JOB, HELD_JOB] = RUNNING.jobs;
+const [STARTING_JOB] = FAILING_STARTED.jobs;
 
 function setupDataset() {
   openTestProject(RAW_SELECTION);
@@ -94,7 +95,7 @@ function selectBaseline() {
 function watch(jobId: string) {
   const row = screen.getByText(jobId).closest("tr");
   if (!row) throw new Error(`no row lists ${jobId}`);
-  fireEvent.click(within(row).getByRole("button", { name: "Watch" }));
+  fireEvent.click(within(row).getByRole("button", { name: `Watch ${jobId}` }));
 }
 
 // The refusal's bucket renders in its own <span>, so the sentence's default per-node text (which
@@ -310,6 +311,24 @@ describe("InferenceTab job table", () => {
     mockModels();
   });
 
+  it("names each row's Watch and Cancel for its job, so no two rows' controls share a name", async () => {
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [STARTING_JOB, HELD_JOB] });
+
+    renderBesideListings(<InferenceTab />);
+    expect(await screen.findByText(HELD)).toBeInTheDocument();
+
+    for (const { job_id } of [STARTING_JOB, HELD_JOB]) {
+      const row = screen.getByText(job_id).closest("tr") as HTMLElement;
+      expect(within(row).getByRole("button", { name: `Watch ${job_id}` })).toHaveTextContent(
+        /^Watch$/,
+      );
+      expect(within(row).getByRole("button", { name: `Cancel ${job_id}` })).toHaveTextContent(
+        /^Cancel$/,
+      );
+    }
+    expect(STARTING_JOB.job_id).not.toBe(HELD_JOB.job_id);
+  });
+
   it("offers a stop control only for a job still in flight, and cancels that job by id", async () => {
     vi.mocked(inferenceApi.listJobs).mockResolvedValue(RUNNING);
     const cancelSpy = vi.spyOn(inferenceApi, "cancel").mockResolvedValue(CANCEL);
@@ -319,9 +338,8 @@ describe("InferenceTab job table", () => {
     expect(await screen.findByText(HELD)).toBeInTheDocument();
     expect(screen.getByText(FAILED_JOB.job_id)).toBeInTheDocument();
 
-    const stops = screen.getAllByRole("button", { name: "Cancel" });
-    expect(stops).toHaveLength(1);
-    fireEvent.click(stops[0]);
+    expect(screen.queryByRole("button", { name: `Cancel ${FAILED_JOB.job_id}` })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(HELD, { user: "jordan" }));
   });
 
@@ -335,7 +353,7 @@ describe("InferenceTab job table", () => {
 
     renderBesideListings(<InferenceTab />);
     expect(await screen.findByText(HELD)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
 
     const line = await screen.findByTestId("entry-in-place");
     expect(line).toHaveTextContent(sentence);
@@ -348,7 +366,7 @@ describe("InferenceTab job table", () => {
       }),
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
 
     await waitFor(() => expect(screen.queryByTestId("entry-in-place")).toBeNull());
   });
@@ -361,10 +379,10 @@ describe("InferenceTab job table", () => {
 
       renderBesideListings(<InferenceTab />);
       await vi.waitFor(() => expect(screen.getByText(HELD)).toBeInTheDocument());
-      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
 
       await vi.waitFor(() => expect(screen.getByText("canceling")).toBeInTheDocument());
-      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: `Cancel ${HELD}` })).not.toBeInTheDocument();
 
       // The next poll still reports running: the row keeps canceling rather than flipping back.
       await act(async () => {
