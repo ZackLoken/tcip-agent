@@ -174,6 +174,14 @@ export const LANDED = Object.fromEntries(
   Object.entries(ANNOTATE_ANSWERS.saves).map(([name, saved]) => [name, loadedSave(saved)]),
 ) as Record<keyof typeof ANNOTATE_ANSWERS.saves, LoadedSave>;
 
+/** The one proposal `landed` says it accepted, by its index in its bucket's document; refuses a
+ *  save that accepted none or several. */
+export function acceptedProposal(landed: LoadedSave): number {
+  const accepted = Object.keys(landed.accepted).map(Number);
+  if (accepted.length !== 1) throw new Error("the landed save accepted no one proposal");
+  return accepted[0];
+}
+
 /** The produced loaded documents, as the client loads each. */
 export const LOADED = {
   review: loadedLabels(ANNOTATE_ANSWERS.review),

@@ -30,6 +30,7 @@ import { useStore } from "@/store";
 import type { AnnotateView } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import {
+  acceptedProposal,
   ANNOTATE_ANSWERS,
   answerAnnotateMount,
   LANDED,
@@ -3234,13 +3235,6 @@ describe("AnnotateTab review symbology", () => {
       (shape) => shape.index === landed.accepted[proposal],
     ),
   });
-
-  /** The one proposal `landed` says it accepted, by its index in its bucket's document. */
-  const acceptedProposal = (landed: LoadedSave) => {
-    const accepted = Object.keys(landed.accepted).map(Number);
-    if (accepted.length !== 1) throw new Error("the landed save accepted no one proposal");
-    return accepted[0];
-  };
 
   /** The tool document's box a tool wrote, and its position among the canvas's boxes. */
   const TOOL_REF = LOADED.tool_two.boxes.findIndex((b) => b.authorship === "tool");
