@@ -61,12 +61,14 @@ export interface CanvasState extends CanvasContent {
 }
 
 /** A save's hold on the canvas: the image it writes, a request id minted once per page so a
- *  request from an unmounted editor never shares an id with a later one, and the controller of
- *  the request, which the hold owns. */
+ *  request from an unmounted editor never shares an id with a later one, the controller of the
+ *  request, which the hold owns, and whether the request landed, settled true once the route
+ *  wrote the document and false once it was refused, failed or aborted. */
 export interface SaveHold {
   image: string;
   id: number;
   controller: AbortController;
+  landed: PromiseWithResolvers<boolean>;
 }
 
 let lastSaveId = 0;
@@ -399,7 +401,12 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     },
 
     holdForSave: (image) => {
-      const hold = { image, id: ++lastSaveId, controller: new AbortController() };
+      const hold = {
+        image,
+        id: ++lastSaveId,
+        controller: new AbortController(),
+        landed: Promise.withResolvers<boolean>(),
+      };
       set((s) => ({ canvas: { ...s.canvas, saving: hold } }));
       return hold;
     },

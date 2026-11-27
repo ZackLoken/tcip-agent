@@ -456,14 +456,13 @@ describe("AnnotateTab save/load race", () => {
     expect(saveSpy.mock.calls[1][0].base_mtime).toBe(LANDED.box.document.base_mtime);
   });
 
-  it("a flush save resolving after navigation does not rewind the loaded path or wipe dirty", async () => {
+  it("a flush save resolving after navigation holds the next image's document until it lands, and the next save writes that image", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    // Dirty img1, then navigate. flushLeaving() fires the save without awaiting
-    // it; hold its response so the img2 load resolves first (slow label write vs
-    // cached read): this interleaving must never corrupt cross-image GT.
+    // Dirty img1, then navigate with the leave's save held, so the img2 load answers first (slow
+    // label write vs cached read): this interleaving must never corrupt cross-image GT.
     act(addBox);
     const flushSave = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(flushSave.promise);
@@ -476,15 +475,17 @@ describe("AnnotateTab save/load race", () => {
     expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
     expect(saveSpy.mock.calls[0][0].base_mtime).toBe(loadOf(IMG1).base_mtime);
 
-    // Edit img2 while the img1 save is still in flight, then let it resolve late.
+    // While the img1 save is in flight the canvas is still img1's, and takes no edit.
+    expect(useStore.getState().canvas.loaded?.image_path).toBe(IMG1);
     act(addBox);
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
     await act(() => Promise.resolve(flushSave.resolve(LANDED.box)));
+    expect(useStore.getState().canvas.loaded?.image_path).toBe(IMG2);
+    expect(useStore.getState().canvas.dirty).toBe(false);
 
-    // The stale result must not markClean() the img2 edits...
-    expect(useStore.getState().canvas.dirty).toBe(true);
-
-    // ...and the next save must target img2 with img2's loaded mtime, not
-    // img1's file with the stale save's echoed mtime.
+    // The next save targets img2 with img2's loaded mtime, not img1's file with the earlier
+    // save's echoed mtime.
+    act(addBox);
     pressSave();
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
@@ -493,28 +494,27 @@ describe("AnnotateTab save/load race", () => {
     expect(saveSpy.mock.calls[1][0].base_mtime).toBe(loadOf(IMG2).base_mtime);
   });
 
-  it("an earlier image's save settling does not release the hold of the later image's save", async () => {
+  it("a canceled save's late answer does not release the hold of the save taken after it", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     act(addBox);
     const pending = heldSaves();
-    act(() => {
-      changeSelection({ current_image_index: 1 });
-    });
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    pressSave();
     await flush();
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-cancel-save" }));
     act(addBox);
     pressSave();
     await flush();
     expect(pending).toHaveLength(2);
-    expect(useStore.getState().canvas.saving?.image).toBe(IMG2);
+    const later = useStore.getState().canvas.saving;
+    expect(later).not.toBeNull();
 
     await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
-    expect(useStore.getState().canvas.saving?.image).toBe(IMG2);
+    expect(useStore.getState().canvas.saving).toBe(later);
     act(addBox);
-    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    expect(useStore.getState().canvas.boxes).toHaveLength(2);
 
     await act(() => Promise.resolve(pending[1].resolve(LANDED.cleared)));
     expect(useStore.getState().canvas.saving).toBeNull();
@@ -668,7 +668,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
   });
 
-  it("a stale conflict for a since-left image is listed naming it, with nothing on the new image's canvas", async () => {
+  it("a pressed save refused as changed after a move puts its image back in view with its edits and the choice on its line", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -683,56 +683,70 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
 
-    // The interactive save 409s late; the navigation's flush sent none while it held the canvas.
+    // The interactive save 409s late; the navigation's leave sent none while it held the canvas.
     expect(pending).toHaveLength(1);
     const conflict = await versionConflict();
     await act(() => {
       for (const save of pending) save.reject(conflict);
       return Promise.resolve();
     });
-    expect(screen.queryByText("Reload")).not.toBeInTheDocument();
-    expect(screen.queryByText(CONFLICT_SENTENCE, { exact: false })).not.toBeInTheDocument();
-    expect(onCanvas()).toHaveLength(0);
+    const choice = `${CONFLICT_SENTENCE}. Reload to load the latest (discards your unsaved edits), or keep editing.`;
+    expect(useStore.getState().gui.dataset?.current_image_index).toBe(0);
+    expect(useStore.getState().canvas.loaded?.image_path).toBe(IMG1);
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    expect(useStore.getState().canvas.dirty).toBe(true);
+    expect(onCanvas()).toHaveLength(1);
+    expect(onCanvas()[0]).toHaveTextContent(choice);
     expect(listed()).toEqual([
       expect.objectContaining({
         kind: "failure",
-        sentence: `Save failed for ${IMG1_NAME}: ${CONFLICT_SENTENCE}`,
-        key: undefined,
+        sentence: choice,
         context: { project: TEST_PROJECT.id, target: IMG1_NAME },
       }),
     ]);
   });
 
-  it("a save failing after its own image was reloaded is listed naming that image, with nothing on the canvas", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    act(addBox);
-    saveSpy.mockRejectedValueOnce(await versionConflict());
-    pressSave();
-    await flush();
+  it.each([
+    [
+      "failing",
+      () => Promise.resolve(new Error("network down")),
+      `Save failed: ${IMG1_NAME}'s edits were not written.`,
+    ],
+    ["refused as changed", versionConflict, `Save failed for ${IMG1_NAME}: ${CONFLICT_SENTENCE}`],
+  ])(
+    "a save %s after its own image was reloaded is listed naming that image, with nothing on the canvas",
+    async (_case, failure, sentence) => {
+      render(<AnnotateTab />);
+      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+      await flush();
+      act(addBox);
+      saveSpy.mockRejectedValueOnce(await versionConflict());
+      pressSave();
+      await flush();
 
-    // A second save goes out under the conflict's entry, then its Reload re-reads the same image.
-    const pending = heldSaves();
-    pressSave();
-    await flush();
-    expect(pending).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
-    await flush();
-    expect(loadSpy.mock.calls[1][0]).toBe(IMG1);
+      // A second save goes out under the conflict's entry, then its Reload re-reads the same image.
+      const pending = heldSaves();
+      pressSave();
+      await flush();
+      expect(pending).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+      await flush();
+      expect(loadSpy.mock.calls[1][0]).toBe(IMG1);
 
-    await act(() => Promise.resolve(pending[0].reject(new Error("network down"))));
-    expect(screen.queryByText(/Could not save annotations/)).not.toBeInTheDocument();
-    expect(onCanvas()).toHaveLength(0);
-    expect(listed().at(-1)).toMatchObject({
-      kind: "failure",
-      level: "error",
-      sentence: `Save failed: ${IMG1_NAME}'s edits were not written.`,
-      key: undefined,
-      context: { target: IMG1_NAME },
-    });
-  });
+      const error = await failure();
+      await act(() => Promise.resolve(pending[0].reject(error)));
+      expect(screen.queryByText(/Could not save annotations/)).not.toBeInTheDocument();
+      expect(onCanvas()).toHaveLength(0);
+      expect(listed().at(-1)).toMatchObject({
+        kind: "failure",
+        level: "error",
+        sentence,
+        key: undefined,
+        context: { target: IMG1_NAME },
+      });
+    },
+  );
 
   it("names the person the app is set to on the save, and sends no provenance of its own", async () => {
     act(() => useStore.getState().setUser("breeder"));

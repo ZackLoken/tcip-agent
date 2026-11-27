@@ -226,6 +226,55 @@ function addBox() {
   expect(page.useStore.getState().canvas.dirty).toBe(true);
 }
 
+/** Hold the page's next load of an image unanswered; returns the answer to give it later. */
+function holdNextLoad(): (labels: LoadedLabels) => void {
+  let answer: ((labels: LoadedLabels) => void) | undefined;
+  page.load.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+  );
+  return (labels) => {
+    if (!answer) throw new Error("the page sent no load the test held");
+    const given = answer;
+    act(() => given(labels));
+  };
+}
+
+/** The status bar's mark of unsaved work on the canvas. */
+const unsaved = () => screen.queryByText("Unsaved changes");
+
+/** The image stepper's readout of where the image in view stands among the capture's images. */
+const imagePosition = () => screen.getByRole("textbox", { name: "Image position" });
+
+/** The entries the open area lists whose sentence holds `text`. */
+const listing = (text: string) =>
+  listItems().filter((item) => within(item).queryByText(text, { exact: false }));
+
+/** The entries the open area lists as failures, by the kind each names. */
+const failureEntries = () =>
+  listItems().filter((item) => within(item).queryByText(/^\w+, failure, /));
+
+/** The line the canvas shows in place for the image in view. */
+const inPlace = () => screen.getByTestId("entry-in-place");
+
+/** The save route's refusal of a document changed since it was loaded, as the route answers it. */
+const refusedAsChanged = answering(
+  LABEL_ANSWERS.version_conflict.status,
+  LABEL_ANSWERS.version_conflict.body,
+);
+
+/** The sentence that refusal states. */
+const CONFLICT_SENTENCE = LABEL_ANSWERS.version_conflict.body.detail.message;
+
+/** The line a refused save of a document changed since it was loaded shows under the canvas. */
+const RELOAD_CHOICE = `${CONFLICT_SENTENCE}. Reload to load the latest (discards your unsaved edits), or keep editing.`;
+
+/** The line a save that failed for any other reason shows under the canvas. */
+const SAVE_AGAIN =
+  /^Could not save annotations \(.+\)\. Your edits are kept in the editor; press Save to retry\.$/;
+
 beforeEach(async () => {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -328,22 +377,6 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
   /** The status bar's readout of the size of the image whose document the canvas holds. */
   const sizeReadout = () => screen.queryByText(/^Image: /);
 
-  /** Hold the page's next load of an image unanswered; returns the answer to give it later. */
-  function holdNextLoad(): (labels: LoadedLabels) => void {
-    let answer: ((labels: LoadedLabels) => void) | undefined;
-    page.load.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          answer = resolve;
-        }),
-    );
-    return (labels) => {
-      if (!answer) throw new Error("the page sent no load the test held");
-      const given = answer;
-      act(() => given(labels));
-    };
-  }
-
   it("loads the image in view once at a return to the tab after a save over a clean canvas", async () => {
     expect(written.event.image_path).toBe(first.path);
     await mountOnCapture();
@@ -359,8 +392,7 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
   });
 
   it("raises the reload warning once, not again at a return to the tab, over unsaved edits it keeps", async () => {
-    const refused = LABEL_ANSWERS.version_conflict;
-    answerSaves(answering(refused.status, refused.body));
+    answerSaves(refusedAsChanged);
     await mountOnCapture();
     addBox();
     deliver(written);
@@ -438,29 +470,222 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(2);
     expect(page.save).toHaveBeenCalledTimes(1);
     expect(warnings()).toEqual([]);
+    expect(imagePosition()).toHaveValue("2");
+    expect(screen.queryByText("1 box")).toBeNull();
+    expect(unsaved()).toBeNull();
+  });
+});
+
+describe("ProjectShell a move to another image over unsaved edits", () => {
+  const [first, second, third] = RAW_SELECTION.images;
+  const saved = ANNOTATE_ANSWERS.saves.box;
+
+  /** Press the image stepper's control that moves `way`, as a person does. */
+  const step = (way: "Next" | "Previous") =>
+    fireEvent.click(screen.getByRole("button", { name: `${way} image` }));
+
+  /** The loads of the image at `path` the page has sent. */
+  const loadsOf = (path: string) => page.load.mock.calls.filter(([p]) => p === path);
+
+  /** Answer a held leaving save with `answer` and let what follows land. */
+  const answerHeld = (held: PromiseWithResolvers<Response>, answer: () => Promise<Response>) =>
+    act(async () => held.resolve(await answer()));
+
+  /** Expect the one box added to the first image unsaved, with that image in view. */
+  function expectBackOnFirst() {
+    expect(unsaved()).toBeInTheDocument();
+    expect(imagePosition()).toHaveValue("1");
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+  }
+
+  it("returns to the image left with its edits and offers Reload under the canvas when the leaving save is refused as changed", async () => {
+    const sent = answerSaves(refusedAsChanged);
+    await mountOnCapture();
+    addBox();
+
+    step("Next");
+    await settle();
+
+    expectBackOnFirst();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body).toMatchObject({ image_path: first.path });
+    expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
+    expect(within(inPlace()).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+    const failures = listing(CONFLICT_SENTENCE);
+    expect(failures).toHaveLength(1);
+    expectRaisedOnce(failures[0]);
+  });
+
+  it("loads the latest once Reload is pressed after a refused leaving save, and then moves", async () => {
+    const latest = LANDED.box.document;
+    expect(latest.image_path).toBe(first.path);
+    const sent = answerSaves(refusedAsChanged);
+    await mountOnCapture();
+    addBox();
+    addBox();
+    step("Next");
+    await settle();
+    page.load.mockResolvedValueOnce(latest);
+
+    fireEvent.click(within(inPlace()).getByRole("button", { name: "Reload" }));
+    await settle();
+
+    expect(page.load).toHaveBeenLastCalledWith(first.path);
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(unsaved()).toBeNull();
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+
+    step("Next");
+    await settle();
+
+    expect(imagePosition()).toHaveValue("2");
+    expect(page.load).toHaveBeenLastCalledWith(second.path);
+    expect(unsaved()).toBeNull();
+    expect(sent).toHaveLength(1);
+  });
+
+  it("returns to the image left with its edits when the leaving save got no answer, and moves once a pressed Save lands", async () => {
+    const sent = answerSaves(unanswered, answering(200, saved));
+    await mountOnCapture();
+    addBox();
+
+    step("Next");
+    await settle();
+
+    expectBackOnFirst();
+    expect(within(inPlace()).getByText(SAVE_AGAIN)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    expect(sent).toHaveLength(2);
+    expect(unsaved()).toBeNull();
+    step("Next");
+    await settle();
+
+    expect(imagePosition()).toHaveValue("2");
+    expect(page.load).toHaveBeenLastCalledWith(second.path);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("shows the next image's document only once a leaving save answered after it lands", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    const sent = answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+
+    step("Next");
+    await settle();
+
+    expect(loadsOf(second.path)).toHaveLength(1);
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(sent).toHaveLength(1);
+
+    await answerHeld(leaving, answering(200, saved));
+
+    expect(imagePosition()).toHaveValue("2");
+    expect(screen.queryByText("1 box")).toBeNull();
+    expect(unsaved()).toBeNull();
+    expect(listItems()).toEqual([]);
+  });
+
+  it("returns to the image left with its edits when the save of two moves made before it answers is refused", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    const sent = answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+    step("Next");
+    await settle();
+    expect(imagePosition()).toHaveValue("3");
+    expect(loadsOf(third.path)).toHaveLength(1);
+
+    await answerHeld(leaving, refusedAsChanged);
+
+    expectBackOnFirst();
+    expect(sent).toHaveLength(1);
+    expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
+  });
+
+  it("returns to the image left with its edits when a move by the next-image key meets a refused leaving save", async () => {
+    const sent = answerSaves(refusedAsChanged);
+    await mountOnCapture();
+    addBox();
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await settle();
+
+    expect(loadsOf(second.path)).toHaveLength(1);
+    expectBackOnFirst();
+    expect(sent).toHaveLength(1);
+    expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
+  });
+
+  it("keeps the edits of a step back made before the leaving save answers, loading nothing over them", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+    holdNextLoad();
+    step("Next");
+    await settle();
+
+    step("Previous");
+    await settle();
+
+    expect(loadsOf(first.path)).toHaveLength(1);
+    expect(imagePosition()).toHaveValue("1");
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+
+    await answerHeld(leaving, answering(200, saved));
+
+    expect(imagePosition()).toHaveValue("1");
+    expect(unsaved()).toBeNull();
+  });
+
+  it("keeps the edits of a step back made after the next image's labels answered and before the leaving save did", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+    expect(loadsOf(second.path)).toHaveLength(1);
+
+    step("Previous");
+    await settle();
+
+    expect(loadsOf(first.path)).toHaveLength(1);
+    expectBackOnFirst();
+
+    await answerHeld(leaving, answering(200, saved));
+
+    expect(imagePosition()).toHaveValue("1");
+    expect(unsaved()).toBeNull();
+  });
+
+  it("sends a leaving save that landed before the next image's labels once, whatever move follows", async () => {
+    const sent = answerSaves(answering(200, saved));
+    await mountOnCapture();
+    addBox();
+    holdNextLoad();
+    step("Next");
+    await settle();
+
+    step("Next");
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    expect(imagePosition()).toHaveValue("3");
+    expect(page.load).toHaveBeenLastCalledWith(third.path);
+    expect(unsaved()).toBeNull();
+    expect(failureEntries()).toEqual([]);
   });
 });
 
 describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
   const [first] = RAW_SELECTION.images;
   const saved = ANNOTATE_ANSWERS.saves.box;
-  const refused = LABEL_ANSWERS.version_conflict;
-  /** The sentence the save route's refusal of a changed document states. */
-  const conflictSentence = refused.body.detail.message;
-
-  /** The status bar's mark of unsaved work on the canvas. */
-  const unsaved = () => screen.queryByText("Unsaved changes");
-
-  /** The entries the open area lists whose sentence holds `text`. */
-  const listing = (text: string) =>
-    listItems().filter((item) => within(item).queryByText(text, { exact: false }));
-
-  /** The entries the open area lists as failures, by the kind each names. */
-  const failureEntries = () =>
-    listItems().filter((item) => within(item).queryByText(/^\w+, failure, /));
-
-  /** The line the canvas shows in place for the image in view. */
-  const inPlace = () => screen.getByTestId("entry-in-place");
 
   /** The image filter's choices, each with how many images it keeps. */
   const filterChoices = () =>
@@ -489,19 +714,15 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
   });
 
   it("keeps the edits of a leaving save refused as changed, offering Reload in place and listing the refusal once", async () => {
-    const { sent, loadsBefore } = await leaveAndReturn(answering(refused.status, refused.body));
+    const { sent, loadsBefore } = await leaveAndReturn(refusedAsChanged);
 
     expect(unsaved()).toBeInTheDocument();
     expect(screen.getByText("1 box")).toBeInTheDocument();
     expect(page.load).toHaveBeenCalledTimes(loadsBefore);
     expect(sent).toHaveLength(1);
-    expect(
-      within(inPlace()).getByText(
-        `${conflictSentence}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
-      ),
-    ).toBeInTheDocument();
+    expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
     expect(within(inPlace()).getByRole("button", { name: "Reload" })).toBeInTheDocument();
-    const failures = listing(conflictSentence);
+    const failures = listing(CONFLICT_SENTENCE);
     expect(failures).toHaveLength(1);
     expect(failureEntries()).toEqual(failures);
     expectRaisedOnce(failures[0]);
@@ -511,7 +732,7 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
     const latest = LANDED.box.document;
     expect(latest.image_path).toBe(first.path);
     expect(latest.boxes).toHaveLength(1);
-    const sent = answerSaves(answering(refused.status, refused.body));
+    const sent = answerSaves(refusedAsChanged);
     await mountOnCapture();
     addBox();
     addBox();
@@ -574,14 +795,16 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
     expect(filterChoices()).toEqual(expect.arrayContaining(["unannotated (3)", "in progress (2)"]));
   });
 
-  it("keeps the edits of a leaving save that got no answer, listing its failure once", async () => {
+  it("keeps the edits of a leaving save that got no answer, saying so in place and listing its failure once", async () => {
     const { sent, loadsBefore } = await leaveAndReturn(unanswered);
 
     expect(unsaved()).toBeInTheDocument();
     expect(page.load).toHaveBeenCalledTimes(loadsBefore);
     expect(sent).toHaveLength(1);
-    const failures = listing(`Save failed: ${first.name}'s edits were not written.`);
+    expect(within(inPlace()).getByText(SAVE_AGAIN)).toBeInTheDocument();
+    const failures = failureEntries();
     expect(failures).toHaveLength(1);
+    expect(within(failures[0]).getByText(SAVE_AGAIN)).toBeInTheDocument();
     expectRaisedOnce(failures[0]);
   });
 });
