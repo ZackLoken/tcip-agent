@@ -14,7 +14,7 @@ import { dismissLabel } from "@/lib/dismissLabel";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import type { EntryAction } from "@/store/slices/notifications";
-import { announcements, metaLine } from "@/test/notifications";
+import { announcements, areaEntries, metaLine, onlyAreaEntry } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS } from "@/test/sessions";
 import { PRODUCED_ENVELOPE, openTestProject } from "@/test/store";
@@ -355,7 +355,7 @@ describe("a failure", () => {
     act(() => useStore.getState().resolveNotification("open:valley"));
     act(() => useStore.getState().releaseNotification("open:ridge"));
 
-    const [ridge, valley] = screen.getAllByRole("listitem");
+    const [ridge, valley] = areaEntries();
     expect(within(valley).getByText("Could not open Valley farm.")).toBeInTheDocument();
     expect(metaLine(valley)).toMatch(/^Error, failure, .+, resolved$/);
     expect(within(valley).queryByRole("button", { name: "Retry" })).toBeNull();
@@ -368,11 +368,11 @@ describe("a failure", () => {
     renderOpenHost();
     raiseOn("open:valley", "Could not open Valley farm.");
     act(() => useStore.getState().resolveNotification("open:valley"));
-    expect(metaLine(screen.getByRole("listitem"))).toMatch(/, resolved$/);
+    expect(metaLine(onlyAreaEntry())).toMatch(/, resolved$/);
 
     raiseOn("open:valley", "Could not open Valley farm.");
 
-    const entry = screen.getByRole("listitem");
+    const entry = onlyAreaEntry();
     expect(metaLine(entry)).toMatch(/^Error, failure, .+, 2 times$/);
     expect(within(entry).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
