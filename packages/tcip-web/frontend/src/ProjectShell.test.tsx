@@ -681,6 +681,50 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(unsaved()).toBeNull();
     expect(failureEntries()).toEqual([]);
   });
+
+  it("returns to the image left with its edits when a Save pressed before a return to the tab is refused after a move", async () => {
+    const pressed = Promise.withResolvers<Response>();
+    const sent = answerSaves(() => pressed.promise);
+    await mountOnCapture();
+    addBox();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    await switchTo("meta");
+    await switchTo("annotate");
+
+    step("Next");
+    await settle();
+    expect(sent).toHaveLength(1);
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+
+    await answerHeld(pressed, refusedAsChanged);
+
+    expectBackOnFirst();
+    expect(sent).toHaveLength(1);
+    expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
+  });
+
+  it("returns to the image left with its edits when an agent's save of the image moved to arrives while the leaving save is held, and that save is refused", async () => {
+    const written = PANEL_EVENTS.labels_written_second;
+    expect(written.event.image_path).toBe(second.path);
+    const leaving = Promise.withResolvers<Response>();
+    const sent = answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+
+    deliver(written);
+    await settle();
+    expect(loadsOf(second.path)).toHaveLength(2);
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+
+    await answerHeld(leaving, refusedAsChanged);
+
+    expectBackOnFirst();
+    expect(sent).toHaveLength(1);
+    expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
+  });
 });
 
 describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
