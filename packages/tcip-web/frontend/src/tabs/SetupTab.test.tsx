@@ -361,21 +361,22 @@ describe("SetupTab plant-mapping build: match radius", () => {
     );
   });
 
+  /** The sentence a refused build of the mapping `CITED` refuses is shown as. */
+  const REFUSED_SENTENCE = `Could not build the mapping: ${CITED.body.detail}`;
+
   it("shows a refused build as one failure in place beside Build, until the next build starts", async () => {
-    const cited = RESULTS_ANSWERS.mapping_cited;
     vi.spyOn(resultsApi, "buildPlantMapping")
-      .mockRejectedValueOnce(await thrown(cited))
+      .mockRejectedValueOnce(await thrown(CITED))
       .mockReturnValue(new Promise(() => {}));
 
     render(<SetupTab />);
     await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
     fillAndBuild();
 
-    const sentence = `Could not build the mapping: ${cited.body.detail}`;
     const line = await within(mappingPanel()).findByTestId("entry-in-place");
-    expect(line).toHaveTextContent(sentence);
-    expect(screen.getAllByText(sentence)).toHaveLength(1);
-    expect(entriesSaying(sentence)).toEqual([
+    expect(line).toHaveTextContent(REFUSED_SENTENCE);
+    expect(screen.getAllByText(REFUSED_SENTENCE)).toHaveLength(1);
+    expect(entriesSaying(REFUSED_SENTENCE)).toEqual([
       expect.objectContaining({
         kind: "failure",
         level: "error",
@@ -390,11 +391,9 @@ describe("SetupTab plant-mapping build: match radius", () => {
 
   /** The mapping `CITED` refuses, which `SUPERSEDED` then builds. */
   const REFUSED_MAPPING = SUPERSEDED.name;
-  const REFUSED_SENTENCE = `Could not build the mapping: ${CITED.body.detail}`;
 
   /** Render the tab beside the notifications area, with its plant registry typed. */
   async function renderBuildingWithArea() {
-    expect(CITED.body.detail).toContain(`'${REFUSED_MAPPING}'`);
     render(
       <>
         <SetupTab />
