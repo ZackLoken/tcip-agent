@@ -107,7 +107,8 @@ import {
   canvasTakesEdits,
   holdsCanvas,
   imageSize,
-  LABELS_LOADING,
+  LABELS_NOT_LOADED,
+  labelsRefusal,
   loadedFor,
 } from "@/store/slices/canvas";
 import {
@@ -182,6 +183,7 @@ export function AnnotateTab() {
   const canvas = useStore((s) => s.canvas);
   const onPage = useStore(canvasOnPage);
   const inView = useStore(canvasInView);
+  const labelsReason = useStore(labelsRefusal);
   const { width: imgW, height: imgH } = imageSize(canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
   const setImageStates = useStore((s) => s.setImageStates);
@@ -1078,7 +1080,7 @@ export function AnnotateTab() {
       }
       const failed = (sentence: string) =>
         tell("failure", "error", sentence, currentImageName, canvasKey("document", imgPath));
-      const neverLoaded = `Could not load this image's labels: ${messageOf(answer.error)}. Saving is off.`;
+      const neverLoaded = `${LABELS_NOT_LOADED}: ${messageOf(answer.error)}. Saving is off.`;
       if (reload) {
         const held = loadedFor(useStore.getState().canvas, imgPath) !== null;
         failed(held ? `Reload failed: ${messageOf(answer.error)}` : neverLoaded);
@@ -1882,7 +1884,7 @@ export function AnnotateTab() {
         onScope={setScope}
         canAccept={acceptTarget !== null}
         canReject={rejectTarget !== null}
-        flagRefusal={inView ? null : LABELS_LOADING}
+        flagRefusal={labelsReason}
         scopeCounts={{
           all: kept.length,
           unreviewed: unreviewedKept.length,

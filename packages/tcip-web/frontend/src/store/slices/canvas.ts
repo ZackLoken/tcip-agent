@@ -144,9 +144,18 @@ export const canvasImageIndex = ({ gui, canvas }: Pick<AppState, "gui" | "canvas
 export const canvasInView = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): boolean =>
   loadedFor(canvas, currentImage(gui.dataset)?.path) !== null;
 
-/** Why a control that acts on the canvas's document cannot act while the canvas holds no document
- *  of the image in view, as the control says it. */
-export const LABELS_LOADING = "Loading this image's labels";
+/** The words that open every statement that the labels of the image in view could not be loaded. */
+export const LABELS_NOT_LOADED = "Could not load this image's labels";
+
+/** Why a control that acts on the canvas's document cannot act, as the control says it: null while
+ *  the canvas holds the document of the image in view, that the labels could not be loaded while
+ *  the image in view is the one whose load last failed, and that they are loading otherwise. */
+export const labelsRefusal = (state: Pick<AppState, "gui" | "canvas">): string | null => {
+  if (canvasInView(state)) return null;
+  return state.canvas.failedLoad === currentImage(state.gui.dataset)?.path
+    ? LABELS_NOT_LOADED
+    : "Loading this image's labels";
+};
 
 /** The canvas as the page draws and states it: the canvas while it holds the document of the image
  *  in view, and the empty canvas, which holds no document, otherwise. */

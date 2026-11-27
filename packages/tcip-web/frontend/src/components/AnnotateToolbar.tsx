@@ -31,7 +31,7 @@ import { refusedRegistryKey, saveRegistry, SUBJECT_CONTROL_ID } from "@/lib/regi
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
-import { canvasOnPage, LABELS_LOADING } from "@/store/slices/canvas";
+import { canvasOnPage, labelsRefusal } from "@/store/slices/canvas";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { isFinished, type AnnotateView, type SubjectState } from "@/store/types";
 
@@ -205,6 +205,7 @@ export function AnnotateToolbar({
   const canvasPoints = useStore((s) => canvasOnPage(s).points);
   const canvasImageAnnotations = useStore((s) => canvasOnPage(s).imageAnnotations);
   const saving = useStore((s) => s.canvas.saving !== null);
+  const labelsReason = useStore(labelsRefusal);
   const annotateUi = useStore((s) => s.annotateUi);
   const setImageFilter = useStore((s) => s.setImageFilter);
   const setVisible = useStore((s) => s.setVisible);
@@ -540,9 +541,7 @@ export function AnnotateToolbar({
             title={
               !dataset?.subject
                 ? "Select a subject first"
-                : subjectState !== null
-                  ? `Every ${dataset.subject} on this image is annotated (c)`
-                  : LABELS_LOADING
+                : (labelsReason ?? `Every ${dataset.subject} on this image is annotated (c)`)
             }
           >
             <input

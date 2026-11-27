@@ -8,7 +8,6 @@ import { datasetKey, saveDatasetUi } from "@/lib/datasetUiState";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { SUBJECT_CONTROL_ID } from "@/lib/registrySave";
 import type { HostSize } from "@/lib/viewGeometry";
-import { LABELS_LOADING } from "@/store/slices/canvas";
 import { acceptedProposal, ANNOTATE_ANSWERS, LANDED, LOADED, loadOf } from "@/test/annotate";
 import { LABEL_ANSWERS } from "@/test/labels";
 import {
@@ -766,10 +765,10 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
 
     const complete = screen.getByRole("checkbox", { name: /^Complete/ });
     expect(complete).toBeDisabled();
-    expect(complete.closest("label")).toHaveAttribute("title", LABELS_LOADING);
+    expect(complete.closest("label")).toHaveAttribute("title", "Loading this image's labels");
     const flag = screen.getByRole("button", { name: "Flag" });
     expect(flag).toBeDisabled();
-    expect(flag).toHaveAttribute("title", LABELS_LOADING);
+    expect(flag).toHaveAttribute("title", "Loading this image's labels");
   });
 
   it("returns to the image the person was on with its edits when a focus within the capture moves before a refused leaving save", async () => {
@@ -980,6 +979,38 @@ describe("ProjectShell a move to another image from a clean canvas", () => {
 
     expect(screen.queryByRole("button", { name: "Remove this rating" })).toBeNull();
     expect(unsaved()).toBeNull();
+  });
+});
+
+describe("ProjectShell an image whose labels could not be loaded", () => {
+  /** The reasons the disabled Complete box and Flag state, in that order. */
+  function disabledReasons(): (string | null | undefined)[] {
+    const complete = screen.getByRole("checkbox", { name: /^Complete/ });
+    const flag = screen.getByRole("button", { name: "Flag" });
+    expect(complete).toBeDisabled();
+    expect(flag).toBeDisabled();
+    return [complete.closest("label")?.getAttribute("title"), flag.getAttribute("title")];
+  }
+
+  it("says on the Complete box and Flag that the labels could not be loaded, and on the next image that they are loading", async () => {
+    page.load.mockRejectedValueOnce(await thrown(ANNOTATE_ANSWERS.unreadable));
+    await mountOnCapture(TEST_PROJECT, selected({ subject: SELECTED_SUBJECT }));
+    expect(inPlace()).toHaveTextContent(/^Could not load this image's labels: /);
+
+    expect(disabledReasons()).toEqual([
+      "Could not load this image's labels",
+      "Could not load this image's labels",
+    ]);
+
+    holdNextLoad();
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await settle();
+
+    expect(imagePosition()).toHaveValue("2");
+    expect(disabledReasons()).toEqual([
+      "Loading this image's labels",
+      "Loading this image's labels",
+    ]);
   });
 });
 

@@ -28,7 +28,6 @@ import {
 } from "@/lib/symbology";
 import type { HostSize } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
-import { LABELS_LOADING } from "@/store/slices/canvas";
 import type { AnnotateView } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import {
@@ -5151,7 +5150,7 @@ describe("AnnotateTab while the canvas holds no document of the image in view", 
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-save-disabled", "true");
     const flag = screen.getByRole("button", { name: "Flag" });
     expect(flag).toBeDisabled();
-    expect(flag).toHaveAttribute("title", LABELS_LOADING);
+    expect(flag).toHaveAttribute("title", "Loading this image's labels");
   });
 
   it("adds no box drawn on an image whose first load was refused, and states no unsaved work", async () => {
