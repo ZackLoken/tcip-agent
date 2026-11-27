@@ -267,6 +267,9 @@ function holdNextLoad(): (labels: LoadedLabels) => void {
 /** The status bar's mark of unsaved work on the canvas. */
 const unsaved = () => screen.queryByText("Unsaved changes");
 
+/** The toolbar's Save control, under whichever label it shows. */
+const saveControl = () => screen.getByRole("button", { name: /^(Save|Saved|Saving)$/ });
+
 /** The image stepper's readout of where the image in view stands among the capture's images. */
 const imagePosition = () => screen.getByRole("textbox", { name: "Image position" });
 
@@ -528,11 +531,12 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
 
     expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(1);
     expect(warnings()).toEqual([]);
-    answerNextLoad(loadOf(next.path));
+    const nextLoad = loadOf(next.path);
+    answerNextLoad(nextLoad);
     await settle();
 
     expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(1);
-    expect(screen.queryByText("1 box")).toBeNull();
+    expect(sizeReadout()).toHaveTextContent(`Image: ${nextLoad.img_width}×${nextLoad.img_height}`);
     expect(imagePosition()).toHaveValue("2");
     expect(unsaved()).toBeNull();
   });
@@ -667,7 +671,7 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(metaLine(failures[0])).toMatch(/^Error, failure, .+, resolved$/);
   });
 
-  it("shows the next image's document only once a leaving save answered after it lands", async () => {
+  it("shows nothing of the image left's document while its leaving save is held, saying it is saving", async () => {
     const leaving = Promise.withResolvers<Response>();
     const sent = answerSaves(() => leaving.promise);
     await mountOnCapture();
@@ -677,7 +681,10 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     await settle();
 
     expect(loadsOf(second.path)).toHaveLength(1);
-    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(imagePosition()).toHaveValue("2");
+    expect(screen.queryByText("1 box")).toBeNull();
+    expect(unsaved()).toBeInTheDocument();
+    expect(saveControl()).toHaveTextContent("Saving");
     expect(sent).toHaveLength(1);
 
     await answerHeld(leaving, answering(200, saved));
@@ -795,7 +802,8 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     step("Next");
     await settle();
     expect(sent).toHaveLength(1);
-    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(screen.queryByText("1 box")).toBeNull();
+    expect(unsaved()).toBeInTheDocument();
 
     await answerHeld(pressed, refusedAsChanged);
 
@@ -817,7 +825,8 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     deliver(written);
     await settle();
     expect(loadsOf(second.path)).toHaveLength(2);
-    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(screen.queryByText("1 box")).toBeNull();
+    expect(unsaved()).toBeInTheDocument();
 
     await answerHeld(leaving, refusedAsChanged);
 

@@ -99,16 +99,18 @@ export const ANNOTATE_ANSWERS = produced as unknown as {
   buckets: { single: string; review: string; shaped: string };
 };
 
+/** The selection of the imported photographs' capture with the photograph at `imagePath` in view;
+ *  a path the capture holds no photograph at throws. */
+export function importedInView(imagePath: string): DatasetSelection {
+  const { selection } = ANNOTATE_ANSWERS.imported;
+  const index = selection.images.findIndex((image) => image.path === imagePath);
+  if (index === -1) throw new Error(`the imported capture holds no photograph at ${imagePath}`);
+  return { ...selection, current_image_index: index };
+}
+
 /** The selection of the imported photographs' capture, the tool's box document's photograph in
  *  view. */
-export const TOOL_SELECTION: DatasetSelection = (() => {
-  const { selection } = ANNOTATE_ANSWERS.imported;
-  const index = selection.images.findIndex(
-    (image) => image.path === ANNOTATE_ANSWERS.tool_two.image_path,
-  );
-  if (index === -1) throw new Error("the imported capture holds no tool's box document");
-  return { ...selection, current_image_index: index };
-})();
+export const TOOL_SELECTION = importedInView(ANNOTATE_ANSWERS.tool_two.image_path);
 
 /** The subjects the produced registry declares, by name. */
 const DECLARED = storedOf(ANNOTATE_ANSWERS.registry).subjects;

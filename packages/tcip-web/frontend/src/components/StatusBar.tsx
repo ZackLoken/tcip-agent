@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { useStore } from "@/store";
-import { selectCanvasMatchesDataset } from "@/store/slices/canvas";
+import { canvasInView } from "@/store/slices/canvas";
 
 function fmtSeconds(totalSeconds: number): string {
   const clamped = Math.max(0, Math.floor(totalSeconds));
@@ -18,7 +18,7 @@ function countLabel(count: number, singular: string, plural: string): string {
 
 export function StatusBar() {
   const view = useStore((s) => s.gui.view);
-  const canvasMatchesDataset = useStore(selectCanvasMatchesDataset);
+  const inView = useStore(canvasInView);
   const loaded = useStore((s) => s.canvas.loaded);
   const dirty = useStore((s) => s.canvas.dirty);
   const boxCount = useStore((s) => s.canvas.boxes.length);
@@ -50,12 +50,12 @@ export function StatusBar() {
       {activeTab === "annotate" && sessionTracking.currentImageName ? (
         <span className="tabular-nums">Image time: {fmtSeconds(imageSeconds)}</span>
       ) : null}
-      {activeTab === "annotate" && loaded && canvasMatchesDataset ? (
+      {activeTab === "annotate" && loaded && inView ? (
         <span className="tabular-nums">
           Image: {loaded.img_width}×{loaded.img_height}
         </span>
       ) : null}
-      {activeTab === "annotate" && canvasMatchesDataset && (polyCount > 0 || boxCount > 0) && (
+      {activeTab === "annotate" && inView && (polyCount > 0 || boxCount > 0) && (
         <span className="tabular-nums">
           {polyCount > 0 && countLabel(polyCount, "polygon", "polygons")}
           {polyCount > 0 && boxCount > 0 && <span className="mx-1.5 text-tcip-border">|</span>}
@@ -64,7 +64,7 @@ export function StatusBar() {
       )}
       {/* Points are counted on their own: they are not detection targets, so they never fold into
           the box count. */}
-      {activeTab === "annotate" && canvasMatchesDataset && pointCount > 0 && (
+      {activeTab === "annotate" && inView && pointCount > 0 && (
         <span className="tabular-nums">{countLabel(pointCount, "point", "points")}</span>
       )}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}

@@ -139,10 +139,10 @@ export const loadedFor = (
 export const canvasImageIndex = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): number =>
   gui.dataset?.images.findIndex((image) => image.path === canvas.loaded?.image_path) ?? -1;
 
-/** Whether the loaded canvas is one of the selected capture's own images; false with no
- *  selection. */
-export const selectCanvasMatchesDataset = (s: Pick<AppState, "gui" | "canvas">) =>
-  canvasImageIndex(s) !== -1;
+/** Whether the canvas holds the document of the image in view; false with no selection, no
+ *  document loaded, or a document of another image. */
+export const canvasInView = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): boolean =>
+  loadedFor(canvas, currentImage(gui.dataset)?.path) !== null;
 
 function snapshot(s: AppState): CanvasSnapshot {
   const c = s.canvas;
@@ -231,8 +231,9 @@ export interface CanvasSlice {
 }
 
 /** Every action that changes the canvas' content or its history; inert while a save is in flight
- *  so the answer is adopted over the very content it was built from. Focus, loads, clearing and
- *  the dirty recount are not edits. */
+ *  so the answer is adopted over the very content it was built from, and, but for the revert of
+ *  a gesture settled as its image is left, while the canvas holds no document of the image in
+ *  view. Focus, loads, clearing and the dirty recount are not edits. */
 export const CONTENT_EDITS = [
   "pushUndo",
   "undo",
@@ -437,8 +438,9 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
   };
   for (const name of CONTENT_EDITS) {
     const action = slice[name] as (...args: never[]) => unknown;
-    slice[name] = ((...args: never[]) =>
-      get().canvas.saving ? undefined : action(...args)) as never;
+    const inert = () =>
+      get().canvas.saving !== null || (name !== "rollbackLast" && !canvasInView(get()));
+    slice[name] = ((...args: never[]) => (inert() ? undefined : action(...args))) as never;
   }
   return slice;
 };

@@ -24,9 +24,10 @@ import {
 } from "@/lib/symbology";
 import { useStore } from "@/store";
 import type { Box, PointShape, Proposal } from "@/store/types";
-import { ANNOTATE_ANSWERS } from "@/test/annotate";
+import { ANNOTATE_ANSWERS, loadOf } from "@/test/annotate";
 import { canvasBody } from "@/test/canvasBody";
 import { servedFlag, servedProposal } from "@/test/labels";
+import { RAW_SELECTION } from "@/test/store";
 
 const RED = subjectColor("subject_a");
 const OTHER = subjectColor("other");
@@ -813,15 +814,19 @@ describe("shapeVisible", () => {
 describe("createCanvasPusher", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    useStore.setState((s) => ({ gui: { ...s.gui, dataset: RAW_SELECTION } }));
+    useStore.getState().loadLabelsIntoCanvas(loadOf(RAW_SELECTION.images[0].path));
     useStore.getState().setMode("box");
     useStore.getState().setActiveSubject("subject_a");
     useStore
       .getState()
       .add("boxes", { x1: 0, y1: 0, x2: 1, y2: 1, subject: "subject_a", attributes: {} });
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
   });
   afterEach(() => {
     vi.useRealTimers();
     useStore.getState().clearCanvas(null);
+    useStore.setState((s) => ({ gui: { ...s.gui, dataset: null } }));
   });
 
   /** The canvas's own full push body over the one box drawn. */

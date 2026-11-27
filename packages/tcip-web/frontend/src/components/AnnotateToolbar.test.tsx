@@ -21,13 +21,13 @@ import { adoptLoad, refusedRegistryKey, SUBJECT_CONTROL_ID } from "@/lib/registr
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
-import { ANNOTATE_ANSWERS, registryOf, SECOND_SUBJECT } from "@/test/annotate";
+import { ANNOTATE_ANSWERS, loadOf, registryOf, SECOND_SUBJECT } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
 import { REGISTERED_MODELS } from "@/test/deliveryRecords";
 import { LABEL_ANSWERS, SERVED_ATTRIBUTES, storedOf, tokenOf, UNSTORED } from "@/test/labels";
 import { QUEUE_ANSWERS } from "@/test/queue";
 import { thrown } from "@/test/refusals";
-import { openTestProject, SELECTED_SUBJECT, selected } from "@/test/store";
+import { openTestProject, RAW_SELECTION, SELECTED_SUBJECT, selected } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
@@ -89,6 +89,13 @@ function renderToolbar(
       onPropose={extra?.onPropose ?? (() => {})}
     />,
   );
+}
+
+/** Open the test project on the produced capture's first photograph, the canvas holding that
+ *  photograph's produced document, which an edit lands on. */
+function openOnLoadedPhotograph() {
+  openTestProject(selected({ count: 1 }));
+  useStore.getState().loadLabelsIntoCanvas(loadOf(RAW_SELECTION.images[0].path));
 }
 
 function openEdit() {
@@ -203,6 +210,7 @@ describe("AnnotateToolbar draw mode", () => {
   });
 
   it("counts points in the subject pill alongside boxes, polygons and ratings", () => {
+    openOnLoadedPhotograph();
     renderToolbar();
     fireEvent.click(modeButton("Point"));
     act(() => {
@@ -537,7 +545,7 @@ describe("AnnotateToolbar subject menu attributes", () => {
 
   it("edits the focused box's attributes inside the menu", () => {
     const [[declared, { values }]] = Object.entries(SERVED_ATTRIBUTES);
-    openTestProject(selected({ count: 0 }));
+    openOnLoadedPhotograph();
     act(() => {
       useStore.getState().setRegistry(SERVED, UNSTORED);
       useStore.getState().setActiveSubject(SERVED_NAME);

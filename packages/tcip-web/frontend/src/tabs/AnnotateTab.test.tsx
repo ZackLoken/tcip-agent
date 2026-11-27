@@ -9,6 +9,7 @@ import { CONF_REFUSED, type ImageBands, PLAIN } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { NotificationsPane } from "@/components/Notifications";
+import { StatusBar } from "@/components/StatusBar";
 import type { BandChoice } from "@/lib/bandSelection";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { dismissLabel } from "@/lib/dismissLabel";
@@ -34,6 +35,7 @@ import {
   ANNOTATE_ANSWERS,
   answerAnnotateMount,
   LANDED,
+  importedInView,
   LOADED,
   loadHolding,
   loadOf,
@@ -57,6 +59,7 @@ import {
   RAW_SELECTION,
   SELECTED_SUBJECT as SUBJECT,
   selected,
+  type SelectionChange,
   TEST_PROJECT,
   testProject,
 } from "@/test/store";
@@ -177,6 +180,7 @@ vi.mock("@/components/AnnotateToolbar", async () => {
   return {
     AnnotateToolbar: (props: {
       bandChoice: BandChoice;
+      saveDisabled: boolean;
       subjectState: string | null;
       onComplete: (next: boolean) => void;
       onCancelSave: () => void;
@@ -192,6 +196,7 @@ vi.mock("@/components/AnnotateToolbar", async () => {
         data-testid="toolbar"
         data-band-choice={props.bandChoice.kind}
         data-band-count={props.bandChoice.kind === "banded" ? props.bandChoice.info.band_count : ""}
+        data-save-disabled={props.saveDisabled}
         data-subject-state={props.subjectState ?? ""}
         data-proposing={props.proposing}
         data-view-proposals={props.view.proposals}
@@ -487,13 +492,15 @@ describe("AnnotateTab save/load race", () => {
     expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
     expect(saveSpy.mock.calls[0][0].base_mtime).toBe(loadOf(IMG1).base_mtime);
 
-    // While the img1 save is in flight img2 is in view under img1's box, which takes no edit.
+    // While the img1 save is in flight img2 is in view with nothing of img1's document drawn,
+    // and that document takes no edit.
     expect(imageInView()).toBe(IMG2);
-    expect(drawnBoxes()).toHaveLength(1);
+    expect(drawnBoxes()).toHaveLength(0);
     act(addBox);
-    expect(drawnBoxes()).toHaveLength(1);
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
     expect(loadOf(IMG2).boxes).toEqual([]);
     await act(() => Promise.resolve(flushSave.resolve(LANDED.box)));
+    expect(useStore.getState().canvas.loaded?.image_path).toBe(IMG2);
     expect(drawnBoxes()).toHaveLength(0);
 
     // The next save targets img2 with img2's loaded mtime, not img1's file with the earlier
@@ -823,6 +830,13 @@ describe("AnnotateTab subject rendering", () => {
     useStore.getState().setRegistry(registryOf(SUBJECT), UNSTORED);
     const [poly] = LOADED.tool_polygon.polygons;
     expect(poly.authorship).toBe("tool");
+    openTestProject(
+      selected({ subject: SUBJECT }, importedInView(LOADED.tool_polygon.image_path)),
+      {
+        mode: "box",
+        active_subject: SUBJECT,
+      },
+    );
     loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_polygon));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -925,6 +939,10 @@ describe("AnnotateTab authorship symbology", () => {
       "tool_accepted",
       "unattributed",
     ]);
+    openTestProject(selected({ subject: SUBJECT }, importedInView(LOADED.authored.image_path)), {
+      mode: "box",
+      active_subject: SUBJECT,
+    });
     loadSpy.mockImplementation(() => Promise.resolve(LOADED.authored));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -3248,8 +3266,8 @@ describe("AnnotateTab review symbology", () => {
     await flush();
   };
   /** Mount over the tool's document with its own photograph in view, so its saves are adopted. */
-  const mountToolDocument = async () => {
-    openTestProject(selected({ subject: SUBJECT }, TOOL_SELECTION), {
+  const mountToolDocument = async (change: SelectionChange = {}) => {
+    openTestProject(selected({ subject: SUBJECT, ...change }, TOOL_SELECTION), {
       mode: "box",
       active_subject: SUBJECT,
     });
@@ -3259,10 +3277,8 @@ describe("AnnotateTab review symbology", () => {
 
   it("a confirms a focused annotation no proposal pairs with when a tool left it unconfirmed", async () => {
     // The tool's document holds the review document's boxes, so the review's pairings stand.
-    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
-    changeSelection({ bucket: BUCKET });
     vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
-    await mountTab();
+    await mountToolDocument({ bucket: BUCKET });
     await flush();
     const { annotations, flags } = ANNOTATE_ANSWERS.tool_two;
     const unconfirmed = annotations.filter((a) => a.authorship === "tool");
@@ -3283,8 +3299,7 @@ describe("AnnotateTab review symbology", () => {
   });
 
   it("a confirms an unconfirmed annotation with no bucket selected", async () => {
-    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
-    await mountTab();
+    await mountToolDocument();
     await flush();
     await pressToolBox();
     expect(screen.getByRole("button", { name: "Accept" })).toBeEnabled();
@@ -4790,6 +4805,8 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
     await dragAddedCorner(11);
     await stepTo(1, 2);
 
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({ image_path: IMG1 });
+    expect(saveSpy.mock.calls[0][0].annotations[0]).toMatchObject({ bbox: [10, 10, 50, 50] });
     expect(standing()).toEqual([]);
     expect(listed()).toEqual([
       expect.objectContaining({
@@ -4833,6 +4850,151 @@ describe("AnnotateTab refusals on the canvas, each kind on its own line", () => 
       "Could not load this image's labels: network down. Saving is off.",
     ]);
     expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+  });
+});
+
+describe("AnnotateTab while the canvas holds no document of the image in view", () => {
+  /** A box a tool wrote, which an accept confirms, on the first image. */
+  const TOOL_WRITTEN = servedAnnotation({
+    subject: SUBJECT,
+    bbox: [100, 100, 200, 200],
+    index: 0,
+    authorship: "tool",
+  });
+  /** A box on the second image, apart from the first image's. */
+  const ON_SECOND = servedAnnotation({ subject: SUBJECT, bbox: [400, 300, 480, 380], index: 0 });
+
+  /** Drag a box out on the stage from (`x`, `y`) by `side` on each axis, as a person does. */
+  async function dragBox(x: number, y: number, side: number) {
+    const stage = screen.getByTestId("canvas-stage");
+    fireEvent.mouseDown(stage, { clientX: x, clientY: y, button: 0 });
+    fireEvent.mouseMove(stage, { clientX: x + side, clientY: y + side });
+    await nextFrame();
+    fireEvent.mouseUp(stage, { clientX: x + side, clientY: y + side });
+    await flush();
+  }
+
+  /** Mount over the first image holding `onFirst`, the tool's box by default, its labels landed,
+   *  then move from that clean canvas to the second image with its load held; returns the answer
+   *  to give that load, holding `onSecond`. */
+  async function moveWithNextLoadHeld(
+    onFirst = [TOOL_WRITTEN],
+    onSecond = [ON_SECOND],
+  ): Promise<() => Promise<void>> {
+    const next = Promise.withResolvers<LoadedLabels>();
+    loadSpy.mockImplementation((imagePath) =>
+      imagePath === IMG1 ? Promise.resolve(loadHolding(IMG1, onFirst)) : next.promise,
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(() => changeSelection({ current_image_index: 1 }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    return () => act(() => Promise.resolve(next.resolve(loadHolding(IMG2, onSecond))));
+  }
+
+  it("draws none of the image left's shapes until the next image's labels land, then that image's", async () => {
+    const answerNext = await moveWithNextLoadHeld();
+    expect(imageInView()).toBe(IMG2);
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+
+    expect(drawnBoxes()).toEqual([]);
+
+    await answerNext();
+    expect(drawnBoxes()).toHaveLength(1);
+    expect(useStore.getState().canvas.boxes).toEqual([
+      expect.objectContaining({ x1: 400, y1: 300, x2: 480, y2: 380 }),
+    ]);
+  });
+
+  it("draws the image left's unsaved shapes again at a step back made while its leaving save is held", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    heldSaves();
+    pressNext();
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(drawnBoxes()).toEqual([]);
+
+    act(() => changeSelection({ current_image_index: 0 }));
+    await flush();
+
+    expect(imageInView()).toBe(IMG1);
+    expect(drawnBoxes()).toHaveLength(1);
+  });
+
+  it("adds no box drawn on the stage before the next image's labels land", async () => {
+    await moveWithNextLoadHeld();
+
+    await dragBox(500, 500, 60);
+
+    expect(useStore.getState().canvas.boxes).toHaveLength(1);
+    expect(useStore.getState().canvas.dirty).toBe(false);
+  });
+
+  it("sends no save for the accept key before the next image's labels land", async () => {
+    await moveWithNextLoadHeld();
+
+    fireEvent.keyDown(window, { key: "a" });
+    await flush();
+
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("sends no save for the Complete box before the next image's labels land", async () => {
+    await moveWithNextLoadHeld();
+
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-complete" }));
+    await flush();
+
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("focuses nothing of the next image from a click made on the image left's polygon before its labels land", async () => {
+    const ring: [number, number][] = [
+      [100, 100],
+      [300, 100],
+      [300, 300],
+    ];
+    const polygon = servedAnnotation({ subject: SUBJECT, rings: [ring], index: 0 });
+    act(() => useStore.getState().setMode("polygon"));
+    const answerNext = await moveWithNextLoadHeld([polygon], [polygon]);
+
+    fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 250, clientY: 150 });
+    await flush();
+    await answerNext();
+
+    expect(useStore.getState().canvas.polygons).toHaveLength(1);
+    expect(useStore.getState().canvas.focus).toBeNull();
+  });
+
+  it("disables Save and Flag and states no subject state before the next image's labels land", async () => {
+    await moveWithNextLoadHeld();
+
+    const toolbar = screen.getByTestId("toolbar");
+    expect(toolbar).toHaveAttribute("data-save-disabled", "true");
+    expect(toolbar).toHaveAttribute("data-subject-state", "");
+    expect(screen.getByRole("button", { name: "Flag" })).toBeDisabled();
+  });
+
+  it("adds no box drawn on an image whose first load was refused, and states no unsaved work", async () => {
+    loadSpy.mockRejectedValueOnce(await thrown(ANNOTATE_ANSWERS.unreadable));
+    useStore.getState().setActiveTab("annotate");
+    render(
+      <>
+        <AnnotateTab />
+        <StatusBar />
+      </>,
+    );
+    await screen.findByText(/Saving is off/);
+
+    await dragBox(500, 500, 60);
+
+    expect(useStore.getState().canvas.boxes).toEqual([]);
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
   });
 });
 

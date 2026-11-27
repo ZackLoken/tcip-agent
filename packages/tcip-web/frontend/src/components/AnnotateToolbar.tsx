@@ -31,6 +31,7 @@ import { refusedRegistryKey, saveRegistry, SUBJECT_CONTROL_ID } from "@/lib/regi
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
+import { canvasInView } from "@/store/slices/canvas";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { isFinished, type AnnotateView, type SubjectState } from "@/store/types";
 
@@ -203,6 +204,7 @@ export function AnnotateToolbar({
   const canvasPolygons = useStore((s) => s.canvas.polygons);
   const canvasPoints = useStore((s) => s.canvas.points);
   const canvasImageAnnotations = useStore((s) => s.canvas.imageAnnotations);
+  const inView = useStore(canvasInView);
   const saving = useStore((s) => s.canvas.saving !== null);
   const annotateUi = useStore((s) => s.annotateUi);
   const setImageFilter = useStore((s) => s.setImageFilter);
@@ -218,16 +220,18 @@ export function AnnotateToolbar({
 
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false);
 
-  // Counts per subject across everything on the current canvas (boxes + polygons + points + ratings).
+  // Counts per subject across everything on the image in view's canvas (boxes + polygons + points
+  // + ratings); none while the canvas holds no document of it.
   const subjectCounts = useMemo(() => {
     const counts = new Map<string, number>();
+    if (!inView) return counts;
     const bump = (subj: string) => counts.set(subj, (counts.get(subj) ?? 0) + 1);
     for (const b of canvasBoxes) bump(b.subject);
     for (const p of canvasPolygons) bump(p.subject);
     for (const p of canvasPoints) bump(p.subject);
     for (const a of canvasImageAnnotations) bump(a.subject);
     return counts;
-  }, [canvasBoxes, canvasPolygons, canvasPoints, canvasImageAnnotations]);
+  }, [inView, canvasBoxes, canvasPolygons, canvasPoints, canvasImageAnnotations]);
 
   const imageName = currentImage(dataset)?.name ?? null;
   const nav = useImageNav();

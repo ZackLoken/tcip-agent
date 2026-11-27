@@ -8,6 +8,7 @@ import { NotificationsPane } from "@/components/Notifications";
 import { adoptLoad } from "@/lib/registrySave";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
+import { loadOf } from "@/test/annotate";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
 import {
   BARE_REGISTRY,
@@ -19,7 +20,7 @@ import {
 } from "@/test/labels";
 import { areaEntrySaying, metaLine } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
-import { openTestProject, selected } from "@/test/store";
+import { openTestProject, RAW_SELECTION, selected } from "@/test/store";
 import { TERMINAL_ANSWERS } from "@/test/terminal";
 
 const initialStoreState = useStore.getState();
@@ -30,7 +31,9 @@ const [SUBJECT] = Object.keys(LOADED.subjects);
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  openTestProject(selected({ count: 0 }));
+  // The canvas holds the produced document of the photograph in view, which the panel edits.
+  openTestProject(selected({ count: 1 }));
+  useStore.getState().loadLabelsIntoCanvas(loadOf(RAW_SELECTION.images[0].path));
   act(() => useStore.getState().setActiveSubject(SUBJECT));
 });
 

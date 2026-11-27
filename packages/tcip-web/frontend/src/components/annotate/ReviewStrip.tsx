@@ -24,6 +24,7 @@ export function ReviewStrip({
   onScope,
   canAccept,
   canReject,
+  canFlag,
   scopeCounts,
   flagCount,
   focused,
@@ -53,6 +54,8 @@ export function ReviewStrip({
   /** Whether an accept, or a reject, has an item to act on. */
   canAccept: boolean;
   canReject: boolean;
+  /** Whether the image's flags are held to show and raise; the panel stays shut while not. */
+  canFlag: boolean;
   /** How many items each scope steps through, of those the filters leave. */
   scopeCounts: Record<StepScope, number>;
   /** The image's open flags. */
@@ -176,13 +179,14 @@ export function ReviewStrip({
           <button
             type="button"
             className="tcip-btn h-7 text-[13px]"
-            aria-expanded={flagsOpen}
+            aria-expanded={flagsOpen && canFlag}
+            disabled={!canFlag}
             onClick={() => onFlagsOpen(!flagsOpen)}
             title={`${K.flag.desc} (${K.flag.label})`}
           >
             Flag{flagCount > 0 ? ` (${flagCount})` : ""}
           </button>
-          {flagsOpen && (
+          {flagsOpen && canFlag && (
             <FlagPanel
               target={itemName(focused) ?? "this image"}
               flags={flags}
