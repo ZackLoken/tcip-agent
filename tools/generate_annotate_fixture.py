@@ -20,13 +20,15 @@ one over the third photograph (``single_proposals``), then :data:`PROPOSED` over
 first accepted and :data:`REVIEWED` with :data:`REVIEWED_RING` saved (``review_saved``), loaded
 (``review``) and served (``review_proposals``). The first box is flagged (``review_flagged``),
 the paired proposal and the unpaired one are accepted (``accept_paired``, ``accept_unpaired``),
-and a second bucket of a box and :data:`PROPOSED_RING` is served (``shaped_proposals``) and its
-polygon accepted (``accept_polygon``); the unpaired proposal is accepted again by a save that
-draws a box over it first (``accept_drawn``). The first photograph is cleared; the flag scenes
-follow (``_flag_scenes``), and the prompt scenes over the fourth photograph
-(``_prompt_scenes``), and the photographs' registry declaring the scenes' subjects
-(``registry``). A COCO document is imported onto three photographs of a capture of their own
-(``_imported``), carrying the tool's and unattributed records. On the tool's box document a
+the document loaded and the bucket's proposals served after the first (``review_after_paired``,
+``review_proposals_after_paired``) and the proposals served again after the second
+(``review_proposals_after_unpaired``), and a second bucket of a box and :data:`PROPOSED_RING` is
+served (``shaped_proposals``) and its polygon accepted (``accept_polygon``); the unpaired proposal
+is accepted again by a save that draws a box over it first (``accept_drawn``). The first
+photograph is cleared; the flag scenes follow (``_flag_scenes``), and the prompt scenes over the
+fourth photograph (``_prompt_scenes``), and the photographs' registry declaring the scenes'
+subjects (``registry``). A COCO document is imported onto three photographs of a capture of their
+own (``_imported``), carrying the tool's and unattributed records. On the tool's box document a
 person saves :data:`REVIEWED`, the imported box at :data:`TOOL_INDEX` kept as the tool's
 (``tool_two``); that box is confirmed (``confirmed``) and the boxes saved as a person's
 (``person_boxes``). The tool's polygon document is loaded (``tool_polygon``), and the
@@ -364,10 +366,23 @@ def produce() -> dict[str, JsonValue]:
             reviewed,
             decide=Decisions(bucket=bucket, verdicts={3: "accepted"}),
         )
+        served["review_after_paired"] = load(first)
+        served["review_proposals_after_paired"] = answered(
+            client,
+            "load_proposals",
+            200,
+            params={"image_path": first, "bucket": bucket},
+        )
         saves["accept_unpaired"] = save(
             first,
             reviewed,
             decide=Decisions(bucket=bucket, verdicts={1: "accepted"}),
+        )
+        served["review_proposals_after_unpaired"] = answered(
+            client,
+            "load_proposals",
+            200,
+            params={"image_path": first, "bucket": bucket},
         )
         shaped = staged_bucket(
             first,

@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 
 import type { LoadedLabels } from "@/api/client";
 import { ROUTES } from "@/api/routes";
-import type { PanelEnvelope } from "@/api/types.generated";
+import type { PanelEnvelope, ServedProposals } from "@/api/types.generated";
 import { dismissLabel } from "@/lib/dismissLabel";
-import { ANNOTATE_ANSWERS, LANDED, loadOf } from "@/test/annotate";
+import { SUBJECT_CONTROL_ID } from "@/lib/registrySave";
+import type { HostSize } from "@/lib/viewGeometry";
+import { acceptedProposal, ANNOTATE_ANSWERS, LANDED, LOADED, loadOf } from "@/test/annotate";
 import { LABEL_ANSWERS } from "@/test/labels";
 import {
   areaEntries,
@@ -25,6 +27,7 @@ import { answeredWith, thrown } from "@/test/refusals";
 import {
   NAV_ANSWER,
   RAW_SELECTION,
+  selected,
   SELECTED_SUBJECT,
   SUBJECT_SELECT_ANSWER,
   TEST_PROJECT,
@@ -40,11 +43,22 @@ vi.mock("react-konva", () => ({
   Circle: () => null,
   Text: () => null,
 }));
-vi.mock("@/components/Canvas/CanvasStage", () => ({
-  CanvasStage: (props: { children?: React.ReactNode }) => (
-    <div data-testid="canvas-stage">{props.children}</div>
-  ),
-}));
+// The host size the stand-in stage reports, as the measured stage does once it is laid out; none
+// until a test sets one.
+const stage = vi.hoisted(() => ({ size: null as HostSize | null }));
+vi.mock("@/components/Canvas/CanvasStage", async () => {
+  const { useEffect } = await import("react");
+  return {
+    CanvasStage: (props: {
+      children?: React.ReactNode;
+      onHostSize: (size: HostSize | null) => void;
+    }) => {
+      const { onHostSize } = props;
+      useEffect(() => onHostSize(stage.size), [onHostSize]);
+      return <div data-testid="canvas-stage">{props.children}</div>;
+    },
+  };
+});
 
 type Page = {
   ProjectShell: typeof import("@/ProjectShell").ProjectShell;
@@ -52,6 +66,7 @@ type Page = {
   useStore: typeof import("@/store").useStore;
   load: MockInstance<typeof import("@/api/client").api.annotate.load>;
   save: MockInstance<typeof import("@/api/client").api.annotate.save>;
+  proposals: MockInstance<typeof import("@/api/client").api.annotate.proposals>;
   select: MockInstance<typeof import("@/api/client").api.dataset.select>;
 };
 
@@ -91,6 +106,7 @@ async function loadPage(): Promise<Page> {
   ]);
   const load = answerAnnotateMount();
   const save = vi.spyOn(api.annotate, "save").mockResolvedValue(landed.box);
+  const proposals = vi.spyOn(api.annotate, "proposals").mockImplementation(pending);
   const select = vi.spyOn(api.dataset, "select").mockRejectedValue(new Error("selection refused"));
   vi.spyOn(api.dataset, "nav").mockResolvedValue(NAV_ANSWER);
   vi.spyOn(subjects.subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
@@ -99,7 +115,7 @@ async function loadPage(): Promise<Page> {
   vi.spyOn(metaApi, "reports").mockImplementation(pending);
   vi.spyOn(metaApi, "retrospectives").mockImplementation(pending);
   vi.spyOn(sessionsApi, "load").mockImplementation(pending);
-  return { ProjectShell, NotificationsPane, useStore, load, save, select };
+  return { ProjectShell, NotificationsPane, useStore, load, save, proposals, select };
 }
 
 /** The last socket the page opened for `panel`'s events. */
@@ -886,6 +902,113 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
     expect(failures).toHaveLength(1);
     expect(within(failures[0]).getByText(SAVE_AGAIN)).toBeInTheDocument();
     expectRaisedOnce(failures[0]);
+  });
+});
+
+describe("ProjectShell an Edit's save landing after a return to the Annotate tab", () => {
+  const BUCKET = ANNOTATE_ANSWERS.buckets.review;
+  const {
+    review_proposals_after_paired: before,
+    review_proposals_after_unpaired: after,
+    saves: { accept_unpaired: accepting },
+  } = ANNOTATE_ANSWERS;
+  const edited = acceptedProposal(LANDED.accept_unpaired);
+  const acceptAll = (served: ServedProposals) =>
+    `Accept all (${served.proposals.filter((p) => p.decision === null).length})`;
+
+  beforeEach(() => {
+    stage.size = { w: 1000, h: 800 };
+  });
+  afterEach(() => {
+    stage.size = null;
+  });
+
+  /** The tool pressed in the toolbar. */
+  const pressedTool = () =>
+    within(screen.getByRole("group", { name: "Tool" })).getByRole("button", { pressed: true })
+      .textContent;
+
+  /** The subject the toolbar names as active, without its count. */
+  const toolbarSubject = () =>
+    document.getElementById(SUBJECT_CONTROL_ID)?.textContent?.replace(/\(\d+\)$/, "");
+
+  /** The edited proposal as `served` holds it. */
+  const editedIn = (served: ServedProposals) => {
+    const proposal = served.proposals.find((p) => p.index === edited);
+    if (!proposal) throw new Error("the served proposals hold no such proposal");
+    return proposal;
+  };
+
+  /** The position the review strip shows for the focused item. */
+  const focusedPosition = () =>
+    (screen.getByRole("textbox", { name: "Item position" }) as HTMLInputElement).value;
+
+  /** The zoom the status line reads. */
+  const zoom = () => screen.getByText(/^Zoom: /).textContent;
+
+  /** Mount on the review bucket over its document as the proposals stood once the paired
+   *  proposal was accepted, press Edit on the unpaired proposal with its save held, and leave the
+   *  tab and return to it; returns the held save's answer. */
+  async function editThenReturn() {
+    const held = Promise.withResolvers<Response>();
+    const sent = answerSaves(() => held.promise);
+    page.load.mockImplementation(() => Promise.resolve(LOADED.review_after_paired));
+    page.proposals.mockResolvedValue(before);
+    await mountOnCapture(TEST_PROJECT, selected({ bucket: BUCKET }));
+    await settle();
+    act(() =>
+      page.useStore.getState().setFocus({ kind: "proposal", index: edited, bucket: BUCKET }),
+    );
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Decide" })).getByRole("button", { name: "Edit" }),
+    );
+    await settle();
+    expect(sent).toHaveLength(1);
+    await switchTo("meta");
+    await switchTo("annotate");
+    expect(screen.getByRole("button", { name: acceptAll(before) })).toBeInTheDocument();
+    return held;
+  }
+
+  /** Land the held Edit's save with the produced save accepting the edited proposal. */
+  const land = async (held: PromiseWithResolvers<Response>) => {
+    await act(() => Promise.resolve(held.resolve(answeredWith(200, accepting))));
+    await settle();
+  };
+
+  it("reads the proposals again in the editor the tab returned to, and the review strip shows that read", async () => {
+    const held = await editThenReturn();
+    const readsBefore = page.proposals.mock.calls.length;
+    page.proposals.mockResolvedValue(after);
+
+    await land(held);
+
+    expect(page.proposals).toHaveBeenCalledTimes(readsBefore + 1);
+    expect(screen.getByRole("button", { name: acceptAll(after) })).toBeInTheDocument();
+  });
+
+  it("moves neither the focus, the tool, the active subject nor the view for a save sent by an editor that left", async () => {
+    const held = await editThenReturn();
+    const accepted = accepting.document.annotations.find((a) => a.index === editedIn(after).paired);
+    const acceptedName = `${accepted?.subject} box`;
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Tool" })).getByRole("button", { name: "Polygon" }),
+    );
+    const tool = pressedTool();
+    const subject = toolbarSubject();
+    const zoomed = zoom();
+    expect(tool).toBe("Polygon");
+    expect(focusedPosition()).toBe("");
+    expect(screen.queryByTitle(acceptedName)).not.toBeInTheDocument();
+    page.proposals.mockResolvedValue(after);
+
+    await land(held);
+
+    expect(focusedPosition()).toBe("");
+    expect(screen.queryByTitle(acceptedName)).not.toBeInTheDocument();
+    expect(pressedTool()).toBe(tool);
+    expect(toolbarSubject()).toBe(subject);
+    expect(zoom()).toBe(zoomed);
   });
 });
 

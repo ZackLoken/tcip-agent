@@ -30,6 +30,7 @@ import { useStore } from "@/store";
 import type { AnnotateView } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import {
+  acceptedProposal,
   ANNOTATE_ANSWERS,
   answerAnnotateMount,
   LANDED,
@@ -3235,13 +3236,6 @@ describe("AnnotateTab review symbology", () => {
     ),
   });
 
-  /** The one proposal `landed` says it accepted, by its index in its bucket's document. */
-  const acceptedProposal = (landed: LoadedSave) => {
-    const accepted = Object.keys(landed.accepted).map(Number);
-    if (accepted.length !== 1) throw new Error("the landed save accepted no one proposal");
-    return accepted[0];
-  };
-
   /** The tool document's box a tool wrote, and its position among the canvas's boxes. */
   const TOOL_REF = LOADED.tool_two.boxes.findIndex((b) => b.authorship === "tool");
   const TOOL_BOX = LOADED.tool_two.boxes[TOOL_REF];
@@ -3518,6 +3512,42 @@ describe("AnnotateTab review symbology", () => {
       pressSave();
       await flush();
       expect(proposalsSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("serves the bucket's proposals again once Reload loads the document anew", async () => {
+      const proposalsSpy = await mountReviewing();
+      act(() => useStore.getState().update("boxes", 0, { ...boxes()[0], x2: 51 }));
+      saveSpy.mockRejectedValueOnce(await versionConflict());
+      pressSave();
+      await flush();
+      expect(proposalsSpy).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+      await flush();
+
+      expect(proposalsSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("serves no proposals again for an answer adopted while another image is in view", async () => {
+      const [loose] = LOOSE;
+      const proposalsSpy = await mountReviewing();
+      act(() =>
+        useStore.getState().setFocus({ kind: "proposal", index: loose.index, bucket: BUCKET }),
+      );
+      const answer = Promise.withResolvers<LoadedSave>();
+      saveSpy.mockReturnValueOnce(answer.promise);
+      fireEvent.keyDown(window, { key: "e" });
+      await flush();
+      loadSpy.mockImplementation(() => new Promise(() => {}));
+      act(() => {
+        changeSelection({ current_image_index: 1 });
+      });
+      await flush();
+      const reads = proposalsSpy.mock.calls.length;
+
+      await act(() => Promise.resolve(answer.resolve(LANDED.accept_unpaired)));
+
+      expect(proposalsSpy).toHaveBeenCalledTimes(reads);
     });
 
     it("refuses an edit made while it is in flight, then adopts the answer whole", async () => {

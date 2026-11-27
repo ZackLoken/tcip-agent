@@ -289,18 +289,16 @@ export function AnnotateTab() {
   // Hiding either while annotating is recorded on the mark the person then makes.
   const [shown, setShown] = useState<AnnotateView>({ proposals: true, predictions: true });
   const predictionsShown = !!bucket && shown.predictions;
-  const [proposalTick, setProposalTick] = useState(0);
+  const proposalRereads = useStore((s) => s.proposalRereads);
+  const rereadProposals = useStore((s) => s.rereadProposals);
   // Each bucket's proposals answer, whole, in the order the canvas draws them.
   const [served, setServed] = useState<{
     key: string;
     answers: { bucket: string; answer: ServedProposals }[];
   } | null>(null);
-  // Proposals pair by document index, so a new document drops them until they are served again.
-  const refreshProposals = () => {
-    setServed(null);
-    setProposalTick((t) => t + 1);
-  };
-  const proposalKey = `${imgPath ?? ""}\0${predictionsShown ? bucket : ""}\0${shown.proposals}`;
+  // Proposals pair by document index, so a new document makes the held ones stale: the key
+  // carries the re-reads asked for, whichever editor asked.
+  const proposalKey = `${imgPath ?? ""}\0${predictionsShown ? bucket : ""}\0${shown.proposals}\0${proposalRereads}`;
   useEffect(() => {
     const image = imageInView;
     if (!image) return;
@@ -329,7 +327,7 @@ export function AnnotateTab() {
       canceled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proposalKey, proposalTick]);
+  }, [proposalKey]);
   // ── Engine prompts: held points and boxes, or a phrase, ask for proposals, never an annotation ──
   const [proposing, setProposing] = useState(false);
   // The bucket whose first proposal is focused once its proposals are served.
@@ -381,7 +379,7 @@ export function AnnotateTab() {
       if (inView) {
         focusOnServeRef.current = answer.bucket;
         setShown((v) => ({ ...v, proposals: true }));
-        refreshProposals();
+        rereadProposals();
       } else {
         const noun = answer.proposal_count === 1 ? "proposal" : "proposals";
         told(`${answer.proposal_count} ${noun} for ${sent.name}, staged under ${answer.bucket}.`);
@@ -574,8 +572,8 @@ export function AnnotateTab() {
   }
 
   /** Edit the focused proposal: it is accepted, and the annotation the answer says it resolved
-   *  to, a new one or one already drawn, is focused in its place. A save the canvas did not adopt
-   *  focuses nothing. */
+   *  to, a new one or one already drawn, is focused in its place while this editor is mounted. A
+   *  save the canvas did not adopt focuses nothing. */
   async function edit() {
     if (focused?.kind !== "proposal") return;
     const { bucket, index } = focused.proposal;
@@ -818,7 +816,8 @@ export function AnnotateTab() {
     interactive?: boolean;
     gestures?: Partial<Gestures>;
     confirm?: AnnotationItem[];
-    /** A proposal this save accepts, whose annotation the adoption focuses. */
+    /** A proposal this save accepts, whose annotation the adoption focuses while the editor that
+     *  sent the save is mounted. */
     focusAccepted?: number;
   }): Promise<LoadedSave | null> {
     const interactive = opts?.interactive ?? true;
@@ -914,10 +913,13 @@ export function AnnotateTab() {
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
     documentLanded(loaded.image_path);
-    if (inView) refreshProposals();
+    if (inView) rereadProposals();
     adoptLabels(result.document);
     if (!inView) return null;
-    if (opts?.focusAccepted !== undefined) focusAccepted(result, opts.focusAccepted);
+    // An editor that has left moves no focus, tool or view.
+    if (opts?.focusAccepted !== undefined && mountedRef.current) {
+      focusAccepted(result, opts.focusAccepted);
+    }
     return result;
   }
 
@@ -1058,7 +1060,7 @@ export function AnnotateTab() {
       if ("labels" in answer) {
         adoptLabels(answer.labels);
         documentLanded(imgPath);
-        if (reload) refreshProposals();
+        if (reload) rereadProposals();
         else cameToImage();
         return;
       }
@@ -1107,8 +1109,8 @@ export function AnnotateTab() {
     }
   }
 
-  // Flush telemetry + any unsaved edits when the tab unmounts (e.g. switching to
-  // another tab). Image-to-image flushing is handled by the load effect above.
+  // Close the visit, save any unsaved edits and send the held visits when the tab unmounts (e.g.
+  // switching to another tab). Image-to-image flushing is handled by the load effect above.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
