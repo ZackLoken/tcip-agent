@@ -267,6 +267,9 @@ function holdNextLoad(): (labels: LoadedLabels) => void {
 /** The status bar's mark of unsaved work on the canvas. */
 const unsaved = () => screen.queryByText("Unsaved changes");
 
+/** The status bar's readout of the open visit of the image in view. */
+const imageTime = () => screen.queryByText(/^Image time: /);
+
 /** The toolbar's Save control, under whichever label it shows. */
 const saveControl = () => screen.getByRole("button", { name: /^(Save|Saved|Saving)$/ });
 
@@ -712,6 +715,60 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expectBackOnFirst();
     expect(sent).toHaveLength(1);
     expect(inPlace()).toHaveTextContent(/^Save canceled\./);
+  });
+
+  it("returns to the image the person was on with its edits when a focus within the capture moves before a refused leaving save", async () => {
+    const focus = PANEL_EVENTS.annotate_focus;
+    const sent = answerSaves(refusedAsChanged);
+    await mountOnCapture(
+      TEST_PROJECT,
+      selected({ subject: focus.event.subject, current_image_index: 1 }),
+    );
+    expect(focus.event.image_index).toBe(0);
+    addBox();
+
+    deliver(focus);
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body).toMatchObject({ image_path: second.path });
+    expect(imagePosition()).toHaveValue("2");
+    expect(unsaved()).toBeInTheDocument();
+    expect(screen.getByText("1 box")).toBeInTheDocument();
+    expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
+  });
+
+  it("opens the visit of the image left again when a held leaving save is refused and the person is returned there", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+    expect(imageTime()).toBeInTheDocument();
+    step("Next");
+    await settle();
+    expect(imageTime()).toBeNull();
+
+    await answerHeld(leaving, refusedAsChanged);
+
+    expectBackOnFirst();
+    expect(imageTime()).toBeInTheDocument();
+  });
+
+  it("opens the visit of the image left again at a step back made while its leaving save is held", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+    holdNextLoad();
+    step("Next");
+    await settle();
+    expect(imageTime()).toBeNull();
+
+    step("Previous");
+    await settle();
+
+    expect(imagePosition()).toHaveValue("1");
+    expect(imageTime()).toBeInTheDocument();
   });
 
   it("returns to the image left with its edits when the save of two moves made before it answers is refused", async () => {
