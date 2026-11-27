@@ -16,6 +16,17 @@ function syncNavIndex(index: number): void {
   }, 400);
 }
 
+/** Put the selection's image at `index` in view and echo it to the backend; nothing when no
+ *  selection is held or that image is already in view. Reads the freshest selection, so a rapid
+ *  sequence of moves never lays a stale render's selection over another field of it. */
+export function moveToImage(index: number): void {
+  const { gui, patchGui } = useStore.getState();
+  const held = gui.dataset;
+  if (held === null || index === held.current_image_index) return;
+  patchGui({ dataset: { ...held, current_image_index: index } });
+  syncNavIndex(index);
+}
+
 /** The image index `delta` steps from `current` along `indices`, the kept images' indices in the
  *  order the filter walks them. From an image the filter drops, the step walks `indices` in its
  *  own direction (forward from the start, backward from the end) and lands on the first kept
@@ -46,7 +57,6 @@ export function useImageNav() {
   const states = useStore((s) => s.annotateUi.imageStates);
   const chosen = useStore((s) => s.annotateUi.imageFilter);
   const queue = useStore((s) => s.annotateUi.reviewQueue);
-  const patchGui = useStore((s) => s.patchGui);
   const ranked = useMemo(() => rankedNames(queue, dataset), [queue, dataset]);
   const filter = filterInEffect(chosen, ranked);
   const images = dataset?.images;
@@ -55,19 +65,12 @@ export function useImageNav() {
     [images, states, filter, ranked],
   );
 
-  // The freshest selection is read at the step, so a rapid sequence of steps never lays a
-  // stale render's selection over another field of it.
-  const goTo = useCallback(
-    (target: (current: number) => number | null) => {
-      const held = useStore.getState().gui.dataset;
-      if (held === null) return;
-      const index = target(held.current_image_index);
-      if (index === null || index === held.current_image_index) return;
-      patchGui({ dataset: { ...held, current_image_index: index } });
-      syncNavIndex(index);
-    },
-    [patchGui],
-  );
+  const goTo = useCallback((target: (current: number) => number | null) => {
+    const held = useStore.getState().gui.dataset;
+    if (held === null) return;
+    const index = target(held.current_image_index);
+    if (index !== null) moveToImage(index);
+  }, []);
 
   const stepImage = useCallback(
     (delta: number) => goTo((current) => stepTarget(indices, current, delta)),
