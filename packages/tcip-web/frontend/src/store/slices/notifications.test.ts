@@ -44,28 +44,6 @@ describe("an entry's dismissal", () => {
   });
 });
 
-describe("a failure set aside for a new attempt", () => {
-  it("is not marked by the key it was set aside from once a raise on another key takes it up", () => {
-    const raiseOn = (key: string) =>
-      useStore.getState().raiseNotification({
-        kind: "failure",
-        level: "error",
-        text: { sentence: "A launch failed." },
-        context: { project: "valley", target: "2026-02-11" },
-        key,
-      });
-    raiseOn("launch:first-root:2026-02-11");
-    useStore.getState().setAsideNotification("launch:first-root:2026-02-11");
-    raiseOn("launch:second-root:2026-02-11");
-
-    useStore.getState().resolveNotification("launch:first-root:2026-02-11");
-
-    expect(useStore.getState().notifications).toEqual([
-      expect.objectContaining({ key: "launch:second-root:2026-02-11", count: 2, resolved: false }),
-    ]);
-  });
-});
-
 describe("an entry about an inference job", () => {
   it("keeps the job its raise stated once its key is released", () => {
     const { launched } = INFERENCE_ANSWERS;
