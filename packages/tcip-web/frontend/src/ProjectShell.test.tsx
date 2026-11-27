@@ -155,7 +155,7 @@ async function mountOnCapture(project = TEST_PROJECT, selection = RAW_SELECTION)
 }
 
 /** Expect `item` to state no count of times raised. */
-const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
+const expectRaisedOnce = (item: HTMLElement) => expect(metaLine(item)).not.toMatch(/ times/);
 
 /** A request as the page sent it: its path and its body. */
 type Sent = { path: string; body: unknown };
