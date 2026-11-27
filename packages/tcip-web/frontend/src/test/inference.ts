@@ -11,8 +11,8 @@ import type { Refusal } from "@/test/refusals";
 /** What `tools/generate_inference_fixture.py` received from the inference routes. The job listing
  *  asked for before a project opens is refused (`unopened`). A pass that
  *  fails is listed running before its engine starts (`failing_started`), when a second launch
- *  naming its bucket is refused (`failing_bucket_exists`). A held pass is launched while it is
- *  still held (`launched`) and both are listed running before either engine starts
+ *  naming its bucket is refused (`failing_bucket_exists`). A held pass is launched while the failed
+ *  one is still held (`launched`) and both are listed running before either engine starts
  *  (`both_started`); the failed pass then streams its failure (`failing_final`). The held pass is
  *  listed beside the failed one before its engine reports (`held_started`) and at one image of nine
  *  (`running`), as its stream sends it

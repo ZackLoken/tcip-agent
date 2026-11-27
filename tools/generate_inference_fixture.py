@@ -98,7 +98,7 @@ def produce() -> dict[str, JsonValue]:
     served: dict[str, JsonValue] = {}
 
     def staged(project: Path, **run: object) -> dict:
-        if run["bucket"] != f"{HELD}/{CAPTURE}":
+        if run["bucket"] != held_bucket:
             failing_gate.pause()
             return engine(project, **run)  # type: ignore[arg-type]
         held_gate.pause()
@@ -126,20 +126,24 @@ def produce() -> dict[str, JsonValue]:
         replaced.write_bytes(Path(checkpoint).read_bytes())
         patch.setattr(inference_tools, "infer", staged)
 
+        def request(
+            bucket_name: str, path: str
+        ) -> inference.LaunchInferencePayload:
+            return inference.LaunchInferencePayload(
+                checkpoint_path=path,
+                dataset_root=str(root),
+                date=CAPTURE,
+                bucket_name=bucket_name,
+                stated=Stated(),
+                user=ACTOR,
+            )
+
         def launch(bucket_name: str, status: int, path: str) -> JsonValue:
             return answered(
-                client,
-                "launch_inference",
-                status,
-                inference.LaunchInferencePayload(
-                    checkpoint_path=path,
-                    dataset_root=str(root),
-                    date=CAPTURE,
-                    bucket_name=bucket_name,
-                    stated=Stated(),
-                    user=ACTOR,
-                ),
+                client, "launch_inference", status, request(bucket_name, path)
             )
+
+        held_bucket = request(HELD, checkpoint).bucket
 
         failing = inference.InferenceJob.model_validate(
             launch(FAILING, 200, str(replaced))
