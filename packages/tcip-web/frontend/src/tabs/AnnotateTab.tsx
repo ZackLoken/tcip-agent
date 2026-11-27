@@ -890,13 +890,12 @@ export function AnnotateTab() {
       );
       landed = true;
     } catch (e) {
-      // A failure of the document the canvas still holds stands on that image's line; one for a
-      // document loaded over since is listed alone. A cancel is said only for a pressed save.
-      const inPlace = interactive && stillLoaded();
+      // A failure or a cancel of the document the canvas still holds stands on that image's line;
+      // a failure of one loaded over since is listed alone.
       const failed = (sentence: string, slot?: "document" | "reload") =>
         tell("failure", "error", sentence, loaded.name, slot && canvasKey(slot, loaded.image_path));
       if (hold.controller.signal.aborted) {
-        if (inPlace) {
+        if (stillLoaded()) {
           tell(
             "notice",
             "warning",

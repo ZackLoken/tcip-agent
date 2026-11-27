@@ -695,6 +695,25 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(areaEntries()).toEqual([]);
   });
 
+  it("returns to the image left with its edits, saying the save was canceled, when the leaving save is canceled while it is held", async () => {
+    const leaving = Promise.withResolvers<Response>();
+    const sent = answerSaves(() => leaving.promise);
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+    expect(imagePosition()).toHaveValue("2");
+
+    fireEvent.click(saveControl());
+    // The page's fetch rejects an aborted request; the stand-in here hands the save no signal.
+    await act(() => Promise.resolve(leaving.reject(new DOMException("aborted", "AbortError"))));
+    await settle();
+
+    expectBackOnFirst();
+    expect(sent).toHaveLength(1);
+    expect(inPlace()).toHaveTextContent(/^Save canceled\./);
+  });
+
   it("returns to the image left with its edits when the save of two moves made before it answers is refused", async () => {
     const leaving = Promise.withResolvers<Response>();
     const sent = answerSaves(() => leaving.promise);
