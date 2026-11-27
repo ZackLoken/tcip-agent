@@ -41,6 +41,7 @@ const [PASSED, FAILED] = PRODUCED_ASSESSMENTS.assessments;
 const {
   launched: LAUNCHED,
   failing_started: FAILING_STARTED,
+  both_started: BOTH_STARTED,
   failing_final: FAILING_FINAL,
   held_started: HELD_STARTED,
   running: RUNNING,
@@ -48,8 +49,7 @@ const {
   canceled: CANCELED,
 } = INFERENCE_ANSWERS;
 const HELD = LAUNCHED.job_id;
-const [FAILED_JOB, HELD_JOB] = RUNNING.jobs;
-const [STARTING_JOB] = FAILING_STARTED.jobs;
+const [FAILED_JOB] = RUNNING.jobs;
 
 function setupDataset() {
   openTestProject(RAW_SELECTION);
@@ -312,12 +312,13 @@ describe("InferenceTab job table", () => {
   });
 
   it("names each row's Watch and Cancel for its job, so no two rows' controls share a name", async () => {
-    vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [STARTING_JOB, HELD_JOB] });
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue(BOTH_STARTED);
 
     renderBesideListings(<InferenceTab />);
     expect(await screen.findByText(HELD)).toBeInTheDocument();
 
-    for (const { job_id } of [STARTING_JOB, HELD_JOB]) {
+    expect(BOTH_STARTED.jobs).toHaveLength(2);
+    for (const { job_id } of BOTH_STARTED.jobs) {
       const row = screen.getByText(job_id).closest("tr") as HTMLElement;
       expect(within(row).getByRole("button", { name: `Watch ${job_id}` })).toHaveTextContent(
         /^Watch$/,
@@ -326,7 +327,6 @@ describe("InferenceTab job table", () => {
         /^Cancel$/,
       );
     }
-    expect(STARTING_JOB.job_id).not.toBe(HELD_JOB.job_id);
   });
 
   it("offers a stop control only for a job still in flight, and cancels that job by id", async () => {
