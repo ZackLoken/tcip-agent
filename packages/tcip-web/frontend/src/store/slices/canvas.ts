@@ -177,9 +177,8 @@ function restoreLast(s: AppState): Partial<AppState> | AppState {
 export interface CanvasSlice {
   /** Canvas-local draft state (not persisted until save). */
   canvas: CanvasState;
-  /** How many times the proposals of the image in view were asked to be read again, once the
-   *  canvas's document changed under them; whichever editor is mounted reads it and reads again
-   *  when it moves. */
+  /** How many times the proposals of the image in view were asked to be read again; moving it
+   *  asks for them to be read again. */
   proposalRereads: number;
   /** Ask for the proposals of the image in view to be read again. */
   rereadProposals: () => void;

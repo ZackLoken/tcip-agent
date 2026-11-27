@@ -572,8 +572,8 @@ export function AnnotateTab() {
   }
 
   /** Edit the focused proposal: it is accepted, and the annotation the answer says it resolved
-   *  to, a new one or one already drawn, is focused in its place. A save the canvas did not adopt
-   *  focuses nothing. */
+   *  to, a new one or one already drawn, is focused in its place while this editor is mounted. A
+   *  save the canvas did not adopt focuses nothing. */
   async function edit() {
     if (focused?.kind !== "proposal") return;
     const { bucket, index } = focused.proposal;
@@ -816,7 +816,8 @@ export function AnnotateTab() {
     interactive?: boolean;
     gestures?: Partial<Gestures>;
     confirm?: AnnotationItem[];
-    /** A proposal this save accepts, whose annotation the adoption focuses. */
+    /** A proposal this save accepts, whose annotation the adoption focuses while the editor that
+     *  sent the save is mounted. */
     focusAccepted?: number;
   }): Promise<LoadedSave | null> {
     const interactive = opts?.interactive ?? true;
