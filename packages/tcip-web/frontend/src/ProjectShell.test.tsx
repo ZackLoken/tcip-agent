@@ -584,6 +584,25 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(sent).toHaveLength(2);
   });
 
+  it("lists a leaving save that got no answer as resolved once a pressed Save lands", async () => {
+    answerSaves(unanswered, answering(200, saved));
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+    const [failure] = failureEntries();
+    expect(within(failure).getByText(SAVE_AGAIN)).toBeInTheDocument();
+    expect(metaLine(failure)).not.toMatch(/resolved/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+
+    expect(unsaved()).toBeNull();
+    const failures = failureEntries();
+    expect(failures).toHaveLength(1);
+    expect(metaLine(failures[0])).toMatch(/^Error, failure, .+, resolved$/);
+  });
+
   it("shows the next image's document only once a leaving save answered after it lands", async () => {
     const leaving = Promise.withResolvers<Response>();
     const sent = answerSaves(() => leaving.promise);
@@ -1042,6 +1061,32 @@ describe("ProjectShell agent notes", () => {
       expectRaisedOnce(item);
       expect(item).not.toHaveTextContent(/Retry/);
       expect(metaLine(item)).toMatch(/, resolved$/);
+    },
+  );
+
+  it.each([
+    ["committed without its audit line", second, DISMISSALS.audit_gap],
+    ["refused for another project the backend has open", banner, DISMISSALS.another_project],
+  ])(
+    "lists a failed dismissal as resolved once its Retry is answered as %s",
+    async (_case, envelope, answer) => {
+      const sent = answerDismissals(unanswered, answering(answer.status, answer.body));
+      await mountOnCapture();
+      deliver(envelope);
+      dismissEntry(envelope.event.text);
+      await settle();
+      const [failure] = failureEntries();
+      expect(metaLine(failure)).not.toMatch(/resolved/);
+
+      fireEvent.click(notificationsArea().getByRole("button", { name: "Retry" }));
+      await settle();
+
+      expect(sent).toEqual([dismissalOf(envelope), dismissalOf(envelope)]);
+      const failures = failureEntries();
+      expect(failures).toHaveLength(1);
+      expect(metaLine(failures[0])).toMatch(
+        /^Error, failure, Agent's note for Results, .+, resolved$/,
+      );
     },
   );
 

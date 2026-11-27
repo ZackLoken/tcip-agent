@@ -1226,11 +1226,19 @@ describe("TrainingTab compare", () => {
     );
   });
 
-  it("lists the cap's refusal saying nothing of being resolved once the tab leaves with the set full", async () => {
-    const { view } = await capRefused();
+  it("lists the cap's refusal saying nothing of being resolved once the tab leaves with the set full and comes back", async () => {
+    const { view, ids } = await capRefused();
 
     view.unmount();
+    expect(metaLine(areaEntrySaying(capSentence))).not.toMatch(/resolved/);
+    render(
+      <StrictMode>
+        <TrainingTab />
+      </StrictMode>,
+    );
+    await screen.findByText(ids[0]);
 
+    expect(toggle(ids[0])).toHaveAttribute("aria-pressed", "false");
     expect(metaLine(areaEntrySaying(capSentence))).not.toMatch(/resolved/);
   });
 

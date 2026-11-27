@@ -2536,12 +2536,13 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       await drawBox(side);
     }
 
-    async function drawBox(side: number) {
+    /** Drag a box from (`from`, `from`) by `side` on each axis. */
+    async function drawBox(side: number, from = 100) {
       const stage = screen.getByTestId("canvas-stage");
-      fireEvent.mouseDown(stage, { clientX: 100, clientY: 100, button: 0 });
-      fireEvent.mouseMove(stage, { clientX: 100 + side, clientY: 100 + side });
+      fireEvent.mouseDown(stage, { clientX: from, clientY: from, button: 0 });
+      fireEvent.mouseMove(stage, { clientX: from + side, clientY: from + side });
       await nextFrame();
-      fireEvent.mouseUp(stage, { clientX: 100 + side, clientY: 100 + side });
+      fireEvent.mouseUp(stage, { clientX: from + side, clientY: from + side });
       await flush();
     }
 
@@ -2603,6 +2604,18 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       await drawBox(60);
 
       expect(metaLine(areaEntrySaying(TOO_SMALL))).toMatch(/^Error, failure, .+, resolved$/);
+    });
+
+    it("is listed counted twice and no longer resolved once a box is drawn too small after one was kept", async () => {
+      await mountAndDraw(2);
+      await drawBox(60);
+      expect(metaLine(areaEntrySaying(TOO_SMALL))).toMatch(/^Error, failure, .+, resolved$/);
+
+      await drawBox(2, 300);
+
+      expect(useStore.getState().canvas.boxes).toHaveLength(1);
+      expect(onCanvas()[0]).toHaveTextContent(TOO_SMALL);
+      expect(metaLine(areaEntrySaying(TOO_SMALL))).toMatch(/^Error, failure, .+, 2 times$/);
     });
 
     it("is listed saying nothing of being resolved once the image changes", async () => {

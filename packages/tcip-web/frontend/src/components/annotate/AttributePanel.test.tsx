@@ -299,16 +299,22 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, .+, resolved$/);
   });
 
-  it("takes a refused save from the panel once the next save commits without its audit line", async () => {
+  it("takes a refused save from the panel once the next save commits without its audit line, listing it as resolved", async () => {
     const stale = LABEL_ANSWERS.registry_stale;
     const saveSpy = vi.spyOn(subjectsApi, "save").mockRejectedValueOnce(await thrown(stale));
     vi.spyOn(subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
 
-    render(<AttributePanel focused={null} />);
+    render(
+      <>
+        <AttributePanel focused={null} />
+        <NotificationsPane />
+      </>,
+    );
     fillAttributeDraft("opening", ["closed", "open"]);
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
     const sentence = `Could not update the attributes: ${stale.body.detail}`;
     expect(screen.getByTestId("entry-in-place")).toHaveTextContent(sentence);
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
 
     const gap = LABEL_ANSWERS.registry_audit_gap;
     saveSpy.mockRejectedValue(await thrown(gap));
@@ -320,5 +326,6 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
       expect.objectContaining({ sentence, key: undefined }),
       expect.objectContaining({ sentence: gap.body.detail.message, key: undefined }),
     ]);
+    expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, .+, resolved$/);
   });
 });
