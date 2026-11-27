@@ -60,10 +60,11 @@ type EntryText = { sentence: string; refusals?: never } | { refusals: Refusal[];
 type RaisedKind = "failure" | "notice" | "job";
 
 /** What an entry is: a condition's occurrence, naming its condition; or a failure, a notice or a
- *  job, standing on the key its producer gave, if any, until the key is released or a raise
- *  stating another text takes it. It offers its action and runs `onDismiss` when dismissed until
- *  it is taken off a key, and keeps the inference job it is about, if any, as long as it is
- *  listed. */
+ *  job, standing on the key its producer gave, if any, until the key is released or resolved or
+ *  a raise stating another text takes it. It offers its action and runs `onDismiss` when
+ *  dismissed until it is taken off a key, keeps the inference job it is about, if any, as long
+ *  as it is listed, and is `resolved` from the moment its producer says its cause ended until it
+ *  is raised again. */
 type EntryStanding =
   | {
       kind: "condition";
@@ -72,6 +73,7 @@ type EntryStanding =
       action?: never;
       onDismiss?: never;
       inferenceJob?: never;
+      resolved?: never;
     }
   | {
       kind: RaisedKind;
@@ -79,6 +81,7 @@ type EntryStanding =
       action?: EntryAction;
       onDismiss?: () => void;
       inferenceJob?: InferenceJob;
+      resolved: boolean;
       condition?: never;
     };
 
@@ -130,12 +133,17 @@ export interface NotificationsSlice {
    * another text is a new entry that takes the key, the earlier one staying listed. With no key,
    * or none standing on it, a listed entry standing on no key of the same kind, level, text and
    * context raises its count and takes the key. Anything else is a new entry, announced once. An
-   * entry raised again carries the latest raise's action, `onDismiss` and inference job.
+   * entry raised again carries the latest raise's action, `onDismiss` and inference job, and is
+   * no longer resolved.
    */
   raiseNotification: (raised: Raised) => void;
-  /** End what stands on `key`: its entry stays listed until dismissed, standing on no key,
-   *  offering no action and running nothing when dismissed, and keeping its inference job. */
+  /** Free `key` for a reason other than the end of its entry's cause: the entry standing on it
+   *  stays listed until dismissed, standing on no key, offering no action and running nothing
+   *  when dismissed, and keeping its inference job. Nothing for a key no entry stands on. */
   releaseNotification: (key: string) => void;
+  /** Say the cause of the entry standing on `key` ended: it is released as `releaseNotification`
+   *  releases it and is marked resolved. Nothing for a key no entry stands on. */
+  resolveNotification: (key: string) => void;
   /** Take the entry `id` names off the list, then run its `onDismiss`; nothing for an id no
    *  listed entry carries. */
   dismissNotification: (id: number) => void;
@@ -171,6 +179,17 @@ export const selectStanding =
 /** `entry` standing on no key, offering no action and running nothing when dismissed. */
 const unkeyed = (entry: NotificationEntry): NotificationEntry =>
   ({ ...entry, key: undefined, action: undefined, onDismiss: undefined }) as NotificationEntry;
+
+/** The change to `s` that takes the entry standing on `key` off it, marked `resolved` or not;
+ *  `s` itself when no entry stands on `key`. */
+const offKey = (s: AppState, key: string, resolved: boolean) =>
+  selectStanding(key)(s)
+    ? {
+        notifications: s.notifications.map((e) =>
+          e.key === key ? ({ ...unkeyed(e), resolved } as NotificationEntry) : e,
+        ),
+      }
+    : s;
 
 let nextEntryId = 1;
 
@@ -243,7 +262,15 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
       const replaced = (next: Partial<NotificationEntry>) => ({
         notifications: s.notifications.map((e) =>
           e === standing
-            ? ({ ...e, key, action, onDismiss, inferenceJob, ...next } as NotificationEntry)
+            ? ({
+                ...e,
+                key,
+                action,
+                onDismiss,
+                inferenceJob,
+                resolved: false,
+                ...next,
+              } as NotificationEntry)
             : e,
         ),
       });
@@ -268,6 +295,7 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
         action,
         onDismiss,
         inferenceJob,
+        resolved: false,
         announcement: { text: textOf(said), level },
         ...said,
       } as NotificationEntry;
@@ -277,12 +305,9 @@ export const createNotificationsSlice: StateCreator<AppState, [], [], Notificati
       return { notifications: [...earlier, entry] };
     }),
 
-  releaseNotification: (key) =>
-    set((s) =>
-      selectStanding(key)(s)
-        ? { notifications: s.notifications.map((e) => (e.key === key ? unkeyed(e) : e)) }
-        : s,
-    ),
+  releaseNotification: (key) => set((s) => offKey(s, key, false)),
+
+  resolveNotification: (key) => set((s) => offKey(s, key, true)),
 
   dismissNotification: (id) => {
     const entry = get().notifications.find((e) => e.id === id);

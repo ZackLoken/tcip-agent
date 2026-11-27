@@ -83,12 +83,13 @@ type Placement =
 
 /**
  * The one entry component. In the area it shows the entry's text, level, kind, target, time,
- * count, action and dismiss control, and whether a condition still holds; in place it shows the
- * entry standing on its key, while one is listed, with its target when the placement asks for
- * it, its text, count, action, the placing control's action and dismiss control, and nothing
- * when none stands. An action's button shows its label and is named by its label followed by
- * what it acts on, when stated. The dismiss control is named by the text's first words, then
- * the target the entry shows, if it shows one, and the time.
+ * count, action and dismiss control, whether a condition still holds, and whether a raised
+ * entry's cause was resolved; in place it shows the entry standing on its key, while one is
+ * listed, with its target when the placement asks for it, its text, count, action, the placing
+ * control's action and dismiss control, and nothing when none stands. An action's button shows
+ * its label and is named by its label followed by what it acts on, when stated. The dismiss
+ * control is named by the text's first words, then the target the entry shows, if it shows
+ * one, and the time.
  */
 export function NotificationItem(props: Placement) {
   const standing = useStore((s) =>
@@ -161,6 +162,7 @@ export function NotificationItem(props: Placement) {
           {meta}, <time dateTime={at.toISOString()}>{time}</time>
           {count}
           {entry.condition && (holding[entry.condition] === entry.id ? ", ongoing" : ", ended")}
+          {entry.resolved && ", resolved"}
         </p>
         {action && <div className="mt-2">{action}</div>}
       </div>

@@ -14,7 +14,7 @@ import { dismissLabel } from "@/lib/dismissLabel";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import type { EntryAction } from "@/store/slices/notifications";
-import { announcements } from "@/test/notifications";
+import { announcements, metaLine } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS } from "@/test/sessions";
 import { PRODUCED_ENVELOPE, openTestProject } from "@/test/store";
@@ -332,6 +332,49 @@ describe("a failure", () => {
 
     act(() => useStore.getState().holdCondition("connection", CONNECTION_LOST));
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent(/Error, condition, .*, ongoing/);
+  });
+
+  /** Raise a failure stating `sentence` on `key`, offering a Retry. */
+  const raiseOn = (key: string, sentence: string) =>
+    act(() =>
+      useStore.getState().raiseNotification({
+        kind: "failure",
+        level: "error",
+        text: { sentence },
+        context: { project: "valley" },
+        key,
+        action: { label: "Retry", run: vi.fn() },
+      }),
+    );
+
+  it("whose cause ended is listed saying resolved after its time, offering no action, and one freed for another reason says nothing of it", () => {
+    renderOpenHost();
+    raiseOn("open:valley", "Could not open Valley farm.");
+    raiseOn("open:ridge", "Could not open Ridge farm.");
+
+    act(() => useStore.getState().resolveNotification("open:valley"));
+    act(() => useStore.getState().releaseNotification("open:ridge"));
+
+    const [ridge, valley] = screen.getAllByRole("listitem");
+    expect(within(valley).getByText("Could not open Valley farm.")).toBeInTheDocument();
+    expect(metaLine(valley)).toMatch(/^Error, failure, .+, resolved$/);
+    expect(within(valley).queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(within(ridge).getByText("Could not open Ridge farm.")).toBeInTheDocument();
+    expect(metaLine(ridge)).not.toMatch(/resolved/);
+    expect(within(ridge).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("resolved and raised again with the same text is one entry counted twice, no longer saying resolved", () => {
+    renderOpenHost();
+    raiseOn("open:valley", "Could not open Valley farm.");
+    act(() => useStore.getState().resolveNotification("open:valley"));
+    expect(metaLine(screen.getByRole("listitem"))).toMatch(/, resolved$/);
+
+    raiseOn("open:valley", "Could not open Valley farm.");
+
+    const entry = screen.getByRole("listitem");
+    expect(metaLine(entry)).toMatch(/^Error, failure, .+, 2 times$/);
+    expect(within(entry).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("offers an action stating what it acts on under its label and that, its label alone shown", () => {
