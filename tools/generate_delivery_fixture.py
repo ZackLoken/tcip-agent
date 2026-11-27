@@ -31,8 +31,9 @@ loaded, ``mapping_loaded``, by name; a third mapping built while every append fa
 only its first plant (``mapping_one_placed``), at a stated radius (``mapping_stated``), once a
 date of photographs carrying no position is added, over every date (``mapping_unpositioned``),
 and once a capture folder holding no image is added, over every date again
-(``mapping_left_out``); in a
-project of its own, beside a plant open on every date, a measurement of each of three plants,
+(``mapping_left_out``); the mapping name ``mapping_cited`` refused, built again with the
+supersede flag set, ``mapping_superseded``; in a project of its own, beside a plant open on every
+date, a measurement of each of three plants,
 one open but its first capture left without predictions
 (``test_plant_mapping_binding.UNREAD_P2``), one undetected and one closed on every date
 (``milestones``); in a project of its own, an attributed
@@ -539,6 +540,17 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
             name="mapping-left-out",
             dataset_root=str(dataset_root),
             plant_registry=registry,
+            user=ACTOR,
+        ),
+        200,
+    )
+    answers["mapping_superseded"] = browsed(
+        "build_plant_mapping",
+        BuildMappingPayload(
+            name="valley",
+            dataset_root=str(dataset_root),
+            plant_registry=registry,
+            supersede=True,
             user=ACTOR,
         ),
         200,

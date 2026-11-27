@@ -3418,6 +3418,21 @@
       },
       "dates_without_images": ["2026-03-25"]
     },
+    "mapping_superseded": {
+      "name": "valley",
+      "per_date": {
+        "2026-02-11": { "n_images": 2, "n_unattributed": 0, "avg_distance_m": 0.0, "n_mapped": 2 },
+        "2026-02-25": { "n_images": 2, "n_unattributed": 0, "avg_distance_m": 0.0, "n_mapped": 2 },
+        "2026-03-11": { "n_images": 2, "n_unattributed": 2, "avg_distance_m": null, "n_mapped": 0 }
+      },
+      "images_unattributed": 2,
+      "unreadable": { "2026-02-11": [], "2026-02-25": [], "2026-03-11": [] },
+      "match_radius": {
+        "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
+        "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
+      },
+      "dates_without_images": ["2026-03-25"]
+    },
     "milestones": [
       {
         "revision": {
