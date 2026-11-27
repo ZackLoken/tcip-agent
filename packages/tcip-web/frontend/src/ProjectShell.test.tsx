@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import type { LoadedLabels } from "@/api/client";
 import { ROUTES } from "@/api/routes";
 import type { PanelEnvelope, ServedProposals } from "@/api/types.generated";
+import { datasetKey, saveDatasetUi } from "@/lib/datasetUiState";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { SUBJECT_CONTROL_ID } from "@/lib/registrySave";
 import type { HostSize } from "@/lib/viewGeometry";
@@ -22,13 +23,14 @@ import {
   PANEL_EVENTS_AFTER_DISMISSAL,
   PANEL_EVENTS_AT_CONNECT,
 } from "@/test/panelEvents";
-import { openedAs, PICKER } from "@/test/projectRecords";
+import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { answeredWith, thrown } from "@/test/refusals";
 import {
   NAV_ANSWER,
   RAW_SELECTION,
   selected,
   SELECTED_SUBJECT,
+  stateEnvelope,
   SUBJECT_SELECT_ANSWER,
   TEST_PROJECT,
 } from "@/test/store";
@@ -68,6 +70,7 @@ type Page = {
   save: MockInstance<typeof import("@/api/client").api.annotate.save>;
   proposals: MockInstance<typeof import("@/api/client").api.annotate.proposals>;
   select: MockInstance<typeof import("@/api/client").api.dataset.select>;
+  nav: MockInstance<typeof import("@/api/client").api.dataset.nav>;
 };
 
 /** The page each test runs in. */
@@ -108,14 +111,14 @@ async function loadPage(): Promise<Page> {
   const save = vi.spyOn(api.annotate, "save").mockResolvedValue(landed.box);
   const proposals = vi.spyOn(api.annotate, "proposals").mockImplementation(pending);
   const select = vi.spyOn(api.dataset, "select").mockRejectedValue(new Error("selection refused"));
-  vi.spyOn(api.dataset, "nav").mockResolvedValue(NAV_ANSWER);
+  const nav = vi.spyOn(api.dataset, "nav").mockResolvedValue(NAV_ANSWER);
   vi.spyOn(subjects.subjectsApi, "load").mockResolvedValue(LABEL_ANSWERS.registry_loaded);
   vi.spyOn(training.trainingApi, "listRuns").mockResolvedValue({ runs: [], sweeps: [] });
   vi.spyOn(inference.inferenceApi, "listJobs").mockResolvedValue({ jobs: [] });
   vi.spyOn(metaApi, "reports").mockImplementation(pending);
   vi.spyOn(metaApi, "retrospectives").mockImplementation(pending);
   vi.spyOn(sessionsApi, "load").mockImplementation(pending);
-  return { ProjectShell, NotificationsPane, useStore, load, save, proposals, select };
+  return { ProjectShell, NotificationsPane, useStore, load, save, proposals, select, nav };
 }
 
 /** The last socket the page opened for `panel`'s events. */
@@ -1043,6 +1046,136 @@ describe("ProjectShell agent focus", () => {
     await act(async () => {});
 
     expect(page.select).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ProjectShell the image in view told to the backend", () => {
+  const focus = PANEL_EVENTS.annotate_focus;
+
+  /** Press the image stepper's control that moves to the next image, as a person does. */
+  const stepNext = () => fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+
+  /** The image index the page's image stepper shows: its 1-based position less one, the stepper's
+   *  filter keeping every image of the capture in its own order here. */
+  const shown = () => Number((imagePosition() as HTMLInputElement).value) - 1;
+
+  /** Each image index the page has posted to the backend, in order. */
+  const posted = () => page.nav.mock.calls.map(([index]) => index);
+
+  /** Run `moves` with `setTimeout` and `clearTimeout` faked, as the reconnect helper fakes them,
+   *  then run out the timers pending once they are made. */
+  async function thenTimersRunOut(moves: () => Promise<void>) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await moves();
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("posts the focus's image last for a focus delivered inside a step's wait", async () => {
+    await mountOnCapture(TEST_PROJECT, selected({ subject: focus.event.subject }));
+
+    await thenTimersRunOut(async () => {
+      stepNext();
+      await settle();
+      expect(shown()).toBe(1);
+      deliver(focus);
+      await settle();
+    });
+
+    expect(shown()).toBe(focus.event.image_index);
+    expect(posted().at(-1)).toBe(shown());
+  });
+
+  it("posts the image saved in the browser for the capture a project opens at", async () => {
+    const valley = PICKER.valley;
+    const { project } = openedAs(valley);
+    const answer = SUBJECT_SELECT_ANSWER;
+    expect(answer.selection.current_image_index).toBe(0);
+    const saved = answer.selection.images.length - 1;
+    saveDatasetUi(datasetKey(project, answer.selection), { index: saved });
+    const { api } = await import("@/api/client");
+    vi.spyOn(api.projects, "list").mockResolvedValue(PROJECT_FIXTURES.picker);
+    vi.spyOn(api.projects, "open").mockResolvedValue(openedAs(valley));
+    page.select.mockResolvedValue(answer);
+    page.useStore.getState().setUser("grower");
+    page.useStore.setState((s) => ({ gui: { ...s.gui, active_tab: "annotate" } }));
+    try {
+      render(<page.ProjectShell />);
+      fireEvent.click(await screen.findByText(valley.record.display_name));
+
+      await thenTimersRunOut(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Open" }));
+        await settle();
+        await settle();
+        expect(shown()).toBe(saved);
+      });
+    } finally {
+      sessionStorage.clear();
+    }
+
+    expect(page.nav).toHaveBeenCalledTimes(1);
+    expect(page.nav).toHaveBeenLastCalledWith(saved);
+  });
+
+  it("posts the image returned to after a step whose leaving save got no answer", async () => {
+    answerSaves(unanswered);
+    await mountOnCapture();
+    addBox();
+
+    await thenTimersRunOut(async () => {
+      stepNext();
+      await settle();
+    });
+
+    expect(shown()).toBe(0);
+    expect(posted().at(-1)).toBe(0);
+  });
+
+  it("posts once, the last image, for three steps inside one wait", async () => {
+    await mountOnCapture();
+
+    await thenTimersRunOut(async () => {
+      for (let n = 0; n < 3; n++) {
+        stepNext();
+        await settle();
+      }
+    });
+
+    expect(shown()).toBe(3);
+    expect(posted()).toEqual([3]);
+  });
+
+  it("posts nothing for snapshots of the capture in view, at the page's image or another", async () => {
+    await mountOnCapture();
+    const stateSocket = FakeWebSocket.instances.findLast((s) =>
+      s.url.endsWith(ROUTES.socketWsState),
+    );
+    if (!stateSocket) throw new Error("the page opened no state socket");
+    act(() => stateSocket.open());
+    const snapshotAt = (index: number, version: number) =>
+      stateEnvelope({
+        state: {
+          ...page.useStore.getState().gui,
+          dataset: { ...RAW_SELECTION, current_image_index: index },
+        },
+        version,
+        project: TEST_PROJECT,
+      });
+
+    await thenTimersRunOut(async () => {
+      act(() => stateSocket.message(JSON.stringify(snapshotAt(0, 1))));
+      act(() => stateSocket.message(JSON.stringify(snapshotAt(2, 2))));
+      await settle();
+    });
+
+    expect(page.useStore.getState().wsVersion).toBe(2);
+    expect(shown()).toBe(0);
+    expect(page.nav).not.toHaveBeenCalled();
   });
 });
 

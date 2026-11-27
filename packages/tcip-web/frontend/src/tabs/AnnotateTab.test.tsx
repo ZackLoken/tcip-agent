@@ -53,7 +53,6 @@ import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import {
   changeSelection,
   LATER_SELECTION,
-  NAV_ANSWER,
   openTestProject,
   RAW_SELECTION,
   SELECTED_SUBJECT as SUBJECT,
@@ -303,7 +302,6 @@ beforeEach(() => {
   setupDataset();
   loadSpy = answerAnnotateMount();
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(LANDED.box);
-  vi.spyOn(api.dataset, "nav").mockResolvedValue(NAV_ANSWER);
   // jsdom lays nothing out, so the stand-in stage reports the host size the viewport math needs.
   stage.size = { w: 1000, h: 800 };
   stage.facts = null;

@@ -47,8 +47,6 @@ const modeButton = (name: "Box" | "Polygon" | "Point") =>
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  // The toolbar's nav hook persists the settled index; nothing here should reach the backend.
-  vi.spyOn(api.dataset, "nav").mockResolvedValue(null);
 });
 
 afterEach(cleanup);
