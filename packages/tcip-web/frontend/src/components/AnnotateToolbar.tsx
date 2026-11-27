@@ -31,7 +31,7 @@ import { refusedRegistryKey, saveRegistry, SUBJECT_CONTROL_ID } from "@/lib/regi
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
-import { canvasOnPage } from "@/store/slices/canvas";
+import { canvasOnPage, LABELS_LOADING } from "@/store/slices/canvas";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { isFinished, type AnnotateView, type SubjectState } from "@/store/types";
 
@@ -542,7 +542,7 @@ export function AnnotateToolbar({
                 ? "Select a subject first"
                 : subjectState !== null
                   ? `Every ${dataset.subject} on this image is annotated (c)`
-                  : "Loading this image's labels"
+                  : LABELS_LOADING
             }
           >
             <input

@@ -144,6 +144,10 @@ export const canvasImageIndex = ({ gui, canvas }: Pick<AppState, "gui" | "canvas
 export const canvasInView = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): boolean =>
   loadedFor(canvas, currentImage(gui.dataset)?.path) !== null;
 
+/** Why a control that acts on the canvas's document cannot act while the canvas holds no document
+ *  of the image in view, as the control says it. */
+export const LABELS_LOADING = "Loading this image's labels";
+
 /** The canvas as the page draws and states it: the canvas while it holds the document of the image
  *  in view, and the empty canvas, which holds no document, otherwise. */
 export const canvasOnPage = (state: Pick<AppState, "gui" | "canvas">): CanvasState =>

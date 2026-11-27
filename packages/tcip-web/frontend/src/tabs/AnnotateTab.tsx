@@ -107,6 +107,7 @@ import {
   canvasTakesEdits,
   holdsCanvas,
   imageSize,
+  LABELS_LOADING,
   loadedFor,
 } from "@/store/slices/canvas";
 import {
@@ -1881,7 +1882,7 @@ export function AnnotateTab() {
         onScope={setScope}
         canAccept={acceptTarget !== null}
         canReject={rejectTarget !== null}
-        canFlag={inView}
+        flagRefusal={inView ? null : LABELS_LOADING}
         scopeCounts={{
           all: kept.length,
           unreviewed: unreviewedKept.length,
