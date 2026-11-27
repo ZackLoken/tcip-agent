@@ -452,7 +452,7 @@ describe("App refused open", () => {
     await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused"));
 
     fireEvent.click(within(cardLine()!).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused, 2 times"));
+    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused (2 times)"));
 
     toggleArea();
     await PANE_FOCUS.heading();

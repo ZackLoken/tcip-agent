@@ -105,7 +105,7 @@ export function NotificationItem(props: Placement) {
   const text = textOf(entry);
   const at = new Date(entry.time);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const count = entry.count > 1 ? `, ${entry.count} times` : "";
+  const count = entry.count > 1 ? `${entry.count} times` : "";
   const target = props.placement === "area" || props.showTarget ? entry.context.target : undefined;
   const offer = ({ label, actsOn, run }: EntryAction) => (
     <button
@@ -142,7 +142,12 @@ export function NotificationItem(props: Placement) {
         )}
         <p id={textId} className={`min-w-0 flex-1 break-words leading-6 ${tone}`}>
           {text}
-          {count && <span className="text-tcip-muted">{count}</span>}
+          {count && (
+            <>
+              {" "}
+              <span className="text-tcip-muted">({count})</span>
+            </>
+          )}
         </p>
         {action}
         {props.action && offer(props.action)}
@@ -160,7 +165,7 @@ export function NotificationItem(props: Placement) {
         </p>
         <p className="mt-1 text-[11px] text-tcip-muted tabular-nums">
           {meta}, <time dateTime={at.toISOString()}>{time}</time>
-          {count}
+          {count && `, ${count}`}
           {entry.condition && (holding[entry.condition] === entry.id ? ", ongoing" : ", ended")}
           {entry.resolved && ", resolved"}
         </p>
