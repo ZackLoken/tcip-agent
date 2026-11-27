@@ -289,7 +289,7 @@ function DatasetIdentityPanel({
       void api.dataset
         .identity(datasetRoot)
         .then((answer) => {
-          useStore.getState().releaseNotification(readKey);
+          useStore.getState().resolveNotification(readKey);
           setReadRefused(false);
           setRead(answer);
           adopt(answer);

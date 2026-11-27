@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
@@ -13,6 +13,7 @@ import {
   type TrainingFrame,
   type TrainingListing,
 } from "@/api/types.generated";
+import { NotificationsPane } from "@/components/Notifications";
 import { EMBEDDED_TOOL_RETRY_MS } from "@/hooks/useEmbeddedToolRetry";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { formatNumber } from "@/lib/numberFormat";
@@ -20,7 +21,7 @@ import { useStore } from "@/store";
 import { numericMetricKeys, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab } from "@/tabs/TrainingTab";
 import { renderBesideListings } from "@/test/jobListings";
-import { entriesSaying } from "@/test/notifications";
+import { areaEntrySaying, entriesSaying, metaLine } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { openTestProject, TEST_PROJECT } from "@/test/store";
 import { servingOf, TENSORBOARD_FAILURES } from "@/test/tensorboard";
@@ -807,6 +808,35 @@ describe("TrainingTab run end and stream error", () => {
     expect(errorStands()).toBe(false);
   });
 
+  it("lists a stream error as resolved once the stream delivers a metric", async () => {
+    const [first] = METRIC_FRAMES;
+    listing(LISTING_BEFORE_FAILURE);
+    streamFrames(UNKNOWN_RUN_FRAME, first);
+    render(<NotificationsPane />);
+
+    renderBesideListings(<TrainingTab />);
+    fireEvent.click(await screen.findByText(id));
+
+    expect(
+      within(await screen.findByRole("table")).getByText(String(first.row.loss)),
+    ).toBeInTheDocument();
+    expect(metaLine(areaEntrySaying(streamError))).toMatch(/^Error, failure, .+, resolved$/);
+  });
+
+  it("lists a stream error saying nothing of being resolved once the stream that raised it closes", async () => {
+    listing(LISTING_BEFORE_FAILURE);
+    streamFrames(UNKNOWN_RUN_FRAME);
+    render(<NotificationsPane />);
+
+    const view = renderBesideListings(<TrainingTab />);
+    fireEvent.click(await screen.findByText(id));
+    await waitFor(() => expect(entriesSaying(streamError)).toHaveLength(1));
+
+    view.unmount();
+
+    expect(metaLine(areaEntrySaying(streamError))).not.toMatch(/resolved/);
+  });
+
   it("ends a stream error's standing once the stream that raised it closes, the entry staying listed", async () => {
     listing(LISTING_BEFORE_FAILURE);
     streamFrames(UNKNOWN_RUN_FRAME);
@@ -1163,6 +1193,53 @@ describe("TrainingTab compare", () => {
 
     expect(screen.queryByTestId("entry-in-place")).toBeNull();
     expect(entriesSaying(sentence)).toHaveLength(1);
+  });
+
+  /** Mount the tab beside its own notifications area with the first four of five runs marked
+   *  and the fifth refused; returns the tab's view and the five runs' ids. */
+  async function capRefused() {
+    openTestProject();
+    const ids = TRAINING_LISTING.runs.slice(0, 5).map((r) => r.experiment_id);
+    listing();
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(compared);
+    render(<NotificationsPane />);
+    const view = renderBesideListings(
+      <StrictMode>
+        <TrainingTab />
+      </StrictMode>,
+    );
+    await screen.findByText(ids[0]);
+    for (const id of ids) fireEvent.click(toggle(id));
+    return { view, ids };
+  }
+
+  const capSentence = "Compare fits at most 4 runs at once; unmark one first.";
+
+  it("lists the cap's refusal as resolved once a run is unmarked", async () => {
+    const { ids } = await capRefused();
+    expect(metaLine(areaEntrySaying(capSentence))).not.toMatch(/resolved/);
+
+    fireEvent.click(toggle(ids[3]));
+
+    expect(metaLine(areaEntrySaying(capSentence))).toMatch(
+      /^Error, failure, Compare, .+, resolved$/,
+    );
+  });
+
+  it("lists the cap's refusal saying nothing of being resolved once the tab leaves with the set full and comes back", async () => {
+    const { view, ids } = await capRefused();
+
+    view.unmount();
+    expect(metaLine(areaEntrySaying(capSentence))).not.toMatch(/resolved/);
+    render(
+      <StrictMode>
+        <TrainingTab />
+      </StrictMode>,
+    );
+    await screen.findByText(ids[0]);
+
+    expect(toggle(ids[0])).toHaveAttribute("aria-pressed", "false");
+    expect(metaLine(areaEntrySaying(capSentence))).not.toMatch(/resolved/);
   });
 
   it("groups Compare and Cancel as one action group", async () => {

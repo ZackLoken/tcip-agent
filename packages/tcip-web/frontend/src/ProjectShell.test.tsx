@@ -8,6 +8,13 @@ import { dismissLabel } from "@/lib/dismissLabel";
 import { ANNOTATE_ANSWERS, LANDED, loadOf } from "@/test/annotate";
 import { LABEL_ANSWERS } from "@/test/labels";
 import {
+  areaEntries,
+  areaEntriesSaying,
+  metaLine,
+  notificationsArea,
+  onlyAreaEntry,
+} from "@/test/notifications";
+import {
   DISMISSALS,
   PANEL_EVENTS,
   PANEL_EVENTS_AFTER_DISMISSAL,
@@ -147,14 +154,8 @@ async function mountOnCapture(project = TEST_PROJECT, selection = RAW_SELECTION)
   for (const panel of ["annotate", "results", "app"]) act(() => panelSocket(panel).open());
 }
 
-/** The open notifications area. */
-const area = () => within(screen.getByRole("region", { name: "Notifications" }));
-
-/** The entries the open area lists, newest first. */
-const listItems = () => area().queryAllByRole("listitem");
-
 /** Expect `item` to state no count of times raised. */
-const expectRaisedOnce = (item: HTMLElement) => expect(item).not.toHaveTextContent(/ times/);
+const expectRaisedOnce = (item: HTMLElement) => expect(metaLine(item)).not.toMatch(/ times/);
 
 /** A request as the page sent it: its path and its body. */
 type Sent = { path: string; body: unknown };
@@ -198,7 +199,9 @@ const unanswered = () => Promise.reject(new TypeError("Failed to fetch"));
 /** Press the dismiss control of the listed entry saying `text`. */
 function dismissEntry(text: string) {
   fireEvent.click(
-    area().getByRole("button", { name: (name) => name.startsWith(dismissLabel(text)) }),
+    notificationsArea().getByRole("button", {
+      name: (name) => name.startsWith(dismissLabel(text)),
+    }),
   );
 }
 
@@ -248,13 +251,8 @@ const unsaved = () => screen.queryByText("Unsaved changes");
 /** The image stepper's readout of where the image in view stands among the capture's images. */
 const imagePosition = () => screen.getByRole("textbox", { name: "Image position" });
 
-/** The entries the open area lists whose sentence holds `text`. */
-const listing = (text: string) =>
-  listItems().filter((item) => within(item).queryByText(text, { exact: false }));
-
 /** The entries the open area lists as failures, by the kind each names. */
-const failureEntries = () =>
-  listItems().filter((item) => within(item).queryByText(/^\w+, failure, /));
+const failureEntries = () => areaEntries().filter((item) => /^\w+, failure, /.test(metaLine(item)));
 
 /** The line the canvas shows in place for the image in view. */
 const inPlace = () => screen.getByTestId("entry-in-place");
@@ -372,7 +370,7 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     "A process just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.";
 
   /** The entries the open area lists saying the reload warning. */
-  const warnings = () => listItems().filter((item) => within(item).queryByText(reloadWarning));
+  const warnings = () => areaEntriesSaying(reloadWarning);
 
   /** The status bar's readout of the size of the image whose document the canvas holds. */
   const sizeReadout = () => screen.queryByText(/^Image: /);
@@ -413,8 +411,8 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     await switchTo("meta");
 
     deliver(written);
-    expect(listItems()).toHaveLength(1);
-    expect(listItems()[0]).toHaveTextContent("A process: labels written");
+    expect(areaEntries()).toHaveLength(1);
+    expect(areaEntries()[0]).toHaveTextContent("A process: labels written");
     await switchTo("annotate");
 
     expect(page.load).toHaveBeenCalledTimes(2);
@@ -511,7 +509,7 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(sent[0].body).toMatchObject({ image_path: first.path });
     expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
     expect(within(inPlace()).getByRole("button", { name: "Reload" })).toBeInTheDocument();
-    const failures = listing(CONFLICT_SENTENCE);
+    const failures = areaEntriesSaying(CONFLICT_SENTENCE);
     expect(failures).toHaveLength(1);
     expectRaisedOnce(failures[0]);
   });
@@ -544,6 +542,25 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("lists a leaving save's refusal as resolved once the Reload after it lands", async () => {
+    answerSaves(refusedAsChanged);
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+    const [refusal] = areaEntriesSaying(CONFLICT_SENTENCE);
+    expect(metaLine(refusal)).not.toMatch(/resolved/);
+    page.load.mockResolvedValueOnce(LANDED.box.document);
+
+    fireEvent.click(within(inPlace()).getByRole("button", { name: "Reload" }));
+    await settle();
+
+    expect(screen.queryByTestId("entry-in-place")).toBeNull();
+    const failures = areaEntriesSaying(CONFLICT_SENTENCE);
+    expect(failures).toHaveLength(1);
+    expect(metaLine(failures[0])).toMatch(/, resolved$/);
+  });
+
   it("returns to the image left with its edits when the leaving save got no answer, and moves once a pressed Save lands", async () => {
     const sent = answerSaves(unanswered, answering(200, saved));
     await mountOnCapture();
@@ -567,6 +584,25 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(sent).toHaveLength(2);
   });
 
+  it("lists a leaving save that got no answer as resolved once a pressed Save lands", async () => {
+    answerSaves(unanswered, answering(200, saved));
+    await mountOnCapture();
+    addBox();
+    step("Next");
+    await settle();
+    const [failure] = failureEntries();
+    expect(within(failure).getByText(SAVE_AGAIN)).toBeInTheDocument();
+    expect(metaLine(failure)).not.toMatch(/resolved/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+
+    expect(unsaved()).toBeNull();
+    const failures = failureEntries();
+    expect(failures).toHaveLength(1);
+    expect(metaLine(failures[0])).toMatch(/^Error, failure, .+, resolved$/);
+  });
+
   it("shows the next image's document only once a leaving save answered after it lands", async () => {
     const leaving = Promise.withResolvers<Response>();
     const sent = answerSaves(() => leaving.promise);
@@ -585,7 +621,7 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(imagePosition()).toHaveValue("2");
     expect(screen.queryByText("1 box")).toBeNull();
     expect(unsaved()).toBeNull();
-    expect(listItems()).toEqual([]);
+    expect(areaEntries()).toEqual([]);
   });
 
   it("returns to the image left with its edits when the save of two moves made before it answers is refused", async () => {
@@ -766,7 +802,7 @@ describe("ProjectShell a return to the Annotate tab over unsaved edits", () => {
     expect(sent).toHaveLength(1);
     expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
     expect(within(inPlace()).getByRole("button", { name: "Reload" })).toBeInTheDocument();
-    const failures = listing(CONFLICT_SENTENCE);
+    const failures = areaEntriesSaying(CONFLICT_SENTENCE);
     expect(failures).toHaveLength(1);
     expect(failureEntries()).toEqual(failures);
     expectRaisedOnce(failures[0]);
@@ -897,19 +933,13 @@ describe("ProjectShell agent notes", () => {
   });
   /** The projects of the entries listed, which the area does not show. */
   const listedProjects = () => page.useStore.getState().notifications.map((e) => e.context.project);
-  /** The one entry the open area lists. */
-  function onlyItem(): HTMLElement {
-    const items = listItems();
-    expect(items).toHaveLength(1);
-    return items[0];
-  }
   /** Expect `item`'s line to name its level's word, its kind and where the note was pushed. */
   const expectLine = (item: HTMLElement, line: string) =>
-    expect(within(item).getByText(new RegExp(`^${line},`))).toBeInTheDocument();
+    expect(metaLine(item)).toMatch(new RegExp(`^${line},`));
   /** Expect the open area to list nothing. */
   function expectListsNothing() {
-    expect(listItems()).toEqual([]);
-    expect(area().getByText(/^Nothing to report\./)).toBeInTheDocument();
+    expect(areaEntries()).toEqual([]);
+    expect(notificationsArea().getByText(/^Nothing to report\./)).toBeInTheDocument();
   }
 
   it("lists two banners one panel's socket delivers as two entries, each its whole text, naming the agent's note on that tab", async () => {
@@ -918,10 +948,9 @@ describe("ProjectShell agent notes", () => {
     deliver(banner);
     deliver(second);
 
-    const items = listItems();
-    expect(items).toHaveLength(2);
+    expect(areaEntries()).toHaveLength(2);
     for (const { event } of [banner, second]) {
-      const showing = items.filter((item) => within(item).queryByText(event.text));
+      const showing = areaEntriesSaying(event.text);
       expect(showing).toHaveLength(1);
       expectLine(showing[0], "Information, notice, Agent's note for Results");
     }
@@ -934,7 +963,7 @@ describe("ProjectShell agent notes", () => {
 
     deliver(appBanner);
 
-    const item = onlyItem();
+    const item = onlyAreaEntry();
     expect(within(item).getByText(appBanner.event.text)).toBeInTheDocument();
     expectLine(item, "Information, notice, Agent's note for the app");
     expect(listedProjects()).toEqual([appBanner.project_id]);
@@ -943,14 +972,14 @@ describe("ProjectShell agent notes", () => {
   it("adds no entry and no count for a banner sent again at a reconnect", async () => {
     await mountOnCapture();
     deliver(banner);
-    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
-    expectRaisedOnce(onlyItem());
+    expect(within(onlyAreaEntry()).getByText(banner.event.text)).toBeInTheDocument();
+    expectRaisedOnce(onlyAreaEntry());
 
     reconnect("results");
     deliver(PANEL_EVENTS_AT_CONNECT.banner);
 
-    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
-    expectRaisedOnce(onlyItem());
+    expect(within(onlyAreaEntry()).getByText(banner.event.text)).toBeInTheDocument();
+    expectRaisedOnce(onlyAreaEntry());
   });
 
   it("lists nothing for a banner whose text is blank", async () => {
@@ -960,7 +989,7 @@ describe("ProjectShell agent notes", () => {
     deliver(blank);
     deliver(second);
 
-    expect(within(onlyItem()).getByText(second.event.text)).toBeInTheDocument();
+    expect(within(onlyAreaEntry()).getByText(second.event.text)).toBeInTheDocument();
   });
 
   it("sends a dismissed banner's dismissal to its panel's route by the person, for its project and event, leaving the other listed", async () => {
@@ -973,7 +1002,7 @@ describe("ProjectShell agent notes", () => {
     await settle();
 
     expect(sent).toEqual([dismissalOf(banner)]);
-    expect(within(onlyItem()).getByText(second.event.text)).toBeInTheDocument();
+    expect(within(onlyAreaEntry()).getByText(second.event.text)).toBeInTheDocument();
   });
 
   it("lists, on a page loaded anew and sent what the backend holds after a dismissal, the banners not dismissed and not the dismissed one", async () => {
@@ -982,13 +1011,13 @@ describe("ProjectShell agent notes", () => {
     for (const envelope of Object.values(PANEL_EVENTS_AFTER_DISMISSAL)) deliver(envelope);
     await settle();
 
-    const notes = listItems().filter((item) =>
-      within(item).queryByText(/^Information, notice, Agent's note for /),
+    const notes = areaEntries().filter((item) =>
+      /^Information, notice, Agent's note for /.test(metaLine(item)),
     );
     expect(notes).toHaveLength(2);
     expect(within(notes[0]).getByText(PANEL_EVENTS.app_banner.event.text)).toBeInTheDocument();
     expect(within(notes[1]).getByText(second.event.text)).toBeInTheDocument();
-    expect(area().queryByText(banner.event.text)).not.toBeInTheDocument();
+    expect(notificationsArea().queryByText(banner.event.text)).not.toBeInTheDocument();
   });
 
   it("tells a dismissal whose line was not written as a warning carrying its sentence, offering no Retry", async () => {
@@ -1001,18 +1030,18 @@ describe("ProjectShell agent notes", () => {
     await settle();
 
     expect(sent).toEqual([dismissalOf(second)]);
-    const item = onlyItem();
+    const item = onlyAreaEntry();
     expect(within(item).getByText(gap.body.detail.message)).toBeInTheDocument();
     expectLine(item, "Warning, notice, Agent's note for Results");
     expect(listedProjects()).toEqual([second.project_id]);
-    expect(area().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(notificationsArea().queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
   it.each([
     ["refused naming no person", answering(DISMISSALS.no_one.status, DISMISSALS.no_one.body)],
     ["given no answer", unanswered],
   ])(
-    "tells a dismissal %s as one failure whose Retry sends it again, leaving the failure without its Retry, or any word of one, once taken",
+    "tells a dismissal %s as one failure whose Retry sends it again, leaving the failure resolved, without its Retry or any word of one, once taken",
     async (_case, failed) => {
       const sent = answerDismissals(failed, answering(200, DISMISSALS.dismissed));
       await mountOnCapture();
@@ -1020,16 +1049,44 @@ describe("ProjectShell agent notes", () => {
 
       dismissEntry(banner.event.text);
       await settle();
-      expectLine(onlyItem(), "Error, failure, Agent's note for Results");
+      expectLine(onlyAreaEntry(), "Error, failure, Agent's note for Results");
+      expect(metaLine(onlyAreaEntry())).not.toMatch(/resolved/);
 
-      fireEvent.click(area().getByRole("button", { name: "Retry" }));
+      fireEvent.click(notificationsArea().getByRole("button", { name: "Retry" }));
       await settle();
 
       expect(sent).toEqual([dismissalOf(banner), dismissalOf(banner)]);
-      const item = onlyItem();
+      const item = onlyAreaEntry();
       expectLine(item, "Error, failure, Agent's note for Results");
       expectRaisedOnce(item);
       expect(item).not.toHaveTextContent(/Retry/);
+      expect(metaLine(item)).toMatch(/, resolved$/);
+    },
+  );
+
+  it.each([
+    ["committed without its audit line", second, DISMISSALS.audit_gap],
+    ["refused for another project the backend has open", banner, DISMISSALS.another_project],
+  ])(
+    "lists a failed dismissal as resolved once its Retry is answered as %s",
+    async (_case, envelope, answer) => {
+      const sent = answerDismissals(unanswered, answering(answer.status, answer.body));
+      await mountOnCapture();
+      deliver(envelope);
+      dismissEntry(envelope.event.text);
+      await settle();
+      const [failure] = failureEntries();
+      expect(metaLine(failure)).not.toMatch(/resolved/);
+
+      fireEvent.click(notificationsArea().getByRole("button", { name: "Retry" }));
+      await settle();
+
+      expect(sent).toEqual([dismissalOf(envelope), dismissalOf(envelope)]);
+      const failures = failureEntries();
+      expect(failures).toHaveLength(1);
+      expect(metaLine(failures[0])).toMatch(
+        /^Error, failure, Agent's note for Results, .+, resolved$/,
+      );
     },
   );
 
@@ -1037,7 +1094,7 @@ describe("ProjectShell agent notes", () => {
     const sent = answerDismissals();
     await mountOnCapture();
     deliver(banner);
-    expect(within(onlyItem()).getByText(banner.event.text)).toBeInTheDocument();
+    expect(within(onlyAreaEntry()).getByText(banner.event.text)).toBeInTheDocument();
 
     act(() => page.useStore.setState({ openProject: openedAs(PICKER.ridge).project }));
     dismissEntry(banner.event.text);
@@ -1047,23 +1104,24 @@ describe("ProjectShell agent notes", () => {
     expectListsNothing();
   });
 
-  it("withdraws a failed dismissal's Retry, and any word of one, sending nothing, once it is pressed after another project opened", async () => {
+  it("withdraws a failed dismissal's Retry, and any word of one, sending nothing and leaving the failure resolved, once it is pressed after another project opened", async () => {
     const sent = answerDismissals(unanswered);
     await mountOnCapture();
     deliver(banner);
     dismissEntry(banner.event.text);
     await settle();
-    expect(area().getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(notificationsArea().getByRole("button", { name: "Retry" })).toBeInTheDocument();
 
     act(() => page.useStore.setState({ openProject: openedAs(PICKER.ridge).project }));
-    fireEvent.click(area().getByRole("button", { name: "Retry" }));
+    fireEvent.click(notificationsArea().getByRole("button", { name: "Retry" }));
     await settle();
 
     expect(sent).toEqual([dismissalOf(banner)]);
-    const item = onlyItem();
+    const item = onlyAreaEntry();
     expectLine(item, "Error, failure, Agent's note for Results");
     expectRaisedOnce(item);
     expect(item).not.toHaveTextContent(/Retry/);
+    expect(metaLine(item)).toMatch(/, resolved$/);
   });
 
   it("lists nothing for a dismissal refused because the backend has another project open", async () => {

@@ -14,7 +14,7 @@ import { dismissLabel } from "@/lib/dismissLabel";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import type { EntryAction } from "@/store/slices/notifications";
-import { announcements } from "@/test/notifications";
+import { announcements, areaEntries, metaLine, onlyAreaEntry } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import { SESSION_ANSWERS } from "@/test/sessions";
 import { PRODUCED_ENVELOPE, openTestProject } from "@/test/store";
@@ -102,15 +102,15 @@ describe("the stale bundle", () => {
     act(() => lastSocket().open());
 
     act(() => lastSocket().message(JSON.stringify({ ...PRODUCED_ENVELOPE, bundle: SENTENCE })));
-    const entry = screen.getByRole("listitem");
+    const entry = onlyAreaEntry();
     expect(within(entry).getByText(SENTENCE)).toBeInTheDocument();
-    expect(entry).toHaveTextContent(/Information, condition, .*, ongoing/);
+    expect(metaLine(entry)).toMatch(/^Information, condition, .*, ongoing$/);
     expect(screen.getByRole("status")).toHaveTextContent(SENTENCE);
     expect(screen.getByTestId("condition-mark")).toBeInTheDocument();
 
     act(() => lastSocket().message(JSON.stringify(PRODUCED_ENVELOPE)));
     expect(screen.queryByTestId("condition-mark")).not.toBeInTheDocument();
-    expect(screen.getByText(/ended/)).toBeInTheDocument();
+    expect(metaLine(onlyAreaEntry())).toMatch(/^Information, condition, .*, ended$/);
     socket.close();
   });
 });
@@ -126,9 +126,9 @@ describe("the unconfirmed visits", () => {
     s.closeSessionInterval();
     postHeldContributions();
     await act(flush);
-    const entry = screen.getByRole("listitem");
+    const entry = onlyAreaEntry();
     expect(entry).toHaveTextContent(/Could not confirm these visits were recorded.*a\.jpg/);
-    expect(entry).toHaveTextContent(/Error, condition, .*, ongoing/);
+    expect(metaLine(entry)).toMatch(/^Error, condition, .*, ongoing$/);
 
     fireEvent.click(within(entry).getByRole("button", { name: /^Dismiss: / }));
     s.startImageSessionTracking("b.jpg", Date.now() - 2000);
@@ -137,7 +137,7 @@ describe("the unconfirmed visits", () => {
     await act(flush);
 
     expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(3);
-    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+    expect(areaEntries()).toHaveLength(0);
     expect(screen.getByText(/Nothing to report/)).toBeInTheDocument();
     expect(screen.getByTestId("condition-mark")).toBeInTheDocument();
   });
@@ -160,13 +160,13 @@ describe("the refused visits", () => {
     for (let i = 0; i < 3; i++) await act(flush);
 
     const said = `Not recorded (${refused.body.detail}): a.jpg, b.jpg`;
-    const entry = screen.getByRole("listitem");
+    const entry = onlyAreaEntry();
     expect(within(entry).getByText(said)).toBeInTheDocument();
     expect(told).toEqual([`Not recorded (${refused.body.detail}): a.jpg`]);
     fireEvent.click(
       within(entry).getByRole("button", { name: (name) => name.startsWith(dismissLabel(said)) }),
     );
-    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+    expect(areaEntries()).toHaveLength(0);
   });
 });
 
@@ -324,14 +324,57 @@ describe("a failure", () => {
     raiseFailure("Could not open the project.", "valley", { label: "Retry", run });
     raiseFailure("Could not open the project.", "valley", { label: "Retry", run });
 
-    const entry = screen.getByRole("listitem");
-    expect(entry).toHaveTextContent(/Error, failure, .*, 2 times/);
-    expect(entry).not.toHaveTextContent(/ongoing|ended/);
+    const entry = onlyAreaEntry();
+    expect(metaLine(entry)).toMatch(/^Error, failure, .*, 2 times$/);
+    expect(metaLine(entry)).not.toMatch(/ongoing|ended/);
     fireEvent.click(within(entry).getByRole("button", { name: "Retry" }));
     expect(run).toHaveBeenCalledTimes(1);
 
     act(() => useStore.getState().holdCondition("connection", CONNECTION_LOST));
-    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent(/Error, condition, .*, ongoing/);
+    expect(metaLine(areaEntries()[0])).toMatch(/^Error, condition, .*, ongoing$/);
+  });
+
+  /** Raise a failure stating `sentence` on `key`, offering a Retry. */
+  const raiseOn = (key: string, sentence: string) =>
+    act(() =>
+      useStore.getState().raiseNotification({
+        kind: "failure",
+        level: "error",
+        text: { sentence },
+        context: { project: "valley" },
+        key,
+        action: { label: "Retry", run: vi.fn() },
+      }),
+    );
+
+  it("whose cause ended is listed saying resolved after its time, offering no action, and one freed for another reason says nothing of it", () => {
+    renderOpenHost();
+    raiseOn("open:valley", "Could not open Valley farm.");
+    raiseOn("open:ridge", "Could not open Ridge farm.");
+
+    act(() => useStore.getState().resolveNotification("open:valley"));
+    act(() => useStore.getState().releaseNotification("open:ridge"));
+
+    const [ridge, valley] = areaEntries();
+    expect(within(valley).getByText("Could not open Valley farm.")).toBeInTheDocument();
+    expect(metaLine(valley)).toMatch(/^Error, failure, .+, resolved$/);
+    expect(within(valley).queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(within(ridge).getByText("Could not open Ridge farm.")).toBeInTheDocument();
+    expect(metaLine(ridge)).not.toMatch(/resolved/);
+    expect(within(ridge).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("resolved and raised again with the same text is one entry counted twice, no longer saying resolved", () => {
+    renderOpenHost();
+    raiseOn("open:valley", "Could not open Valley farm.");
+    act(() => useStore.getState().resolveNotification("open:valley"));
+    expect(metaLine(onlyAreaEntry())).toMatch(/, resolved$/);
+
+    raiseOn("open:valley", "Could not open Valley farm.");
+
+    const entry = onlyAreaEntry();
+    expect(metaLine(entry)).toMatch(/^Error, failure, .+, 2 times$/);
+    expect(within(entry).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("offers an action stating what it acts on under its label and that, its label alone shown", () => {
@@ -343,7 +386,7 @@ describe("a failure", () => {
       run,
     });
 
-    const retry = within(screen.getByRole("listitem")).getByRole("button", {
+    const retry = within(onlyAreaEntry()).getByRole("button", {
       name: "Retry opening Valley farm",
     });
     expect(retry).toHaveTextContent(/^Retry$/);
@@ -389,7 +432,7 @@ describe("a job", () => {
     ]);
     expect(jobs[0].id).toBeGreaterThan(standing.id);
     expect(screen.getByRole("button", { name: "Notifications, 1 new" })).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("Training run run-1: completed");
+    expect(areaEntries()[0]).toHaveTextContent("Training run run-1: completed");
   });
 
   it("raised on its standing entry without being told again updates that entry in place, unannounced", async () => {
@@ -499,8 +542,6 @@ describe("an entry in place", () => {
       within(screen.getByTestId("entry-in-place")).getByRole("button", { name: "Reload" }),
     );
     expect(reload).toHaveBeenCalledTimes(1);
-    expect(
-      within(screen.getByRole("listitem")).queryByRole("button", { name: "Reload" }),
-    ).toBeNull();
+    expect(within(onlyAreaEntry()).queryByRole("button", { name: "Reload" })).toBeNull();
   });
 });

@@ -14,12 +14,13 @@ import {
   type ServedBuild,
   type ServedMapping,
 } from "@/api/types.generated";
+import { NotificationsPane } from "@/components/Notifications";
 import { answerPhrase, invarianceName } from "@/lib/invariances";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { IDENTITY_ANSWERS } from "@/test/datasetIdentity";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
-import { entriesSaying } from "@/test/notifications";
+import { areaEntrySaying, entriesSaying, metaLine } from "@/test/notifications";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
 import { GROUPED_SELECTION, openTestProject, RAW_SELECTION, TEST_PROJECT } from "@/test/store";
@@ -435,6 +436,32 @@ describe("SetupTab plant-mapping build: match radius", () => {
     await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
   });
 
+  it("lists a failed mapping load saying nothing of being resolved once another mapping loads", async () => {
+    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(resultsApi, "loadPlantMapping")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(RESULTS_ANSWERS.mapping_loaded);
+    const [first, second] = RESULTS_ANSWERS.mapping_names.names;
+    const sentence = "Could not load the mapping: Failed to fetch";
+
+    render(
+      <>
+        <SetupTab />
+        <NotificationsPane />
+      </>,
+    );
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: first } });
+    await within(mappingPanel()).findByTestId("entry-in-place");
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: second } });
+
+    await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
+    expect(metaLine(areaEntrySaying(sentence))).toMatch(new RegExp(`^Error, failure, ${first}, `));
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+  });
+
   it("renders the mapping-wide unattributed line when the total is nonzero", async () => {
     await buildAnswering(ONE_PLACED);
 
@@ -756,6 +783,28 @@ describe("SetupTab dataset identity", () => {
     expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
     expect(identity).toHaveBeenCalledTimes(2);
     expect(within(identityPanel()).queryByTestId("entry-in-place")).toBeNull();
+  });
+
+  it("lists a failed identity read as resolved once its Retry lands", async () => {
+    // What fetch rejects with when the backend cannot be reached.
+    vi.spyOn(api.dataset, "identity")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(IDENTITY_ANSWERS.unregistered);
+    const sentence = "Could not read the dataset identity: Failed to fetch";
+
+    render(
+      <>
+        <SetupTab />
+        <NotificationsPane />
+      </>,
+    );
+    await screen.findByText("Dataset identity");
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+
+    fireEvent.click(within(identityPanel()).getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("No identity document is stored at this root.")).toBeVisible();
+    expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, .+, resolved$/);
   });
 
   it("keeps the identity panel and its Retry once a failed first read is dismissed, focus on Retry", async () => {

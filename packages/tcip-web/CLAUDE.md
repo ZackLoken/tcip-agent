@@ -253,4 +253,5 @@ its colors and fonts the tokens in `frontend/src/index.css` and its logos in
   the one source that says it. Each entry holds its kind, its context, its time, its sentence and
   any action it offers, and is dismissable, as "What a person meets at the screen" requires. No
   message pops up and none leaves on a timer; the button shows how many entries are new and
-  whether a lasting condition holds.
+  whether a lasting condition holds. An entry whose cause has ended stays listed and says so, its
+  producer telling the area when that cause ends.
