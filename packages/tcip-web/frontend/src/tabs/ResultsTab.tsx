@@ -657,7 +657,12 @@ export function ResultsTab() {
               <div className="flex flex-col gap-1">
                 <div className="tcip-label">Predictions by date</div>
                 {datesError && (
-                  <ErrorRetry message={datesError} onRetry={refreshDatasetTree} className="mb-1" />
+                  <ErrorRetry
+                    message={datesError}
+                    onRetry={refreshDatasetTree}
+                    actsOn="dataset dates"
+                    className="mb-1"
+                  />
                 )}
                 {!datesError && tree?.label_problem && (
                   <div className="tcip-problem mb-1">{tree.label_problem}</div>

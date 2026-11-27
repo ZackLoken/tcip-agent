@@ -674,6 +674,7 @@ export function TrainingTab() {
                 emptyMessage: "No runs.",
                 error: runsError ?? undefined,
                 onRetry: listRunsNow,
+                actsOn: "training runs",
                 rows: launchRows,
               }}
               onSelect={(key) => void loadSplitChoices(key)}
@@ -682,7 +683,12 @@ export function TrainingTab() {
         )}
 
         {runsError && !pickerOpen && (
-          <ErrorRetry message={runsError} onRetry={listRunsNow} className="text-[13px] mb-2" />
+          <ErrorRetry
+            message={runsError}
+            onRetry={listRunsNow}
+            actsOn="training runs"
+            className="text-[13px] mb-2"
+          />
         )}
         {empty && !runsError && <RunMonitorEmpty>No runs.</RunMonitorEmpty>}
         <div className="mb-2 empty:hidden">

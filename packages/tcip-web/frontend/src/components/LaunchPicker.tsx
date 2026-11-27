@@ -79,6 +79,8 @@ export interface LaunchPickerProps {
      * onRetry as its Retry control, the way the runs list reports its own load failure. */
     error?: string;
     onRetry: () => void;
+    /** The short noun phrase for what onRetry reads again, which names the Retry control. */
+    actsOn: string;
   };
   /** Called once a row transitions into the selected state (never on deselection), so a caller
    * can fetch that row's own Data choices lazily instead of prefetching every row's on open. */
@@ -127,7 +129,12 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
       <div>
         <div className="tcip-heading mb-1">{list.title}</div>
         {list.error ? (
-          <ErrorRetry message={list.error} onRetry={list.onRetry} className="text-[13px]" />
+          <ErrorRetry
+            message={list.error}
+            onRetry={list.onRetry}
+            actsOn={list.actsOn}
+            className="text-[13px]"
+          />
         ) : list.rows.length === 0 ? (
           <div className="text-[13px] text-tcip-muted">{list.emptyMessage}</div>
         ) : (

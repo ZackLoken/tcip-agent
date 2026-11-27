@@ -380,7 +380,14 @@ export function InferenceTab() {
         <ModelPicker id="inference-model-select" value={model} onChange={setModel} />
 
         <div className="tcip-label mb-1">Dates</div>
-        {datesError && <ErrorRetry message={datesError} onRetry={refreshDates} className="mb-1" />}
+        {datesError && (
+          <ErrorRetry
+            message={datesError}
+            onRetry={refreshDates}
+            actsOn="dataset dates"
+            className="mb-1"
+          />
+        )}
         {!datasetRoot ? (
           <p className="text-tcip-muted mb-3">No project is open.</p>
         ) : dates.length === 0 ? (
@@ -414,7 +421,12 @@ export function InferenceTab() {
           Assessment
         </label>
         {assessmentsError && (
-          <ErrorRetry message={assessmentsError} onRetry={refreshAssessments} className="mb-1" />
+          <ErrorRetry
+            message={assessmentsError}
+            onRetry={refreshAssessments}
+            actsOn="assessments"
+            className="mb-1"
+          />
         )}
         <select
           id="inference-assessment"
@@ -525,7 +537,14 @@ export function InferenceTab() {
 
       <div className="p-4 overflow-auto">
         <div className="tcip-heading mb-3">Jobs</div>
-        {jobsError && <ErrorRetry message={jobsError} onRetry={listJobsNow} className="mb-2" />}
+        {jobsError && (
+          <ErrorRetry
+            message={jobsError}
+            onRetry={listJobsNow}
+            actsOn="inference jobs"
+            className="mb-2"
+          />
+        )}
         {listedJobs.length === 0 ? (
           !jobsError && <div className="text-tcip-muted">No jobs.</div>
         ) : (
@@ -561,6 +580,7 @@ export function InferenceTab() {
                       <div className="flex gap-1">
                         <button
                           id={watchControlId(j.job_id)}
+                          aria-label={`Watch ${j.job_id}`}
                           className="tcip-btn"
                           onClick={() => watch(j)}
                         >
@@ -584,7 +604,6 @@ export function InferenceTab() {
                     columns={4}
                   />
                 </Fragment>
-                          aria-label={`Watch ${j.job_id}`}
               ))}
             </tbody>
           </table>

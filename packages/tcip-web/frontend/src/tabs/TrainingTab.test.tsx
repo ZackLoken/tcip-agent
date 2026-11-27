@@ -1092,7 +1092,7 @@ describe("TrainingTab launch picker", () => {
     ).toBeInTheDocument();
     expect(within(picker).queryByText("No runs.")).not.toBeInTheDocument();
 
-    fireEvent.click(within(picker).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(picker).getByRole("button", { name: "Retry training runs" }));
     await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
     expect(await within(picker).findByText("No runs.")).toBeInTheDocument();
   });
@@ -1106,7 +1106,7 @@ describe("TrainingTab launch picker", () => {
     expect(await screen.findAllByText("Could not load training runs: network error")).toHaveLength(
       1,
     );
-    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Retry training runs" })).toHaveLength(1);
   });
 
   it("shows one failed-listing error and one Retry with the picker closed, and Retry lists again", async () => {
@@ -1120,10 +1120,10 @@ describe("TrainingTab launch picker", () => {
     expect(await screen.findAllByText("Could not load training runs: network error")).toHaveLength(
       1,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry training runs" }));
     await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
     expect(await screen.findByText(RUNS.unlaunched.experiment_id)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry training runs" })).not.toBeInTheDocument();
   });
 });
 

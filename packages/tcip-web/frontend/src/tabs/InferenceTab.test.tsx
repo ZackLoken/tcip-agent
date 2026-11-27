@@ -925,17 +925,39 @@ describe("InferenceTab load errors", () => {
     renderBesideListings(<InferenceTab />);
 
     const reads = [
-      { message: "Could not load this dataset's dates: dates down", read: tree },
-      { message: "Could not load assessments: assessments down", read: assessments },
-      { message: "Could not load inference jobs: jobs down", read: listJobs },
-      { message: "Could not load registered models: models down", read: models },
+      {
+        message: "Could not load this dataset's dates: dates down",
+        retry: "Retry dataset dates",
+        read: tree,
+      },
+      {
+        message: "Could not load assessments: assessments down",
+        retry: "Retry assessments",
+        read: assessments,
+      },
+      {
+        message: "Could not load inference jobs: jobs down",
+        retry: "Retry inference jobs",
+        read: listJobs,
+      },
+      {
+        message: "Could not load registered models: models down",
+        retry: "Retry registered models",
+        read: models,
+      },
     ];
-    for (const { message, read } of reads) {
+    for (const { message } of reads) await screen.findByText(message);
+    for (const { message, retry } of reads) {
+      expect(
+        within(screen.getByText(message)).getByRole("button", { name: retry }),
+      ).toHaveTextContent(/^Retry$/);
+    }
+    for (const { message, retry, read } of reads) {
       const block = await screen.findByText(message);
       expect(screen.getAllByText(message)).toHaveLength(1);
       expect(read).toHaveBeenCalledTimes(1);
 
-      fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
+      fireEvent.click(within(block).getByRole("button", { name: retry }));
 
       await waitFor(() => expect(screen.queryByText(message)).not.toBeInTheDocument());
       expect(read).toHaveBeenCalledTimes(2);

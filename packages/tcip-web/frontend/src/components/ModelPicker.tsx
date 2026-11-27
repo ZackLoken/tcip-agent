@@ -49,7 +49,9 @@ export function ModelPicker({
       <label className="tcip-label mb-1" htmlFor={id}>
         Model
       </label>
-      {error && <ErrorRetry message={error} onRetry={refresh} className="mb-1" />}
+      {error && (
+        <ErrorRetry message={error} onRetry={refresh} actsOn="registered models" className="mb-1" />
+      )}
       {models.length > 0 ? (
         <select
           id={id}
