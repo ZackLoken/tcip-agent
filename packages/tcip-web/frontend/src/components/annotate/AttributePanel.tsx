@@ -8,8 +8,8 @@ import { NotificationItem } from "@/components/Notifications";
 import { refusedRegistryKey, saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
-import { canvasInView } from "@/store/slices/canvas";
-import { NO_CONTENT, TOOL_ARRAY } from "@/store/types";
+import { canvasOnPage } from "@/store/slices/canvas";
+import { TOOL_ARRAY } from "@/store/types";
 
 /** The lower part of the subject menu: the focused shape's attributes, the active subject's
  *  declared attributes with the control that declares a new one, and the image-level ratings
@@ -18,19 +18,10 @@ import { NO_CONTENT, TOOL_ARRAY } from "@/store/types";
 export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const activeSubject = useStore((s) => s.gui.active_subject);
   const registry = useStore((s) => s.registry.subjects);
-  const heldBoxes = useStore((s) => s.canvas.boxes);
-  const heldPolygons = useStore((s) => s.canvas.polygons);
-  const heldPoints = useStore((s) => s.canvas.points);
-  const heldRatings = useStore((s) => s.canvas.imageAnnotations);
-  // Nothing of a canvas holding no document of the image in view is shown.
-  const { boxes, polygons, points, imageAnnotations } = useStore(canvasInView)
-    ? {
-        boxes: heldBoxes,
-        polygons: heldPolygons,
-        points: heldPoints,
-        imageAnnotations: heldRatings,
-      }
-    : NO_CONTENT;
+  const boxes = useStore((s) => canvasOnPage(s).boxes);
+  const polygons = useStore((s) => canvasOnPage(s).polygons);
+  const points = useStore((s) => canvasOnPage(s).points);
+  const imageAnnotations = useStore((s) => canvasOnPage(s).imageAnnotations);
   const add = useStore((s) => s.add);
   const update = useStore((s) => s.update);
   const remove = useStore((s) => s.remove);

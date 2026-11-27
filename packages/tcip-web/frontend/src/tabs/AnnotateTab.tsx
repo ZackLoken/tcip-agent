@@ -13,7 +13,6 @@ import {
   PROJECT_NOT_OPEN,
   type ProjectNotOpenRefusal,
   type ProposePayload,
-  type ServedFlag,
   type ServedProposals,
   VERSION_CONFLICT,
   type VersionConflictRefusal,
@@ -104,6 +103,7 @@ import {
   canvasImage,
   canvasImageIndex,
   canvasInView,
+  canvasOnPage,
   canvasTakesEdits,
   holdsCanvas,
   imageSize,
@@ -111,7 +111,6 @@ import {
 } from "@/store/slices/canvas";
 import {
   isFinished,
-  NO_CONTENT,
   TOOL_ARRAY,
   type DrawingBox,
   type AnnotateView,
@@ -168,14 +167,6 @@ const heldSaveLanded = (): Promise<boolean> =>
 /** Whether the stage takes no gesture now, the canvas taking no edit. */
 const stageInert = (): boolean => !canvasTakesEdits(useStore.getState());
 
-/** What the page draws and states of a canvas holding no document of the image in view. */
-const NOTHING_HELD = {
-  ...NO_CONTENT,
-  currentPolygon: [] as [number, number][],
-  flags: [] as ServedFlag[],
-  completion: {} as Record<string, SubjectState>,
-};
-
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const view = useStore((s) => s.gui.view);
@@ -188,9 +179,8 @@ export function AnnotateTab() {
   const registry = useStore((s) => s.registry.subjects);
 
   const canvas = useStore((s) => s.canvas);
+  const onPage = useStore(canvasOnPage);
   const inView = useStore(canvasInView);
-  // The canvas as the page draws and states it.
-  const canvasShown = inView ? canvas : NOTHING_HELD;
   const { width: imgW, height: imgH } = imageSize(canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
   const setImageStates = useStore((s) => s.setImageStates);
@@ -483,31 +473,23 @@ export function AnnotateTab() {
   }
   const [matchesOf] = useState(matchTypes);
   const matches = useMemo(
-    () => matchesOf(canvasShown, proposals, reviewing),
+    () => matchesOf(onPage, proposals, reviewing),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvasShown.boxes, canvasShown.polygons, canvasShown.points, proposals, reviewing],
+    [onPage.boxes, onPage.polygons, onPage.points, proposals, reviewing],
   );
   // The items are every geometry's: a review steps boxes, polygons and points alike, and the
   // tool follows the focused item.
   const items = useMemo(
     () =>
       reviewItems({
-        canvas: canvasShown,
+        canvas: onPage,
         proposals,
         matches,
         reviewing,
-        flags: canvasShown.flags,
+        flags: onPage.flags,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      canvasShown.boxes,
-      canvasShown.polygons,
-      canvasShown.points,
-      canvasShown.flags,
-      proposals,
-      matches,
-      reviewing,
-    ],
+    [onPage.boxes, onPage.polygons, onPage.points, onPage.flags, proposals, matches, reviewing],
   );
   const kept = useMemo(
     () => keptItems(items, filters),
@@ -522,8 +504,8 @@ export function AnnotateTab() {
   );
 
   const focused: ReviewItem | null = useMemo(
-    () => focusedItem(items, proposals, canvas.focus),
-    [items, proposals, canvas.focus],
+    () => focusedItem(items, proposals, onPage.focus),
+    [items, proposals, onPage.focus],
   );
   // The pointer handlers read the focus as the item the canvas draws handles on, so a proposal
   // pairing with an annotation focuses that annotation for them too; only the tool's own shape.
@@ -628,11 +610,11 @@ export function AnnotateTab() {
 
   // ── Flags: a comment on the focused item, or on the image when nothing is focused ──
   const [flagsOpen, setFlagsOpen] = useState(false);
-  const openFlags = canvasShown.flags.filter((f) => f.resolution === null);
+  const openFlags = onPage.flags.filter((f) => f.resolution === null);
   const flagMarks = useMemo(
     () => flagPlaces(openFlags, drawnProposals),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvasShown.flags, drawnProposals],
+    [onPage.flags, drawnProposals],
   );
   async function raiseFlag(text: string): Promise<boolean> {
     const answer = await save({ gestures: { flag: [flagRequest(text, focused)] } });
@@ -704,7 +686,7 @@ export function AnnotateTab() {
   const draft = () =>
     draftStrokes({
       mode,
-      currentPolygon: canvasShown.currentPolygon,
+      currentPolygon: onPage.currentPolygon,
       polygonColor: draftColor(activeSubject),
       cutStart: cutStart ? { point: cutStart.point, color: subjectColor(cutStart.subject) } : null,
       cursor,
@@ -1180,7 +1162,7 @@ export function AnnotateTab() {
   }
 
   const subjectState: SubjectState | null =
-    inView && dataset?.subject ? canvas.completion[dataset.subject] : null;
+    onPage.loaded && dataset?.subject ? onPage.completion[dataset.subject] : null;
   const subjectFinished = isFinished(subjectState);
 
   const K = ANNOTATE_KEYS;
@@ -1906,7 +1888,7 @@ export function AnnotateTab() {
           flagged: scopedOrder(kept, "flagged").length,
         }}
         flagCount={openFlags.length}
-        flags={focused ? focused.flags : imageFlags(canvasShown.flags)}
+        flags={focused ? focused.flags : imageFlags(onPage.flags)}
         flagsOpen={flagsOpen}
         onFlagsOpen={setFlagsOpen}
         onFlag={raiseFlag}
@@ -1995,7 +1977,7 @@ export function AnnotateTab() {
                 {annotateUi.snap && cursor && mode === "polygon" && (
                   <SnapIndicator
                     cursor={cursor}
-                    polygons={canvasShown.polygons}
+                    polygons={onPage.polygons}
                     scale={view.scale}
                     radius={SNAP_RADIUS_CANVAS / view.scale}
                   />
@@ -2006,9 +1988,9 @@ export function AnnotateTab() {
             <ProposalShapes proposals={drawnProposals} focused={focused} widths={widths} />
             {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
             <AnnotationShapes
-              boxes={canvasShown.boxes}
-              polygons={canvasShown.polygons}
-              points={canvasShown.points}
+              boxes={onPage.boxes}
+              polygons={onPage.polygons}
+              points={onPage.points}
               mode={mode}
               activeSubject={activeSubject}
               matches={matches}

@@ -144,6 +144,11 @@ export const canvasImageIndex = ({ gui, canvas }: Pick<AppState, "gui" | "canvas
 export const canvasInView = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): boolean =>
   loadedFor(canvas, currentImage(gui.dataset)?.path) !== null;
 
+/** The canvas as the page draws and states it: the canvas while it holds the document of the image
+ *  in view, and the empty canvas, which holds no document, otherwise. */
+export const canvasOnPage = (state: Pick<AppState, "gui" | "canvas">): CanvasState =>
+  canvasInView(state) ? state.canvas : EMPTY_CANVAS;
+
 /** Whether the canvas takes an edit now: no save holds it and it holds the document of the image
  *  in view. */
 export const canvasTakesEdits = (state: Pick<AppState, "gui" | "canvas">): boolean =>
