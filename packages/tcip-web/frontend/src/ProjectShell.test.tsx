@@ -1055,8 +1055,9 @@ describe("ProjectShell the image in view told to the backend", () => {
   /** Press the image stepper's control that moves to the next image, as a person does. */
   const stepNext = () => fireEvent.click(screen.getByRole("button", { name: "Next image" }));
 
-  /** The image index the page holds in view. */
-  const shown = () => page.useStore.getState().gui.dataset?.current_image_index;
+  /** The image index the page's image stepper shows: its 1-based position less one, the stepper's
+   *  filter keeping every image of the capture in its own order here. */
+  const shown = () => Number((imagePosition() as HTMLInputElement).value) - 1;
 
   /** Each image index the page has posted to the backend, in order. */
   const posted = () => page.nav.mock.calls.map(([index]) => index);
