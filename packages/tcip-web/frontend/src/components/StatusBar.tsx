@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { useStore } from "@/store";
-import { selectCanvasMatchesDataset } from "@/store/slices/canvas";
+import { canvasOnPage } from "@/store/slices/canvas";
 
 function fmtSeconds(totalSeconds: number): string {
   const clamped = Math.max(0, Math.floor(totalSeconds));
@@ -18,12 +18,11 @@ function countLabel(count: number, singular: string, plural: string): string {
 
 export function StatusBar() {
   const view = useStore((s) => s.gui.view);
-  const canvasMatchesDataset = useStore(selectCanvasMatchesDataset);
-  const loaded = useStore((s) => s.canvas.loaded);
+  const loaded = useStore((s) => canvasOnPage(s).loaded);
   const dirty = useStore((s) => s.canvas.dirty);
-  const boxCount = useStore((s) => s.canvas.boxes.length);
-  const polyCount = useStore((s) => s.canvas.polygons.length);
-  const pointCount = useStore((s) => s.canvas.points.length);
+  const boxCount = useStore((s) => canvasOnPage(s).boxes.length);
+  const polyCount = useStore((s) => canvasOnPage(s).polygons.length);
+  const pointCount = useStore((s) => canvasOnPage(s).points.length);
   const activeTab = useStore((s) => s.gui.active_tab);
   const sessionTracking = useStore((s) => s.sessionTracking);
 
@@ -50,12 +49,12 @@ export function StatusBar() {
       {activeTab === "annotate" && sessionTracking.currentImageName ? (
         <span className="tabular-nums">Image time: {fmtSeconds(imageSeconds)}</span>
       ) : null}
-      {activeTab === "annotate" && loaded && canvasMatchesDataset ? (
+      {activeTab === "annotate" && loaded ? (
         <span className="tabular-nums">
           Image: {loaded.img_width}×{loaded.img_height}
         </span>
       ) : null}
-      {activeTab === "annotate" && canvasMatchesDataset && (polyCount > 0 || boxCount > 0) && (
+      {activeTab === "annotate" && (polyCount > 0 || boxCount > 0) && (
         <span className="tabular-nums">
           {polyCount > 0 && countLabel(polyCount, "polygon", "polygons")}
           {polyCount > 0 && boxCount > 0 && <span className="mx-1.5 text-tcip-border">|</span>}
@@ -64,7 +63,7 @@ export function StatusBar() {
       )}
       {/* Points are counted on their own: they are not detection targets, so they never fold into
           the box count. */}
-      {activeTab === "annotate" && canvasMatchesDataset && pointCount > 0 && (
+      {activeTab === "annotate" && pointCount > 0 && (
         <span className="tabular-nums">{countLabel(pointCount, "point", "points")}</span>
       )}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}

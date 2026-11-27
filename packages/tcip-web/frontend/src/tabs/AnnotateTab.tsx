@@ -102,8 +102,13 @@ import { declaredClient, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
 import {
   canvasImage,
   canvasImageIndex,
+  canvasInView,
+  canvasOnPage,
+  canvasTakesEdits,
   holdsCanvas,
   imageSize,
+  LABELS_NOT_LOADED,
+  labelsRefusal,
   loadedFor,
 } from "@/store/slices/canvas";
 import {
@@ -161,6 +166,9 @@ function documentLanded(imagePath: string): void {
 const heldSaveLanded = (): Promise<boolean> =>
   useStore.getState().canvas.saving?.landed.promise ?? Promise.resolve(true);
 
+/** Whether the stage takes no gesture now, the canvas taking no edit. */
+const stageInert = (): boolean => !canvasTakesEdits(useStore.getState());
+
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const view = useStore((s) => s.gui.view);
@@ -173,6 +181,9 @@ export function AnnotateTab() {
   const registry = useStore((s) => s.registry.subjects);
 
   const canvas = useStore((s) => s.canvas);
+  const onPage = useStore(canvasOnPage);
+  const inView = useStore(canvasInView);
+  const labelsReason = useStore(labelsRefusal);
   const { width: imgW, height: imgH } = imageSize(canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
   const setImageStates = useStore((s) => s.setImageStates);
@@ -237,7 +248,7 @@ export function AnnotateTab() {
   const imageInView = currentImage(dataset);
   const imgPath = imageInView?.path ?? null;
   const currentImageName = imageInView?.name ?? null;
-  const saveDisabled = !imgPath || canvas.loaded === null;
+  const saveDisabled = !imgPath || !inView;
 
   const bandsInfo = useImageBands(imgPath);
   const bandChoice = useBandSelection(bandsInfo);
@@ -254,7 +265,7 @@ export function AnnotateTab() {
   // The stage's own measurement of the canvas host; null while it has at most one pixel on a side.
   const [host, setHost] = useState<HostSize | null>(null);
   const regions = useRegionServes({
-    imagePath: imgPath,
+    imagePath: inView ? imgPath : null,
     imgW,
     imgH,
     view,
@@ -424,7 +435,8 @@ export function AnnotateTab() {
     }
   }
 
-  const reviewing = served?.key === proposalKey && served.answers.length > 0;
+  // Proposals pair with the canvas's shapes, so none are reviewed beside another image's document.
+  const reviewing = inView && served?.key === proposalKey && served.answers.length > 0;
   // The canvas and the strip read each proposal with the bucket it came from.
   const proposals: Proposal[] = useMemo(
     () =>
@@ -464,23 +476,23 @@ export function AnnotateTab() {
   }
   const [matchesOf] = useState(matchTypes);
   const matches = useMemo(
-    () => matchesOf(canvas, proposals, reviewing),
+    () => matchesOf(onPage, proposals, reviewing),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvas.boxes, canvas.polygons, canvas.points, proposals, reviewing],
+    [onPage.boxes, onPage.polygons, onPage.points, proposals, reviewing],
   );
   // The items are every geometry's: a review steps boxes, polygons and points alike, and the
   // tool follows the focused item.
   const items = useMemo(
     () =>
       reviewItems({
-        canvas,
+        canvas: onPage,
         proposals,
         matches,
         reviewing,
-        flags: canvas.flags,
+        flags: onPage.flags,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvas.boxes, canvas.polygons, canvas.points, canvas.flags, proposals, matches, reviewing],
+    [onPage.boxes, onPage.polygons, onPage.points, onPage.flags, proposals, matches, reviewing],
   );
   const kept = useMemo(
     () => keptItems(items, filters),
@@ -495,8 +507,8 @@ export function AnnotateTab() {
   );
 
   const focused: ReviewItem | null = useMemo(
-    () => focusedItem(items, proposals, canvas.focus),
-    [items, proposals, canvas.focus],
+    () => focusedItem(items, proposals, onPage.focus),
+    [items, proposals, onPage.focus],
   );
   // The pointer handlers read the focus as the item the canvas draws handles on, so a proposal
   // pairing with an annotation focuses that annotation for them too; only the tool's own shape.
@@ -601,11 +613,11 @@ export function AnnotateTab() {
 
   // ── Flags: a comment on the focused item, or on the image when nothing is focused ──
   const [flagsOpen, setFlagsOpen] = useState(false);
-  const openFlags = canvas.flags.filter((f) => f.resolution === null);
+  const openFlags = onPage.flags.filter((f) => f.resolution === null);
   const flagMarks = useMemo(
     () => flagPlaces(openFlags, drawnProposals),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvas.flags, drawnProposals],
+    [onPage.flags, drawnProposals],
   );
   async function raiseFlag(text: string): Promise<boolean> {
     const answer = await save({ gestures: { flag: [flagRequest(text, focused)] } });
@@ -677,7 +689,7 @@ export function AnnotateTab() {
   const draft = () =>
     draftStrokes({
       mode,
-      currentPolygon: canvas.currentPolygon,
+      currentPolygon: onPage.currentPolygon,
       polygonColor: draftColor(activeSubject),
       cutStart: cutStart ? { point: cutStart.point, color: subjectColor(cutStart.subject) } : null,
       cursor,
@@ -688,7 +700,7 @@ export function AnnotateTab() {
     if (!imageInView || !project) return null;
     // Never push mid-transition: attaching the previous image's still-live shapes to the new
     // image_path would show the agent a false canvas; wait until the loaded identity matches.
-    if (!loadedFor(canvas, imageInView.path)) return null;
+    if (!inView) return null;
     return canvasStateBody({
       projectId: project.id,
       image: imageInView,
@@ -810,6 +822,8 @@ export function AnnotateTab() {
   /** Save the current canvas, with any gestures it adjudicates, to the path it was loaded from,
    *  reading the live store and refs so a call mid-transition writes the right image. The
    *  items of `confirm` are named by their position in the very list this save serializes.
+   *  An `interactive` save, the default, is refused (null, nothing sent) while the canvas holds
+   *  no document of the image in view.
    *  The canvas adopts the answer while the save still holds it and its document is still
    *  loaded; resolves that answer when its image is the one in view, else null. */
   async function save(opts?: {
@@ -827,8 +841,9 @@ export function AnnotateTab() {
     // The canvas still holds the document this save was built from.
     const stillLoaded = () => useStore.getState().canvas.loaded === loaded;
     // That document is also the image in view's.
-    const stillInView = () =>
-      stillLoaded() && loadedFor(useStore.getState().canvas, liveImage()?.path) !== null;
+    const stillInView = () => stillLoaded() && canvasInView(useStore.getState());
+    // A save the person asks for writes only the image they are looking at.
+    if (interactive && !stillInView()) return null;
     if (useStore.getState().canvas.saving) return null;
     if (!useStore.getState().canvas.dirty && !gestures) return null;
     settleGestures({ path: loaded.image_path, name: loaded.name });
@@ -859,13 +874,12 @@ export function AnnotateTab() {
       );
       landed = true;
     } catch (e) {
-      // A failure of the document the canvas still holds stands on that image's line; one for a
-      // document loaded over since is listed alone. A cancel is said only for a pressed save.
-      const inPlace = interactive && stillLoaded();
+      // A failure or a cancel of the document the canvas still holds stands on that image's line;
+      // a failure of one loaded over since is listed alone.
       const failed = (sentence: string, slot?: "document" | "reload") =>
         tell("failure", "error", sentence, loaded.name, slot && canvasKey(slot, loaded.image_path));
       if (hold.controller.signal.aborted) {
-        if (inPlace) {
+        if (stillLoaded()) {
           tell(
             "notice",
             "warning",
@@ -1066,7 +1080,7 @@ export function AnnotateTab() {
       }
       const failed = (sentence: string) =>
         tell("failure", "error", sentence, currentImageName, canvasKey("document", imgPath));
-      const neverLoaded = `Could not load this image's labels: ${messageOf(answer.error)}. Saving is off.`;
+      const neverLoaded = `${LABELS_NOT_LOADED}: ${messageOf(answer.error)}. Saving is off.`;
       if (reload) {
         const held = loadedFor(useStore.getState().canvas, imgPath) !== null;
         failed(held ? `Reload failed: ${messageOf(answer.error)}` : neverLoaded);
@@ -1151,7 +1165,7 @@ export function AnnotateTab() {
   }
 
   const subjectState: SubjectState | null =
-    canvas.loaded && dataset?.subject ? canvas.completion[dataset.subject] : null;
+    onPage.loaded && dataset?.subject ? onPage.completion[dataset.subject] : null;
   const subjectFinished = isFinished(subjectState);
 
   const K = ANNOTATE_KEYS;
@@ -1172,7 +1186,7 @@ export function AnnotateTab() {
       when: () => rejectTarget !== null,
     },
     { keys: K.edit.keys, action: () => void edit(), when: () => focused?.kind === "proposal" },
-    { keys: K.flag.keys, action: () => setFlagsOpen((open) => !open) },
+    { keys: K.flag.keys, action: () => setFlagsOpen((open) => !open), when: () => inView },
     { keys: K.nextItem.keys, action: () => stepItem(1), when: () => order.length > 0 },
     { keys: K.previousItem.keys, action: () => stepItem(-1), when: () => order.length > 0 },
     {
@@ -1289,7 +1303,7 @@ export function AnnotateTab() {
     imgW > 0 && imgH > 0 && (ix < 0 || iy < 0 || ix > imgW || iy > imgH);
 
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
-    if (ev.evt.button !== 0 || canvas.saving) return; // right-button drags must not fabricate boxes
+    if (ev.evt.button !== 0 || stageInert()) return; // right-button drags must not fabricate boxes
     // A fresh press starts a new gesture: clear the drag flag first. A completed vertex drag
     // fires no trailing click, so without this the stale flag would swallow the next click
     // (e.g. an outside click meant to deselect), forcing a second click.
@@ -1498,7 +1512,7 @@ export function AnnotateTab() {
     moveRafRef.current = requestAnimationFrame(() => {
       moveRafRef.current = null;
       const p = pendingMoveRef.current;
-      if (p && !useStore.getState().canvas.saving) processMoveRef.current(p[0], p[1]);
+      if (p && !stageInert()) processMoveRef.current(p[0], p[1]);
     });
   };
 
@@ -1555,7 +1569,7 @@ export function AnnotateTab() {
   };
 
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
-    if (ev.evt.button !== 0 || canvas.saving) return;
+    if (ev.evt.button !== 0 || stageInert()) return;
     if (outsideImage(ix, iy)) return;
     if (mode === "point") {
       if (didDragRef.current) {
@@ -1870,13 +1884,14 @@ export function AnnotateTab() {
         onScope={setScope}
         canAccept={acceptTarget !== null}
         canReject={rejectTarget !== null}
+        flagRefusal={labelsReason}
         scopeCounts={{
           all: kept.length,
           unreviewed: unreviewedKept.length,
           flagged: scopedOrder(kept, "flagged").length,
         }}
         flagCount={openFlags.length}
-        flags={focused ? focused.flags : imageFlags(canvas.flags)}
+        flags={focused ? focused.flags : imageFlags(onPage.flags)}
         flagsOpen={flagsOpen}
         onFlagsOpen={setFlagsOpen}
         onFlag={raiseFlag}
@@ -1965,7 +1980,7 @@ export function AnnotateTab() {
                 {annotateUi.snap && cursor && mode === "polygon" && (
                   <SnapIndicator
                     cursor={cursor}
-                    polygons={canvas.polygons}
+                    polygons={onPage.polygons}
                     scale={view.scale}
                     radius={SNAP_RADIUS_CANVAS / view.scale}
                   />
@@ -1976,9 +1991,9 @@ export function AnnotateTab() {
             <ProposalShapes proposals={drawnProposals} focused={focused} widths={widths} />
             {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
             <AnnotationShapes
-              boxes={canvas.boxes}
-              polygons={canvas.polygons}
-              points={canvas.points}
+              boxes={onPage.boxes}
+              polygons={onPage.polygons}
+              points={onPage.points}
               mode={mode}
               activeSubject={activeSubject}
               matches={matches}

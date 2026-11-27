@@ -5,7 +5,7 @@ import { api, loadedLabels } from "@/api/client";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { currentImage } from "@/lib/paths";
 import { useStore } from "@/store";
-import { selectCanvasMatchesDataset } from "@/store/slices/canvas";
+import { canvasInView } from "@/store/slices/canvas";
 import { LABEL_ANSWERS } from "@/test/labels";
 import { GROUPED_SELECTION, selected, SEPARATED_SELECTION } from "@/test/store";
 
@@ -29,15 +29,16 @@ describe("the selection's image places", () => {
     expect(currentImage(SELECTION)).toEqual(FIRST);
   });
 
-  it("matches the canvas to the dataset by the places the selection carries", () => {
+  it("holds the canvas in view only for a document of the image at the place the selection carries", () => {
     const loaded = (image_path: string) => {
       useStore
         .getState()
         .loadLabelsIntoCanvas(loadedLabels({ ...LABEL_ANSWERS.loaded, image_path }));
-      return selectCanvasMatchesDataset(useStore.getState());
+      return canvasInView(useStore.getState());
     };
 
-    expect(loaded(SECOND.path)).toBe(true);
+    expect(loaded(FIRST.path)).toBe(true);
+    expect(loaded(SECOND.path)).toBe(false);
     expect(loaded(GROUPED_SELECTION.images[0].path)).toBe(false);
   });
 

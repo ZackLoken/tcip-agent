@@ -31,6 +31,7 @@ import { refusedRegistryKey, saveRegistry, SUBJECT_CONTROL_ID } from "@/lib/regi
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
+import { canvasOnPage, labelsRefusal } from "@/store/slices/canvas";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { isFinished, type AnnotateView, type SubjectState } from "@/store/types";
 
@@ -199,11 +200,12 @@ export function AnnotateToolbar({
   const setActiveSubject = useStore((s) => s.setActiveSubject);
   const registry = useStore((s) => s.registry.subjects);
   const discovered = useStore((s) => s.registry.discovered);
-  const canvasBoxes = useStore((s) => s.canvas.boxes);
-  const canvasPolygons = useStore((s) => s.canvas.polygons);
-  const canvasPoints = useStore((s) => s.canvas.points);
-  const canvasImageAnnotations = useStore((s) => s.canvas.imageAnnotations);
+  const canvasBoxes = useStore((s) => canvasOnPage(s).boxes);
+  const canvasPolygons = useStore((s) => canvasOnPage(s).polygons);
+  const canvasPoints = useStore((s) => canvasOnPage(s).points);
+  const canvasImageAnnotations = useStore((s) => canvasOnPage(s).imageAnnotations);
   const saving = useStore((s) => s.canvas.saving !== null);
+  const labelsReason = useStore(labelsRefusal);
   const annotateUi = useStore((s) => s.annotateUi);
   const setImageFilter = useStore((s) => s.setImageFilter);
   const setVisible = useStore((s) => s.setVisible);
@@ -539,9 +541,7 @@ export function AnnotateToolbar({
             title={
               !dataset?.subject
                 ? "Select a subject first"
-                : subjectState !== null
-                  ? `Every ${dataset.subject} on this image is annotated (c)`
-                  : "Loading this image's labels"
+                : (labelsReason ?? `Every ${dataset.subject} on this image is annotated (c)`)
             }
           >
             <input

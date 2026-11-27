@@ -139,10 +139,33 @@ export const loadedFor = (
 export const canvasImageIndex = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): number =>
   gui.dataset?.images.findIndex((image) => image.path === canvas.loaded?.image_path) ?? -1;
 
-/** Whether the loaded canvas is one of the selected capture's own images; false with no
- *  selection. */
-export const selectCanvasMatchesDataset = (s: Pick<AppState, "gui" | "canvas">) =>
-  canvasImageIndex(s) !== -1;
+/** Whether the canvas holds the document of the image in view; false with no selection, no
+ *  document loaded, or a document of another image. */
+export const canvasInView = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">): boolean =>
+  loadedFor(canvas, currentImage(gui.dataset)?.path) !== null;
+
+/** The words that open every statement that the labels of the image in view could not be loaded. */
+export const LABELS_NOT_LOADED = "Could not load this image's labels";
+
+/** Why a control that acts on the canvas's document cannot act, as the control says it: null while
+ *  the canvas holds the document of the image in view, that the labels could not be loaded while
+ *  the image in view is the one whose load last failed, and that they are loading otherwise. */
+export const labelsRefusal = (state: Pick<AppState, "gui" | "canvas">): string | null => {
+  if (canvasInView(state)) return null;
+  return state.canvas.failedLoad === currentImage(state.gui.dataset)?.path
+    ? LABELS_NOT_LOADED
+    : "Loading this image's labels";
+};
+
+/** The canvas as the page draws and states it: the canvas while it holds the document of the image
+ *  in view, and the empty canvas, which holds no document, otherwise. */
+export const canvasOnPage = (state: Pick<AppState, "gui" | "canvas">): CanvasState =>
+  canvasInView(state) ? state.canvas : EMPTY_CANVAS;
+
+/** Whether the canvas takes an edit now: no save holds it and it holds the document of the image
+ *  in view. */
+export const canvasTakesEdits = (state: Pick<AppState, "gui" | "canvas">): boolean =>
+  state.canvas.saving === null && canvasInView(state);
 
 function snapshot(s: AppState): CanvasSnapshot {
   const c = s.canvas;
@@ -231,8 +254,9 @@ export interface CanvasSlice {
 }
 
 /** Every action that changes the canvas' content or its history; inert while a save is in flight
- *  so the answer is adopted over the very content it was built from. Focus, loads, clearing and
- *  the dirty recount are not edits. */
+ *  so the answer is adopted over the very content it was built from, and, but for the revert of
+ *  a gesture settled as its image is left, while the canvas holds no document of the image in
+ *  view. Focus, loads, clearing and the dirty recount are not edits. */
 export const CONTENT_EDITS = [
   "pushUndo",
   "undo",
@@ -437,8 +461,9 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
   };
   for (const name of CONTENT_EDITS) {
     const action = slice[name] as (...args: never[]) => unknown;
-    slice[name] = ((...args: never[]) =>
-      get().canvas.saving ? undefined : action(...args)) as never;
+    const inert = () =>
+      name === "rollbackLast" ? get().canvas.saving !== null : !canvasTakesEdits(get());
+    slice[name] = ((...args: never[]) => (inert() ? undefined : action(...args))) as never;
   }
   return slice;
 };

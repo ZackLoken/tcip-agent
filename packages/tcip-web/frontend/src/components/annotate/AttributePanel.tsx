@@ -8,6 +8,7 @@ import { NotificationItem } from "@/components/Notifications";
 import { refusedRegistryKey, saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
+import { canvasOnPage } from "@/store/slices/canvas";
 import { TOOL_ARRAY } from "@/store/types";
 
 /** The lower part of the subject menu: the focused shape's attributes, the active subject's
@@ -17,10 +18,10 @@ import { TOOL_ARRAY } from "@/store/types";
 export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const activeSubject = useStore((s) => s.gui.active_subject);
   const registry = useStore((s) => s.registry.subjects);
-  const boxes = useStore((s) => s.canvas.boxes);
-  const polygons = useStore((s) => s.canvas.polygons);
-  const points = useStore((s) => s.canvas.points);
-  const imageAnnotations = useStore((s) => s.canvas.imageAnnotations);
+  const boxes = useStore((s) => canvasOnPage(s).boxes);
+  const polygons = useStore((s) => canvasOnPage(s).polygons);
+  const points = useStore((s) => canvasOnPage(s).points);
+  const imageAnnotations = useStore((s) => canvasOnPage(s).imageAnnotations);
   const add = useStore((s) => s.add);
   const update = useStore((s) => s.update);
   const remove = useStore((s) => s.remove);

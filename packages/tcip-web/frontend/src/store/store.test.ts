@@ -31,6 +31,17 @@ const EMPTY: LoadedLabels = loadOf(RAW_SELECTION.images[0].path);
 /** The produced save of one person's box, as the client adopts its document. */
 const ONE_BOX: LoadedLabels = LANDED.box.document;
 
+/** Hold the selected capture's first two photographs, the first, whose produced load is `EMPTY`,
+ *  in view. */
+const holdFirstInView = () =>
+  useStore.setState((st) => ({ gui: { ...st.gui, dataset: selected({ count: 2 }) } }));
+
+/** The canvas holding `EMPTY`, the document of the photograph in view. */
+function loadFirstInView(): void {
+  holdFirstInView();
+  s().loadLabelsIntoCanvas(EMPTY);
+}
+
 function loadPolygon(rings: [number, number][][]): void {
   s().loadLabelsIntoCanvas({
     ...EMPTY,
@@ -54,9 +65,7 @@ function loadOnePolygon(): void {
 }
 
 describe("canvas store", () => {
-  beforeEach(() => {
-    s().clearCanvas(null);
-  });
+  beforeEach(loadFirstInView);
 
   it("loadLabelsIntoCanvas resets dirty and undo/redo stacks", () => {
     loadOnePolygon();
@@ -165,9 +174,7 @@ describe("canvas store", () => {
 });
 
 describe("splitPolygon", () => {
-  beforeEach(() => {
-    s().clearCanvas(null);
-  });
+  beforeEach(loadFirstInView);
 
   const PIECE_A: [number, number][] = [
     [0, 0],
@@ -254,9 +261,7 @@ describe("splitPolygon", () => {
 });
 
 describe("canvas store points", () => {
-  beforeEach(() => {
-    s().clearCanvas(null);
-  });
+  beforeEach(loadFirstInView);
 
   const pt = (x: number, y: number, subject = "tip") => ({
     x,
@@ -434,9 +439,7 @@ describe("focus follows the image and the bucket", () => {
 });
 
 describe("content-based dirty tracking", () => {
-  beforeEach(() => {
-    s().clearCanvas(null);
-  });
+  beforeEach(loadFirstInView);
 
   const box = { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, iscrowd: false };
 
@@ -558,7 +561,7 @@ describe("the hold on the canvas covers every content edit", () => {
   /** A canvas on which every action changes state: content of each kind, a history to undo and
    *  to redo, a polygon being drawn, and a subject to commit it under. */
   function arrange() {
-    s().clearCanvas(null);
+    holdFirstInView();
     s().loadLabelsIntoCanvas({
       ...EMPTY,
       boxes: [box],
@@ -624,6 +627,25 @@ describe("the hold on the canvas covers every content edit", () => {
     const held = s().canvas;
     run();
     expect(s().canvas).toBe(held);
+  });
+
+  it.each(RUNS.filter(([edit]) => edit !== "rollbackLast"))(
+    "%s %s does nothing while another photograph is in view",
+    (_edit, _on, run) => {
+      arrange();
+      changeSelection({ current_image_index: 1 });
+      const away = s().canvas;
+      run();
+      expect(s().canvas).toBe(away);
+    },
+  );
+
+  it("rollbackLast reverts the canvas's last gesture while another photograph is in view", () => {
+    arrange();
+    changeSelection({ current_image_index: 1 });
+    const away = s().canvas;
+    s().rollbackLast();
+    expect(s().canvas.boxes).toHaveLength(away.boxes.length - 1);
   });
 });
 
