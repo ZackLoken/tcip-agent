@@ -5062,6 +5062,37 @@ describe("AnnotateTab while the canvas holds no document of the image in view", 
     expect(screen.queryAllByTestId("k-circle")).toEqual([]);
   });
 
+  it("counts none of the image left's open flags on Flag before the next image's labels land", async () => {
+    const flagged = LOADED.flagged;
+    expect(flagged.image_path).toBe(IMG1);
+    expect(flagged.flags.filter((f) => f.resolution === null)).not.toEqual([]);
+    await moveWithNextLoadHeld(flagged);
+
+    expect(screen.getByRole("button", { name: "Flag" })).toBeDisabled();
+  });
+
+  it("draws none of the polygon left in progress on the image left before the next image's labels land", async () => {
+    act(() => useStore.getState().setMode("polygon"));
+    const next = Promise.withResolvers<LoadedLabels>();
+    loadSpy.mockImplementation((imagePath) =>
+      imagePath === IMG1 ? Promise.resolve(loadHolding(IMG1, [])) : next.promise,
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    const stage = screen.getByTestId("canvas-stage");
+    fireEvent.click(stage, { clientX: 100, clientY: 100 });
+    fireEvent.click(stage, { clientX: 300, clientY: 100 });
+    await flush();
+    expect(screen.queryAllByTestId("k-line")).not.toEqual([]);
+
+    act(() => changeSelection({ current_image_index: 1 }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+
+    expect(screen.queryAllByTestId("k-line")).toEqual([]);
+  });
+
   it("opens no flag panel for the flag key pressed before the next image's labels land", async () => {
     const answerNext = await moveWithNextLoadHeld();
 
