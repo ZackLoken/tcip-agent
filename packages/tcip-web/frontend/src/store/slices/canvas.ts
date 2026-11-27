@@ -177,6 +177,12 @@ function restoreLast(s: AppState): Partial<AppState> | AppState {
 export interface CanvasSlice {
   /** Canvas-local draft state (not persisted until save). */
   canvas: CanvasState;
+  /** How many times the proposals of the image in view were asked to be read again, once the
+   *  canvas's document changed under them; whichever editor is mounted reads it and reads again
+   *  when it moves. */
+  proposalRereads: number;
+  /** Ask for the proposals of the image in view to be read again. */
+  rereadProposals: () => void;
 
   /** Canvas helpers. */
   loadLabelsIntoCanvas: (labels: LoadedLabels) => void;
@@ -268,6 +274,9 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
 
   const slice: CanvasSlice = {
     canvas: EMPTY_CANVAS,
+    proposalRereads: 0,
+
+    rereadProposals: () => set((s) => ({ proposalRereads: s.proposalRereads + 1 })),
 
     loadLabelsIntoCanvas: (labels) =>
       set((s) => ({

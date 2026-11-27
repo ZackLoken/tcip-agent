@@ -3520,6 +3520,42 @@ describe("AnnotateTab review symbology", () => {
       expect(proposalsSpy).toHaveBeenCalledTimes(2);
     });
 
+    it("serves the bucket's proposals again once Reload loads the document anew", async () => {
+      const proposalsSpy = await mountReviewing();
+      act(() => useStore.getState().update("boxes", 0, { ...boxes()[0], x2: 51 }));
+      saveSpy.mockRejectedValueOnce(await versionConflict());
+      pressSave();
+      await flush();
+      expect(proposalsSpy).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+      await flush();
+
+      expect(proposalsSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("serves no proposals again for an answer adopted while another image is in view", async () => {
+      const [loose] = LOOSE;
+      const proposalsSpy = await mountReviewing();
+      act(() =>
+        useStore.getState().setFocus({ kind: "proposal", index: loose.index, bucket: BUCKET }),
+      );
+      const answer = Promise.withResolvers<LoadedSave>();
+      saveSpy.mockReturnValueOnce(answer.promise);
+      fireEvent.keyDown(window, { key: "e" });
+      await flush();
+      loadSpy.mockImplementation(() => new Promise(() => {}));
+      act(() => {
+        changeSelection({ current_image_index: 1 });
+      });
+      await flush();
+      const reads = proposalsSpy.mock.calls.length;
+
+      await act(() => Promise.resolve(answer.resolve(LANDED.accept_unpaired)));
+
+      expect(proposalsSpy).toHaveBeenCalledTimes(reads);
+    });
+
     it("refuses an edit made while it is in flight, then adopts the answer whole", async () => {
       await editedToolBox();
       const answer = Promise.withResolvers<LoadedSave>();
