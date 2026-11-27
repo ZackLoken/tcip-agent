@@ -21,16 +21,17 @@ once its first delivery's record is damaged (``tests._record_damage_fixtures.dam
 ``unreadable_deliveries``; the phenology project's measurement refused by the delivery gate,
 ``delivery_refusal``, shown unvalidated, ``phenology``, and naming no stored mapping,
 ``unknown_mapping``; its curves exported under an acknowledgment whose line lands while
-the delivery's fails, ``export_audit_gap``; a second mapping built while every append fails,
-``mapping_audit_gap``; a rebuild of the mapping its delivery cites, unsuperseded, whose refusal
-names the citing event as ``<acknowledged_mapping event>`` (``fixture_session.normalized``'s
-``minted``), ``mapping_cited``; once the count trait is confirmed there, a phenology
-measurement of it, ``operationalization_refusal``; its mapping names, ``mapping_names``, and
-its first mapping loaded, ``mapping_loaded``; mappings built
-over its registry (``mapping_built``), over one placing only its first plant
-(``mapping_one_placed``), at a stated radius (``mapping_stated``), once a date of
-photographs carrying no position is added, over every date (``mapping_unpositioned``), and once
-a capture folder holding no image is added, over every date again (``mapping_left_out``); in a
+the delivery's fails, ``export_audit_gap``; a rebuild of the mapping its delivery cites,
+unsuperseded, whose refusal names the citing event as ``<acknowledged_mapping event>``
+(``fixture_session.normalized``'s ``minted``), ``mapping_cited``; once the count trait is
+confirmed there, a phenology measurement of it, ``operationalization_refusal``; its mapping names,
+a second mapping having been built beside the first, ``mapping_names``, and each of those mappings
+loaded, ``mapping_loaded``, by name; a third mapping built while every append fails,
+``mapping_audit_gap``; mappings built over its registry (``mapping_built``), over one placing
+only its first plant (``mapping_one_placed``), at a stated radius (``mapping_stated``), once a
+date of photographs carrying no position is added, over every date (``mapping_unpositioned``),
+and once a capture folder holding no image is added, over every date again
+(``mapping_left_out``); in a
 project of its own, beside a plant open on every date, a measurement of each of three plants,
 one open but its first capture left without predictions
 (``test_plant_mapping_binding.UNREAD_P2``), one undetected and one closed on every date
@@ -201,6 +202,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         ExportCountCsvPayload,
         ExportCsvPayload,
         LoadMappingPayload,
+        MappingNames,
         OrthomosaicPlantCountsDelivery,
         PerImageCountDelivery,
         PhenologyAnswer,
@@ -452,7 +454,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         "export_csv", curves_export, 409, landing=1
     )
     curves = exported(curves_export, "export_csv")
-    answers["mapping_audit_gap"] = browsed(
+    browsed(
         "build_plant_mapping",
         BuildMappingPayload(
             name="orchard",
@@ -460,8 +462,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
             plant_registry=registry,
             user=ACTOR,
         ),
-        409,
-        landing=0,
+        200,
     )
     fx.propose_and_confirm(root, fx.COUNT_SPEC)
     answers["operationalization_refusal"] = browsed(
@@ -469,9 +470,22 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         measured.model_copy(update={"trait": fx.COUNT_TRAIT}),
         400,
     )
-    answers["mapping_names"] = answered(client, "list_plant_mappings", 200)
-    answers["mapping_loaded"] = browsed(
-        "load_plant_mapping", LoadMappingPayload(name="valley"), 200
+    listed = answered(client, "list_plant_mappings", 200)
+    answers["mapping_names"] = listed
+    answers["mapping_loaded"] = {
+        name: browsed("load_plant_mapping", LoadMappingPayload(name=name), 200)
+        for name in MappingNames.model_validate(listed).names
+    }
+    answers["mapping_audit_gap"] = browsed(
+        "build_plant_mapping",
+        BuildMappingPayload(
+            name="audit-gap",
+            dataset_root=str(dataset_root),
+            plant_registry=registry,
+            user=ACTOR,
+        ),
+        409,
+        landing=0,
     )
     registries = {
         "mapping_built": registry,

@@ -3283,17 +3283,6 @@
         }
       }
     },
-    "mapping_audit_gap": {
-      "status": 409,
-      "body": {
-        "detail": {
-          "kind": "audit_entry_not_written",
-          "message": "plant_mapping_built completed and its audit entry could not be written: the audit log could not be appended to. Whatever the call changed is committed and unrecorded, so do not retry it blind: repair the audit log's destination, then reconcile the trail against what the call did.",
-          "committed": true,
-          "what": null
-        }
-      }
-    },
     "operationalization_refusal": {
       "status": 400,
       "body": {
@@ -3305,16 +3294,52 @@
     },
     "mapping_names": { "names": ["orchard", "valley"] },
     "mapping_loaded": {
-      "name": "valley",
-      "per_date": {
-        "2026-02-11": { "n_images": 2, "n_unattributed": 0, "avg_distance_m": 0.0, "n_mapped": 2 },
-        "2026-02-25": { "n_images": 2, "n_unattributed": 0, "avg_distance_m": 0.0, "n_mapped": 2 }
+      "orchard": {
+        "name": "orchard",
+        "per_date": {
+          "2026-02-11": {
+            "n_images": 2,
+            "n_unattributed": 0,
+            "avg_distance_m": 0.0,
+            "n_mapped": 2
+          },
+          "2026-02-25": { "n_images": 2, "n_unattributed": 0, "avg_distance_m": 0.0, "n_mapped": 2 }
+        },
+        "images_unattributed": 0,
+        "unreadable": { "2026-02-11": [], "2026-02-25": [] },
+        "match_radius": {
+          "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
+          "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
+        }
       },
-      "images_unattributed": 0,
-      "unreadable": { "2026-02-11": [], "2026-02-25": [] },
-      "match_radius": {
-        "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
-        "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
+      "valley": {
+        "name": "valley",
+        "per_date": {
+          "2026-02-11": {
+            "n_images": 2,
+            "n_unattributed": 0,
+            "avg_distance_m": 0.0,
+            "n_mapped": 2
+          },
+          "2026-02-25": { "n_images": 2, "n_unattributed": 0, "avg_distance_m": 0.0, "n_mapped": 2 }
+        },
+        "images_unattributed": 0,
+        "unreadable": { "2026-02-11": [], "2026-02-25": [] },
+        "match_radius": {
+          "2026-02-11": { "source": "h_pos_err", "value": 1.0 },
+          "2026-02-25": { "source": "h_pos_err", "value": 1.0 }
+        }
+      }
+    },
+    "mapping_audit_gap": {
+      "status": 409,
+      "body": {
+        "detail": {
+          "kind": "audit_entry_not_written",
+          "message": "plant_mapping_built completed and its audit entry could not be written: the audit log could not be appended to. Whatever the call changed is committed and unrecorded, so do not retry it blind: repair the audit log's destination, then reconcile the trail against what the call did.",
+          "committed": true,
+          "what": null
+        }
       }
     },
     "mapping_built": {
