@@ -82,7 +82,7 @@ function PlantMappingPanel({
   async function loadMapping(name: string) {
     try {
       setMapping(await resultsApi.loadPlantMapping({ name }));
-      useStore.getState().resolveNotification(loadKey);
+      useStore.getState().releaseNotification(loadKey);
     } catch (e) {
       tell("failure", "error", `Could not load the mapping: ${messageOf(e)}`, name, loadKey);
     }

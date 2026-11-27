@@ -436,7 +436,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
     await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
   });
 
-  it("lists a failed mapping load as resolved once a load lands", async () => {
+  it("lists a failed mapping load saying nothing of being resolved once another mapping loads", async () => {
     vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
     // What fetch rejects with when the backend cannot be reached.
     vi.spyOn(resultsApi, "loadPlantMapping")
@@ -458,7 +458,8 @@ describe("SetupTab plant-mapping build: match radius", () => {
     fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: second } });
 
     await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
-    expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, .+, resolved$/);
+    expect(metaLine(areaEntrySaying(sentence))).toMatch(new RegExp(`^Error, failure, ${first}, `));
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
   });
 
   it("renders the mapping-wide unattributed line when the total is nonzero", async () => {
