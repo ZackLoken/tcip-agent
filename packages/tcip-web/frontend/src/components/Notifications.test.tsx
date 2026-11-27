@@ -580,4 +580,39 @@ describe("an entry in place", () => {
     expect(reload).toHaveBeenCalledTimes(1);
     expect(within(onlyAreaEntry()).queryByRole("button", { name: "Reload" })).toBeNull();
   });
+
+  it("states the count after a sentence ending in a period as the sentence, a space and the count in parentheses", () => {
+    const sentence = "The labels changed since they loaded.";
+    render(
+      <>
+        <NotificationItem
+          placement="in place"
+          entryKey="annotate-reload:a.jpg"
+          afterDismiss={() => {}}
+          action={{ label: "Reload", run: () => {} }}
+        />
+        <NotificationsPane />
+      </>,
+    );
+    const raise = () =>
+      act(() =>
+        useStore.getState().raiseNotification({
+          kind: "failure",
+          level: "error",
+          text: { sentence },
+          context: { project: "valley", target: "a.jpg" },
+          key: "annotate-reload:a.jpg",
+        }),
+      );
+    raise();
+    raise();
+
+    const line = screen.getByTestId("entry-in-place");
+    expect(line).toHaveTextContent(`${sentence} (2 times)`);
+    expect(line).not.toHaveTextContent(/\.\s*,/);
+    expect(within(line).getByRole("button", { name: "Reload" })).toHaveAccessibleDescription(
+      `${sentence} (2 times)`,
+    );
+    expect(metaLine(onlyAreaEntry())).toMatch(/^Error, failure, .+, 2 times$/);
+  });
 });

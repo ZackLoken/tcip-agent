@@ -728,7 +728,7 @@ describe("InferenceTab bucket refusals", () => {
     await waitFor(() => expect(launch).toHaveBeenCalledTimes(2));
 
     const line = await screen.findByTestId("entry-in-place");
-    expect(line).toHaveTextContent(`${REFUSED.message}, 2 times`);
+    expect(line).toHaveTextContent(`${REFUSED.message} (2 times)`);
     expect(watchIn(line)).toBeInTheDocument();
     expect(refusalEntries()).toEqual([expect.objectContaining({ count: 2 })]);
   });
