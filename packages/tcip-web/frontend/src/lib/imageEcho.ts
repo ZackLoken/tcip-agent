@@ -9,7 +9,6 @@ import { useStore } from "@/store";
 import { datasetIdentityChanged } from "@/store/slices/gui";
 import type { DatasetSelection } from "@/store/types";
 
-// A dropped post leaves the backend at the last index it received, however far that is.
 const ECHO_WAIT_MS = 400;
 
 let pending: ReturnType<typeof setTimeout> | null = null;
