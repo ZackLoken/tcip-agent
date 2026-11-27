@@ -33,7 +33,7 @@ import { TabHeading } from "@/components/TabHeading";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { useDisplayPixels } from "@/hooks/useDisplayPixels";
 import { useImageBands } from "@/hooks/useImageBands";
-import { useImageNav } from "@/hooks/useImageNav";
+import { moveToImage, useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionServes } from "@/hooks/useRegionServes";
@@ -99,7 +99,13 @@ import { nextMode } from "@/lib/toolMode";
 import { fitView, type HostSize, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import { declaredClient, UNDECLARED_ACTOR } from "@/store/slices/agentActivity";
-import { canvasImage, holdsCanvas, imageSize, loadedFor } from "@/store/slices/canvas";
+import {
+  canvasImage,
+  canvasImageIndex,
+  holdsCanvas,
+  imageSize,
+  loadedFor,
+} from "@/store/slices/canvas";
 import {
   isFinished,
   TOOL_ARRAY,
@@ -150,6 +156,10 @@ function documentLanded(imagePath: string): void {
   releaseNotification(canvasKey("document", imagePath));
   releaseNotification(canvasKey("reload", imagePath));
 }
+
+/** Whether the save holding the canvas landed, once it answers; true at once when none holds it. */
+const heldSaveLanded = (): Promise<boolean> =>
+  useStore.getState().canvas.saving?.landed.promise ?? Promise.resolve(true);
 
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
@@ -799,7 +809,8 @@ export function AnnotateTab() {
   /** Save the current canvas, with any gestures it adjudicates, to the path it was loaded from,
    *  reading the live store and refs so a call mid-transition writes the right image. The
    *  items of `confirm` are named by their position in the very list this save serializes.
-   *  Resolves the answer the canvas adopted, or null when it adopted none. */
+   *  The canvas adopts the answer while the save still holds it and its document is still
+   *  loaded; resolves that answer when its image is the one in view, else null. */
   async function save(opts?: {
     interactive?: boolean;
     gestures?: Partial<Gestures>;
@@ -826,6 +837,7 @@ export function AnnotateTab() {
     let result: LoadedSave;
     const hold = holdForSave(loaded.image_path);
     let owned = false;
+    let landed = false;
     try {
       result = await api.annotate.save(
         {
@@ -843,9 +855,10 @@ export function AnnotateTab() {
         },
         hold.controller.signal,
       );
+      landed = true;
     } catch (e) {
-      // Only a failure of the document still loaded stands in place over the canvas; one for an
-      // image since left or reloaded is listed in the notifications area alone, naming it.
+      // A failure of the document the canvas still holds stands on that image's line; one for a
+      // document loaded over since is listed alone. A cancel is said only for a pressed save.
       const inPlace = interactive && stillLoaded();
       const failed = (sentence: string, slot?: "document" | "reload") =>
         tell("failure", "error", sentence, loaded.name, slot && canvasKey(slot, loaded.image_path));
@@ -864,8 +877,8 @@ export function AnnotateTab() {
       const conflict = refusalOf<VersionConflictRefusal>(e, VERSION_CONFLICT);
       if (conflict) {
         // Someone wrote this file since it loaded: keep the canvas dirty, and offer the choice on
-        // its reload line for a pressed save or the image in view; for an image left, list it.
-        if (inPlace || stillInView()) {
+        // its reload line while the canvas holds it; once loaded over, list it.
+        if (stillLoaded()) {
           failed(
             `${conflict.message}. Reload to load the latest (discards your unsaved edits), or keep editing.`,
             "reload",
@@ -875,7 +888,7 @@ export function AnnotateTab() {
         }
         return null;
       }
-      if (inPlace) {
+      if (stillLoaded()) {
         failed(
           `Could not save annotations (${messageOf(e)}). Your edits are kept in the editor; press Save to retry.`,
           "document",
@@ -887,17 +900,20 @@ export function AnnotateTab() {
     } finally {
       owned = holdsCanvas(useStore.getState().canvas, hold);
       releaseSave(hold);
+      hold.landed.resolve(landed);
     }
 
-    // Dropped: an answer without its hold (loaded over or canceled), or for a document no longer
-    // the image in view's; a held canvas took no edit, whichever editor is mounted.
-    if (!owned || !stillInView()) return null;
+    // Dropped: an answer without its hold (loaded over or canceled), or for a document the
+    // canvas no longer holds; a held canvas took no edit, whichever editor is mounted.
+    if (!owned || !stillLoaded()) return null;
+    const inView = stillInView();
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
     documentLanded(loaded.image_path);
-    refreshProposals();
+    if (inView) refreshProposals();
     adoptLabels(result.document);
+    if (!inView) return null;
     if (opts?.focusAccepted !== undefined) focusAccepted(result, opts.focusAccepted);
     return result;
   }
@@ -914,11 +930,21 @@ export function AnnotateTab() {
     if (useStore.getState().canvas.loaded) loadAgain();
   }
 
-  // Flush telemetry + any unsaved edits for the image being left, using the path
-  // that canvas belongs to. Called before loading a different image and on unmount.
-  function flushLeaving() {
+  /** Close the visit of the image being left and save its unsaved edits to the path the canvas's
+   *  document belongs to; resolves whether the save holding the canvas landed. */
+  function flushLeaving(): Promise<boolean> {
     closeSessionInterval();
     void save({ interactive: false });
+    return heldSaveLanded();
+  }
+
+  /** Put the image whose document the canvas holds back in view; false when the selection holds
+   *  no such image. */
+  function returnToCanvasImage(): boolean {
+    const index = canvasImageIndex(useStore.getState());
+    if (index === -1) return false;
+    moveToImage(index);
+    return true;
   }
 
   // Once per write of the image in view's labels, as it arrives: warn under the event's project
@@ -991,12 +1017,10 @@ export function AnnotateTab() {
     const live = useStore.getState().canvas;
     const reload = landedRef.current && canvasImage(live) === imgPath;
     const arriving = leftForRef.current !== imgPath;
-    // A mount coming to the image whose edits the store kept unsaved, or held by a save still in
+    // Coming to the image whose edits the canvas holds unsaved, or held by a save still in
     // flight, keeps that canvas rather than saving it again and loading over it.
     const keeping =
-      leftForRef.current === null &&
-      loadedFor(live, imgPath) !== null &&
-      (live.dirty || live.saving !== null);
+      arriving && loadedFor(live, imgPath) !== null && (live.dirty || live.saving !== null);
     leftForRef.current = imgPath;
     // This mount has come to its image: reloads are read as such from here, and its visit opens.
     const cameToImage = () => {
@@ -1014,34 +1038,39 @@ export function AnnotateTab() {
     if (reload && reloadTick === loadedTickRef.current) return;
     loadedTickRef.current = reloadTick;
 
-    // Switching images: flush the previous image's work first (to the path it belongs to), once
-    // per image come to, then load the new one.
-    if (!reload && arriving) flushLeaving();
+    // Switching images saves the image left once per image come to; the next document waits on
+    // the save holding the canvas, and one that does not land puts its image back in view.
+    const left = reload ? Promise.resolve(true) : arriving ? flushLeaving() : heldSaveLanded();
 
     let canceled = false;
     void (async () => {
-      try {
-        const labels = await api.annotate.load(imgPath);
-        if (canceled) return;
-        adoptLabels(labels);
+      const loading = api.annotate.load(imgPath).then(
+        (labels) => ({ labels }),
+        (error: unknown) => ({ error }),
+      );
+      const landed = await left;
+      if (canceled || (!landed && returnToCanvasImage())) return;
+      const answer = await loading;
+      if (canceled) return;
+      if ("labels" in answer) {
+        adoptLabels(answer.labels);
         documentLanded(imgPath);
         if (reload) refreshProposals();
         else cameToImage();
-      } catch (e) {
-        if (canceled) return;
-        const failed = (sentence: string) =>
-          tell("failure", "error", sentence, currentImageName, canvasKey("document", imgPath));
-        if (reload) {
-          failed(`Reload failed: ${messageOf(e)}`);
-          return;
-        }
-        // A blank canvas holding no document: a transient load failure never overwrites the labels.
-        useStore.getState().clearCanvas(imgPath);
-        cameToImage();
-        // Reload rereads a loaded document, and the canvas now holds none.
-        useStore.getState().releaseNotification(canvasKey("reload", imgPath));
-        failed(`Could not load this image's labels: ${messageOf(e)}. Saving is off.`);
+        return;
       }
+      const failed = (sentence: string) =>
+        tell("failure", "error", sentence, currentImageName, canvasKey("document", imgPath));
+      if (reload) {
+        failed(`Reload failed: ${messageOf(answer.error)}`);
+        return;
+      }
+      // A blank canvas holding no document: a transient load failure never overwrites the labels.
+      useStore.getState().clearCanvas(imgPath);
+      cameToImage();
+      // Reload rereads a loaded document, and the canvas now holds none.
+      useStore.getState().releaseNotification(canvasKey("reload", imgPath));
+      failed(`Could not load this image's labels: ${messageOf(answer.error)}. Saving is off.`);
     })();
     return () => {
       canceled = true;
@@ -1080,7 +1109,7 @@ export function AnnotateTab() {
   useEffect(() => {
     mountedRef.current = true;
     return () => {
-      flushLeaving();
+      void flushLeaving();
       postHeldContributions();
       mountedRef.current = false;
     };
