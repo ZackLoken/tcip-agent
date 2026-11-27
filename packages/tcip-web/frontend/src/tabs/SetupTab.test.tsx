@@ -20,7 +20,7 @@ import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { IDENTITY_ANSWERS } from "@/test/datasetIdentity";
 import { RESULTS_ANSWERS } from "@/test/deliveryRecords";
-import { areaEntrySaying, entriesSaying, metaLine } from "@/test/notifications";
+import { areaEntriesSaying, areaEntrySaying, entriesSaying, metaLine } from "@/test/notifications";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
 import { GROUPED_SELECTION, openTestProject, RAW_SELECTION, TEST_PROJECT } from "@/test/store";
@@ -266,6 +266,11 @@ function panelHeaded(heading: string): HTMLElement {
 const mappingPanel = () => panelHeaded("Plant mapping");
 const identityPanel = () => panelHeaded("Dataset identity");
 
+const [FIRST_MAPPING, SECOND_MAPPING] = RESULTS_ANSWERS.mapping_names.names;
+/** The route's own answer to a load of the stored mapping `name`. */
+const loadedByName = ({ name }: { name: string }) =>
+  Promise.resolve(RESULTS_ANSWERS.mapping_loaded[name]);
+
 function fillAndBuild() {
   fireEvent.change(screen.getByLabelText("Mapping"), {
     target: { value: "valley-2026" },
@@ -283,8 +288,8 @@ describe("SetupTab plant-mapping build: match radius", () => {
     mapping_stated: STATED,
     mapping_unpositioned: UNPOSITIONED,
     mapping_left_out: LEFT_OUT,
-    mapping_loaded: LOADED,
   } = RESULTS_ANSWERS;
+  const LOADED = RESULTS_ANSWERS.mapping_loaded[SECOND_MAPPING];
 
   async function buildAnswering(mapping: ServedBuild) {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue(mapping);
@@ -418,48 +423,123 @@ describe("SetupTab plant-mapping build: match radius", () => {
     ]);
   });
 
-  it("ends a failed mapping load's line once a load lands", async () => {
-    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
+  describe("a failed load of a stored mapping", () => {
     // What fetch rejects with when the backend cannot be reached.
-    vi.spyOn(resultsApi, "loadPlantMapping")
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValue(RESULTS_ANSWERS.mapping_loaded);
-    const [first, second] = RESULTS_ANSWERS.mapping_names.names;
-
-    render(<SetupTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: first } });
-    await within(mappingPanel()).findByTestId("entry-in-place");
-    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: second } });
-
-    await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
-  });
-
-  it("lists a failed mapping load saying nothing of being resolved once another mapping loads", async () => {
-    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
-    // What fetch rejects with when the backend cannot be reached.
-    vi.spyOn(resultsApi, "loadPlantMapping")
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValue(RESULTS_ANSWERS.mapping_loaded);
-    const [first, second] = RESULTS_ANSWERS.mapping_names.names;
+    const unreachable = () => new TypeError("Failed to fetch");
     const sentence = "Could not load the mapping: Failed to fetch";
 
-    render(
-      <>
-        <SetupTab />
-        <NotificationsPane />
-      </>,
-    );
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: first } });
-    await within(mappingPanel()).findByTestId("entry-in-place");
-    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
-    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: second } });
+    async function renderWithArea() {
+      vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
+      render(
+        <>
+          <SetupTab />
+          <NotificationsPane />
+        </>,
+      );
+      await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    }
 
-    await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
-    expect(metaLine(areaEntrySaying(sentence))).toMatch(new RegExp(`^Error, failure, ${first}, `));
-    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+    const select = (name: string) =>
+      fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: name } });
+
+    it("ends its line once the load of another mapping lands", async () => {
+      vi.spyOn(resultsApi, "loadPlantMapping")
+        .mockRejectedValueOnce(unreachable())
+        .mockImplementation(loadedByName);
+
+      await renderWithArea();
+      select(FIRST_MAPPING);
+      await within(mappingPanel()).findByTestId("entry-in-place");
+      select(SECOND_MAPPING);
+
+      await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull(),
+      );
+    });
+
+    it("is listed saying nothing of being resolved once another mapping loads, and resolved once its own mapping does", async () => {
+      vi.spyOn(resultsApi, "loadPlantMapping")
+        .mockRejectedValueOnce(unreachable())
+        .mockImplementation(loadedByName);
+
+      await renderWithArea();
+      select(FIRST_MAPPING);
+      await within(mappingPanel()).findByTestId("entry-in-place");
+      expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+      select(SECOND_MAPPING);
+
+      await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull(),
+      );
+      expect(metaLine(areaEntrySaying(sentence))).toMatch(
+        new RegExp(`^Error, failure, ${FIRST_MAPPING}, `),
+      );
+      expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+
+      select(FIRST_MAPPING);
+
+      await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(metaLine(areaEntrySaying(sentence))).toMatch(/, resolved$/));
+    });
+
+    it("stands for its own mapping when another mapping fails with the same message", async () => {
+      vi.spyOn(resultsApi, "loadPlantMapping").mockRejectedValue(unreachable());
+
+      await renderWithArea();
+      select(FIRST_MAPPING);
+      await within(mappingPanel()).findByTestId("entry-in-place");
+      select(SECOND_MAPPING);
+
+      await waitFor(() => expect(areaEntriesSaying(sentence)).toHaveLength(2));
+      expect(areaEntriesSaying(sentence).map((item) => metaLine(item))).toEqual([
+        expect.stringMatching(new RegExp(`^Error, failure, ${SECOND_MAPPING}, `)),
+        expect.stringMatching(new RegExp(`^Error, failure, ${FIRST_MAPPING}, `)),
+      ]);
+
+      fireEvent.click(
+        within(within(mappingPanel()).getByTestId("entry-in-place")).getByRole("button", {
+          name: /^Dismiss/,
+        }),
+      );
+
+      expect(areaEntriesSaying(sentence)).toHaveLength(1);
+      expect(metaLine(areaEntrySaying(sentence))).toMatch(
+        new RegExp(`^Error, failure, ${FIRST_MAPPING}, `),
+      );
+    });
+
+    it("stands again in place when its mapping is selected again, while that load is out", async () => {
+      vi.spyOn(resultsApi, "loadPlantMapping")
+        .mockRejectedValueOnce(unreachable())
+        .mockImplementationOnce(loadedByName)
+        .mockReturnValueOnce(new Promise(() => {}));
+
+      await renderWithArea();
+      select(FIRST_MAPPING);
+      await within(mappingPanel()).findByTestId("entry-in-place");
+      select(SECOND_MAPPING);
+      await waitFor(() =>
+        expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull(),
+      );
+      select(FIRST_MAPPING);
+
+      await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(3));
+      expect(within(mappingPanel()).getByTestId("entry-in-place")).toHaveTextContent(sentence);
+    });
+
+    it("leaves no line under a name typed that is no stored mapping", async () => {
+      vi.spyOn(resultsApi, "loadPlantMapping").mockRejectedValue(unreachable());
+
+      await renderWithArea();
+      select(FIRST_MAPPING);
+      await within(mappingPanel()).findByTestId("entry-in-place");
+      select(`${FIRST_MAPPING}-draft`);
+
+      expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull();
+      expect(areaEntriesSaying(sentence)).toHaveLength(1);
+    });
   });
 
   it("renders the mapping-wide unattributed line when the total is nonzero", async () => {

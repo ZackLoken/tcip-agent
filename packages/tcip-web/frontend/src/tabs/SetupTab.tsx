@@ -36,9 +36,12 @@ function radiusPhrase(radius: MatchRadius): string {
   return `radius ${radius.value.toFixed(2)} m ${source}`;
 }
 
-/** The key a failed mapping `kind`, a load or a build, stands on in the project `projectId`. */
-const mappingKey = (kind: "load" | "build", projectId: string) =>
-  `setup-mapping-${kind}:${projectId}`;
+/** The key a failed load of the mapping `name` stands on in the project `projectId`. */
+const mappingLoadKey = (projectId: string, name: string) =>
+  `setup-mapping-load:${projectId}:${name}`;
+
+/** The key a failed build of a mapping stands on in the project `projectId`. */
+const mappingBuildKey = (projectId: string) => `setup-mapping-build:${projectId}`;
 
 /** The key a failed identity `kind`, a read or a registration, of the dataset at `datasetRoot`
  *  stands on in the project `projectId`. */
@@ -55,8 +58,7 @@ function PlantMappingPanel({
   projectId: string;
   datasetRoot: string | null;
 }) {
-  const loadKey = mappingKey("load", projectId);
-  const buildKey = mappingKey("build", projectId);
+  const buildKey = mappingBuildKey(projectId);
   const buildButton = useRef<HTMLButtonElement>(null);
   const [mappingName, setMappingName] = useState("");
   // Every mapping name already persisted under the open project, for the picker below; a name
@@ -80,11 +82,12 @@ function PlantMappingPanel({
   // Selecting an already-built mapping by name shows its own summary and radii, the same way a
   // fresh build does.
   async function loadMapping(name: string) {
+    const key = mappingLoadKey(projectId, name);
     try {
       setMapping(await resultsApi.loadPlantMapping({ name }));
-      useStore.getState().releaseNotification(loadKey);
+      useStore.getState().resolveNotification(key);
     } catch (e) {
-      tell("failure", "error", `Could not load the mapping: ${messageOf(e)}`, name, loadKey);
+      tell("failure", "error", `Could not load the mapping: ${messageOf(e)}`, name, key);
     }
   }
 
@@ -164,11 +167,13 @@ function PlantMappingPanel({
               ))}
             </datalist>
           )}
-          <NotificationItem
-            placement="in place"
-            entryKey={loadKey}
-            afterDismiss={() => document.getElementById(MAPPING_INPUT_ID)?.focus()}
-          />
+          {mappings?.names.includes(mappingName) && (
+            <NotificationItem
+              placement="in place"
+              entryKey={mappingLoadKey(projectId, mappingName)}
+              afterDismiss={() => document.getElementById(MAPPING_INPUT_ID)?.focus()}
+            />
+          )}
         </div>
         <div className="flex flex-col gap-1">
           <label className="tcip-label" htmlFor="plant-registry-name">

@@ -112,10 +112,11 @@ export const REGISTERED_MODELS = produced.registered_models as unknown as Regist
  *  the curves export's refusals once the
  *  delivery's line failed, the count project's listing refused once a delivery record was
  *  damaged, the phenology project's measurement refused by the delivery gate, shown unvalidated
- *  and refused for naming no stored mapping, the refusal of a mapping built while its line failed, of a rebuild of a
+ *  and refused for naming no stored mapping, of a rebuild of a
  *  mapping a delivery cites, of a measurement of a trait confirmed with no phenology
  *  operationalization, and of a per-plant count export over an unassessed bucket; the phenology
- *  project's mapping names, its mapping loaded and its mappings built (placing every plant,
+ *  project's mapping names, each of those mappings loaded by its name, the refusal of a mapping
+ *  built while its line failed and its mappings built (placing every plant,
  *  placing one, at a stated radius, over a date whose photographs carry no position, and beside
  *  a capture folder holding no image, which it left out); the
  *  measurements of three plants, each alone, whose milestone rows read incomplete, unobserved and
@@ -138,7 +139,7 @@ export const RESULTS_ANSWERS = produced.answers as unknown as {
   operationalization_refusal: Refusal<OperationalizationRefusal>;
   count_delivery_refusal: Refusal<DeliveryRefusal>;
   mapping_names: MappingNames;
-  mapping_loaded: ServedMapping;
+  mapping_loaded: Record<string, ServedMapping>;
   mapping_built: ServedBuild;
   mapping_one_placed: ServedBuild;
   mapping_stated: ServedBuild;
