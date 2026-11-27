@@ -401,28 +401,6 @@ describe("SetupTab plant-mapping build: match radius", () => {
     ]);
   });
 
-  it("shows a failed load of a stored mapping in place under the Mapping input", async () => {
-    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
-    // What fetch rejects with when the backend cannot be reached.
-    vi.spyOn(resultsApi, "loadPlantMapping").mockRejectedValue(new TypeError("Failed to fetch"));
-    const [name] = RESULTS_ANSWERS.mapping_names.names;
-    const sentence = "Could not load the mapping: Failed to fetch";
-
-    render(<SetupTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: name } });
-
-    const line = await within(mappingPanel()).findByTestId("entry-in-place");
-    expect(line).toHaveTextContent(sentence);
-    expect(entriesSaying(sentence)).toEqual([
-      expect.objectContaining({
-        kind: "failure",
-        level: "error",
-        context: { project: TEST_PROJECT.id, target: name },
-      }),
-    ]);
-  });
-
   describe("a failed load of a stored mapping", () => {
     // What fetch rejects with when the backend cannot be reached.
     const unreachable = () => new TypeError("Failed to fetch");
@@ -442,20 +420,21 @@ describe("SetupTab plant-mapping build: match radius", () => {
     const select = (name: string) =>
       fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: name } });
 
-    it("ends its line once the load of another mapping lands", async () => {
-      vi.spyOn(resultsApi, "loadPlantMapping")
-        .mockRejectedValueOnce(unreachable())
-        .mockImplementation(loadedByName);
+    it("shows in place under the Mapping input as one failure of its mapping", async () => {
+      vi.spyOn(resultsApi, "loadPlantMapping").mockRejectedValue(unreachable());
 
       await renderWithArea();
       select(FIRST_MAPPING);
-      await within(mappingPanel()).findByTestId("entry-in-place");
-      select(SECOND_MAPPING);
 
-      await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(2));
-      await waitFor(() =>
-        expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull(),
-      );
+      const line = await within(mappingPanel()).findByTestId("entry-in-place");
+      expect(line).toHaveTextContent(sentence);
+      expect(entriesSaying(sentence)).toEqual([
+        expect.objectContaining({
+          kind: "failure",
+          level: "error",
+          context: { project: TEST_PROJECT.id, target: FIRST_MAPPING },
+        }),
+      ]);
     });
 
     it("is listed saying nothing of being resolved once another mapping loads, and resolved once its own mapping does", async () => {
@@ -527,6 +506,24 @@ describe("SetupTab plant-mapping build: match radius", () => {
 
       await waitFor(() => expect(resultsApi.loadPlantMapping).toHaveBeenCalledTimes(3));
       expect(within(mappingPanel()).getByTestId("entry-in-place")).toHaveTextContent(sentence);
+    });
+
+    it("stands in place while the listing of mapping names is refused", async () => {
+      vi.spyOn(resultsApi, "loadPlantMapping").mockRejectedValue(unreachable());
+      vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue(RESULTS_ANSWERS.mapping_built);
+
+      await renderWithArea();
+      select(FIRST_MAPPING);
+      await within(mappingPanel()).findByTestId("entry-in-place");
+      vi.mocked(resultsApi.listPlantMappings).mockRejectedValue(new Error("mappings refused"));
+      fireEvent.change(screen.getByLabelText("Plant registry"), {
+        target: { value: "valley-plants" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Build" }));
+
+      expect(await within(mappingPanel()).findByText(/mappings refused/)).toBeInTheDocument();
+      expect(within(mappingPanel()).getByTestId("entry-in-place")).toHaveTextContent(sentence);
+      expect(areaEntriesSaying(sentence)).toHaveLength(1);
     });
 
     it("leaves no line under a name typed that is no stored mapping", async () => {

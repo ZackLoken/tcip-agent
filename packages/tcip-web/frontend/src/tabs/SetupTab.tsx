@@ -167,13 +167,11 @@ function PlantMappingPanel({
               ))}
             </datalist>
           )}
-          {mappings?.names.includes(mappingName) && (
-            <NotificationItem
-              placement="in place"
-              entryKey={mappingLoadKey(projectId, mappingName)}
-              afterDismiss={() => document.getElementById(MAPPING_INPUT_ID)?.focus()}
-            />
-          )}
+          <NotificationItem
+            placement="in place"
+            entryKey={mappingLoadKey(projectId, mappingName)}
+            afterDismiss={() => document.getElementById(MAPPING_INPUT_ID)?.focus()}
+          />
         </div>
         <div className="flex flex-col gap-1">
           <label className="tcip-label" htmlFor="plant-registry-name">
