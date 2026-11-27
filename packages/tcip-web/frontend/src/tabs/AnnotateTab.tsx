@@ -1066,8 +1066,10 @@ export function AnnotateTab() {
       }
       const failed = (sentence: string) =>
         tell("failure", "error", sentence, currentImageName, canvasKey("document", imgPath));
+      const neverLoaded = `Could not load this image's labels: ${messageOf(answer.error)}. Saving is off.`;
       if (reload) {
-        failed(`Reload failed: ${messageOf(answer.error)}`);
+        const held = loadedFor(useStore.getState().canvas, imgPath) !== null;
+        failed(held ? `Reload failed: ${messageOf(answer.error)}` : neverLoaded);
         return;
       }
       // A blank canvas holding no document: a transient load failure never overwrites the labels.
@@ -1075,7 +1077,7 @@ export function AnnotateTab() {
       cameToImage();
       // Reload rereads a loaded document, and the canvas now holds none.
       useStore.getState().releaseNotification(canvasKey("reload", imgPath));
-      failed(`Could not load this image's labels: ${messageOf(answer.error)}. Saving is off.`);
+      failed(neverLoaded);
     })();
     return () => {
       canceled = true;
