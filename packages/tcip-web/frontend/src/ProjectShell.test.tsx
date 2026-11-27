@@ -303,7 +303,7 @@ afterEach(cleanup);
 describe("ProjectShell agent activity", () => {
   const { labels_written: written, labels_written_second: second } = PANEL_EVENTS;
 
-  it("lists two live saves of different images as one notice of the agent's activity, counted twice", async () => {
+  it("lists two live saves of different images as one notice of the agent's activity, counted twice, and loads again for the one naming the image in view alone", async () => {
     await mountOnCapture();
 
     deliver(written);
@@ -317,6 +317,9 @@ describe("ProjectShell agent activity", () => {
         context: { project: written.project_id, target: "Annotate" },
       }),
     ]);
+    await settle();
+    expect(page.load).toHaveBeenCalledTimes(2);
+    expect(page.load).toHaveBeenLastCalledWith(RAW_SELECTION.images[0].path);
   });
 
   it("names the client a save declared, without its version", async () => {
@@ -508,6 +511,29 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     expect(warnings()).toEqual([]);
     expect(imagePosition()).toHaveValue("2");
     expect(screen.queryByText("1 box")).toBeNull();
+    expect(unsaved()).toBeNull();
+  });
+
+  it("does nothing for a save of the image just left delivered while the next image loads, which then shows", async () => {
+    expect(written.event.image_path).toBe(first.path);
+    await mountOnCapture();
+    addBox();
+    const answerNextLoad = holdNextLoad();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await settle();
+    expect(page.save).toHaveBeenCalledTimes(1);
+    deliver(written);
+    await settle();
+
+    expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(1);
+    expect(warnings()).toEqual([]);
+    answerNextLoad(loadOf(next.path));
+    await settle();
+
+    expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(1);
+    expect(page.useStore.getState().canvas.loaded?.image_path).toBe(next.path);
+    expect(imagePosition()).toHaveValue("2");
     expect(unsaved()).toBeNull();
   });
 });
