@@ -360,7 +360,7 @@ function DatasetIdentityPanel({
   async function register(confirmedCrop: string | null) {
     setSubmitting(true);
     setRepaired(null);
-    useStore.getState().releaseNotification(registerKey);
+    useStore.getState().setAsideNotification(registerKey);
     try {
       const answer = await api.dataset.register({
         dataset_root: datasetRoot,
@@ -369,11 +369,14 @@ function DatasetIdentityPanel({
         confirmed_crop: confirmedCrop,
       });
       setRepaired(answer.repaired);
+      useStore.getState().resolveNotification(registerKey);
     } catch (e) {
       // A registration whose audit line was lost still committed, so its message is no failure.
       const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
-      if (gap) tell("notice", "warning", gap.message, datasetRoot);
-      else
+      if (gap) {
+        useStore.getState().resolveNotification(registerKey);
+        tell("notice", "warning", gap.message, datasetRoot);
+      } else {
         tell(
           "failure",
           "error",
@@ -381,6 +384,7 @@ function DatasetIdentityPanel({
           datasetRoot,
           registerKey,
         );
+      }
     } finally {
       setSubmitting(false);
       setConfirming(false);

@@ -364,6 +364,42 @@ describe("a failure", () => {
     expect(within(ridge).queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
+  it("set aside for an attempt and taken up by a raise on another key says nothing of being resolved when that attempt lands", () => {
+    renderOpenHost();
+    raiseOn("launch:valley:first-root", "Could not launch the date.");
+    act(() => useStore.getState().setAsideNotification("launch:valley:first-root"));
+    raiseOn("launch:valley:second-root", "Could not launch the date.");
+
+    act(() => useStore.getState().resolveNotification("launch:valley:first-root"));
+
+    const entry = onlyAreaEntry();
+    expect(metaLine(entry)).toMatch(/^Error, failure, .+, 2 times$/);
+    expect(within(entry).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("a notice set aside for an attempt says nothing of being resolved when that attempt lands", () => {
+    renderOpenHost();
+    act(() =>
+      useStore.getState().raiseNotification({
+        kind: "notice",
+        level: "warning",
+        text: { sentence: "Exported, but the export was not recorded." },
+        context: { project: "valley" },
+        key: "export:valley",
+      }),
+    );
+    act(() => useStore.getState().setAsideNotification("export:valley"));
+
+    act(() => useStore.getState().resolveNotification("export:valley"));
+
+    const entry = onlyAreaEntry();
+    expect(
+      within(entry).getByText("Exported, but the export was not recorded."),
+    ).toBeInTheDocument();
+    expect(metaLine(entry)).toMatch(/^Warning, notice, /);
+    expect(metaLine(entry)).not.toMatch(/resolved/);
+  });
+
   it("resolved and raised again with the same text is one entry counted twice, no longer saying resolved", () => {
     renderOpenHost();
     raiseOn("open:valley", "Could not open Valley farm.");

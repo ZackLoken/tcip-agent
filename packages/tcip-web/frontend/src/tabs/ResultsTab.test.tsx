@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { reportedExport, resultsApi } from "@/api/inference";
@@ -15,6 +15,7 @@ import {
   SHOWN_UNVALIDATED,
   UNVALIDATED,
 } from "@/api/types.generated";
+import { NotificationsPane } from "@/components/Notifications";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 import { mockDatasetTree } from "@/test/datasetTree";
@@ -28,7 +29,7 @@ import {
   disclosureOf,
   RESULTS_ANSWERS,
 } from "@/test/deliveryRecords";
-import { entriesSaying } from "@/test/notifications";
+import { areaEntrySaying, entriesSaying, metaLine } from "@/test/notifications";
 import { fetchAnswers, thrown } from "@/test/refusals";
 import {
   DATASET_TREES,
@@ -351,6 +352,60 @@ describe("ResultsTab evidence gate", () => {
       expect(within(phenologyPanel()).queryByTestId("entry-in-place")).toBeNull(),
     );
     expect(resultsApi.downloadCsv).toHaveBeenCalledTimes(2);
+  });
+
+  describe("an export that lands after an earlier one", () => {
+    const LANDED = {
+      blob: new Blob([CURVES_EXPORT.file]),
+      exported: reportedExport<SavedExport>(new Headers(CURVES_EXPORT.headers)),
+    };
+
+    let revoked: MockInstance<typeof URL.revokeObjectURL>;
+
+    beforeEach(() => {
+      mockDatasetTree();
+      vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
+      vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-url");
+      revoked = vi.spyOn(URL, "revokeObjectURL").mockReturnValue(undefined);
+    });
+
+    /** Compute beside the notifications area, press the export button `first` names, wait for
+     *  what that export told in place, then export the curves and wait until their file is
+     *  handed over. */
+    async function exportCurvesAfter(first: RegExp): Promise<void> {
+      render(<NotificationsPane />);
+      await renderAndCompute();
+      await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: first }));
+      await within(phenologyPanel()).findByTestId("entry-in-place");
+      fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
+      await waitFor(() => expect(revoked).toHaveBeenCalled());
+    }
+
+    it("lists a failed milestones export saying nothing of being resolved once a curves export lands", async () => {
+      // What fetch rejects with when the backend cannot be reached.
+      vi.spyOn(resultsApi, "downloadCsv")
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValue(LANDED);
+
+      await exportCurvesAfter(/milestones csv/i);
+
+      const failed = areaEntrySaying("CSV export failed: Failed to fetch");
+      expect(metaLine(failed)).toMatch(/^Error, failure, /);
+      expect(metaLine(failed)).not.toMatch(/resolved/);
+    });
+
+    it("lists the notice of an export committed without its audit line saying nothing of being resolved", async () => {
+      const gap = RESULTS_ANSWERS.export_audit_gap.body.detail;
+      vi.spyOn(resultsApi, "downloadCsv")
+        .mockRejectedValueOnce(await thrown(RESULTS_ANSWERS.export_audit_gap))
+        .mockResolvedValue(LANDED);
+
+      await exportCurvesAfter(/curves csv/i);
+
+      expect(metaLine(areaEntrySaying(gap.message))).toMatch(/^Warning, notice, /);
+      expect(metaLine(areaEntrySaying(gap.message))).not.toMatch(/resolved/);
+    });
   });
 
   it("shows the row count only after a compute", async () => {

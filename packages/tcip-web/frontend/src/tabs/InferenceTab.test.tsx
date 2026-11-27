@@ -15,7 +15,7 @@ import {
 } from "@/test/deliveryRecords";
 import { INFERENCE_ANSWERS } from "@/test/inference";
 import { renderBesideListings } from "@/test/jobListings";
-import { entriesSaying } from "@/test/notifications";
+import { areaEntrySaying, entriesSaying, metaLine } from "@/test/notifications";
 import { thrown } from "@/test/refusals";
 import {
   DATASET_TREES,
@@ -369,6 +369,32 @@ describe("InferenceTab job table", () => {
     fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
 
     await waitFor(() => expect(screen.queryByTestId("entry-in-place")).toBeNull());
+  });
+
+  it("lists a failed job cancel as resolved once the next cancel of that job lands", async () => {
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue(RUNNING);
+    // What fetch rejects with when the backend cannot be reached.
+    const cancel = vi
+      .spyOn(inferenceApi, "cancel")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(CANCEL);
+    const sentence = "Cancel failed: Failed to fetch";
+
+    renderBesideListings(<InferenceTab />);
+    render(<NotificationsPane />);
+    expect(await screen.findByText(HELD)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
+    await screen.findByTestId("entry-in-place");
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${HELD}` }));
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(metaLine(areaEntrySaying(sentence))).toMatch(
+        new RegExp(`^Error, failure, ${HELD}, .+, resolved$`),
+      ),
+    );
   });
 
   it("shows canceling until the poll reports the job ended", async () => {
@@ -764,6 +790,25 @@ describe("InferenceTab bucket refusals", () => {
     expect(await screen.findByText(HELD)).toBeInTheDocument();
     expect(screen.queryByTestId("entry-in-place")).toBeNull();
     expect(entriesSaying(sentence)).toHaveLength(1);
+  });
+
+  it("lists a failed launch as resolved once its date launches", async () => {
+    const missing = INFERENCE_ANSWERS.missing_checkpoint;
+    vi.spyOn(inferenceApi, "launch")
+      .mockRejectedValueOnce(await thrown(missing))
+      .mockResolvedValue(LAUNCHED);
+    const sentence = `Inference launch failed: ${missing.body.detail}`;
+    render(<NotificationsPane />);
+    await launchOneRefused();
+    await lineOf(DS_DATE);
+    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(await screen.findByText(HELD)).toBeInTheDocument();
+    expect(metaLine(areaEntrySaying(sentence))).toMatch(
+      new RegExp(`^Error, failure, ${DS_DATE}, .+, resolved$`),
+    );
   });
 
   it("clears a refusal in place on a model change, its entry kept on no key", async () => {

@@ -24,7 +24,7 @@ import { BAND_ANSWERS } from "@/test/bands";
 import { measureWindow, PANE_FOCUS } from "@/test/dock";
 import { INFERENCE_ANSWERS } from "@/test/inference";
 import { LABEL_ANSWERS } from "@/test/labels";
-import { announcements } from "@/test/notifications";
+import { announcements, areaEntrySaying, metaLine } from "@/test/notifications";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
@@ -458,6 +458,27 @@ describe("App refused open", () => {
     await PANE_FOCUS.heading();
     expect(area().getByRole("listitem")).toHaveTextContent(/backend refused.*, 2 times/);
     expect(useStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("lists a refused open as resolved once its Retry opens the project", async () => {
+    const open = vi.mocked(api.projects.open);
+    open.mockRejectedValueOnce(new Error("backend refused")).mockResolvedValue(openedAs(EMPTY));
+    render(<App />);
+    fireEvent.click(await screen.findByText(EMPTY.record.display_name));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(cardLine()).toHaveTextContent("backend refused"));
+    toggleArea();
+    await PANE_FOCUS.heading();
+    expect(metaLine(areaEntrySaying("backend refused"))).not.toMatch(/resolved/);
+
+    fireEvent.click(within(cardLine()!).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(useStore.getState().openProject?.id).toBe(EMPTY.record.id));
+    await waitFor(() =>
+      expect(metaLine(areaEntrySaying("backend refused"))).toMatch(
+        new RegExp(`^Error, failure, ${EMPTY.record.display_name}, .+, resolved$`),
+      ),
+    );
   });
 
   it("leaves the card's line and the entry's Retry once the same card is chosen again, the entry staying listed", async () => {
