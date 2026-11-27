@@ -8,11 +8,27 @@ export function entriesSaying(text: string): NotificationEntry[] {
   return useStore.getState().notifications.filter((e) => textOf(e) === text);
 }
 
+/** The rendered notifications area, queried within. */
+export const notificationsArea = () =>
+  within(screen.getByRole("region", { name: "Notifications" }));
+
+/** Every entry the rendered notifications area lists, newest first. */
+export const areaEntries = (): HTMLElement[] => notificationsArea().queryAllByRole("listitem");
+
+/** The one entry the rendered notifications area lists; throws when it lists another number. */
+export function onlyAreaEntry(): HTMLElement {
+  const items = areaEntries();
+  if (items.length !== 1) throw new Error(`the area lists ${items.length} entries, not one`);
+  return items[0];
+}
+
+/** Every entry the rendered notifications area lists whose text holds `text`, newest first. */
+export const areaEntriesSaying = (text: string): HTMLElement[] =>
+  areaEntries().filter((item) => item.textContent?.includes(text));
+
 /** The one entry the rendered notifications area lists whose text holds `text`. */
 export function areaEntrySaying(text: string): HTMLElement {
-  const items = within(screen.getByRole("region", { name: "Notifications" }))
-    .queryAllByRole("listitem")
-    .filter((item) => item.textContent?.includes(text));
+  const items = areaEntriesSaying(text);
   if (items.length !== 1) throw new Error(`the area lists ${items.length} entries saying ${text}`);
   return items[0];
 }

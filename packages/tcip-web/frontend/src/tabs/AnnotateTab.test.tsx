@@ -44,7 +44,7 @@ import {
 import { BAND_ANSWERS } from "@/test/bands";
 import { dockWithNotificationsOpen, measureWindow, PANE_FOCUS } from "@/test/dock";
 import { LABEL_ANSWERS, servedAnnotation, UNSTORED } from "@/test/labels";
-import { areaEntrySaying, metaLine } from "@/test/notifications";
+import { areaEntrySaying, metaLine, onlyAreaEntry } from "@/test/notifications";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
 import { thrown } from "@/test/refusals";
@@ -712,12 +712,9 @@ describe("AnnotateTab save/load race", () => {
     expect(drawnBoxes()).toHaveLength(1);
     expect(onCanvas()).toHaveLength(1);
     expect(onCanvas()[0]).toHaveTextContent(choice);
-    const entries = within(screen.getByRole("region", { name: "Notifications" })).getAllByRole(
-      "listitem",
-    );
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toHaveTextContent(choice);
-    expect(entries[0]).toHaveTextContent(`failure, ${IMG1_NAME}`);
+    const entry = onlyAreaEntry();
+    expect(entry).toHaveTextContent(choice);
+    expect(metaLine(entry)).toContain(`Error, failure, ${IMG1_NAME}, `);
     // The area shows no entry's project.
     expect(listed().map((entry) => entry.context.project)).toEqual([TEST_PROJECT.id]);
   });
@@ -1316,10 +1313,6 @@ describe("AnnotateTab entries on the canvas", () => {
     await flush();
   }
 
-  /** The one entry the notifications area lists. */
-  const inArea = () =>
-    within(screen.getByRole("region", { name: "Notifications" })).getByRole("listitem");
-
   it("names why the labels failed to load", async () => {
     loadSpy.mockRejectedValueOnce(await thrown(unreadable));
 
@@ -1336,7 +1329,7 @@ describe("AnnotateTab entries on the canvas", () => {
 
     const [entry] = onCanvas();
     expect(entry).toHaveTextContent(CONFLICT_SENTENCE);
-    const area = inArea();
+    const area = onlyAreaEntry();
     expect(area).toHaveTextContent(CONFLICT_SENTENCE);
     expect(within(area).queryByRole("button", { name: "Reload" })).toBeNull();
 
@@ -1345,7 +1338,7 @@ describe("AnnotateTab entries on the canvas", () => {
     await flush();
     expect(loadSpy.mock.calls[1][0]).toBe(IMG1);
     expect(onCanvas()).toHaveLength(0);
-    expect(inArea()).toHaveTextContent(CONFLICT_SENTENCE);
+    expect(onlyAreaEntry()).toHaveTextContent(CONFLICT_SENTENCE);
   });
 
   it("another save failure stands on the canvas offering no Reload", async () => {
@@ -1365,7 +1358,7 @@ describe("AnnotateTab entries on the canvas", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
 
     expect(onCanvas()).toHaveLength(0);
-    expect(inArea()).toHaveTextContent("Could not save annotations");
+    expect(onlyAreaEntry()).toHaveTextContent("Could not save annotations");
   });
 
   it("reads a failed image once, stepping back to it before the next image lands", async () => {
