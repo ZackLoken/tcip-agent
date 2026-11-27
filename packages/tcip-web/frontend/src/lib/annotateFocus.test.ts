@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api/client";
 import type { AnnotateFocus } from "@/api/types.generated";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
+import { datasetKey, saveDatasetUi } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import { PANEL_EVENTS } from "@/test/panelEvents";
 import {
@@ -118,6 +119,24 @@ describe("applyAnnotateFocus", () => {
     expect(g.dataset?.current_image_index).toBe(3);
     expect(g.mode).toBe("polygon");
     expect(g.active_tab).toBe("annotate");
+  });
+
+  it("posts the focus's image when the selection it needs restores that image from the browser", async () => {
+    seedDataset(selection({ subject: CURRENT }));
+    const answer = FOCUSED_SELECT_ANSWER;
+    expect(answer.selection.current_image_index).toBe(0);
+    const image = 3;
+    saveDatasetUi(datasetKey(PROJECT, answer.selection), { index: image });
+    vi.mocked(api.dataset.select).mockResolvedValue(answer);
+
+    try {
+      await applyAnnotateFocus(focus({ image_index: image }), () => true);
+    } finally {
+      sessionStorage.clear();
+    }
+
+    expect(useStore.getState().gui.dataset?.current_image_index).toBe(image);
+    expect(api.dataset.nav).toHaveBeenLastCalledWith(image);
   });
 
   it("selects the named proposal bucket and focuses the named proposal", async () => {

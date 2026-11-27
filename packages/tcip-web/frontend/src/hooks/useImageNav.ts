@@ -2,29 +2,17 @@
 
 import { useCallback, useMemo } from "react";
 
-import { api } from "@/api/client";
 import { filteredIndices, filterInEffect, rankedNames } from "@/lib/imageFilter";
 import { useStore } from "@/store";
 
-// Debounced: only the settled position persists; a dropped sync leaves the snapshot one image stale.
-let navSyncTimer: ReturnType<typeof setTimeout> | null = null;
-function syncNavIndex(index: number): void {
-  if (navSyncTimer !== null) clearTimeout(navSyncTimer);
-  navSyncTimer = setTimeout(() => {
-    navSyncTimer = null;
-    api.dataset.nav(index).catch(() => {});
-  }, 400);
-}
-
-/** Put the selection's image at `index` in view and echo it to the backend; nothing when no
- *  selection is held or that image is already in view. Reads the freshest selection, so a rapid
- *  sequence of moves never lays a stale render's selection over another field of it. */
+/** Put the selection's image at `index` in view; nothing when no selection is held or that image
+ *  is already in view. Reads the freshest selection, so a rapid sequence of moves never lays a
+ *  stale render's selection over another field of it. */
 export function moveToImage(index: number): void {
   const { gui, patchGui } = useStore.getState();
   const held = gui.dataset;
   if (held === null || index === held.current_image_index) return;
   patchGui({ dataset: { ...held, current_image_index: index } });
-  syncNavIndex(index);
 }
 
 /** The image index `delta` steps from `current` along `indices`, the kept images' indices in the

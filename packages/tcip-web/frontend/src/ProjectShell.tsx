@@ -19,6 +19,7 @@ import { useJobListings } from "@/hooks/useJobListings";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { takeBanner } from "@/lib/banners";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
+import { startImageEcho } from "@/lib/imageEcho";
 import { adoptLoad } from "@/lib/registrySave";
 import { endRecordedSession } from "@/lib/sessionLifecycle";
 import { TAB_LABELS } from "@/lib/tabLabels";
@@ -93,6 +94,9 @@ export function ProjectShell() {
 
   // Every change to the active tab is sent to the backend's GUI state, debounced.
   useActiveTabSync();
+
+  // Every move of the image in view is told to the backend once it settles.
+  useEffect(() => startImageEcho(), []);
 
   useJobListings();
 

@@ -19,7 +19,7 @@ import type { DatasetSelection, GuiState, Mode, TabName, ViewState } from "@/sto
 
 /** True when two selections name a different (dataset_root, date, subject): a different dataset
  *  whose own position the browser adopts. */
-function datasetIdentityChanged(a: DatasetSelection, b: DatasetSelection): boolean {
+export function datasetIdentityChanged(a: DatasetSelection, b: DatasetSelection): boolean {
   return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
 }
 

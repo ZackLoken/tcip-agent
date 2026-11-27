@@ -114,7 +114,7 @@ export const api = {
       postJson<RegisteredDataset>(ROUTES.postDatasetRegister, body),
 
     // Persist the current image position so the agent (view_gui_state) sees the last
-    // image the human looked at. Debounced by the caller; fire-and-forget on the FE side.
+    // image the human looked at. Posted by the image echo alone; fire-and-forget on the FE side.
     nav: (current_image_index: number) =>
       postJson<null>(ROUTES.postDatasetNav, { current_image_index } satisfies NavRequest),
   },
