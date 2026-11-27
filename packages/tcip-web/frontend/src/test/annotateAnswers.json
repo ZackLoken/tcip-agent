@@ -369,6 +369,244 @@
     "base_mtime": "<base_mtime n7>",
     "name": "img1.jpg"
   },
+  "review_after_paired": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+    "img_width": 1000,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": "user:grower",
+        "accepted_at": "2000-01-01T00:00:05+00:00",
+        "index": 0,
+        "authorship": "tool_accepted"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [300.0, 300.0, 340.0, 340.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": "user:grower",
+        "accepted_at": "2000-01-01T00:00:08+00:00",
+        "index": 1,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [500.0, 50.0, 540.0, 90.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 2,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": null,
+        "rings": [
+          [
+            [800.0, 600.0],
+            [900.0, 600.0],
+            [900.0, 700.0]
+          ]
+        ],
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 3,
+        "authorship": "person"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [
+      {
+        "id": "<id n8>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:07+00:00",
+        "resolution": null,
+        "covered_by": [0]
+      }
+    ],
+    "base_mtime": "<base_mtime n9>",
+    "name": "img1.jpg"
+  },
+  "review_proposals_after_paired": {
+    "operating_point": {
+      "kind": "conf_refused",
+      "reason": "no assessment answers for bucket '<review bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+    },
+    "proposals": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "paired": 0,
+        "decision": "accepted",
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [600.0, 600.0, 640.0, 640.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [700.0, 100.0, 740.0, 140.0],
+        "rings": null,
+        "point": null,
+        "score": 0.2,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 2,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [300.0, 300.0, 340.0, 340.0],
+        "rings": null,
+        "point": null,
+        "score": 0.8,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 3,
+        "paired": 1,
+        "decision": "accepted",
+        "authorship": "tool"
+      }
+    ]
+  },
+  "review_proposals_after_unpaired": {
+    "operating_point": {
+      "kind": "conf_refused",
+      "reason": "no assessment answers for bucket '<review bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+    },
+    "proposals": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "paired": 0,
+        "decision": "accepted",
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [600.0, 600.0, 640.0, 640.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "paired": 4,
+        "decision": "accepted",
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [700.0, 100.0, 740.0, 140.0],
+        "rings": null,
+        "point": null,
+        "score": 0.2,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 2,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [300.0, 300.0, 340.0, 340.0],
+        "rings": null,
+        "point": null,
+        "score": 0.8,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 3,
+        "paired": 1,
+        "decision": "accepted",
+        "authorship": "tool"
+      }
+    ]
+  },
   "shaped_proposals": {
     "operating_point": {
       "kind": "conf_refused",
@@ -459,7 +697,7 @@
         "covered_by": [0]
       },
       {
-        "id": "<id n9>",
+        "id": "<id n10>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:15+00:00",
@@ -467,7 +705,7 @@
         "covered_by": [0]
       }
     ],
-    "base_mtime": "<base_mtime n10>",
+    "base_mtime": "<base_mtime n11>",
     "name": "img1.jpg"
   },
   "flags_mixed": {
@@ -507,7 +745,7 @@
         "covered_by": [0]
       },
       {
-        "id": "<id n9>",
+        "id": "<id n10>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:15+00:00",
@@ -520,7 +758,7 @@
         "covered_by": [0]
       },
       {
-        "id": "<id n11>",
+        "id": "<id n12>",
         "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
         "by": "user:first",
         "at": "2000-01-01T00:00:17+00:00",
@@ -541,7 +779,7 @@
         "covered_by": [0]
       }
     ],
-    "base_mtime": "<base_mtime n12>",
+    "base_mtime": "<base_mtime n13>",
     "name": "img1.jpg"
   },
   "saves": {
@@ -569,7 +807,7 @@
         ],
         "completion": { "subject_a": "partial" },
         "flags": [],
-        "base_mtime": "<base_mtime n13>",
+        "base_mtime": "<base_mtime n14>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -611,7 +849,7 @@
         ],
         "completion": { "tip": "partial" },
         "flags": [],
-        "base_mtime": "<base_mtime n14>",
+        "base_mtime": "<base_mtime n15>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -624,7 +862,7 @@
         "annotations": [],
         "completion": { "subject_a": "negative" },
         "flags": [],
-        "base_mtime": "<base_mtime n15>",
+        "base_mtime": "<base_mtime n16>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -796,7 +1034,7 @@
             "covered_by": [0]
           }
         ],
-        "base_mtime": "<base_mtime n16>",
+        "base_mtime": "<base_mtime n9>",
         "name": "img1.jpg"
       },
       "accepted": { "3": 1 }
@@ -1169,7 +1407,7 @@
             "covered_by": [0]
           },
           {
-            "id": "<id n9>",
+            "id": "<id n10>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }
@@ -1180,7 +1418,7 @@
             "covered_by": [0]
           }
         ],
-        "base_mtime": "<base_mtime n10>",
+        "base_mtime": "<base_mtime n11>",
         "name": "img1.jpg"
       },
       "accepted": {}
@@ -1210,7 +1448,7 @@
             "covered_by": []
           },
           {
-            "id": "<id n9>",
+            "id": "<id n10>",
             "request": {
               "text": "open?",
               "target": { "point": [30.0, 30.0], "subject": "subject_a" }

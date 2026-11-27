@@ -37,10 +37,12 @@ import { SESSION_ANSWERS } from "@/test/sessions";
  *  - the review: four proposals staged, the first accepted, and two boxes of a person's and a
  *    polygon added (`review_saved`), that document loaded (`review`) and its proposals served
  *    (`review_proposals`); the first box flagged (`review_flagged`); then the proposal a box pairs
- *    with accepted (`accept_paired`), the unpaired proposal accepted (`accept_unpaired`), and a
- *    second bucket's box and polygon proposals served (`shaped_proposals`) and its polygon
- *    accepted (`accept_polygon`); the unpaired proposal accepted again by a save drawing a box
- *    over it first (`accept_drawn`);
+ *    with accepted (`accept_paired`), that document loaded (`review_after_paired`) and the bucket's
+ *    proposals served (`review_proposals_after_paired`), the unpaired proposal accepted
+ *    (`accept_unpaired`) and the bucket's proposals served again
+ *    (`review_proposals_after_unpaired`), and a second bucket's box and polygon proposals served
+ *    (`shaped_proposals`) and its polygon accepted (`accept_polygon`); the unpaired proposal
+ *    accepted again by a save drawing a box over it first (`accept_drawn`);
  *  - over three photographs of a capture of their own, a COCO document imported carrying the
  *    tool's and unattributed records: a document whose third box the import gave a tool and whose
  *    other two a person saved (`tool_two`), its save confirming that box (`confirmed`), and a
@@ -72,6 +74,9 @@ export const ANNOTATE_ANSWERS = produced as unknown as {
   single_proposals: ServedProposals;
   review: LabelDocumentAnswer;
   review_proposals: ServedProposals;
+  review_after_paired: LabelDocumentAnswer;
+  review_proposals_after_paired: ServedProposals;
+  review_proposals_after_unpaired: ServedProposals;
   review_flagged: LabelDocumentAnswer;
   shaped_proposals: ServedProposals;
   tool_two: LabelDocumentAnswer;
@@ -172,6 +177,7 @@ export const LANDED = Object.fromEntries(
 /** The produced loaded documents, as the client loads each. */
 export const LOADED = {
   review: loadedLabels(ANNOTATE_ANSWERS.review),
+  review_after_paired: loadedLabels(ANNOTATE_ANSWERS.review_after_paired),
   review_flagged: loadedLabels(ANNOTATE_ANSWERS.review_flagged),
   tool_two: loadedLabels(ANNOTATE_ANSWERS.tool_two),
   authored: loadedLabels(ANNOTATE_ANSWERS.authored),
