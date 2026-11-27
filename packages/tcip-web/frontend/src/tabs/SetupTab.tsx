@@ -104,7 +104,7 @@ function PlantMappingPanel({
     setBuilding(true);
     setBuildMsg(null);
     setMapping(null);
-    useStore.getState().setAsideNotification(buildKey);
+    useStore.getState().releaseNotification(buildKey);
     try {
       const built = await resultsApi.buildPlantMapping({
         name: mappingName,
@@ -120,7 +120,6 @@ function PlantMappingPanel({
       });
       setMapping(built);
       setBuildMsg(`Built ${mappingName}.`);
-      useStore.getState().resolveNotification(buildKey);
       refreshMappingNames();
     } catch (e) {
       // A build whose receipt could not be written committed, so its message is no failure.

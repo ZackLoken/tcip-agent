@@ -386,9 +386,12 @@ describe("SetupTab plant-mapping build: match radius", () => {
     await waitFor(() => expect(within(mappingPanel()).queryByTestId("entry-in-place")).toBeNull());
   });
 
-  /** Render the tab beside the notifications area and fill and press Build once the listing of
-   *  mapping names is read. */
-  async function buildBesideArea() {
+  it("lists a refused build of one mapping saying nothing of being resolved once a build of another lands", async () => {
+    const cited = RESULTS_ANSWERS.mapping_cited;
+    vi.spyOn(resultsApi, "buildPlantMapping")
+      .mockRejectedValueOnce(await thrown(cited))
+      .mockResolvedValue(BUILT);
+    const sentence = `Could not build the mapping: ${cited.body.detail}`;
     render(
       <>
         <SetupTab />
@@ -396,53 +399,20 @@ describe("SetupTab plant-mapping build: match radius", () => {
       </>,
     );
     await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fillAndBuild();
-  }
-
-  it("lists a refused build as resolved once the next build lands", async () => {
-    const cited = RESULTS_ANSWERS.mapping_cited;
-    vi.spyOn(resultsApi, "buildPlantMapping")
-      .mockRejectedValueOnce(await thrown(cited))
-      .mockResolvedValue(BUILT);
-    const sentence = `Could not build the mapping: ${cited.body.detail}`;
-
-    await buildBesideArea();
+    // The refusal names the mapping its build was of.
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: "valley" } });
+    fireEvent.change(screen.getByLabelText("Plant registry"), {
+      target: { value: "valley-plants" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
     await within(mappingPanel()).findByTestId("entry-in-place");
+
+    fireEvent.change(screen.getByLabelText("Mapping"), { target: { value: BUILT.name } });
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+
+    expect(await screen.findByText(`Built ${BUILT.name}.`)).toBeInTheDocument();
+    expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, valley, /);
     expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
-
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
-
-    expect(await screen.findByText("Built valley-2026.")).toBeInTheDocument();
-    expect(metaLine(areaEntrySaying(sentence))).toMatch(
-      /^Error, failure, valley-2026, .+, resolved$/,
-    );
-  });
-
-  it("marks only the last of two refused builds resolved once a third build lands", async () => {
-    const cited = RESULTS_ANSWERS.mapping_cited;
-    vi.spyOn(resultsApi, "buildPlantMapping")
-      .mockRejectedValueOnce(await thrown(cited))
-      // What fetch rejects with when the backend cannot be reached.
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValue(BUILT);
-    const first = `Could not build the mapping: ${cited.body.detail}`;
-    const second = "Could not build the mapping: Failed to fetch";
-
-    await buildBesideArea();
-    await waitFor(() =>
-      expect(within(mappingPanel()).getByTestId("entry-in-place")).toHaveTextContent(first),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
-    await waitFor(() =>
-      expect(within(mappingPanel()).getByTestId("entry-in-place")).toHaveTextContent(second),
-    );
-    expect(metaLine(areaEntrySaying(first))).not.toMatch(/resolved/);
-
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
-
-    expect(await screen.findByText("Built valley-2026.")).toBeInTheDocument();
-    expect(metaLine(areaEntrySaying(second))).toMatch(/, resolved$/);
-    expect(metaLine(areaEntrySaying(first))).not.toMatch(/resolved/);
   });
 
   it("adopts nothing and shows a build committed without its receipt as a warning in place", async () => {
@@ -877,33 +847,69 @@ describe("SetupTab dataset identity", () => {
     expect(api.dataset.register).toHaveBeenCalledTimes(2);
   });
 
-  it("lists a refused registration as resolved once the next registration lands", async () => {
-    const refusal = IDENTITY_ANSWERS.unknown_crop;
-    const register = vi
-      .spyOn(api.dataset, "register")
-      .mockRejectedValueOnce(await thrown(refusal))
-      .mockResolvedValue(IDENTITY_ANSWERS.registered);
-    const sentence = `Could not register the dataset: ${refusal.body.detail}`;
+  describe("beside the notifications area", () => {
+    /** What the area's entry of a registration refused with `refusal` says. */
+    const refusedSaying = (refusal: { body: { detail: string } }) =>
+      `Could not register the dataset: ${refusal.body.detail}`;
+    // What fetch rejects with when the backend cannot be reached.
+    const UNREACHED = "Could not register the dataset: Failed to fetch";
 
-    render(
-      <>
-        <SetupTab />
-        <NotificationsPane />
-      </>,
-    );
-    fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
-    await within(identityPanel()).findByTestId("entry-in-place");
-    expect(metaLine(areaEntrySaying(sentence))).not.toMatch(/resolved/);
-    // The reread after the refusal puts the crop back to the stored one, none.
-    await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(2));
-    fireEvent.change(screen.getByLabelText("Crop"), { target: { value: SERVED_CROP } });
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    beforeEach(() => {
+      render(
+        <>
+          <SetupTab />
+          <NotificationsPane />
+        </>,
+      );
+    });
 
-    await waitFor(() => expect(register).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(metaLine(areaEntrySaying(sentence))).toMatch(/^Error, failure, .+, resolved$/),
-    );
+    /** Once the identity has been read `reads` times, choose the served crop and press Register;
+     *  each registration's reread puts the crop back to the stored one, none. */
+    async function registerAfterRead(reads: number) {
+      await waitFor(() => expect(api.dataset.identity).toHaveBeenCalledTimes(reads));
+      fireEvent.change(await screen.findByLabelText("Crop"), { target: { value: SERVED_CROP } });
+      fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    }
+
+    it("lists a refused registration as resolved once the next registration lands", async () => {
+      const refusal = IDENTITY_ANSWERS.unknown_crop;
+      const register = vi
+        .spyOn(api.dataset, "register")
+        .mockRejectedValueOnce(await thrown(refusal))
+        .mockResolvedValue(IDENTITY_ANSWERS.registered);
+
+      await registerAfterRead(1);
+      await within(identityPanel()).findByTestId("entry-in-place");
+      expect(metaLine(areaEntrySaying(refusedSaying(refusal)))).not.toMatch(/resolved/);
+      await registerAfterRead(2);
+
+      await waitFor(() => expect(register).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(metaLine(areaEntrySaying(refusedSaying(refusal)))).toMatch(
+          /^Error, failure, .+, resolved$/,
+        ),
+      );
+    });
+
+    it("marks only the later of two registrations refused in other words resolved once a third lands", async () => {
+      const refusal = IDENTITY_ANSWERS.unknown_crop;
+      vi.spyOn(api.dataset, "register")
+        .mockRejectedValueOnce(await thrown(refusal))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValue(IDENTITY_ANSWERS.registered);
+
+      await registerAfterRead(1);
+      await within(identityPanel()).findByTestId("entry-in-place");
+      await registerAfterRead(2);
+      await waitFor(() =>
+        expect(within(identityPanel()).getByTestId("entry-in-place")).toHaveTextContent(UNREACHED),
+      );
+      expect(metaLine(areaEntrySaying(refusedSaying(refusal)))).not.toMatch(/resolved/);
+      await registerAfterRead(3);
+
+      await waitFor(() => expect(metaLine(areaEntrySaying(UNREACHED))).toMatch(/, resolved$/));
+      expect(metaLine(areaEntrySaying(refusedSaying(refusal)))).not.toMatch(/resolved/);
+    });
   });
 
   it("shows a committed registration's lost audit line as a warning, not a failure", async () => {

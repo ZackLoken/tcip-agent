@@ -264,7 +264,7 @@ export function ResultsTab() {
     if (!lastInputs || answer === null) return;
     const { validation } = answer;
     if (validation.kind === SHOWN_UNVALIDATED && !ackReason.trim()) return;
-    useStore.getState().setAsideNotification(phenologyExportKey);
+    useStore.getState().releaseNotification(phenologyExportKey);
     try {
       const body: ExportCsvPayload = {
         ...lastInputs,
@@ -282,7 +282,6 @@ export function ResultsTab() {
       a.download = exported.filename;
       a.click();
       URL.revokeObjectURL(url);
-      useStore.getState().resolveNotification(phenologyExportKey);
     } catch (e) {
       const committed = committedOf<SavedExport>(e);
       if (committed) {

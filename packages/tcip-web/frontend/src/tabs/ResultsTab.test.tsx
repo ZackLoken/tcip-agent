@@ -369,31 +369,30 @@ describe("ResultsTab evidence gate", () => {
       revoked = vi.spyOn(URL, "revokeObjectURL").mockReturnValue(undefined);
     });
 
-    /** Compute beside the notifications area, export the curves, wait for what the export told
-     *  in place, then export them again and wait until that export's file is handed over. */
-    async function exportTwice(): Promise<void> {
+    /** Compute beside the notifications area, press the export button `first` names, wait for
+     *  what that export told in place, then export the curves and wait until their file is
+     *  handed over. */
+    async function exportCurvesAfter(first: RegExp): Promise<void> {
       render(<NotificationsPane />);
       await renderAndCompute();
       await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
-      fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
+      fireEvent.click(screen.getByRole("button", { name: first }));
       await within(phenologyPanel()).findByTestId("entry-in-place");
       fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
       await waitFor(() => expect(revoked).toHaveBeenCalled());
     }
 
-    it("lists a failed export as resolved", async () => {
+    it("lists a failed milestones export saying nothing of being resolved once a curves export lands", async () => {
       // What fetch rejects with when the backend cannot be reached.
       vi.spyOn(resultsApi, "downloadCsv")
         .mockRejectedValueOnce(new TypeError("Failed to fetch"))
         .mockResolvedValue(LANDED);
 
-      await exportTwice();
+      await exportCurvesAfter(/milestones csv/i);
 
-      await waitFor(() =>
-        expect(metaLine(areaEntrySaying("CSV export failed: Failed to fetch"))).toMatch(
-          /^Error, failure, .+, resolved$/,
-        ),
-      );
+      const failed = areaEntrySaying("CSV export failed: Failed to fetch");
+      expect(metaLine(failed)).toMatch(/^Error, failure, /);
+      expect(metaLine(failed)).not.toMatch(/resolved/);
     });
 
     it("lists the notice of an export committed without its audit line saying nothing of being resolved", async () => {
@@ -402,7 +401,7 @@ describe("ResultsTab evidence gate", () => {
         .mockRejectedValueOnce(await thrown(RESULTS_ANSWERS.export_audit_gap))
         .mockResolvedValue(LANDED);
 
-      await exportTwice();
+      await exportCurvesAfter(/curves csv/i);
 
       expect(metaLine(areaEntrySaying(gap.message))).toMatch(/^Warning, notice, /);
       expect(metaLine(areaEntrySaying(gap.message))).not.toMatch(/resolved/);
