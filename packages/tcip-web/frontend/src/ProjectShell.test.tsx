@@ -8,6 +8,7 @@ import { datasetKey, saveDatasetUi } from "@/lib/datasetUiState";
 import { dismissLabel } from "@/lib/dismissLabel";
 import { SUBJECT_CONTROL_ID } from "@/lib/registrySave";
 import type { HostSize } from "@/lib/viewGeometry";
+import { LABELS_LOADING } from "@/store/slices/canvas";
 import { acceptedProposal, ANNOTATE_ANSWERS, LANDED, LOADED, loadOf } from "@/test/annotate";
 import { LABEL_ANSWERS } from "@/test/labels";
 import {
@@ -267,11 +268,23 @@ function holdNextLoad(): (labels: LoadedLabels) => void {
 /** The status bar's mark of unsaved work on the canvas. */
 const unsaved = () => screen.queryByText("Unsaved changes");
 
+/** The status bar's readout of the size of the image in view, while the canvas holds its document. */
+const sizeReadout = () => screen.queryByText(/^Image: /);
+
+/** The status bar's readout of the size the produced load of the image at `path` states. */
+const sizeOf = (path: string) => {
+  const { img_width: width, img_height: height } = loadOf(path);
+  return `Image: ${width}×${height}`;
+};
+
 /** The status bar's readout of the open visit of the image in view. */
 const imageTime = () => screen.queryByText(/^Image time: /);
 
 /** The toolbar's Save control, under whichever label it shows. */
 const saveControl = () => screen.getByRole("button", { name: /^(Save|Saved|Saving)$/ });
+
+/** The toolbar's subject control, which names the active subject and counts its shapes. */
+const subjectControl = () => screen.getByRole("button", { expanded: false, name: /\(\d+\)$/ });
 
 /** The image stepper's readout of where the image in view stands among the capture's images. */
 const imagePosition = () => screen.getByRole("textbox", { name: "Image position" });
@@ -400,9 +413,6 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
   /** The entries the open area lists saying the reload warning. */
   const warnings = () => areaEntriesSaying(reloadWarning);
 
-  /** The status bar's readout of the size of the image whose document the canvas holds. */
-  const sizeReadout = () => screen.queryByText(/^Image: /);
-
   it("loads the image in view once at a return to the tab after a save over a clean canvas", async () => {
     expect(written.event.image_path).toBe(first.path);
     await mountOnCapture();
@@ -469,7 +479,6 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
 
   it("loads the image in view again for a save delivered after its first load was refused", async () => {
     page.load.mockRejectedValueOnce(await thrown(ANNOTATE_ANSWERS.unreadable));
-    const { img_width: width, img_height: height } = loadOf(first.path);
     await mountOnCapture();
     expect(sizeReadout()).toBeNull();
 
@@ -478,7 +487,7 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     await settle();
 
     expect(page.load).toHaveBeenLastCalledWith(first.path);
-    expect(sizeReadout()).toHaveTextContent(`Image: ${width}×${height}`);
+    expect(sizeReadout()).toHaveTextContent(sizeOf(first.path));
   });
 
   it("says the labels could not be loaded and saving is off when the load a save asks for is refused too, listing the failure once", async () => {
@@ -516,6 +525,7 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
     expect(page.save).toHaveBeenCalledTimes(1);
     expect(warnings()).toEqual([]);
     expect(imagePosition()).toHaveValue("2");
+    expect(sizeReadout()).toHaveTextContent(sizeOf(next.path));
     expect(screen.queryByText("1 box")).toBeNull();
     expect(unsaved()).toBeNull();
   });
@@ -534,12 +544,12 @@ describe("ProjectShell agent saves on the Annotate tab", () => {
 
     expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(1);
     expect(warnings()).toEqual([]);
-    const nextLoad = loadOf(next.path);
-    answerNextLoad(nextLoad);
+    expect(sizeReadout()).toBeNull();
+    answerNextLoad(loadOf(next.path));
     await settle();
 
     expect(page.load.mock.calls.filter(([path]) => path === next.path)).toHaveLength(1);
-    expect(sizeReadout()).toHaveTextContent(`Image: ${nextLoad.img_width}×${nextLoad.img_height}`);
+    expect(sizeReadout()).toHaveTextContent(sizeOf(next.path));
     expect(imagePosition()).toHaveValue("2");
     expect(unsaved()).toBeNull();
   });
@@ -686,6 +696,7 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expect(loadsOf(second.path)).toHaveLength(1);
     expect(imagePosition()).toHaveValue("2");
     expect(screen.queryByText("1 box")).toBeNull();
+    expect(sizeReadout()).toBeNull();
     expect(unsaved()).toBeInTheDocument();
     expect(saveControl()).toHaveTextContent("Saving");
     expect(sent).toHaveLength(1);
@@ -693,6 +704,7 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     await answerHeld(leaving, answering(200, saved));
 
     expect(imagePosition()).toHaveValue("2");
+    expect(sizeReadout()).toHaveTextContent(sizeOf(second.path));
     expect(screen.queryByText("1 box")).toBeNull();
     expect(unsaved()).toBeNull();
     expect(areaEntries()).toEqual([]);
@@ -715,6 +727,49 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expectBackOnFirst();
     expect(sent).toHaveLength(1);
     expect(inPlace()).toHaveTextContent(/^Save canceled\./);
+  });
+
+  /** Mount on the produced capture selected for the subject the scenes save, add a box of the
+   *  subject the page made active and, when `rated`, a rating of it, then step to the next image
+   *  with the leaving save left unanswered; returns that subject. */
+  async function stepWithLeavingSaveHeld(rated = false): Promise<string> {
+    answerSaves(pending);
+    await mountOnCapture(TEST_PROJECT, selected({ subject: SELECTED_SUBJECT }));
+    const { add, gui } = page.useStore.getState();
+    const subject = gui.active_subject;
+    if (!subject) throw new Error("the page made no subject active");
+    act(() => add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject, attributes: {} }));
+    if (rated) act(() => add("imageAnnotations", { subject, attributes: {} }));
+    step("Next");
+    await settle();
+    expect(saveControl()).toHaveTextContent("Saving");
+    return subject;
+  }
+
+  it("counts none of the image left's shapes on the subject control while its leaving save is held", async () => {
+    const subject = await stepWithLeavingSaveHeld();
+
+    expect(subjectControl()).toHaveTextContent(`${subject}(0)`);
+  });
+
+  it("lists none of the image left's ratings in the subject menu while its leaving save is held", async () => {
+    await stepWithLeavingSaveHeld(true);
+
+    fireEvent.click(subjectControl());
+
+    expect(screen.getByTestId("subject-attributes")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove this rating" })).toBeNull();
+  });
+
+  it("disables the Complete box and Flag, each saying why, while the image left's leaving save is held", async () => {
+    await stepWithLeavingSaveHeld();
+
+    const complete = screen.getByRole("checkbox", { name: /^Complete/ });
+    expect(complete).toBeDisabled();
+    expect(complete.closest("label")).toHaveAttribute("title", LABELS_LOADING);
+    const flag = screen.getByRole("button", { name: "Flag" });
+    expect(flag).toBeDisabled();
+    expect(flag).toHaveAttribute("title", LABELS_LOADING);
   });
 
   it("returns to the image the person was on with its edits when a focus within the capture moves before a refused leaving save", async () => {
@@ -909,6 +964,22 @@ describe("ProjectShell a move to another image over unsaved edits", () => {
     expectBackOnFirst();
     expect(sent).toHaveLength(1);
     expect(within(inPlace()).getByText(RELOAD_CHOICE)).toBeInTheDocument();
+  });
+});
+
+describe("ProjectShell a move to another image from a clean canvas", () => {
+  it("adds no rating from the subject menu before the next image's labels land", async () => {
+    await mountOnCapture();
+    holdNextLoad();
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await settle();
+    fireEvent.click(subjectControl());
+
+    fireEvent.click(screen.getByRole("button", { name: "Add rating" }));
+    await settle();
+
+    expect(screen.queryByRole("button", { name: "Remove this rating" })).toBeNull();
+    expect(unsaved()).toBeNull();
   });
 });
 
