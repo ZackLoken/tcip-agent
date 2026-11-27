@@ -118,7 +118,8 @@ export const REGISTERED_MODELS = produced.registered_models as unknown as Regist
  *  project's mapping names, each of those mappings loaded by its name, the refusal of a mapping
  *  built while its line failed and its mappings built (placing every plant,
  *  placing one, at a stated radius, over a date whose photographs carry no position, and beside
- *  a capture folder holding no image, which it left out); the
+ *  a capture folder holding no image, which it left out), and a build of the mapping a refused
+ *  build named, made with the supersede flag set; the
  *  measurements of three plants, each alone, whose milestone rows read incomplete, unobserved and
  *  right-censored, in that order; and an assessed series' project's deliveries,
  *  none, and its first plant measured validated, the series' reference photographs attributed
@@ -145,6 +146,7 @@ export const RESULTS_ANSWERS = produced.answers as unknown as {
   mapping_stated: ServedBuild;
   mapping_unpositioned: ServedBuild;
   mapping_left_out: ServedBuild;
+  mapping_superseded: ServedBuild;
   milestones: [PhenologyAnswer, PhenologyAnswer, PhenologyAnswer];
   no_deliveries: DeliveryEvents;
   phenology_validated: PhenologyAnswer;
