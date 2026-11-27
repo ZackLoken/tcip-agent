@@ -377,6 +377,29 @@ describe("a failure", () => {
     expect(within(entry).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("a notice set aside for an attempt says nothing of being resolved when that attempt lands", () => {
+    renderOpenHost();
+    act(() =>
+      useStore.getState().raiseNotification({
+        kind: "notice",
+        level: "warning",
+        text: { sentence: "Exported, but the export was not recorded." },
+        context: { project: "valley" },
+        key: "export:valley",
+      }),
+    );
+    act(() => useStore.getState().setAsideNotification("export:valley"));
+
+    act(() => useStore.getState().resolveNotification("export:valley"));
+
+    const entry = onlyAreaEntry();
+    expect(
+      within(entry).getByText("Exported, but the export was not recorded."),
+    ).toBeInTheDocument();
+    expect(metaLine(entry)).toMatch(/^Warning, notice, /);
+    expect(metaLine(entry)).not.toMatch(/resolved/);
+  });
+
   it("resolved and raised again with the same text is one entry counted twice, no longer saying resolved", () => {
     renderOpenHost();
     raiseOn("open:valley", "Could not open Valley farm.");
